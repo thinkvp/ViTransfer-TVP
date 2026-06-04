@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot, buildProjectUploadsRoot, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot, buildProjectUploadsRoot } from '@/lib/project-storage-paths'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -75,11 +75,8 @@ function asNumberBigInt(v: unknown): number {
 async function computeStorageEntrySizeBytes(storagePath: string | null | undefined): Promise<number> {
   if (!storagePath) return 0
 
-  const localPath = stripDropboxStoragePrefix(storagePath)
-  if (!localPath) return 0
-
   try {
-    return await computeDirectorySizeBytes(getFilePath(localPath))
+    return await computeDirectorySizeBytes(getFilePath(storagePath))
   } catch {
     return 0
   }

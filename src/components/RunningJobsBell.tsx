@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { getProcessingPhaseLabel } from '@/lib/video-processing-phase'
-import { useUploadManager, type UploadJob, type ProcessingJob, type AlbumZipJob, type AlbumThumbnailJob, type CompletedServerJob, type FolderRenameJob, type VideoAssetPreviewJob, type AlbumSocialJob, type ClearRunningJobTarget } from '@/components/UploadManagerProvider'
+import { useUploadManager, type UploadJob, type ProcessingJob, type AlbumZipJob, type AlbumThumbnailJob, type CompletedServerJob, type FolderRenameJob, type VideoAssetPreviewJob, type VideoAssetPreviewItem, type AlbumSocialJob, type ClearRunningJobTarget } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
 
 function formatSize(bytes: number): string {
@@ -291,7 +291,7 @@ function AlbumZipJobRow({
               'h-full rounded-full transition-all',
               isPending ? 'bg-warning' : 'bg-primary',
             )}
-            style={{ width: isPending ? '100%' : '60%' }}
+            style={{ width: isPending ? '10%' : '60%' }}
           />
         </div>
         <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -351,21 +351,21 @@ function AlbumThumbnailJobRow({
               'h-full rounded-full transition-all',
               isPending ? 'bg-warning' : 'bg-primary',
             )}
-            style={{ width: isPending ? '100%' : `${Math.max(progress, 1)}%` }}
+            style={{ width: isPending ? '10%' : `${Math.max(progress, 2)}%` }}
           />
         </div>
         <div className="flex justify-between text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1">
             {isPending ? (
-              'Queued for thumbnails…'
+              <>Queued for thumbnails… ({job.totalPhotos} photos)</>
             ) : (
               <>
                 <Loader2 className="w-3 h-3 animate-spin" />
-                {job.processedPhotos}/{job.totalPhotos} photos
+                Photo {job.processedPhotos}/{job.totalPhotos}
+                {progress > 0 && <span className="ml-1">· {progress}%</span>}
               </>
             )}
           </span>
-          {!isPending && progress > 0 && <span>{progress}%</span>}
         </div>
       </div>
     </div>
@@ -425,6 +425,7 @@ function FolderRenameJobRow({ job, onClear, clearDisabled }: { job: FolderRename
 
 function VideoAssetPreviewJobRow({ job, onNavigate }: { job: VideoAssetPreviewJob; onNavigate: (projectId: string) => void }) {
   const isProcessing = job.processingCount > 0
+  const progress = job.totalCount > 0 ? Math.round((job.processingCount / job.totalCount) * 100) : 0
 
   return (
     <div
@@ -445,20 +446,47 @@ function VideoAssetPreviewJobRow({ job, onNavigate }: { job: VideoAssetPreviewJo
         <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
           <div
             className={cn('h-full rounded-full transition-all', !isProcessing ? 'bg-warning' : 'bg-primary')}
-            style={{ width: !isProcessing ? '100%' : '60%' }}
+            style={{ width: !isProcessing ? '10%' : `${Math.max(progress, 5)}%` }}
           />
         </div>
         <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
           {!isProcessing ? (
-            `${job.pendingCount} queued…`
+            `${job.pendingCount} queued · ${job.processingCount} processing`
           ) : (
             <>
               <Loader2 className="w-3 h-3 animate-spin" />
-              Generating previews…
+              {job.processingCount}/{job.totalCount} processed
+              {progress > 0 && <span className="ml-1">· {progress}%</span>}
             </>
           )}
         </div>
       </div>
+
+      {/* Per-asset detail rows */}
+      {job.assets.length > 0 && (
+        <div className="space-y-0.5 pt-0.5 border-t border-border/50">
+          {job.assets.map((asset) => (
+            <VideoAssetItemRow key={asset.id} asset={asset} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VideoAssetItemRow({ asset }: { asset: VideoAssetPreviewItem }) {
+  return (
+    <div className="flex items-center gap-2 pl-1 text-[11px] text-muted-foreground">
+      <span
+        className={cn(
+          'w-1.5 h-1.5 rounded-full flex-shrink-0',
+          asset.status === 'PROCESSING' ? 'bg-primary' : 'bg-warning',
+        )}
+      />
+      <span className="truncate font-medium text-foreground/70">{asset.fileName}</span>
+      <span className="truncate text-muted-foreground/60">
+        {asset.videoName}{asset.versionLabel ? ` ${asset.versionLabel}` : ''}
+      </span>
     </div>
   )
 }
@@ -486,12 +514,12 @@ function AlbumSocialJobRow({ job, onNavigate }: { job: AlbumSocialJob; onNavigat
         <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
           <div
             className={cn('h-full rounded-full transition-all', !isProcessing ? 'bg-warning' : 'bg-primary')}
-            style={{ width: !isProcessing ? '100%' : '60%' }}
+            style={{ width: !isProcessing ? '10%' : '60%' }}
           />
         </div>
         <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
           {!isProcessing ? (
-            'Queued for social copies…'
+            `Queued for social copies… (${job.totalCount} photos)`
           ) : (
             <>
               <Loader2 className="w-3 h-3 animate-spin" />
@@ -514,6 +542,7 @@ function CompletedServerJobRow({
   onDismiss: (id: string) => void
 }) {
   const isError = !!job.error
+  const hasAssets = job.assets && job.assets.length > 0
 
   const typeLabel = isError
     ? job.type === 'processing'
@@ -534,7 +563,7 @@ function CompletedServerJobRow({
           : job.type === 'albumThumbnail'
             ? 'Thumbnail generation complete'
             : job.type === 'videoAssetPreview'
-              ? 'Asset preview generation complete'
+              ? `${job.assets?.length ?? 'All'} file${(job.assets?.length ?? 0) !== 1 ? 's' : ''} complete`
               : job.type === 'albumSocial'
                 ? 'Social copy generation complete'
                 : 'Folder rename complete'
@@ -584,6 +613,15 @@ function CompletedServerJobRow({
           {typeLabel}
         </div>
       )}
+
+      {/* Per-asset detail rows for grouped completions */}
+      {hasAssets && !isError && (
+        <div className="space-y-0.5 pt-0.5 border-t border-border/50">
+          {job.assets!.map((asset) => (
+            <VideoAssetItemRow key={asset.id} asset={asset} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -599,6 +637,8 @@ export default function RunningJobsBell() {
     albumSocialJobs,
     completedServerJobs,
     totalActiveCount,
+    totalActiveItems,
+    pollError,
     dismissCompletedJob,
     clearRunningJob,
     setDropdownOpen,
@@ -678,7 +718,11 @@ export default function RunningJobsBell() {
           className="relative p-2 w-9 sm:w-10 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground data-[state=open]:border-primary/50"
         >
           <Activity className="h-4 w-4 sm:h-5 sm:w-5" />
-          {totalActiveCount > 0 ? (
+          {totalActiveItems > 0 ? (
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-[18px] text-center">
+              {totalActiveItems > 99 ? '99+' : totalActiveItems}
+            </span>
+          ) : totalActiveCount > 0 ? (
             <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-[18px] text-center">
               {totalActiveCount > 99 ? '99+' : totalActiveCount}
             </span>
@@ -704,7 +748,7 @@ export default function RunningJobsBell() {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                   </span>
-                  {totalActiveCount} active
+                  {totalActiveCount} active{totalActiveItems !== totalActiveCount ? ` · ${totalActiveItems} items` : ''}
                 </span>
               </div>
             )}
@@ -712,7 +756,13 @@ export default function RunningJobsBell() {
 
           {/* Content */}
           <div className="flex-1 min-h-0 overflow-y-auto">
-            {!hasAnything ? (
+            {pollError ? (
+              <div className="p-4 text-center">
+                <div className="text-sm text-destructive">{pollError}</div>
+                <div className="text-xs text-muted-foreground mt-1">Showing last known state.</div>
+              </div>
+            ) : null}
+            {!hasAnything && !pollError ? (
               <div className="p-6 text-center text-sm text-muted-foreground">
                 No jobs running.
               </div>
@@ -805,38 +855,48 @@ export default function RunningJobsBell() {
 
                 {/* Video asset preview generation jobs */}
                 {videoAssetPreviewJobs.length > 0 && (
-                  <div>
-                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                      Asset Previews ({videoAssetPreviewJobs.length})
-                    </div>
-                    <div className="divide-y divide-border">
-                      {videoAssetPreviewJobs.map((job) => (
-                        <VideoAssetPreviewJobRow
-                          key={job.projectId}
-                          job={job}
-                          onNavigate={handleNavigate}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  (() => {
+                    const assetTotal = videoAssetPreviewJobs.reduce((s, j) => s + j.totalCount, 0)
+                    return (
+                      <div>
+                        <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                          Asset Previews ({videoAssetPreviewJobs.length} project{videoAssetPreviewJobs.length !== 1 ? 's' : ''}{assetTotal > videoAssetPreviewJobs.length ? ` · ${assetTotal} files` : ''})
+                        </div>
+                        <div className="divide-y divide-border">
+                          {videoAssetPreviewJobs.map((job) => (
+                            <VideoAssetPreviewJobRow
+                              key={job.projectId}
+                              job={job}
+                              onNavigate={handleNavigate}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()
                 )}
 
                 {/* Album photo social derivative jobs */}
                 {albumSocialJobs.length > 0 && (
-                  <div>
-                    <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                      Social Copies ({albumSocialJobs.length})
-                    </div>
-                    <div className="divide-y divide-border">
-                      {albumSocialJobs.map((job) => (
-                        <AlbumSocialJobRow
-                          key={job.albumId}
-                          job={job}
-                          onNavigate={handleNavigate}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  (() => {
+                    const socialTotal = albumSocialJobs.reduce((s, j) => s + j.totalCount, 0)
+                    return (
+                      <div>
+                        <div className="px-4 pt-3 pb-1 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                          Social Copies ({albumSocialJobs.length} album{albumSocialJobs.length !== 1 ? 's' : ''}{socialTotal > albumSocialJobs.length ? ` · ${socialTotal} photos` : ''})
+                        </div>
+                        <div className="divide-y divide-border">
+                          {albumSocialJobs.map((job) => (
+                            <AlbumSocialJobRow
+                              key={job.albumId}
+                              job={job}
+                              onNavigate={handleNavigate}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()
                 )}
 
                 {/* Processing jobs */}

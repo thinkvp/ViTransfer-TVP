@@ -41,7 +41,7 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
   })()
 
   try {
-    // Resolve file path — handles both local and Dropbox-backed assets
+    // Resolve file path
     const resolved = await materializeStoragePathToLocalFile({
       rawPath: storagePath,
       tempDir: path.join(os.tmpdir(), 'vitransfer-asset-tmp'),
@@ -182,7 +182,7 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
       }
     }
 
-    // Clean up temp file if materialized from Dropbox
+    // Clean up temp file if materialized from S3
     if (resolved.isTemporary) {
       fs.promises.unlink(filePath).catch(() => {})
     }

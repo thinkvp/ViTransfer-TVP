@@ -1,20 +1,6 @@
 import path from 'path'
 import { sanitizeFilename } from '@/lib/file-validation'
 
-const DROPBOX_PREFIX = 'dropbox:'
-export function isDropboxStoragePath(rawPath: string): boolean {
-  return rawPath.startsWith(DROPBOX_PREFIX)
-}
-export function stripDropboxStoragePrefix(rawPath: string): string {
-  if (!rawPath.startsWith(DROPBOX_PREFIX)) return rawPath
-  return rawPath.slice(DROPBOX_PREFIX.length).replace(/^\/+/, '')
-}
-export function toDropboxStoragePath(rawPath: string): string {
-  const stripped = stripDropboxStoragePrefix(rawPath).trim().replace(/\\/g, '/')
-  const relative = stripped.replace(/^\/+/, '')
-  return `${DROPBOX_PREFIX}/${relative}`
-}
-
 export type AlbumZipVariant = 'full' | 'social'
 
 function trimStorageSegment(value: string): string {
@@ -303,12 +289,6 @@ export function replaceStoredStoragePathPrefix(
   newPrefix: string,
 ): string | null {
   if (!currentPath) return null
-
-  if (isDropboxStoragePath(currentPath)) {
-    const stripped = stripDropboxStoragePrefix(currentPath)
-    const replaced = replaceStoragePathPrefix(stripped, oldPrefix, newPrefix)
-    return replaced ? toDropboxStoragePath(replaced) : null
-  }
 
   return replaceStoragePathPrefix(currentPath, oldPrefix, newPrefix)
 }

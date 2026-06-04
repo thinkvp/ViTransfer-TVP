@@ -10,8 +10,6 @@ import {
   buildVideoPreviewStoragePath,
   buildVideoThumbnailStoragePath,
   buildVideoTimelineStorageRoot,
-  isDropboxStoragePath,
-  stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
 import { resolveVideoOriginalPath } from '@/lib/resolve-video-original'
 import fs from 'fs'
@@ -156,9 +154,6 @@ async function resolveExistingVideoOriginalPath(videoId: string, storagePath: st
   }
 
   pushCandidate(trimmedStoragePath)
-  if (isDropboxStoragePath(trimmedStoragePath)) {
-    pushCandidate(stripDropboxStoragePrefix(trimmedStoragePath))
-  }
 
   const video = await prisma.video.findUnique({
     where: { id: videoId },

@@ -551,7 +551,7 @@ export default function AdminHeader() {
               <User className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
             {user.isSystemAdmin && <ClientActivityEye />}
-            <RunningJobsBell />
+            {canSeeMenu(permissions, 'projects') && <RunningJobsBell />}
             <NotificationsBell />
           </div>
         </div>

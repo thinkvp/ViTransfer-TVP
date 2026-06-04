@@ -1877,7 +1877,7 @@ model AlbumAnalytics {
   // Optional: full or social variants for album/photo downloads
   variant String?
 
-  // Additional context, e.g. { source: 'Dropbox' } for Dropbox-served downloads
+  // Additional context for download events (e.g. { source: 'S3' })
   details Json?
 
   ipAddress String?

@@ -3,12 +3,10 @@ import { getFilePath } from '@/lib/storage'
 import {
   buildProjectStorageRoot,
   buildVideoOriginalStoragePath,
-  isDropboxStoragePath,
-  stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
 
 /**
- * Check whether a storage path (local or dropbox:-prefixed) exists on the local filesystem.
+ * Check whether a storage path exists on the local filesystem.
  *
  * Uses getFilePath() which applies the legacy project-redirect layer, so explicit
  * YYYY-MM path probing is unnecessary.
@@ -17,10 +15,7 @@ export function storagePathExistsLocal(storagePath: string | null | undefined): 
   if (!storagePath) return false
 
   try {
-    const localPath = isDropboxStoragePath(storagePath)
-      ? stripDropboxStoragePrefix(storagePath)
-      : storagePath
-    return existsSync(getFilePath(localPath))
+    return existsSync(getFilePath(storagePath))
   } catch {
     return false
   }
@@ -46,7 +41,7 @@ export type VideoOriginalContext = {
  * Resolve the actual on-disk path for a video's original file.
  *
  * Checks in order:
- *  1. The stored originalStoragePath (with dropbox: stripped if present)
+ *  1. The stored originalStoragePath
  *  2. The canonical path rebuilt from project/video/version metadata
  *  3. Legacy project-ID based roots (the redirect layer in storage.ts
  *     transparently resolves projects/<id>/... to projects/YYYY-MM/<id>/...)
@@ -54,9 +49,7 @@ export type VideoOriginalContext = {
  * Returns the first candidate that exists on disk, or null if none found.
  */
 export function resolveVideoOriginalPath(video: VideoOriginalContext): string | null {
-  const localCurrentPath = isDropboxStoragePath(video.originalStoragePath)
-    ? stripDropboxStoragePrefix(video.originalStoragePath)
-    : video.originalStoragePath
+  const localCurrentPath = video.originalStoragePath
 
   const projectStoragePath = video.project.storagePath
     || buildProjectStorageRoot(

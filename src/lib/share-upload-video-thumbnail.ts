@@ -7,7 +7,6 @@ import sharp from 'sharp'
 import {
   buildProjectUploadVideoThumbnailStoragePath,
   buildProjectStorageRoot,
-  stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
 import { prisma } from '@/lib/db'
 import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
@@ -57,7 +56,7 @@ async function getStoredFileSize(storagePath: string): Promise<number | null> {
     return typeof size === 'number' && Number.isFinite(size) && size > 0 ? size : null
   }
 
-  const absolutePath = getFilePath(stripDropboxStoragePrefix(storagePath))
+  const absolutePath = getFilePath(storagePath)
   try {
     const stat = await fs.promises.stat(absolutePath)
     return stat.isFile() && stat.size > 0 ? stat.size : null
@@ -71,7 +70,7 @@ async function thumbnailExists(storagePath: string): Promise<boolean> {
     return s3FileExists(storagePath)
   }
 
-  const absolutePath = getFilePath(stripDropboxStoragePrefix(storagePath))
+  const absolutePath = getFilePath(storagePath)
   try {
     await fs.promises.access(absolutePath, fs.constants.F_OK)
     return true

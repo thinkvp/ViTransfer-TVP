@@ -15,10 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Dockerfile optimisations** - reordered system packages before npm global install for stable layer caching. Replaced `COPY . .` in builder stage with explicit file/directory copies to reduce cache busting. Removed duplicate `apk update` call after the retry loop. Added `npm cache clean --force` after npm ci/install in deps-full stage to shrink image layers. Simplified postinstall script to use `;` separators instead of `&& ||` error masking.
 - **Share page FILES mode improvements** - Numerous small UI improvements across the FILES mode of the Share page.
+- **Running Jobs improvements** - Numerous small tweaks and improvements to Running Jobs.
 
 ### Fixed
 
 - **Share page: stale thumbnails after session expiry + reauthentication** - After a client's share session expired and they reauthenticated, stale in-memory caches retained signed URLs from the old session, causing thumbnails and previews to fail with 401/403 errors. Introduced a centralized handleSessionExpired() that clears all caches and resets auth state, replacing 7 duplicated inline 401 handlers. Auth handlers now also purge caches and re-fetch downloadable files with the new token, so all content loads fresh after reauth without requiring a manual page refresh.
+
+### Removed
+
+- **Stripped remaining Dropbox references** - Removed legacy support for resolving dropbox paths.
 
 ## [1.9.5] - 2026-06-03
 

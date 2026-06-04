@@ -8,8 +8,6 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { downloadFile, getFilePath, uploadFile } from '@/lib/storage'
 import {
   buildVideoAssetPreviewStoragePath,
-  isDropboxStoragePath,
-  stripDropboxStoragePrefix,
 } from '@/lib/project-storage-paths'
 import {
   allocateUniqueStorageName,
@@ -28,10 +26,7 @@ async function getLogicalFileSize(filePath: string): Promise<number> {
     throw new Error(`Failed to determine file size for ${filePath}`)
   }
 
-  const resolvedPath = isDropboxStoragePath(filePath)
-    ? stripDropboxStoragePrefix(filePath)
-    : filePath
-  const stats = await fs.promises.stat(getFilePath(resolvedPath))
+  const stats = await fs.promises.stat(getFilePath(filePath))
   return stats.size
 }
 

@@ -7,8 +7,6 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { deleteDirectory, deleteFile, pruneEmptyParentDirectories } from '@/lib/storage'
 import { sanitizeEmailHtml } from '@/lib/security/email-html-sanitization'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
-
 export const runtime = 'nodejs'
 
 const MAX_EMAIL_HTML_FOR_CID_REWRITE_CHARS = 250_000
@@ -35,9 +33,7 @@ function rewriteCidReferences(html: string, projectId: string, emailId: string, 
 }
 
 function toLocalStoragePath(storagePath: string): string {
-  return isDropboxStoragePath(storagePath)
-    ? stripDropboxStoragePrefix(storagePath)
-    : storagePath
+  return storagePath
 }
 
 async function assertProjectAccessOr404(projectId: string, auth: any) {

@@ -4,7 +4,6 @@ import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import {
   buildProjectStorageRoot,
@@ -402,12 +401,6 @@ export async function GET(
     // S3 mode: redirect to presigned R2 URL — no local file access needed
     // ---------------------------------------------------------------------------
     if (isS3Mode()) {
-      // Legacy storage rows may still retain a 'dropbox:' prefix. Strip it before
-      // looking up the S3 key.
-      if (isDropboxStoragePath(filePath)) {
-        filePath = stripDropboxStoragePrefix(filePath)
-      }
-
       const fileExists = await s3FileExists(filePath)
       if (!fileExists) {
         // Try canonical fallback path (e.g. legacy project paths that were migrated)
@@ -488,7 +481,7 @@ export async function GET(
       })
     }
 
-    let fullPath = getFilePath(isDropboxStoragePath(filePath) ? stripDropboxStoragePrefix(filePath) : filePath)
+    let fullPath = getFilePath(filePath)
     if (!existsSync(fullPath)) {
       const fallbackPath = buildCanonicalFallbackPath({
         video,
@@ -498,13 +491,10 @@ export async function GET(
       })
 
       if (fallbackPath && fallbackPath !== filePath) {
-        const normalizedFallbackPath = isDropboxStoragePath(fallbackPath)
-          ? stripDropboxStoragePrefix(fallbackPath)
-          : fallbackPath
-        const fallbackFullPath = getFilePath(normalizedFallbackPath)
+        const fallbackFullPath = getFilePath(fallbackPath)
         if (existsSync(fallbackFullPath)) {
           fullPath = fallbackFullPath
-          filePath = normalizedFallbackPath
+          filePath = fallbackPath
         }
       }
     }

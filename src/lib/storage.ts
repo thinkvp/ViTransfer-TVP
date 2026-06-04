@@ -3,7 +3,6 @@ import * as path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
@@ -500,43 +499,6 @@ export async function moveUploadedFile(
     return
   }
 
-  if (isDropboxStoragePath(destLogicalPath)) {
-    // Legacy dropbox:-prefixed destinations are normalized to local storage.
-    const localPath = stripDropboxStoragePrefix(destLogicalPath)
-    console.log(`[STORAGE] Legacy-prefixed path detected — storing locally at: ${localPath}`)
-
-    await ensureProjectStorageLayoutForPath(localPath)
-    const destFullPath = validatePathForWrite(localPath)
-    const destDir = path.dirname(destFullPath)
-
-    await mkdir(STORAGE_ROOT, { recursive: true })
-    await mkdir(destDir, { recursive: true })
-
-    try {
-      await fs.promises.rename(srcAbsPath, destFullPath)
-    } catch (err: any) {
-      if (err?.code === 'EXDEV') {
-        const readStream = fs.createReadStream(srcAbsPath)
-        const writeStream = fs.createWriteStream(destFullPath)
-        await pipeline(readStream, writeStream)
-        await fs.promises.unlink(srcAbsPath).catch(() => {})
-      } else {
-        throw err
-      }
-    }
-
-    const stats = await fs.promises.stat(destFullPath)
-    if (stats.size !== expectedSize) {
-      await fs.promises.unlink(destFullPath).catch(() => {})
-      throw new Error(
-        `File size mismatch after move: expected ${expectedSize} bytes, got ${stats.size} bytes.`
-      )
-    }
-
-    await fs.promises.unlink(`${srcAbsPath}.json`).catch(() => {})
-    return
-  }
-
   await ensureProjectStorageLayoutForPath(destLogicalPath)
   const destFullPath = validatePathForWrite(destLogicalPath)
   const destDir = path.dirname(destFullPath)
@@ -579,11 +541,7 @@ export async function downloadFile(filePath: string): Promise<Readable> {
     const { stream } = await s3DownloadFile(filePath)
     return stream
   }
-  // Legacy dropbox:-prefixed rows still resolve to local disk.
-  const resolvedPath = isDropboxStoragePath(filePath)
-    ? stripDropboxStoragePrefix(filePath)
-    : filePath
-  const fullPath = validatePath(resolvedPath)
+  const fullPath = validatePath(filePath)
   return fs.createReadStream(fullPath)
 }
 
@@ -593,15 +551,11 @@ export async function deleteFile(filePath: string): Promise<void> {
     return
   }
 
-  const resolvedPath = isDropboxStoragePath(filePath)
-    ? stripDropboxStoragePrefix(filePath)
-    : filePath
-
-  const base = validatePathBase(resolvedPath)
+  const base = validatePathBase(filePath)
   const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })
   const candidates = redirected && redirected !== base.fullPath
     ? [redirected, base.fullPath]
-    : [validatePath(resolvedPath)]
+    : [validatePath(filePath)]
 
   for (const fullPath of candidates) {
     if (!fs.existsSync(fullPath)) continue

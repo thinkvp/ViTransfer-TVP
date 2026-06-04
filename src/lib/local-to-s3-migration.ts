@@ -4,7 +4,6 @@ import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import { getFilePath } from '@/lib/storage'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { S3Client, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
@@ -149,11 +148,7 @@ function normalizeKey(rawPath: string): string | null {
   const trimmed = String(rawPath || '').trim()
   if (!trimmed) return null
 
-  const normalized = isDropboxStoragePath(trimmed)
-    ? stripDropboxStoragePrefix(trimmed)
-    : trimmed
-
-  const key = normalized.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/')
+  const key = trimmed.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/')
   if (!key) return null
   if (key === '.tus-tmp' || key.startsWith('.tus-tmp/')) return null
   return key

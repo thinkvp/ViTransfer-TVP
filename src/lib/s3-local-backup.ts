@@ -90,9 +90,7 @@ const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
 function normalizeKey(raw: string | null | undefined): string | null {
   const trimmed = String(raw || '').trim()
   if (!trimmed) return null
-  // Strip dropbox: prefix if present
-  const stripped = trimmed.startsWith('dropbox:') ? trimmed.slice(8) : trimmed
-  const key = stripped.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/')
+  const key = trimmed.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/')
   if (!key || key === '.tus-tmp' || key.startsWith('.tus-tmp/')) return null
   return key
 }

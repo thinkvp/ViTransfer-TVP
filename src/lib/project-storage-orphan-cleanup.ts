@@ -9,7 +9,6 @@ import {
   PROJECT_REDIRECTS_INDEX_FILENAME,
   STORAGE_ROOT,
 } from '@/lib/storage'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { isS3Mode, s3DeleteFile, getS3Bucket, getS3Client } from '@/lib/s3-storage'
 import { ListObjectsV2Command } from '@aws-sdk/client-s3'
 import {
@@ -204,9 +203,7 @@ function normalizeStoredReferencePath(storagePath: string | null | undefined): s
   const trimmed = storagePath.trim()
   if (!trimmed) return null
 
-  return isDropboxStoragePath(trimmed)
-    ? stripDropboxStoragePrefix(trimmed)
-    : trimmed
+  return trimmed
 }
 
 function isTimelineSpriteFileName(fileName: string): boolean {

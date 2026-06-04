@@ -1,10 +1,8 @@
-import { existsSync, statSync } from 'fs'
 import path from 'path'
 import fs from 'fs'
 import { Transform } from 'stream'
 import { pipeline } from 'stream/promises'
 import { getFilePath } from '@/lib/storage'
-import { isDropboxStoragePath, stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import {
   isS3Mode,
   s3DownloadFile,
@@ -12,26 +10,6 @@ import {
 
 function sanitizeTempFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9 ._&-]/g, '_') || 'file.bin'
-}
-
-/**
- * Try to resolve a legacy prefixed storage path to a local file first.
- * Returns the absolute path if a local copy exists, null otherwise.
- */
-function tryResolveLegacyPrefixedPathLocally(rawPath: string): string | null {
-  try {
-    const localRelPath = stripDropboxStoragePrefix(rawPath)
-    const localAbsPath = getFilePath(localRelPath)
-    if (existsSync(localAbsPath)) {
-      const stat = statSync(localAbsPath)
-      if (stat.isFile() && stat.size > 0) {
-        return localAbsPath
-      }
-    }
-  } catch {
-    // local copy not available
-  }
-  return null
 }
 
 export async function materializeStoragePathToLocalFile(params: {
@@ -63,15 +41,8 @@ export async function materializeStoragePathToLocalFile(params: {
     return { localPath: tempPath, isTemporary: true }
   }
 
-  if (isDropboxStoragePath(params.rawPath)) {
-    const localPath = tryResolveLegacyPrefixedPathLocally(params.rawPath)
-    if (localPath) {
-      return { localPath, isTemporary: false }
-    }
-  }
-
   return {
-    localPath: getFilePath(stripDropboxStoragePrefix(params.rawPath)),
+    localPath: getFilePath(params.rawPath),
     isTemporary: false,
   }
 }

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import { stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
@@ -68,7 +67,7 @@ export async function GET(
     const originalFilename = video.originalFileName || 'video.mp4'
     const safeFilename = sanitizeFilenameForHeader(originalFilename)
 
-    const fullPath = getFilePath(stripDropboxStoragePrefix(filePath))
+    const fullPath = getFilePath(filePath)
 
     // Check if file exists and get stats
     const stat = await fs.promises.stat(fullPath)

@@ -187,85 +187,10 @@ export async function GET(request: NextRequest) {
     // -----------------------------------------------------------------------
     // Album ZIP generation jobs (queried from BullMQ)
     // -----------------------------------------------------------------------
-    const albumZipJobs: Array<{
-      id: string
-      albumId: string
-      albumName: string
-      projectId: string
-      projectName: string
-      variant: 'full' | 'social'
-      status: 'PENDING' | 'ACTIVE'
-    }> = []
-
-    try {
-      const albumZipQueue = getAlbumPhotoZipQueue()
-      const [activeZipQueueJobs, waitingZipQueueJobs] = await Promise.all([
-        albumZipQueue.getJobs(['active']),
-        albumZipQueue.getJobs(['waiting', 'prioritized', 'delayed']),
-      ])
-
-      // Map albumId:variant → status
-      const albumZipJobMap = new Map<string, 'ACTIVE' | 'PENDING'>()
-      const activeAlbumIds = new Set<string>()
-
-      for (const qj of activeZipQueueJobs) {
-        const { albumId, variant } = qj.data ?? {}
-        if (albumId && variant) {
-          albumZipJobMap.set(`${albumId}:${variant}`, 'ACTIVE')
-          activeAlbumIds.add(albumId)
-        }
-      }
-      for (const qj of waitingZipQueueJobs) {
-        const { albumId, variant } = qj.data ?? {}
-        if (albumId && variant) {
-          const key = `${albumId}:${variant}`
-          if (!albumZipJobMap.has(key)) {
-            albumZipJobMap.set(key, 'PENDING')
-            activeAlbumIds.add(albumId)
-          }
-        }
-      }
-
-      if (activeAlbumIds.size > 0) {
-        const albums = await prisma.album.findMany({
-          where: {
-            id: { in: [...activeAlbumIds] },
-            project: {
-              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-              ...(isSystemAdmin
-                ? {}
-                : { assignedUsers: { some: { userId: authResult.id } } }),
-            },
-          },
-          select: {
-            id: true,
-            name: true,
-            projectId: true,
-            project: { select: { title: true } },
-          },
-          orderBy: { createdAt: 'asc' },
-        })
-
-        for (const album of albums) {
-          for (const variant of ['full', 'social'] as const) {
-            const status = albumZipJobMap.get(`${album.id}:${variant}`)
-            if (status) {
-              albumZipJobs.push({
-                id: `${album.id}:${variant}`,
-                albumId: album.id,
-                albumName: album.name,
-                projectId: album.projectId,
-                projectName: album.project.title,
-                variant,
-                status,
-              })
-            }
-          }
-        }
-      }
-    } catch {
-      // Queue may be unavailable — degrade gracefully
-    }
+    const albumZipJobs = await buildAlbumZipJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => {
+      console.error('[running-jobs] album-zip builder failed:', err)
+      return { active: [], completed: [] }
+    })
 
     // -----------------------------------------------------------------------
     // Errored video processing jobs (persist until resolved/deleted)
@@ -302,12 +227,31 @@ export async function GET(request: NextRequest) {
       error: true,
     }))
 
-    const [albumThumbnailJobs, folderRenameJobs, videoAssetPreviewJobs, albumSocialJobs] = await Promise.all([
-      buildAlbumThumbnailJobs(),
-      buildFolderRenameJobs(),
-      buildVideoAssetPreviewJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }),
-      buildAlbumSocialJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }),
-    ])
+    // Build each job category independently so one failure doesn't kill the entire response.
+    const albumThumbnailJobs = await buildAlbumThumbnailJobs().catch((err) => {
+      console.error('[running-jobs] album-thumbnail builder failed:', err)
+      return { active: [], completed: [] }
+    })
+    const folderRenameJobs = await buildFolderRenameJobs().catch((err) => {
+      console.error('[running-jobs] folder-rename builder failed:', err)
+      return { active: [], completed: [] }
+    })
+    const videoAssetPreviewJobs = await buildVideoAssetPreviewJobs({
+      isSystemAdmin,
+      userId: authResult.id,
+      allowedStatuses,
+    }).catch((err) => {
+      console.error('[running-jobs] video-asset-preview builder failed:', err)
+      return { active: [], completed: [] }
+    })
+    const albumSocialJobs = await buildAlbumSocialJobs({
+      isSystemAdmin,
+      userId: authResult.id,
+      allowedStatuses,
+    }).catch((err) => {
+      console.error('[running-jobs] album-social builder failed:', err)
+      return { active: [], completed: [] }
+    })
 
     return NextResponse.json({
       jobs,
@@ -432,39 +376,196 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, type, id, removedJobs: queueJob ? 1 : 0 })
     }
 
-    const folderRenameJob = await prisma.folderRenameJob.findUnique({
-      where: { id },
-      select: {
-        id: true,
-        status: true,
-      },
-    })
+    if (type === 'folderRename') {
+      const folderRenameJob = await prisma.folderRenameJob.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+        },
+      })
 
-    if (!folderRenameJob) {
-      return NextResponse.json({ error: 'Folder rename job not found' }, { status: 404 })
-    }
-
-    if (folderRenameJob.status !== 'PENDING') {
-      return NextResponse.json({ error: 'Only queued folder rename jobs can be cleared' }, { status: 409 })
-    }
-
-    const folderRenameQueue = getFolderRenameQueue()
-    const queuedJobs = await folderRenameQueue.getJobs(['waiting', 'prioritized', 'delayed'])
-    let removedJobs = 0
-
-    for (const job of queuedJobs) {
-      if (job?.data?.folderRenameJobId === id) {
-        await job.remove().catch(() => {})
-        removedJobs++
+      if (!folderRenameJob) {
+        return NextResponse.json({ error: 'Folder rename job not found' }, { status: 404 })
       }
+
+      if (folderRenameJob.status !== 'PENDING') {
+        return NextResponse.json({ error: 'Only queued folder rename jobs can be cleared' }, { status: 409 })
+      }
+
+      const folderRenameQueue = getFolderRenameQueue()
+      const queuedJobs = await folderRenameQueue.getJobs(['waiting', 'prioritized', 'delayed'])
+      let removedJobs = 0
+
+      for (const job of queuedJobs) {
+        if (job?.data?.folderRenameJobId === id) {
+          await job.remove().catch(() => {})
+          removedJobs++
+        }
+      }
+
+      await prisma.folderRenameJob.delete({ where: { id } })
+
+      return NextResponse.json({ ok: true, type, id, removedJobs })
     }
 
-    await prisma.folderRenameJob.delete({ where: { id } })
-
-    return NextResponse.json({ ok: true, type, id, removedJobs })
+    // Valid type string but no handler matched — should never happen.
+    return NextResponse.json({ error: `Unhandled job type: ${type}` }, { status: 400 })
   } catch (err: any) {
     console.error('[running-jobs-clear]', err)
     return NextResponse.json({ error: err?.message || 'Unknown error' }, { status: 500 })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Album ZIP generation jobs helper
+// ---------------------------------------------------------------------------
+
+async function buildAlbumZipJobs({
+  isSystemAdmin,
+  userId,
+  allowedStatuses,
+}: {
+  isSystemAdmin: boolean
+  userId: string
+  allowedStatuses: string[]
+}) {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+
+  try {
+    const albumZipQueue = getAlbumPhotoZipQueue()
+    const [activeZipQueueJobs, waitingZipQueueJobs] = await Promise.all([
+      albumZipQueue.getJobs(['active']),
+      albumZipQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+    ])
+
+    // Map albumId:variant → status
+    const albumZipJobMap = new Map<string, 'ACTIVE' | 'PENDING'>()
+    const activeAlbumIds = new Set<string>()
+
+    for (const qj of activeZipQueueJobs) {
+      const { albumId, variant } = qj.data ?? {}
+      if (albumId && variant) {
+        albumZipJobMap.set(`${albumId}:${variant}`, 'ACTIVE')
+        activeAlbumIds.add(albumId)
+      }
+    }
+    for (const qj of waitingZipQueueJobs) {
+      const { albumId, variant } = qj.data ?? {}
+      if (albumId && variant) {
+        const key = `${albumId}:${variant}`
+        if (!albumZipJobMap.has(key)) {
+          albumZipJobMap.set(key, 'PENDING')
+          activeAlbumIds.add(albumId)
+        }
+      }
+    }
+
+    // Fetch album details for active jobs
+    let albums: Array<{ id: string; name: string; projectId: string; project: { title: string } }> = []
+    if (activeAlbumIds.size > 0) {
+      albums = await prisma.album.findMany({
+        where: {
+          id: { in: [...activeAlbumIds] },
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          projectId: true,
+          project: { select: { title: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+    }
+
+    const active: Array<{
+      id: string
+      albumId: string
+      albumName: string
+      projectId: string
+      projectName: string
+      variant: 'full' | 'social'
+      status: 'PENDING' | 'ACTIVE'
+    }> = []
+
+    for (const album of albums) {
+      for (const variant of ['full', 'social'] as const) {
+        const status = albumZipJobMap.get(`${album.id}:${variant}`)
+        if (status) {
+          active.push({
+            id: `${album.id}:${variant}`,
+            albumId: album.id,
+            albumName: album.name,
+            projectId: album.projectId,
+            projectName: album.project.title,
+            variant,
+            status,
+          })
+        }
+      }
+    }
+
+    // Detect recently completed ZIPs: albums with non-zero ZIP sizes updated recently
+    // that are NOT currently in the active BullMQ set.
+    const recentlyUpdatedAlbums = await prisma.album.findMany({
+      where: {
+        updatedAt: { gte: cutoff },
+        OR: [
+          { fullZipFileSize: { gt: 0 } },
+          { socialZipFileSize: { gt: 0 } },
+        ],
+        project: {
+          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+          ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        projectId: true,
+        project: { select: { title: true } },
+        fullZipFileSize: true,
+        socialZipFileSize: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
+
+    const activeAlbumVariantSet = new Set(active.map((j) => `${j.albumId}:${j.variant}`))
+
+    const completed: Array<{
+      id: string
+      type: 'albumZip'
+      label: string
+      sublabel: string
+      projectId: string
+      completedAt: number
+    }> = []
+
+    for (const album of recentlyUpdatedAlbums) {
+      for (const variant of ['full', 'social'] as const) {
+        const sizeKey = variant === 'full' ? 'fullZipFileSize' as const : 'socialZipFileSize' as const
+        if (album[sizeKey] > 0 && !activeAlbumVariantSet.has(`${album.id}:${variant}`)) {
+          const variantLabel = variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
+          completed.push({
+            id: `${album.id}:${variant}`,
+            type: 'albumZip',
+            label: album.name,
+            sublabel: `${album.project.title} · ${variantLabel} complete`,
+            projectId: album.projectId,
+            completedAt: album.updatedAt.getTime(),
+          })
+        }
+      }
+    }
+
+    return { active, completed }
+  } catch {
+    return { active: [], completed: [] }
   }
 }
 
@@ -699,32 +800,73 @@ async function buildVideoAssetPreviewJobs({
   allowedStatuses: string[]
 }) {
   try {
-    const activeAssets = await prisma.videoAsset.findMany({
-      where: {
-        previewStatus: { in: ['PENDING', 'PROCESSING'] },
-        video: {
-          project: {
-            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-            ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+
+    const [activeAssets, recentlyReady] = await Promise.all([
+      prisma.videoAsset.findMany({
+        where: {
+          previewStatus: { in: ['PENDING', 'PROCESSING'] },
+          video: {
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+            },
           },
         },
-      },
-      select: {
-        previewStatus: true,
-        video: {
-          select: {
-            projectId: true,
-            project: { select: { title: true } },
+        select: {
+          id: true,
+          fileName: true,
+          previewStatus: true,
+          video: {
+            select: {
+              name: true,
+              versionLabel: true,
+              projectId: true,
+              project: { select: { title: true } },
+            },
           },
         },
-      },
-    })
+      }),
+      prisma.videoAsset.findMany({
+        where: {
+          previewStatus: 'READY',
+          previewGeneratedAt: { gte: cutoff },
+          video: {
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+            },
+          },
+        },
+        select: {
+          id: true,
+          fileName: true,
+          previewGeneratedAt: true,
+          video: {
+            select: {
+              name: true,
+              versionLabel: true,
+              projectId: true,
+              project: { select: { title: true } },
+            },
+          },
+        },
+        orderBy: { previewGeneratedAt: 'desc' },
+      }),
+    ])
 
     const projectMap = new Map<string, {
       projectId: string
       projectName: string
       pendingCount: number
       processingCount: number
+      assets: Array<{
+        id: string
+        fileName: string
+        videoName: string
+        versionLabel: string | null
+        status: 'PENDING' | 'PROCESSING'
+      }>
     }>()
 
     for (const asset of activeAssets) {
@@ -735,21 +877,86 @@ async function buildVideoAssetPreviewJobs({
           projectName: asset.video.project.title,
           pendingCount: 0,
           processingCount: 0,
+          assets: [],
         })
       }
       const entry = projectMap.get(projectId)!
-      if (asset.previewStatus === 'PENDING') entry.pendingCount++
+      const status = asset.previewStatus as 'PENDING' | 'PROCESSING'
+      if (status === 'PENDING') entry.pendingCount++
       else entry.processingCount++
+      entry.assets.push({
+        id: asset.id,
+        fileName: asset.fileName,
+        videoName: asset.video.name,
+        versionLabel: asset.video.versionLabel,
+        status,
+      })
+    }
+
+    // Sort assets within each project: processing first, then pending
+    for (const entry of projectMap.values()) {
+      entry.assets.sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'PROCESSING' ? -1 : 1
+        return a.fileName.localeCompare(b.fileName)
+      })
     }
 
     const active = [...projectMap.values()].map((e) => ({
-      ...e,
+      projectId: e.projectId,
+      projectName: e.projectName,
+      pendingCount: e.pendingCount,
+      processingCount: e.processingCount,
       totalCount: e.pendingCount + e.processingCount,
+      assets: e.assets,
     }))
 
-    return { active }
+    const completed = (() => {
+      const completedByProject = new Map<string, {
+        id: string
+        type: 'videoAssetPreview'
+        label: string
+        sublabel: string
+        projectId: string
+        completedAt: number
+        assets: Array<{ id: string; fileName: string; videoName: string; versionLabel: string | null; status: 'PENDING' | 'PROCESSING' }>
+      }>()
+
+      for (const asset of recentlyReady) {
+        const projectId = asset.video.projectId
+        if (!completedByProject.has(projectId)) {
+          completedByProject.set(projectId, {
+            id: projectId,
+            type: 'videoAssetPreview',
+            label: 'Asset previews',
+            sublabel: asset.video.project.title,
+            projectId,
+            completedAt: (asset.previewGeneratedAt ?? new Date()).getTime(),
+            assets: [],
+          })
+        }
+        const entry = completedByProject.get(projectId)!
+        entry.completedAt = Math.max(entry.completedAt, (asset.previewGeneratedAt ?? new Date()).getTime())
+        entry.assets.push({
+          id: asset.id,
+          fileName: asset.fileName,
+          videoName: asset.video.name,
+          versionLabel: asset.video.versionLabel,
+          status: 'PROCESSING', // For completed entries, the status is just for display — we use it for the dot color but all are done
+        })
+      }
+
+      // Sort assets within each project by filename
+      for (const entry of completedByProject.values()) {
+        entry.assets.sort((a, b) => a.fileName.localeCompare(b.fileName))
+        entry.label = `${entry.assets.length} asset preview${entry.assets.length !== 1 ? 's' : ''}`
+      }
+
+      return [...completedByProject.values()]
+    })()
+
+    return { active, completed }
   } catch {
-    return { active: [] }
+    return { active: [], completed: [] }
   }
 }
 
@@ -767,28 +974,57 @@ async function buildAlbumSocialJobs({
   allowedStatuses: string[]
 }) {
   try {
-    const activePhotos = await prisma.albumPhoto.findMany({
-      where: {
-        socialStatus: { in: ['PENDING', 'PROCESSING'] as any },
-        album: {
-          project: {
-            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-            ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+
+    const [activePhotos, recentlyReady] = await Promise.all([
+      prisma.albumPhoto.findMany({
+        where: {
+          socialStatus: { in: ['PENDING', 'PROCESSING'] as any },
+          album: {
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+            },
           },
         },
-      },
-      select: {
-        albumId: true,
-        socialStatus: true,
-        album: {
-          select: {
-            name: true,
-            projectId: true,
-            project: { select: { title: true } },
+        select: {
+          albumId: true,
+          socialStatus: true,
+          album: {
+            select: {
+              name: true,
+              projectId: true,
+              project: { select: { title: true } },
+            },
           },
         },
-      },
-    })
+      }),
+      prisma.albumPhoto.findMany({
+        where: {
+          socialStatus: 'READY',
+          socialGeneratedAt: { gte: cutoff },
+          album: {
+            project: {
+              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+              ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+            },
+          },
+        },
+        select: {
+          id: true,
+          albumId: true,
+          socialGeneratedAt: true,
+          album: {
+            select: {
+              name: true,
+              projectId: true,
+              project: { select: { title: true } },
+            },
+          },
+        },
+        orderBy: { socialGeneratedAt: 'desc' },
+      }),
+    ])
 
     const albumMap = new Map<string, {
       albumId: string
@@ -821,8 +1057,17 @@ async function buildAlbumSocialJobs({
       totalCount: e.pendingCount + e.processingCount,
     }))
 
-    return { active }
+    const completed = recentlyReady.map((photo) => ({
+      id: photo.id,
+      type: 'albumSocial' as const,
+      label: photo.album.name,
+      sublabel: `${photo.album.project.title} · Social copies complete`,
+      projectId: photo.album.projectId,
+      completedAt: (photo.socialGeneratedAt ?? new Date()).getTime(),
+    }))
+
+    return { active, completed }
   } catch {
-    return { active: [] }
+    return { active: [], completed: [] }
   }
 }

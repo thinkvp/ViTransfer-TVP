@@ -93,6 +93,16 @@ export type VideoAssetPreviewJob = {
   pendingCount: number
   processingCount: number
   totalCount: number
+  /** Individual assets being processed, sorted processing-first then by filename. */
+  assets: VideoAssetPreviewItem[]
+}
+
+export type VideoAssetPreviewItem = {
+  id: string
+  fileName: string
+  videoName: string
+  versionLabel: string | null
+  status: 'PENDING' | 'PROCESSING'
 }
 
 /** Album photo social derivative jobs grouped by album (polled from DB). */
@@ -116,6 +126,8 @@ export type CompletedServerJob = {
   completedAt: number
   /** True when the job finished with an error (not a successful completion). */
   error?: boolean
+  /** Per-item details for grouped completions (e.g. video asset previews). */
+  assets?: VideoAssetPreviewItem[]
 }
 
 export type ClearRunningJobTarget = {
@@ -187,6 +199,10 @@ export type UploadManagerContextType = {
   completedServerJobs: CompletedServerJob[]
   /** Badge count: queued + uploading + paused + processing + album jobs. */
   totalActiveCount: number
+  /** Total individual items across grouped job types (for detailed badge tooltip). */
+  totalActiveItems: number
+  /** Error message from the last poll, or null when healthy. */
+  pollError: string | null
   /** Enqueue a new upload. Returns the job ID. */
   addUpload: (config: StartUploadConfig) => string
   /** Permanently abort and remove an upload. */
@@ -275,6 +291,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const [videoAssetPreviewJobs, setVideoAssetPreviewJobs] = useState<VideoAssetPreviewJob[]>([])
   const [albumSocialJobs, setAlbumSocialJobs] = useState<AlbumSocialJob[]>([])
   const [completedServerJobs, setCompletedServerJobs] = useState<CompletedServerJob[]>([])
+  const [pollError, setPollError] = useState<string | null>(null)
 
   // Track previously-seen job IDs so we can detect completions.
   const prevProcessingIdsRef = useRef<Set<string>>(new Set())
@@ -691,6 +708,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       try {
         const res = await apiFetch('/api/running-jobs')
         if (res.ok && active) {
+          setPollError(null) // Clear any previous error
           const data = await res.json()
           const now = Date.now()
           const newCompleted: CompletedServerJob[] = []
@@ -740,8 +758,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           }
 
           // --- Album ZIP jobs ---
-          if (Array.isArray(data.albumZipJobs)) {
-            const incoming = data.albumZipJobs as AlbumZipJob[]
+          if (data.albumZipJobs?.active != null || data.albumZipJobs?.completed != null) {
+            const incoming = (data.albumZipJobs.active ?? []) as AlbumZipJob[]
             const incomingIds = new Set(incoming.map((j: AlbumZipJob) => j.id))
 
             for (const prevId of prevAlbumZipIdsRef.current) {
@@ -758,6 +776,14 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                     completedAt: now,
                   })
                 }
+              }
+            }
+
+            // Surface server-reported completed album ZIP jobs
+            for (const j of (data.albumZipJobs.completed ?? []) as any[]) {
+              const key = getCompletedServerJobKeyByParts('albumZip', j.id)
+              if (!dismissedServerJobIdsRef.current.has(key)) {
+                newCompleted.push({ ...j, type: 'albumZip' } as CompletedServerJob)
               }
             }
 
@@ -838,8 +864,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           }
 
           // --- Video asset preview jobs ---
-          if (Array.isArray(data.videoAssetPreviewJobs?.active)) {
-            const incoming = data.videoAssetPreviewJobs.active as VideoAssetPreviewJob[]
+          if (data.videoAssetPreviewJobs?.active != null || data.videoAssetPreviewJobs?.completed != null) {
+            const incoming = (data.videoAssetPreviewJobs.active ?? []) as VideoAssetPreviewJob[]
             const incomingIds = new Set(incoming.map((j: VideoAssetPreviewJob) => j.projectId))
 
             for (const prevId of prevVideoAssetPreviewIdsRef.current) {
@@ -858,14 +884,22 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
               }
             }
 
+            // Surface server-reported completed video asset preview jobs
+            for (const j of (data.videoAssetPreviewJobs.completed ?? []) as any[]) {
+              const key = getCompletedServerJobKeyByParts('videoAssetPreview', j.id)
+              if (!dismissedServerJobIdsRef.current.has(key)) {
+                newCompleted.push({ ...j, type: 'videoAssetPreview' } as CompletedServerJob)
+              }
+            }
+
             prevVideoAssetPreviewIdsRef.current = incomingIds
             prevVideoAssetPreviewMapRef.current = new Map(incoming.map((j: VideoAssetPreviewJob) => [j.projectId, j]))
             setVideoAssetPreviewJobs(incoming)
           }
 
           // --- Album social derivative jobs ---
-          if (Array.isArray(data.albumSocialJobs?.active)) {
-            const incoming = data.albumSocialJobs.active as AlbumSocialJob[]
+          if (data.albumSocialJobs?.active != null || data.albumSocialJobs?.completed != null) {
+            const incoming = (data.albumSocialJobs.active ?? []) as AlbumSocialJob[]
             const incomingIds = new Set(incoming.map((j: AlbumSocialJob) => j.albumId))
 
             for (const prevId of prevAlbumSocialIdsRef.current) {
@@ -887,6 +921,50 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             prevAlbumSocialIdsRef.current = incomingIds
             prevAlbumSocialMapRef.current = new Map(incoming.map((j: AlbumSocialJob) => [j.albumId, j]))
             setAlbumSocialJobs(incoming)
+          }
+
+          // Auto-clear dismissed keys for any job that is currently active again.
+          // This prevents old dismissals from blocking completions when the same
+          // album/video/project gets new work (e.g. adding photos to an existing
+          // album re-enqueues ZIP/thumbnail jobs with the same deterministic IDs).
+          const allActiveJobKeys = new Set<string>()
+
+          for (const job of processingJobs) {
+            allActiveJobKeys.add(getCompletedServerJobKeyByParts('processing', job.id))
+          }
+          for (const job of albumZipJobs) {
+            allActiveJobKeys.add(getCompletedServerJobKeyByParts('albumZip', job.id))
+          }
+          for (const job of albumThumbnailJobs) {
+            allActiveJobKeys.add(getCompletedServerJobKeyByParts('albumThumbnail', job.id))
+          }
+          for (const job of folderRenameJobs) {
+            allActiveJobKeys.add(getCompletedServerJobKeyByParts('folderRename', job.id))
+          }
+          for (const job of videoAssetPreviewJobs) {
+            allActiveJobKeys.add(getCompletedServerJobKeyByParts('videoAssetPreview', job.projectId))
+          }
+          for (const job of albumSocialJobs) {
+            allActiveJobKeys.add(getCompletedServerJobKeyByParts('albumSocial', job.albumId))
+          }
+
+          let dismissedChanged = false
+          for (const key of allActiveJobKeys) {
+            if (dismissedServerJobIdsRef.current.has(key)) {
+              dismissedServerJobIdsRef.current.delete(key)
+              dismissedChanged = true
+            }
+          }
+          if (dismissedChanged) {
+            persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
+            // Also purge any stale completed entries that match the now-unblocked keys
+            setCompletedServerJobs((prev) =>
+              prev.filter((job) => {
+                const key = getCompletedServerJobKey(job)
+                // Keep error entries; only purge successful ones that were blocked
+                return job.error || !allActiveJobKeys.has(key)
+              }),
+            )
           }
 
           // Merge new completions and purge stale (>30 min, but keep errors)
@@ -920,9 +998,18 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
               return filtered.length !== prev.length ? filtered : prev
             })
           }
+        } else if (active) {
+          // API returned a non-OK status — surface as error
+          if (res.status === 401 || res.status === 403) {
+            setPollError('Session expired — please refresh the page.')
+          } else {
+            setPollError(`Server error (${res.status})`)
+          }
         }
-      } catch {
-        // ignore transient errors
+      } catch (err: any) {
+        if (active) {
+          setPollError(err?.message || 'Failed to fetch running jobs')
+        }
       }
     }
 
@@ -1080,15 +1167,6 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     [removeJob],
   )
 
-  const dismissCompletedJob = useCallback(
-    (jobKey: string) => {
-      dismissedServerJobIdsRef.current.add(jobKey)
-      persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
-      setCompletedServerJobs((prev) => prev.filter((j) => getCompletedServerJobKey(j) !== jobKey))
-    },
-    [],
-  )
-
   const clearRunningJob = useCallback(
     async (target: ClearRunningJobTarget) => {
       await apiPost('/api/running-jobs', target)
@@ -1096,6 +1174,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       const jobKey = getCompletedServerJobKeyByParts(target.type, target.id)
       dismissedServerJobIdsRef.current.add(jobKey)
       persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
+      pruneDismissedJobs()
       setCompletedServerJobs((prev) => prev.filter((job) => getCompletedServerJobKey(job) !== jobKey))
 
       if (target.type === 'processing') {
@@ -1120,14 +1199,45 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   // ------ derived ------
 
+  const uploadActiveCount = uploads.filter((u) => u.status === 'queued' || u.status === 'uploading' || u.status === 'paused').length
+  const groupedItemCount =
+    videoAssetPreviewJobs.reduce((sum, j) => sum + j.totalCount, 0) +
+    albumSocialJobs.reduce((sum, j) => sum + j.totalCount, 0)
+
   const totalActiveCount =
-    uploads.filter((u) => u.status === 'queued' || u.status === 'uploading' || u.status === 'paused').length +
+    uploadActiveCount +
     processingJobs.length +
     albumZipJobs.length +
     albumThumbnailJobs.length +
     folderRenameJobs.length +
     videoAssetPreviewJobs.length +
     albumSocialJobs.length
+
+  const totalActiveItems = totalActiveCount + groupedItemCount - videoAssetPreviewJobs.length - albumSocialJobs.length
+
+  // Prune dismissed-job localStorage set to prevent unbounded growth.
+  const pruneDismissedJobs = useCallback(() => {
+    const MAX_DISMISSED = 500
+    if (dismissedServerJobIdsRef.current.size > MAX_DISMISSED) {
+      const entries = [...dismissedServerJobIdsRef.current]
+      // Keep the most recent entries (assuming newer IDs are lexicographically larger;
+      // for timestamp-based IDs, keep the last N by sorting desc then taking first N)
+      const kept = entries.slice(-MAX_DISMISSED)
+      dismissedServerJobIdsRef.current = new Set(kept)
+      persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
+    }
+  }, [])
+
+  // Prune on each dismissal
+  const dismissCompletedJob = useCallback(
+    (jobKey: string) => {
+      dismissedServerJobIdsRef.current.add(jobKey)
+      persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
+      pruneDismissedJobs()
+      setCompletedServerJobs((prev) => prev.filter((j) => getCompletedServerJobKey(j) !== jobKey))
+    },
+    [pruneDismissedJobs],
+  )
 
   const actionsValue = useMemo<UploadManagerActionsContextType>(() => ({
     addUpload,
@@ -1150,6 +1260,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     albumSocialJobs,
     completedServerJobs,
     totalActiveCount,
+    totalActiveItems,
+    pollError,
     addUpload,
     cancelUpload,
     pauseUpload,
@@ -1168,6 +1280,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     albumSocialJobs,
     completedServerJobs,
     totalActiveCount,
+    totalActiveItems,
+    pollError,
     addUpload,
     cancelUpload,
     pauseUpload,

@@ -8,7 +8,6 @@ import { buildProjectStorageRoot, buildProjectUploadVideoThumbnailStoragePath, b
 import { recalculateAndStoreProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { getFilePath, uploadFile } from '@/lib/storage'
-import { stripDropboxStoragePrefix } from '@/lib/project-storage-paths'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import type { ShareUploadPreviewJob } from '@/lib/queue'
 import { calculateOutputDimensions, parseResolutions } from './video-processor-helpers'
@@ -66,7 +65,7 @@ function getThumbnailCaptureTimestamp(durationSeconds?: number | null): number {
 async function previewExists(previewStoragePath: string): Promise<boolean> {
   try {
     if (isS3Mode()) return await s3FileExists(previewStoragePath)
-    return fs.existsSync(getFilePath(stripDropboxStoragePrefix(previewStoragePath)))
+    return fs.existsSync(getFilePath(previewStoragePath))
   } catch {
     return false
   }
@@ -78,7 +77,7 @@ async function getPreviewFileSize(previewStoragePath: string): Promise<bigint> {
       const size = await s3GetFileSize(previewStoragePath)
       return typeof size === 'number' && size > 0 ? BigInt(size) : BigInt(0)
     }
-    const stat = fs.statSync(getFilePath(stripDropboxStoragePrefix(previewStoragePath)))
+    const stat = fs.statSync(getFilePath(previewStoragePath))
     return BigInt(stat.size)
   } catch {
     return BigInt(0)
@@ -94,7 +93,7 @@ async function generateImagePreview(sourcePath: string, tempOutputPath: string):
     const { s3DownloadFileToBuffer } = await import('@/lib/s3-storage')
     sourceInput = await s3DownloadFileToBuffer(sourcePath)
   } else {
-    sourceInput = getFilePath(stripDropboxStoragePrefix(sourcePath))
+    sourceInput = getFilePath(sourcePath)
   }
 
   await (sharpLib as any)(sourceInput)
@@ -119,7 +118,7 @@ async function generateVideoPreview(
     // avoids downloading the full video; FFmpeg only fetches the moov atom + target frame region.
     inputArg = await s3GetPresignedStreamUrl(sourcePath, 300, 'video/*')
   } else {
-    inputArg = getFilePath(stripDropboxStoragePrefix(sourcePath))
+    inputArg = getFilePath(sourcePath)
   }
 
   await generateThumbnail(inputArg, tempOutputPath, timestamp)
