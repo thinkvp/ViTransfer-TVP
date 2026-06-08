@@ -196,15 +196,30 @@ async function collectAccountingKeys(): Promise<FileEntry[]> {
   return entries
 }
 
-/** Collect S3 keys for timeline sprites by listing the S3 prefix for each video. */
+/** Collect S3 keys for timeline sprites by listing the S3 prefix for each video, asset, and upload. */
 async function collectTimelineSpriteKeys(client: ReturnType<typeof getS3Client>, bucket: string): Promise<FileEntry[]> {
-  const videos = await prisma.video.findMany({
-    select: { timelinePreviewSpritesPath: true },
-    where: { timelinePreviewSpritesPath: { not: null } },
-  })
+  const [videos, assets, uploads] = await Promise.all([
+    prisma.video.findMany({
+      select: { timelinePreviewSpritesPath: true },
+      where: { timelinePreviewSpritesPath: { not: null } },
+    }),
+    prisma.videoAsset.findMany({
+      select: { timelinePreviewSpritesPath: true },
+      where: { timelinePreviewSpritesPath: { not: null } },
+    }),
+    prisma.shareUploadFile.findMany({
+      select: { timelinePreviewSpritesPath: true },
+      where: { timelinePreviewSpritesPath: { not: null } },
+    }),
+  ])
+  const allPrefixes = [
+    ...videos.map(v => v.timelinePreviewSpritesPath),
+    ...assets.map(a => a.timelinePreviewSpritesPath),
+    ...uploads.map(u => u.timelinePreviewSpritesPath),
+  ]
   const entries: FileEntry[] = []
-  for (const video of videos) {
-    const prefix = normalizeKey(video.timelinePreviewSpritesPath)
+  for (const spritesPath of allPrefixes) {
+    const prefix = normalizeKey(spritesPath)
     if (!prefix) continue
     const objects = await listS3Keys(client, bucket, prefix).catch(() => [])
     for (const obj of objects) {

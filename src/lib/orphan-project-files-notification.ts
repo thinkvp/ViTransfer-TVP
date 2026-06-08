@@ -36,13 +36,18 @@ export async function upsertOrphanProjectFilesScanNotification(
 
   // Build a human-readable summary for the notification message.
   const parts: string[] = []
-  if (result.orphanFiles > 0) {
-    parts.push(`${result.orphanFiles} orphaned file${result.orphanFiles === 1 ? '' : 's'} (on storage but not in DB)`)
+  const scanFailed = result.missingFiles < 0
+  if (scanFailed) {
+    parts.push('S3 listing failed — scan results may be incomplete')
+  } else {
+    if (result.orphanFiles > 0) {
+      parts.push(`${result.orphanFiles} orphaned file${result.orphanFiles === 1 ? '' : 's'} (on storage but not in DB)`)
+    }
+    if (result.missingFiles > 0) {
+      parts.push(`${result.missingFiles} missing file${result.missingFiles === 1 ? '' : 's'} (in DB but not on storage)`)
+    }
   }
-  if (result.missingFiles > 0) {
-    parts.push(`${result.missingFiles} missing file${result.missingFiles === 1 ? '' : 's'} (in DB but not on storage)`)
-  }
-  const message = parts.join(' and ') + ' found during the weekly scan'
+  const message = (parts.length > 0 ? parts.join(' and ') + ' found' : 'No issues found') + ' during the weekly scan'
 
   const details = {
     __payload: {

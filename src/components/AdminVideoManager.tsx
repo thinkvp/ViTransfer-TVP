@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X, RotateCw, Loader2 } from 'lucide-react'
 import VideoUpload from './VideoUpload'
 import VideoList from './VideoList'
 import { InlineEdit } from './InlineEdit'
 import { cn } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
-import { apiPatch } from '@/lib/api-client'
+import { apiPatch, apiPost } from '@/lib/api-client'
 import MultiVideoUploadModal from '@/components/MultiVideoUploadModal'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
@@ -72,6 +72,10 @@ export default function AdminVideoManager({
   // S3 rename confirmation modal
   const [renameConfirmGroup, setRenameConfirmGroup] = useState<{ oldName: string; videoIds: string[]; proposedName: string } | null>(null)
   const [renameGroupConfirming, setRenameGroupConfirming] = useState(false)
+
+  // Reprocess state per video group
+  const [reprocessingGroups, setReprocessingGroups] = useState<Set<string>>(new Set())
+  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null)
 
   // Notify parent when component mounts with first video
   useEffect(() => {
@@ -186,7 +190,79 @@ export default function AdminVideoManager({
               onClick={() => toggleGroup(groupName)}
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <Video className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                {(() => {
+                  const isReprocessing = reprocessingGroups.has(groupName)
+                  const isHovered = hoveredGroup === groupName
+                  const canReprocess = projectStatus !== 'APPROVED' && projectStatus !== 'CLOSED'
+                  const hasError = hasFailed
+                  const hasBusy = hasUploading || hasProcessing || hasQueued
+                  // Color: red for error, orange for busy, primary for healthy
+                  const iconColor = hasError
+                    ? 'text-destructive'
+                    : hasBusy
+                    ? 'text-orange-500'
+                    : 'text-primary'
+
+                  const handleReprocess = async (e: React.MouseEvent) => {
+                    e.stopPropagation()
+                    if (!canReprocess || isReprocessing) return
+                    const videoIds = groupVideos.map((v: any) => v.id)
+                    setReprocessingGroups((prev) => new Set(prev).add(groupName))
+                    try {
+                      await apiPost(`/api/projects/${projectId}/reprocess`, { videoIds })
+                      toast.success(`Queued ${videoIds.length} video(s) for reprocessing`)
+                      onRefresh?.()
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Failed to reprocess videos')
+                    } finally {
+                      setReprocessingGroups((prev) => {
+                        const next = new Set(prev)
+                        next.delete(groupName)
+                        return next
+                      })
+                    }
+                  }
+
+                  if (isReprocessing) {
+                    return (
+                      <span title="Reprocessing…" className="flex-shrink-0">
+                        <Loader2
+                          className="w-5 h-5 text-primary animate-spin"
+                        />
+                      </span>
+                    )
+                  }
+
+                  if (isHovered && canReprocess) {
+                    return (
+                      <span
+                        title="Reprocess previews"
+                        className="flex-shrink-0"
+                        onMouseEnter={() => setHoveredGroup(groupName)}
+                        onMouseLeave={() => setHoveredGroup(null)}
+                      >
+                        <RotateCw
+                          className={`w-5 h-5 cursor-pointer ${iconColor} hover:scale-110 transition-transform`}
+                          onClick={handleReprocess}
+                        />
+                      </span>
+                    )
+                  }
+
+                  return (
+                    <span
+                      title={canReprocess ? 'Reprocess previews' : undefined}
+                      className="flex-shrink-0"
+                      onMouseEnter={() => setHoveredGroup(groupName)}
+                      onMouseLeave={() => setHoveredGroup(null)}
+                    >
+                      <Video
+                        className={`w-5 h-5 ${iconColor} ${canReprocess ? 'cursor-pointer' : ''}`}
+                        onClick={canReprocess ? handleReprocess : undefined}
+                      />
+                    </span>
+                  )
+                })()}
                 <div className="flex-1 min-w-0">
                   <div className="min-w-0">
                     {editingGroupName === groupName ? (

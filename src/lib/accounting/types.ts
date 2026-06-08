@@ -266,6 +266,7 @@ export interface ProfitLossSection {
 // Balance sheet
 export interface BalanceSheetReport {
   asAt: string
+  basis: 'CASH' | 'ACCRUAL'
   currency: string
   assets: BalanceSheetSection[]
   totalAssetsCents: number
@@ -280,24 +281,6 @@ export interface BalanceSheetSection {
   amountCents: number
   accountId?: string | null
   accountCode?: string | null
-}
-
-// Trial Balance
-export interface TrialBalanceRow {
-  accountId: string
-  code: string
-  name: string
-  type: string
-  debitCents: number
-  creditCents: number
-}
-
-export interface TrialBalanceReport {
-  asAt: string
-  currency: string
-  rows: TrialBalanceRow[]
-  totalDebitCents: number
-  totalCreditCents: number
 }
 
 // Aged Receivables

@@ -4,7 +4,7 @@ import type { AccountingSettings } from '@/lib/accounting/types'
 function defaultAccountingSettingsRow() {
   return {
     id: 'default',
-    reportingBasis: 'ACCRUAL' as const,
+    reportingBasis: 'CASH' as const,
     basGstAccountId: null as string | null,
     basPaygAccountId: null as string | null,
     basPaygInstalmentDefaultCents: null as number | null,

@@ -310,6 +310,15 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   // Track IDs that the user has manually dismissed (so re-polls don't re-add them).
   const dismissedServerJobIdsRef = useRef<Set<string>>(new Set())
 
+  // Refs mirroring the latest active job lists, used inside the polling effect
+  // so we don't need to list the state variables as effect dependencies.
+  const latestProcessingJobsRef = useRef<ProcessingJob[]>([])
+  const latestAlbumZipJobsRef = useRef<AlbumZipJob[]>([])
+  const latestAlbumThumbnailJobsRef = useRef<AlbumThumbnailJob[]>([])
+  const latestFolderRenameJobsRef = useRef<FolderRenameJob[]>([])
+  const latestVideoAssetPreviewJobsRef = useRef<VideoAssetPreviewJob[]>([])
+  const latestAlbumSocialJobsRef = useRef<AlbumSocialJob[]>([])
+
   useEffect(() => {
     dismissedServerJobIdsRef.current = loadDismissedServerJobIds()
   }, [])
@@ -738,6 +747,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             prevProcessingIdsRef.current = incomingIds
             prevProcessingMapRef.current = new Map(incoming.map((j: ProcessingJob) => [j.id, j]))
             setProcessingJobs(incoming)
+            latestProcessingJobsRef.current = incoming
           }
 
           if (Array.isArray(data.completedProcessingJobs) && data.completedProcessingJobs.length > 0) {
@@ -790,6 +800,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             prevAlbumZipIdsRef.current = incomingIds
             prevAlbumZipMapRef.current = new Map(incoming.map((j: AlbumZipJob) => [j.id, j]))
             setAlbumZipJobs(incoming)
+            latestAlbumZipJobsRef.current = incoming
           }
 
           // --- Album thumbnail jobs ---
@@ -823,6 +834,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             prevAlbumThumbnailIdsRef.current = incomingIds
             prevAlbumThumbnailMapRef.current = new Map(incoming.map((j: AlbumThumbnailJob) => [j.id, j]))
             setAlbumThumbnailJobs(incoming)
+            latestAlbumThumbnailJobsRef.current = incoming
           }
 
           // --- Folder rename jobs ---
@@ -861,6 +873,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             prevFolderRenameIdsRef.current = incomingIds
             prevFolderRenameMapRef.current = new Map(incoming.map((j: FolderRenameJob) => [j.id, j]))
             setFolderRenameJobs(incoming)
+            latestFolderRenameJobsRef.current = incoming
           }
 
           // --- Video asset preview jobs ---
@@ -895,6 +908,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             prevVideoAssetPreviewIdsRef.current = incomingIds
             prevVideoAssetPreviewMapRef.current = new Map(incoming.map((j: VideoAssetPreviewJob) => [j.projectId, j]))
             setVideoAssetPreviewJobs(incoming)
+            latestVideoAssetPreviewJobsRef.current = incoming
           }
 
           // --- Album social derivative jobs ---
@@ -921,6 +935,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             prevAlbumSocialIdsRef.current = incomingIds
             prevAlbumSocialMapRef.current = new Map(incoming.map((j: AlbumSocialJob) => [j.albumId, j]))
             setAlbumSocialJobs(incoming)
+            latestAlbumSocialJobsRef.current = incoming
           }
 
           // Auto-clear dismissed keys for any job that is currently active again.
@@ -929,22 +944,22 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           // album re-enqueues ZIP/thumbnail jobs with the same deterministic IDs).
           const allActiveJobKeys = new Set<string>()
 
-          for (const job of processingJobs) {
+          for (const job of latestProcessingJobsRef.current) {
             allActiveJobKeys.add(getCompletedServerJobKeyByParts('processing', job.id))
           }
-          for (const job of albumZipJobs) {
+          for (const job of latestAlbumZipJobsRef.current) {
             allActiveJobKeys.add(getCompletedServerJobKeyByParts('albumZip', job.id))
           }
-          for (const job of albumThumbnailJobs) {
+          for (const job of latestAlbumThumbnailJobsRef.current) {
             allActiveJobKeys.add(getCompletedServerJobKeyByParts('albumThumbnail', job.id))
           }
-          for (const job of folderRenameJobs) {
+          for (const job of latestFolderRenameJobsRef.current) {
             allActiveJobKeys.add(getCompletedServerJobKeyByParts('folderRename', job.id))
           }
-          for (const job of videoAssetPreviewJobs) {
+          for (const job of latestVideoAssetPreviewJobsRef.current) {
             allActiveJobKeys.add(getCompletedServerJobKeyByParts('videoAssetPreview', job.projectId))
           }
-          for (const job of albumSocialJobs) {
+          for (const job of latestAlbumSocialJobsRef.current) {
             allActiveJobKeys.add(getCompletedServerJobKeyByParts('albumSocial', job.albumId))
           }
 
@@ -1167,6 +1182,19 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     [removeJob],
   )
 
+  // Prune dismissed-job localStorage set to prevent unbounded growth.
+  const pruneDismissedJobs = useCallback(() => {
+    const MAX_DISMISSED = 500
+    if (dismissedServerJobIdsRef.current.size > MAX_DISMISSED) {
+      const entries = [...dismissedServerJobIdsRef.current]
+      // Keep the most recent entries (assuming newer IDs are lexicographically larger;
+      // for timestamp-based IDs, keep the last N by sorting desc then taking first N)
+      const kept = entries.slice(-MAX_DISMISSED)
+      dismissedServerJobIdsRef.current = new Set(kept)
+      persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
+    }
+  }, [])
+
   const clearRunningJob = useCallback(
     async (target: ClearRunningJobTarget) => {
       await apiPost('/api/running-jobs', target)
@@ -1194,7 +1222,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
       setFolderRenameJobs((prev) => prev.filter((job) => job.id !== target.id))
     },
-    [],
+    [pruneDismissedJobs],
   )
 
   // ------ derived ------
@@ -1214,19 +1242,6 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     albumSocialJobs.length
 
   const totalActiveItems = totalActiveCount + groupedItemCount - videoAssetPreviewJobs.length - albumSocialJobs.length
-
-  // Prune dismissed-job localStorage set to prevent unbounded growth.
-  const pruneDismissedJobs = useCallback(() => {
-    const MAX_DISMISSED = 500
-    if (dismissedServerJobIdsRef.current.size > MAX_DISMISSED) {
-      const entries = [...dismissedServerJobIdsRef.current]
-      // Keep the most recent entries (assuming newer IDs are lexicographically larger;
-      // for timestamp-based IDs, keep the last N by sorting desc then taking first N)
-      const kept = entries.slice(-MAX_DISMISSED)
-      dismissedServerJobIdsRef.current = new Set(kept)
-      persistDismissedServerJobIds(dismissedServerJobIdsRef.current)
-    }
-  }, [])
 
   // Prune on each dismissal
   const dismissCompletedJob = useCallback(

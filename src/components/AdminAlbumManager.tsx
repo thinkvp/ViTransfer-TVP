@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Loader2, Layers } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Loader2, Layers, RotateCw } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -97,6 +97,10 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   const [pendingDisableSocialAlbumId, setPendingDisableSocialAlbumId] = useState<string | null>(null)
   const [pendingDeleteAlbum, setPendingDeleteAlbum] = useState<{ id: string; name: string } | null>(null)
   const [pendingDeletePhoto, setPendingDeletePhoto] = useState<{ albumId: string; photoId: string; fileName: string } | null>(null)
+
+  // Reprocess state per album
+  const [reprocessingAlbumIds, setReprocessingAlbumIds] = useState<Set<string>>(new Set())
+  const [hoveredAlbumId, setHoveredAlbumId] = useState<string | null>(null)
 
   const sortedAlbums = useMemo(() => {
     return [...albums].sort((a, b) => {
@@ -522,7 +526,79 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
               onClick={() => void toggleAlbum(album.id)}
             >
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <Images className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                {(() => {
+                  const isReprocessing = reprocessingAlbumIds.has(album.id)
+                  const isHovered = hoveredAlbumId === album.id
+                  const canReprocess = projectStatus !== 'APPROVED' && projectStatus !== 'CLOSED'
+                  const hasError = album.status === 'ERROR'
+                  const hasBusy = album.status === 'UPLOADING' || album.status === 'PROCESSING'
+                  // Color: red for error, orange for busy, primary for healthy
+                  const iconColor = hasError
+                    ? 'text-destructive'
+                    : hasBusy
+                    ? 'text-orange-500'
+                    : 'text-primary'
+
+                  const handleReprocess = async (e: React.MouseEvent) => {
+                    e.stopPropagation()
+                    if (!canReprocess || isReprocessing) return
+                    setReprocessingAlbumIds((prev) => new Set(prev).add(album.id))
+                    try {
+                      await apiPost(`/api/albums/${album.id}/reprocess`, {})
+                      toast.success('Album queued for reprocessing')
+                      onProjectDataChanged?.()
+                      void fetchAlbums()
+                    } catch (err: any) {
+                      toast.error(err?.message || 'Failed to reprocess album')
+                    } finally {
+                      setReprocessingAlbumIds((prev) => {
+                        const next = new Set(prev)
+                        next.delete(album.id)
+                        return next
+                      })
+                    }
+                  }
+
+                  if (isReprocessing) {
+                    return (
+                      <span title="Reprocessing…" className="flex-shrink-0">
+                        <Loader2
+                          className="w-5 h-5 text-primary animate-spin"
+                        />
+                      </span>
+                    )
+                  }
+
+                  if (isHovered && canReprocess) {
+                    return (
+                      <span
+                        title="Reprocess album (ZIPs, thumbnails, social copies)"
+                        className="flex-shrink-0"
+                        onMouseEnter={() => setHoveredAlbumId(album.id)}
+                        onMouseLeave={() => setHoveredAlbumId(null)}
+                      >
+                        <RotateCw
+                          className={`w-5 h-5 cursor-pointer ${iconColor} hover:scale-110 transition-transform`}
+                          onClick={handleReprocess}
+                        />
+                      </span>
+                    )
+                  }
+
+                  return (
+                    <span
+                      title={canReprocess ? 'Reprocess album (ZIPs, thumbnails, social copies)' : undefined}
+                      className="flex-shrink-0"
+                      onMouseEnter={() => setHoveredAlbumId(album.id)}
+                      onMouseLeave={() => setHoveredAlbumId(null)}
+                    >
+                      <Images
+                        className={`w-5 h-5 ${iconColor} ${canReprocess ? 'cursor-pointer' : ''}`}
+                        onClick={canReprocess ? handleReprocess : undefined}
+                      />
+                    </span>
+                  )
+                })()}
                 <div className="flex-1 min-w-0">
                   <div className="min-w-0">
                     {editingAlbumId === album.id ? (

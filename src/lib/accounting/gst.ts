@@ -18,6 +18,7 @@
  */
 
 import { prisma } from '@/lib/db'
+import { getSalesTaxRate } from '@/lib/settings'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import type { SalesLineItem } from '@/lib/sales/types'
 import type { BasSalesRecord, BasExpenseRecord } from '@/lib/accounting/types'
@@ -71,8 +72,7 @@ export async function calculateBas(
 ): Promise<BasCalculationResult> {
   const issues: BasIssue[] = []
 
-  const settings = await prisma.salesSettings.findUnique({ where: { id: 'default' } })
-  const taxRatePercent = settings?.taxRatePercent ?? 10
+  const taxRatePercent = await getSalesTaxRate()
 
   // ── Expenses ──────────────────────────────────────────────────────────────
   const expenses = await prisma.expense.findMany({

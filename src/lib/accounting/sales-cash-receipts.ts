@@ -49,7 +49,7 @@ export async function listSalesCashReceiptsInRange(startDate: string, endDate: s
 
   return payments.map((payment) => ({
     paymentDate: payment.paymentDate,
-    amountCents: Math.max(0, Math.trunc(payment.amountCents)),
+    amountCents: Math.trunc(payment.amountCents),
     invoice: payment.invoice ? { itemsJson: payment.invoice.itemsJson, taxEnabled: payment.invoice.taxEnabled } : null,
   }))
 }
@@ -72,7 +72,7 @@ export async function listSalesCashReceiptsUpTo(asOf: string): Promise<SalesCash
 
   return payments.map((payment) => ({
     paymentDate: payment.paymentDate,
-    amountCents: Math.max(0, Math.trunc(payment.amountCents)),
+    amountCents: Math.trunc(payment.amountCents),
     invoice: payment.invoice ? { itemsJson: payment.invoice.itemsJson, taxEnabled: payment.invoice.taxEnabled } : null,
   }))
 }

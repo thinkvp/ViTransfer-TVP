@@ -370,10 +370,15 @@ export function DeveloperToolsSection({
 
   const orphanProjectFilesSummary = useMemo(() => {
     if (!orphanProjectFilesResult) return null
+    const scanFailed = orphanProjectFilesResult.missingFiles < 0
     const scannedLabel = `${orphanProjectFilesResult.scannedFiles} files scanned across ${orphanProjectFilesResult.scannedProjects ?? orphanProjectFilesResult.scannedDirectories ?? orphanProjectFilesResult.scannedProjectDirectories} project${(orphanProjectFilesResult.scannedProjects ?? 1) === 1 ? '' : 's'}`
-    const orphanLabel = `${orphanProjectFilesResult.orphanFiles} orphan file${orphanProjectFilesResult.orphanFiles === 1 ? '' : 's'} on storage (${formatBytes(orphanProjectFilesResult.orphanFileBytes)})`
-    const missingLabel = `${orphanProjectFilesResult.missingFiles} missing file${orphanProjectFilesResult.missingFiles === 1 ? '' : 's'} in DB`
-    return { scannedLabel, orphanLabel, missingLabel }
+    const orphanLabel = scanFailed
+      ? 'Orphan scan skipped — storage listing failed'
+      : `${orphanProjectFilesResult.orphanFiles} orphan file${orphanProjectFilesResult.orphanFiles === 1 ? '' : 's'} on storage (${formatBytes(orphanProjectFilesResult.orphanFileBytes)})`
+    const missingLabel = scanFailed
+      ? 'Missing-file check skipped — storage listing failed'
+      : `${orphanProjectFilesResult.missingFiles} missing file${orphanProjectFilesResult.missingFiles === 1 ? '' : 's'} in DB`
+    return { scannedLabel, orphanLabel, missingLabel, scanFailed }
   }, [orphanProjectFilesResult])
 
   async function runOrphanProjectFilesCleanup(dryRun: boolean) {
@@ -735,11 +740,11 @@ export function DeveloperToolsSection({
                     <p className="text-xs text-muted-foreground">{orphanProjectFilesSummary.scannedLabel}</p>
                     <p className="text-xs text-muted-foreground">
                       {orphanProjectFilesSummary.orphanLabel}
-                      {orphanProjectFilesResult?.orphanFiles === 0 ? ' — none found ✓' : ''}
+                      {!orphanProjectFilesSummary.scanFailed && orphanProjectFilesResult?.orphanFiles === 0 ? ' — none found ✓' : ''}
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {orphanProjectFilesSummary.missingLabel}
-                      {orphanProjectFilesResult?.missingFiles === 0 ? ' — none found ✓' : ''}
+                      {!orphanProjectFilesSummary.scanFailed && orphanProjectFilesResult?.missingFiles === 0 ? ' — none found ✓' : ''}
                     </p>
                     {orphanProjectFilesResult?.deleted ? (
                       <p className="text-xs text-muted-foreground">

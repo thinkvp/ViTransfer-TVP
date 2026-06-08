@@ -316,6 +316,40 @@ async function collectReferencedPaths(): Promise<Set<string>> {
     }
   }
 
+  // Include asset timeline paths in S3 migration key set
+  const assetsWithTimeline = await prisma.videoAsset.findMany({
+    where: {
+      OR: [
+        { timelinePreviewVttPath: { not: null } },
+        { timelinePreviewSpritesPath: { not: null } },
+      ],
+    },
+    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
+  })
+  for (const a of assetsWithTimeline) {
+    const vttKey = normalizeKey(a.timelinePreviewVttPath || '')
+    if (vttKey) keys.add(vttKey)
+    const spritesKey = normalizeKey(a.timelinePreviewSpritesPath || '')
+    if (spritesKey) keys.add(spritesKey)
+  }
+
+  // Include upload timeline paths in S3 migration key set
+  const uploadsWithTimeline = await prisma.shareUploadFile.findMany({
+    where: {
+      OR: [
+        { timelinePreviewVttPath: { not: null } },
+        { timelinePreviewSpritesPath: { not: null } },
+      ],
+    },
+    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
+  })
+  for (const u of uploadsWithTimeline) {
+    const vttKey = normalizeKey(u.timelinePreviewVttPath || '')
+    if (vttKey) keys.add(vttKey)
+    const spritesKey = normalizeKey(u.timelinePreviewSpritesPath || '')
+    if (spritesKey) keys.add(spritesKey)
+  }
+
   for (const row of commentFiles) {
     const key = normalizeKey(row.storagePath)
     if (key) keys.add(key)

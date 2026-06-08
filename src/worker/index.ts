@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload, ShareUploadPreviewJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload, ShareUploadPreviewJob, AssetTimelineJob, UploadTimelineJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -394,6 +394,26 @@ async function main() {
 
   console.log('[WORKER] Share upload preview worker started')
 
+  // Create asset-timeline worker
+  const { processAssetTimeline } = await import('./asset-upload-timeline-processor')
+  const assetTimelineWorker = new Worker<AssetTimelineJob>('asset-timeline', processAssetTimeline, {
+    connection: getRedisForQueue(),
+    concurrency: Math.max(1, concurrency),
+  })
+  assetTimelineWorker.on('completed', (job) => console.log(`[WORKER] Asset timeline job ${job.id} completed`))
+  assetTimelineWorker.on('failed', (job, err) => console.error(`[WORKER ERROR] Asset timeline job ${job?.id} failed:`, err))
+  console.log('[WORKER] Asset timeline worker started')
+
+  // Create upload-timeline worker
+  const { processUploadTimeline } = await import('./asset-upload-timeline-processor')
+  const uploadTimelineWorker = new Worker<UploadTimelineJob>('upload-timeline', processUploadTimeline, {
+    connection: getRedisForQueue(),
+    concurrency: Math.max(1, concurrency),
+  })
+  uploadTimelineWorker.on('completed', (job) => console.log(`[WORKER] Upload timeline job ${job.id} completed`))
+  uploadTimelineWorker.on('failed', (job, err) => console.error(`[WORKER ERROR] Upload timeline job ${job?.id} failed:`, err))
+  console.log('[WORKER] Upload timeline worker started')
+
   // Create notification processing queue with repeatable job
   console.log('Setting up notification processing...')
   const notificationQueue = new Queue('notification-processing', {
@@ -779,8 +799,14 @@ async function main() {
         try {
           console.log('[CONSISTENCY] Running scheduled storage integrity scan (dry run)...')
           const result = await cleanupProjectStorageOrphans(true)
+          const scanFailed = result.missingFiles < 0
           const hasIssues = result.orphanFiles > 0 || result.missingFiles > 0
-          if (hasIssues) {
+          if (scanFailed) {
+            // S3 listing failed — keep any existing notification and log the failure.
+            // Don't clear the old notification; the admin needs to see this is broken.
+            await upsertOrphanProjectFilesScanNotification(result, new Date().toISOString())
+            console.warn(`[CONSISTENCY] Storage integrity scan failed: S3 listing error (see errors array). Keeping existing notification.`)
+          } else if (hasIssues) {
             await upsertOrphanProjectFilesScanNotification(result, new Date().toISOString())
             console.log(`[CONSISTENCY] Storage integrity scan completed: ${result.orphanFiles} orphan files, ${result.missingFiles} missing files`)
           } else {

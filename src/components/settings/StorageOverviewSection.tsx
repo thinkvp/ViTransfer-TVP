@@ -39,12 +39,9 @@ type ClosedProjectPreviewCleanupResult = {
   projectsWithPreviews: number
   videosWithPreviews: number
   previewFiles: number
-  timelineDirs: number
   deleted?: {
     previewFiles: number
     previewFilesFailed: number
-    timelineDirs: number
-    timelineDirsFailed: number
   }
   errors?: Array<{ projectId: string; path: string; error: string }>
   sample?: {
@@ -535,11 +532,12 @@ export function StorageOverviewSection({
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5 flex-1">
                 <Label htmlFor="autoDeletePreviewsOnClose">
-                  Auto-delete video previews and timeline sprites when project is closed
+                  Auto-delete video previews when project is closed
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  When enabled, all generated preview files and timeline sprite previews will be
-                  deleted when a project is closed to save disk space. They will be automatically
+                  When enabled, generated video preview files (480p, 720p, 1080p) will be
+                  deleted when a project is closed to save disk space. Thumbnails and timeline
+                  sprites are preserved since they are small. Previews will be automatically
                   regenerated if the project is reopened.
                 </p>
               </div>
@@ -557,9 +555,10 @@ export function StorageOverviewSection({
               <div className="space-y-0.5 min-w-0">
                 <Label>Delete previews for closed projects</Label>
                 <p className="text-xs text-muted-foreground">
-                  Finds all CLOSED projects that still have preview files (480p, 720p, 1080p) or
-                  timeline sprite directories on disk, and deletes them to reclaim storage. Database
-                  fields are cleared so previews will regenerate if the project is re-opened. Run a
+                  Finds all CLOSED projects that still have preview files (480p, 720p, 1080p)
+                  or video-asset playback previews on disk, and deletes them to reclaim storage.
+                  Timeline sprites are preserved since they are small. Database fields are
+                  cleared so previews will regenerate if the project is re-opened. Run a
                   dry-run first to preview impact.
                 </p>
 
@@ -577,18 +576,13 @@ export function StorageOverviewSection({
                       Videos with previews: {closedPreviewsResult.videosWithPreviews}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Preview files: {closedPreviewsResult.previewFiles}; timeline sprite dirs:{' '}
-                      {closedPreviewsResult.timelineDirs}
+                      Preview files: {closedPreviewsResult.previewFiles}
                     </p>
                     {closedPreviewsResult.deleted ? (
                       <p className="text-xs text-muted-foreground">
                         Deleted: {closedPreviewsResult.deleted.previewFiles} preview files
                         {closedPreviewsResult.deleted.previewFilesFailed
                           ? ` (${closedPreviewsResult.deleted.previewFilesFailed} failed)`
-                          : ''}
-                        , {closedPreviewsResult.deleted.timelineDirs} timeline dirs
-                        {closedPreviewsResult.deleted.timelineDirsFailed
-                          ? ` (${closedPreviewsResult.deleted.timelineDirsFailed} failed)`
                           : ''}
                       </p>
                     ) : null}

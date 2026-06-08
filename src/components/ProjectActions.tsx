@@ -453,7 +453,9 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           `Preview reprocessing started. Cleared: ${Number(data?.cancelledJobs || 0)} jobs. ` +
           `Videos: ${Number(data?.queuedVideoJobs || 0)}, ` +
           `Uploads: ${Number(data?.queuedUploadPreviewJobs || 0)}, ` +
+          `Upload timelines: ${Number(data?.queuedUploadTimelineJobs || 0)}, ` +
           `Video assets: ${Number(data?.queuedVideoAssetPreviewJobs || 0)}, ` +
+          `Asset timelines: ${Number(data?.queuedAssetTimelineJobs || 0)}, ` +
           `Album photo previews: ${Number(data?.queuedAlbumPhotoSocialJobs || 0)}, ` +
           `Album thumbnails: ${Number(data?.queuedAlbumThumbnailJobs || 0)}.`
         )

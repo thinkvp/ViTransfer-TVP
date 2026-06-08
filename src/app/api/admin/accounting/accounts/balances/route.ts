@@ -4,6 +4,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 import { listSalesInvoiceIncomeEntries } from '@/lib/accounting/sales-income-allocation'
+import { getSalesTaxRate } from '@/lib/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,7 +30,7 @@ export async function GET(request: NextRequest) {
   if (to) dateFilter.lte = to
   const hasDateFilter = from || to
 
-  const [expenseGroups, bankTransactions, splitLines, journalEntries, salesIncomeEntries, debitNormalAccounts, settings] = await Promise.all([
+  const [expenseGroups, bankTransactions, splitLines, journalEntries, salesIncomeEntries, expenseNormalAccounts, taxRatePercentRaw] = await Promise.all([
     prisma.expense.groupBy({
       by: ['accountId'],
       where: hasDateFilter ? { date: dateFilter } : {},
@@ -59,13 +60,14 @@ export async function GET(request: NextRequest) {
       where: hasDateFilter ? { date: dateFilter } : {},
     }),
     listSalesInvoiceIncomeEntries({ from, to }),
-    // Fetch IDs of debit-normal accounts so we can apply the correct sign for bank transactions / split lines
-    prisma.account.findMany({ where: { type: { in: ['ASSET', 'EXPENSE', 'COGS'] } }, select: { id: true } }),
-    prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } }),
+    // Only EXPENSE/COGS need the bank-transaction sign flip (withdrawal → increase expense).
+    // ASSET accounts use raw bank-statement sign (deposit = increase, no flip).
+    prisma.account.findMany({ where: { type: { in: ['EXPENSE', 'COGS'] } }, select: { id: true } }),
+    getSalesTaxRate(),
   ])
 
   const balances: Record<string, number> = {}
-  const taxRatePercent = settings?.taxRatePercent ?? 10
+  const taxRatePercent = taxRatePercentRaw ?? 10
 
   for (const g of expenseGroups) {
     if (g.accountId) {
@@ -73,23 +75,23 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // For debit-normal accounts (ASSET, EXPENSE, COGS) a bank credit (positive amountCents, money in)
-  // reduces the account balance, so we negate after stripping GST. For credit-normal accounts
-  // (INCOME, LIABILITY, EQUITY) the ex-GST signed amount is already correct.
-  const debitNormalSet = new Set(debitNormalAccounts.map((a: { id: string }) => a.id))
+  // Bank transactions follow bank-statement convention (positive = money in).
+  // Only EXPENSE/COGS need the sign flip (a withdrawal -$100 = money out = should
+  // increase the expense balance).  ASSET, INCOME, LIABILITY, EQUITY use raw sign.
+  const expenseNormalSet = new Set(expenseNormalAccounts.map((a: { id: string }) => a.id))
 
   for (const transaction of bankTransactions) {
     if (!transaction.accountId) continue
 
     const exGst = amountExcludingGst(transaction.amountCents, transaction.taxCode, taxRatePercent)
-    const contribution = debitNormalSet.has(transaction.accountId) ? -exGst : exGst
+    const contribution = expenseNormalSet.has(transaction.accountId) ? -exGst : exGst
     balances[transaction.accountId] = (balances[transaction.accountId] ?? 0) + contribution
   }
 
   // SplitLine.amountCents follows the same sign convention as bank transactions.
   for (const splitLine of splitLines) {
     const exGst = amountExcludingGst(splitLine.amountCents, splitLine.taxCode, taxRatePercent)
-    const contribution = debitNormalSet.has(splitLine.accountId) ? -exGst : exGst
+    const contribution = expenseNormalSet.has(splitLine.accountId) ? -exGst : exGst
     balances[splitLine.accountId] = (balances[splitLine.accountId] ?? 0) + contribution
   }
 

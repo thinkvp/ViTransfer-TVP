@@ -24,6 +24,8 @@ import { isS3Mode } from '@/lib/storage-provider-client'
 import { extractUploadMediaMetadata } from '@/lib/upload-media-metadata-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
+import { useContentImageRefresh } from '@/hooks/useContentImageRefresh'
 import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey } from '@/lib/downloadable-file-utils'
@@ -1310,7 +1312,7 @@ export default function SharePage() {
           ? {
               ...item,
               status: 'preparing',
-              progressPercent: 10,
+              progressPercent: 0,
               speedBytesPerSecond: null,
               etaSeconds: null,
               errorMessage: null,
@@ -2165,26 +2167,46 @@ export default function SharePage() {
     })
   }, [project?.videosByName, shareToken, fetchTokensForVideos])
 
-  // Refresh short-lived content tokens after idle/AFK when the tab becomes active again.
-  // This mirrors the FILES area strategy of re-resolving expiring access URLs.
+  // ── Comprehensive content-token refresh ──────────────────────────────────
+  // Called by useContentImageRefresh on: image load errors, periodic timer,
+  // and visibility change (tab hidden >30 s → visible).  Covers video
+  // thumbnails/sprites, album photos, and upload previews.
+  const refreshAllContentTokens = useCallback(() => {
+    // Clear all token caches so fetches produce fresh URLs.
+    clearAllShareCaches()
+
+    // Refresh video tokens (thumbnails, sprites, VTT).
+    void refreshViewVideoTokens(true)
+
+    // Refresh downloadable files (album photo tokens, upload access URLs).
+    void fetchDownloadableFiles()
+
+    // Refresh album list (sidebar album thumbnail URLs).
+    if (project?.slug && !isGuest) {
+      void fetchAlbums(shareToken)
+    }
+  }, [clearAllShareCaches, refreshViewVideoTokens, fetchDownloadableFiles, fetchAlbums, project?.slug, shareToken, isGuest])
+
+  // Global content-image error capture + proactive periodic token refresh + visibility-change refresh.
+  useContentImageRefresh({
+    onRefresh: refreshAllContentTokens,
+    enabled: isAuthenticated,
+  })
+
+  // Also keep the legacy visibility/focus handler for non-admin sessions to ensure
+  // video tokens are refreshed on tab focus (covers the gap before the 30 s
+  // away threshold in useContentImageRefresh's visibility handler).
   useEffect(() => {
     if (!isAuthenticated || isAdminSession) return
     if (!shareToken) return
 
-    const handleVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void refreshViewVideoTokens()
-      }
-    }
     const handleFocus = () => {
       void refreshViewVideoTokens()
     }
 
     window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleVisible)
     return () => {
       window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVisible)
     }
   }, [isAdminSession, isAuthenticated, refreshViewVideoTokens, shareToken])
 
@@ -3070,6 +3092,8 @@ export default function SharePage() {
                     shareToken={shareToken}
                     commentsForTimeline={filteredComments}
                     hideDownloadButton={true}
+                    useFullTimecode={Boolean(project?.useFullTimecode)}
+                    showTimeDisplayToggle={true}
                     fillContainer
                   />
                   {/* Video name + Company logo row — below video player on mobile */}
@@ -3296,6 +3320,11 @@ function ShareFeedbackGrid({
     }
   }, [fetchComments])
 
+  // Share the user's time-display preference so that CommentSectionView and
+  // CommentInput stay in sync with the VideoPlayer toggle.
+  const { timeDisplayMode } = useTimeDisplayMode(Boolean(project?.useFullTimecode))
+  const effectiveUseFullTimecode = timeDisplayMode === 'timecode'
+
   const management = useCommentManagement({
     projectId: String(project.id),
     initialComments: serverComments as any,
@@ -3415,6 +3444,8 @@ function ShareFeedbackGrid({
               shareToken={shareToken}
               commentsForTimeline={management.comments as any}
               disableFullscreenCommentsUI={commentsDisabled}
+              useFullTimecode={Boolean(project?.useFullTimecode)}
+              showTimeDisplayToggle={true}
               fillContainer
               pinControlsToBottom={false}
             />
@@ -3446,7 +3477,7 @@ function ShareFeedbackGrid({
                 onClearRange={management.handleClearRange}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
-                useFullTimecode={Boolean(project?.useFullTimecode)}
+                useFullTimecode={effectiveUseFullTimecode}
                 replyingToComment={management.replyingToComment}
                 onCancelReply={management.handleCancelReply}
                 showAuthorInput={Boolean(isPasswordProtected)}
@@ -3499,7 +3530,7 @@ function ShareFeedbackGrid({
               clientEmail={project.clientEmail}
               isApproved={isApproved}
               restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
-              useFullTimecode={Boolean(project?.useFullTimecode)}
+              useFullTimecode={effectiveUseFullTimecode}
               videos={readyVideos as any}
               isAdminView={false}
               companyName={companyName}
@@ -3545,7 +3576,7 @@ function ShareFeedbackGrid({
                 onClearRange={management.handleClearRange}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
-                useFullTimecode={Boolean(project?.useFullTimecode)}
+                useFullTimecode={effectiveUseFullTimecode}
                 replyingToComment={management.replyingToComment}
                 onCancelReply={management.handleCancelReply}
                 showAuthorInput={Boolean(isPasswordProtected)}

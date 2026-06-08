@@ -23,7 +23,7 @@ const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
 
 type ShareUploadFilePathRow = { storagePath: string | null }
 type ShareUploadFolderPathRow = { storagePath: string | null }
-type ShareUploadPreviewPathRow = { storagePath: string | null; previewPath: string | null }
+type ShareUploadPreviewPathRow = { storagePath: string | null; previewPath: string | null; timelinePreviewVttPath: string | null; timelinePreviewSpritesPath: string | null }
 type VideoAssetPreviewPathRow = {
   storagePath: string | null
   previewPath: string | null
@@ -264,6 +264,8 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
         previewPath: true,
         fileType: true,
         previewStatus: true,
+        timelinePreviewVttPath: true,
+        timelinePreviewSpritesPath: true,
         video: {
           select: {
             storageFolderName: true,
@@ -282,7 +284,7 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
       },
     }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
-    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath" FROM "ShareUploadFile"`,
+    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath", "timelinePreviewVttPath", "timelinePreviewSpritesPath" FROM "ShareUploadFile"`,
     prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
     prisma.projectFile.findMany({ select: { storagePath: true } }),
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
@@ -370,6 +372,8 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   for (const videoAsset of videoAssets) {
     addResolvedFilePath(exactFilePaths, videoAsset.storagePath)
     addResolvedFilePath(exactFilePaths, videoAsset.previewPath)
+    addResolvedFilePath(exactFilePaths, videoAsset.timelinePreviewVttPath)
+    addResolvedDirectoryPrefix(protectedDirectoryPrefixes, videoAsset.timelinePreviewSpritesPath)
 
     const previewPath = String(videoAsset.previewPath || '').toLowerCase()
     const fileType = String(videoAsset.fileType || '').toLowerCase()
@@ -395,6 +399,8 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   for (const shareUploadFile of shareUploadFiles) {
     addResolvedFilePath(exactFilePaths, shareUploadFile.storagePath)
     addResolvedFilePath(exactFilePaths, shareUploadFile.previewPath)
+    addResolvedFilePath(exactFilePaths, shareUploadFile.timelinePreviewVttPath)
+    addResolvedDirectoryPrefix(protectedDirectoryPrefixes, shareUploadFile.timelinePreviewSpritesPath)
   }
   for (const shareUploadFolder of shareUploadFolders) {
     if (!shareUploadFolder.storagePath) continue
@@ -543,39 +549,38 @@ type S3ObjectEntry = {
 /**
  * List all objects in the S3 bucket (no pagination limit — loads entire bucket).
  * Used for orphan detection when in S3 mode.
+ *
+ * Returns the full object list on success, or throws with a descriptive error.
+ * Callers MUST handle the error — silently returning empty would cause every
+ * DB-referenced path to be reported as a missing file.
  */
 async function listS3Objects(): Promise<S3ObjectEntry[]> {
   let objects: S3ObjectEntry[] = []
 
-  try {
-    const client = getS3Client()
-    const bucket = getS3Bucket()
-    let continuationToken: string | undefined
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+  let continuationToken: string | undefined
 
-    do {
-      const listResponse = await client.send(
-        new ListObjectsV2Command({
-          Bucket: bucket,
-          ContinuationToken: continuationToken,
-          MaxKeys: 1000,
+  do {
+    const listResponse = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      })
+    )
+
+    for (const obj of listResponse.Contents ?? []) {
+      if (obj.Key) {
+        objects.push({
+          key: obj.Key,
+          bytes: obj.Size ?? 0,
         })
-      )
-
-      for (const obj of listResponse.Contents ?? []) {
-        if (obj.Key) {
-          objects.push({
-            key: obj.Key,
-            bytes: obj.Size ?? 0,
-          })
-        }
       }
+    }
 
-      continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
-    } while (continuationToken)
-  } catch (error: any) {
-    // If S3 listing fails, return empty and let the scan continue on local filesystem
-    console.warn('[orphan-cleanup] S3 listing failed:', error?.message || error)
-  }
+    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
+  } while (continuationToken)
 
   return objects
 }
@@ -644,6 +649,8 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
         previewPath: true,
         fileType: true,
         previewStatus: true,
+        timelinePreviewVttPath: true,
+        timelinePreviewSpritesPath: true,
         video: {
           select: {
             storageFolderName: true,
@@ -662,7 +669,7 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
       },
     }),
     prisma.commentFile.findMany({ select: { storagePath: true } }),
-    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath" FROM "ShareUploadFile"`,
+    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath", "timelinePreviewVttPath", "timelinePreviewSpritesPath" FROM "ShareUploadFile"`,
     prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
     prisma.projectFile.findMany({ select: { storagePath: true } }),
     prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
@@ -724,6 +731,8 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   for (const a of videoAssets) {
     addMain(a.storagePath)
     addMain(a.previewPath)
+    addMain(a.timelinePreviewVttPath)
+    addTimelineSpritePrefix(a.timelinePreviewSpritesPath)
 
     const previewPath = String(a.previewPath || '').toLowerCase()
     const fileType = String(a.fileType || '').toLowerCase()
@@ -746,6 +755,8 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   for (const f of shareUploadFiles) {
     addMain(f.storagePath)
     addMain(f.previewPath)
+    addMain(f.timelinePreviewVttPath)
+    addTimelineSpritePrefix(f.timelinePreviewSpritesPath)
   }
   for (const folder of shareUploadFolders) {
     if (!folder.storagePath) continue
@@ -987,41 +998,55 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   if (isS3Mode()) {
     scannedStorageRoots = 2 // Main bucket namespace + accounting/ prefix namespace
     // Fetch both S3 listings once and share between orphan detection and missing-files check.
+    let s3ListFailed = false
     const [s3Objects, accountingS3Files] = await Promise.all([
-      listS3Objects(),
+      listS3Objects().catch((e: any) => {
+        s3ListFailed = true
+        const bucketLabel = (() => { try { return getS3Bucket() } catch { return 'unknown' } })()
+        errors.push({ path: `s3://${bucketLabel}/`, error: String(e?.message || e) })
+        return [] as S3ObjectEntry[]
+      }),
       listAccountingS3Keys().catch((e: any) => {
         errors.push({ path: `${ACCOUNTING_S3_PREFIX}/`, error: String(e?.message || e) })
         return [] as Array<{ key: string; bytes: number }>
       }),
     ])
 
-    // Orphan scans (files on storage with no DB record)
-    const s3Orphans = await scanS3ForOrphans(s3Objects, refs, errors, stats)
-    orphanFiles.push(...s3Orphans)
-    const accountingOrphans = await scanAccountingOrphans(
-      missingRefs.accountingPaths,
-      stats,
-      errors,
-      accountingS3Files,
-    )
-    orphanFiles.push(...accountingOrphans)
-
-    // Missing-files check (DB records with no file on storage)
-    const s3KeySet = new Set(s3Objects.map((o) => o.key))
-    const acctS3RelKeySet = new Set(
-      accountingS3Files.map((f) =>
-        f.key.startsWith(`${ACCOUNTING_S3_PREFIX}/`)
-          ? f.key.slice(`${ACCOUNTING_S3_PREFIX}/`.length)
-          : f.key
+    // If the main S3 listing failed, the missing-files check would falsely
+    // report every DB-referenced path as missing because s3KeySet is empty.
+    // Skip the missing-files check entirely and flag the error so the
+    // notification / UI can surface the scan failure.
+    if (s3ListFailed) {
+      missingResult = { count: -1, sample: [] }
+    } else {
+      // Orphan scans (files on storage with no DB record)
+      const s3Orphans = await scanS3ForOrphans(s3Objects, refs, errors, stats)
+      orphanFiles.push(...s3Orphans)
+      const accountingOrphans = await scanAccountingOrphans(
+        missingRefs.accountingPaths,
+        stats,
+        errors,
+        accountingS3Files,
       )
-    )
-    missingResult = await checkMissingFiles(
-      missingRefs.mainPaths,
-      missingRefs.accountingPaths,
-      missingRefs.timelineSpritePrefixes,
-      s3KeySet,
-      acctS3RelKeySet,
-    )
+      orphanFiles.push(...accountingOrphans)
+
+      // Missing-files check (DB records with no file on storage)
+      const s3KeySet = new Set(s3Objects.map((o) => o.key))
+      const acctS3RelKeySet = new Set(
+        accountingS3Files.map((f) =>
+          f.key.startsWith(`${ACCOUNTING_S3_PREFIX}/`)
+            ? f.key.slice(`${ACCOUNTING_S3_PREFIX}/`.length)
+            : f.key
+        )
+      )
+      missingResult = await checkMissingFiles(
+        missingRefs.mainPaths,
+        missingRefs.accountingPaths,
+        missingRefs.timelineSpritePrefixes,
+        s3KeySet,
+        acctS3RelKeySet,
+      )
+    }
   } else {
     // Local mode: walk filesystem
     roots = await listPhysicalProjectRoots()

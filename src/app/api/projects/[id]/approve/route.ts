@@ -8,6 +8,7 @@ import { getProjectRecipients, getPrimaryRecipient } from '@/lib/recipients'
 import { generateShareUrl } from '@/lib/url'
 import { getAutoApproveProject } from '@/lib/settings'
 import { verifyProjectAccess } from '@/lib/project-access'
+import { getCurrentUserFromRequest } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { z } from 'zod'
 export const runtime = 'nodejs'
@@ -223,8 +224,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const isCompleteProjectApproval = allApproved && autoApprove
 
         // Use new unified notification system
-        const safeAuthorName = authorName || undefined
-        const safeAuthorEmail = authorEmail || undefined
+        // Resolve author name: use provided name, or if admin session, look up from auth
+        let safeAuthorName: string | undefined = authorName || undefined
+        let safeAuthorEmail: string | undefined = authorEmail || undefined
+        if (!safeAuthorName && accessCheck.isAdmin) {
+          const adminUser = await getCurrentUserFromRequest(request)
+          safeAuthorName = adminUser?.name || undefined
+          if (!safeAuthorEmail) {
+            safeAuthorEmail = adminUser?.email || undefined
+          }
+        }
 
         await handleApprovalNotification({
           project: {
@@ -243,6 +252,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           authorName: safeAuthorName,
           authorEmail: safeAuthorEmail,
           isComplete: isCompleteProjectApproval, // Pass whether ALL videos are approved
+          performedByAdmin: accessCheck.isAdmin,
         })
       }
     } catch (error) {

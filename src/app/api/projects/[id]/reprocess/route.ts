@@ -1,10 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
-import { getVideoQueue } from '@/lib/queue'
-import { deleteFile } from '@/lib/storage'
+import {
+  enqueueShareUploadPreview,
+  getAssetTimelineQueue,
+  getShareUploadPreviewQueue,
+  getVideoQueue,
+} from '@/lib/queue'
+import { deleteDirectory, deleteFile } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import {
+  buildProjectStorageRoot,
+  buildVideoAssetPreviewStoragePath,
+  buildVideoTimelineStorageRoot,
+} from '@/lib/project-storage-paths'
+import {
+  recalculateAndStoreProjectDiskBytes,
+  recalculateAndStoreProjectPreviewBytes,
+  recalculateAndStoreProjectTotalBytes,
+} from '@/lib/project-total-bytes'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -186,10 +201,144 @@ export async function POST(
       })
     }
 
+    // --- Also reprocess video assets (attached files) for these videos ---
+    const reprocessedVideoIds = reprocessed.map((v) => v.id)
+    const videoAssets = await prisma.videoAsset.findMany({
+      where: { videoId: { in: reprocessedVideoIds } },
+      select: {
+        id: true,
+        videoId: true,
+        storagePath: true,
+        fileType: true,
+        fileName: true,
+        previewPath: true,
+        timelinePreviewVttPath: true,
+        timelinePreviewSpritesPath: true,
+        video: {
+          select: {
+            projectId: true,
+            name: true,
+            storageFolderName: true,
+            versionLabel: true,
+          },
+        },
+      },
+    })
+
+    const projectStoragePath =
+      project.storagePath ||
+      buildProjectStorageRoot(project.companyName || 'Studio', project.title)
+
+    const previewableAssets = videoAssets.filter((a) => {
+      const ft = String(a.fileType || '').toLowerCase()
+      return ft.startsWith('image/') || ft.startsWith('video/')
+    })
+
+    // Delete old asset preview files
+    const assetFilePathsToDelete = new Set<string>()
+    const assetDirPathsToDelete = new Set<string>()
+
+    for (const asset of previewableAssets) {
+      const videoFolderName = asset.video.storageFolderName || asset.video.name
+      if (asset.previewPath) assetFilePathsToDelete.add(asset.previewPath)
+      assetFilePathsToDelete.add(
+        buildVideoAssetPreviewStoragePath(
+          projectStoragePath,
+          videoFolderName,
+          asset.video.versionLabel,
+          asset.storagePath,
+          '.jpg',
+        ),
+      )
+      assetFilePathsToDelete.add(
+        buildVideoAssetPreviewStoragePath(
+          projectStoragePath,
+          videoFolderName,
+          asset.video.versionLabel,
+          asset.storagePath,
+          '.mp4',
+        ),
+      )
+      if (asset.timelinePreviewVttPath) assetFilePathsToDelete.add(asset.timelinePreviewVttPath)
+      if (asset.timelinePreviewSpritesPath) assetDirPathsToDelete.add(asset.timelinePreviewSpritesPath)
+      assetDirPathsToDelete.add(
+        buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, asset.video.versionLabel),
+      )
+    }
+
+    await Promise.allSettled([
+      ...[...assetFilePathsToDelete].map((fp) => deleteFile(fp)),
+      ...[...assetDirPathsToDelete].map((dp) => deleteDirectory(dp)),
+    ])
+
+    // Reset asset preview status and enqueue reprocessing jobs
+    const shareUploadPreviewQueue = getShareUploadPreviewQueue()
+    const assetTimelineQueue = getAssetTimelineQueue()
+    let queuedAssetPreviewJobs = 0
+    let queuedAssetTimelineJobs = 0
+
+    for (const asset of previewableAssets) {
+      const isVideo = String(asset.fileType || '').toLowerCase().startsWith('video/')
+
+      await prisma.videoAsset.update({
+        where: { id: asset.id },
+        data: {
+          previewStatus: null,
+          previewPath: null,
+          previewError: null,
+          previewGeneratedAt: null,
+          previewFileSize: null,
+          previewAttempts: 0,
+          previewQueuedAt: null,
+          ...(isVideo
+            ? {
+                timelinePreviewsReady: false,
+                timelinePreviewVttPath: null,
+                timelinePreviewSpritesPath: null,
+              }
+            : {}),
+        },
+      })
+
+      await shareUploadPreviewQueue
+        .remove(`share-preview:videoAsset:${asset.id}`)
+        .catch(() => {})
+      await enqueueShareUploadPreview({
+        type: 'videoAsset',
+        recordId: asset.id,
+        storagePath: asset.storagePath,
+        fileType: asset.fileType,
+        fileName: asset.fileName,
+      })
+      queuedAssetPreviewJobs += 1
+
+      if (isVideo) {
+        await assetTimelineQueue.add('process-asset-timeline', {
+          assetId: asset.id,
+          videoId: asset.videoId,
+          projectId: project.id,
+          storagePath: asset.storagePath,
+          durationSeconds: 0,
+          width: 0,
+          height: 0,
+        })
+        queuedAssetTimelineJobs += 1
+      }
+    }
+
+    // Recalculate project byte totals
+    await Promise.allSettled([
+      recalculateAndStoreProjectPreviewBytes(project.id),
+      recalculateAndStoreProjectDiskBytes(project.id),
+      recalculateAndStoreProjectTotalBytes(project.id),
+    ])
+
     return NextResponse.json({
       success: true,
       count: reprocessed.length,
       videos: reprocessed,
+      queuedAssetPreviewJobs,
+      queuedAssetTimelineJobs,
     })
   } catch (error) {
     console.error('Error reprocessing videos:', error)

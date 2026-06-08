@@ -33,6 +33,7 @@ export default function ReportsPage() {
 
   // Balance Sheet state
   const [bsAsOf, setBsAsOf] = useState(new Date().toISOString().slice(0, 10))
+  const [bsBasis, setBsBasis] = useState<'ACCRUAL' | 'CASH'>('ACCRUAL')
   const [bsReport, setBsReport] = useState<BalanceSheetReport | null>(null)
   const [bsLoading, setBsLoading] = useState(false)
 
@@ -43,7 +44,11 @@ export default function ReportsPage() {
       try {
         const res = await apiFetch('/api/admin/accounting/settings')
         const data: AccountingSettings | null = res.ok ? await res.json() : null
-        if (!cancelled) setPlBasis(data?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL')
+        if (!cancelled) {
+          const basis = data?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL'
+          setPlBasis(basis)
+          setBsBasis(basis)
+        }
       } finally {
         if (!cancelled) setSettingsLoading(false)
       }
@@ -68,7 +73,7 @@ export default function ReportsPage() {
     setBsLoading(true)
     setBsReport(null)
     try {
-      const res = await apiFetch(`/api/admin/accounting/reports/balance-sheet?asOf=${bsAsOf}`)
+      const res = await apiFetch(`/api/admin/accounting/reports/balance-sheet?asOf=${bsAsOf}&basis=${bsBasis}`)
       if (res.ok) { const d = await res.json(); setBsReport(d.report) }
     } finally { setBsLoading(false) }
   }
@@ -160,7 +165,7 @@ export default function ReportsPage() {
                 mkSection('Equity', bsReport.equity, bsReport.totalEquityCents, 'Total Equity'),
                 { columns: bsCols, rows: [{ cells: ['Net Assets', fmtAud(bsReport.totalAssetsCents - bsReport.totalLiabilitiesCents)], bold: true, doubleSeparator: true }] },
               ]
-              generateReportPdf({ title: 'Balance Sheet', subtitle: `As at ${bsReport.asAt}`, sections })
+              generateReportPdf({ title: 'Balance Sheet', subtitle: `As at ${bsReport.asAt} (${bsReport.basis})`, sections })
             }
           }}
           disabled={tab === 'pl' ? !plReport : !bsReport}
@@ -245,6 +250,17 @@ export default function ReportsPage() {
                   <Label>As At</Label>
                   <Input type="date" value={bsAsOf} onChange={e => setBsAsOf(e.target.value)} className="h-9 w-36" />
                 </div>
+                <div className="space-y-1">
+                  <Label>Basis</Label>
+                  <select
+                    value={bsBasis}
+                    onChange={e => setBsBasis(e.target.value as 'ACCRUAL' | 'CASH')}
+                    className="h-9 min-w-32 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="ACCRUAL">Accrual</option>
+                    <option value="CASH">Cash</option>
+                  </select>
+                </div>
                 <Button onClick={runBS} disabled={bsLoading || !bsAsOf} className="self-end">
                   {bsLoading ? 'Running…' : 'Run Report'}
                 </Button>
@@ -255,7 +271,9 @@ export default function ReportsPage() {
           {bsReport && (
             <Card className="print:shadow-none">
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Balance Sheet — As at {bsReport.asAt}</CardTitle>
+                <CardTitle className="text-base">Balance Sheet — As at {bsReport.asAt}
+                  <span className="text-sm font-normal text-muted-foreground ml-2">({bsReport.basis})</span>
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <BSSection title="Assets" rows={bsReport.assets} total={bsReport.totalAssetsCents} totalLabel="Total Assets" />

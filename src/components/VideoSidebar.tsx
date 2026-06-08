@@ -35,6 +35,7 @@ import {
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import Image from 'next/image'
+import VideoHoverPreview from '@/components/VideoHoverPreview'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import { ContextMenuItems } from '@/components/ShareFilesBrowser'
@@ -988,6 +989,11 @@ export default function VideoSidebar({
     const approvedVideo = group.videos.find((v: any) => v.approved === true)
     const displayVideo = approvedVideo || latestVideo
     const thumbnailUrl = displayVideo?.thumbnailUrl
+    const durationSeconds = typeof displayVideo?.duration === 'number' ? displayVideo.duration : undefined
+    const hasTimeline =
+      typeof displayVideo?.timelineVttUrl === 'string' && displayVideo.timelineVttUrl.length > 0 &&
+      typeof displayVideo?.timelineSpriteUrl === 'string' && displayVideo.timelineSpriteUrl.length > 0 &&
+      typeof durationSeconds === 'number' && durationSeconds > 0
     const availableContentWidth = sidebarWidth - 48
     const containerWidth = Math.max(120, availableContentWidth - 16)
     const containerHeight = Math.round(containerWidth * 9 / 16)
@@ -1000,19 +1006,31 @@ export default function VideoSidebar({
       : []
 
     const thumbnailEl = thumbnailUrl ? (
-      <div
-        className="bg-black rounded overflow-hidden flex items-center justify-center mx-auto relative"
-        style={{ width: containerWidth, height: containerHeight }}
-      >
-        <Image
-          src={thumbnailUrl}
+      hasTimeline ? (
+        <VideoHoverPreview
+          thumbnailUrl={thumbnailUrl}
+          vttUrl={displayVideo.timelineVttUrl}
+          spriteBaseUrl={displayVideo.timelineSpriteUrl}
+          durationSeconds={durationSeconds!}
           alt={group.name}
-          fill
-          className="object-contain"
-          unoptimized
-          onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
+          className="mx-auto rounded overflow-hidden"
+          style={{ width: containerWidth, height: containerHeight }}
         />
-      </div>
+      ) : (
+        <div
+          className="bg-black rounded overflow-hidden flex items-center justify-center mx-auto relative"
+          style={{ width: containerWidth, height: containerHeight }}
+        >
+          <Image
+            src={thumbnailUrl}
+            alt={group.name}
+            fill
+            className="object-contain"
+            unoptimized
+            onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
+          />
+        </div>
+      )
     ) : null
 
     const titleEl = (
@@ -1121,7 +1139,18 @@ export default function VideoSidebar({
           alt={a.name}
           className="w-full h-full object-cover"
           loading={isActive ? 'eager' : 'lazy'}
+          onError={(e) => {
+            // Hide the broken image so the placeholder shows through.
+            (e.currentTarget as HTMLImageElement).style.display = 'none'
+          }}
         />
+        {/* Transparent placeholder — shown when the image errors or has no src. */}
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-muted to-muted-foreground pointer-events-none"
+          style={{ zIndex: -1 }}
+        >
+          <Images className="w-6 h-6 text-muted-foreground" />
+        </div>
       </div>
     ) : (
       <div

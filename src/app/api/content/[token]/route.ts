@@ -228,24 +228,34 @@ export async function GET(
       }
     }
 
-    const video = await prisma.video.findUnique({
-      where: { id: verifiedToken.videoId },
-      include: { project: true },
-    })
+    // Upload tokens use a placeholder videoId ('upload') — skip the video lookup.
+    const isUploadEntity = verifiedToken.entityType === 'upload'
 
-    if (!video || video.projectId !== verifiedToken.projectId) {
+    const video = isUploadEntity
+      ? null
+      : await prisma.video.findUnique({
+          where: { id: verifiedToken.videoId },
+          include: { project: true },
+        })
+
+    if (!isUploadEntity && (!video || video.projectId !== verifiedToken.projectId)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 404 })
     }
 
-    const originalPath = video.originalStoragePath
+    const originalPath = video?.originalStoragePath ?? null
     let filePath: string | null = null
     let filename: string | null = null
     let contentType = 'video/mp4'
     let selectedAsset: { fileName: string } | null = null
-    const canServeOriginal = Boolean(originalPath && (isAdminRequest || video.approved))
+    const canServeOriginal = Boolean(originalPath && (isAdminRequest || video?.approved))
 
     // Handle asset download or inline preview.
+    // Upload entities don't have an associated video — reject early if a
+    // maliciously-crafted request tries to reach this branch for an upload token.
     if (assetId) {
+      if (!video) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+      }
       const asset = await prisma.videoAsset.findUnique({
         where: { id: assetId }
       })
@@ -318,44 +328,92 @@ export async function GET(
         selectedAsset = { fileName: filename }
       }
     } else {
+      // Upload entities only reach timeline-vtt/timeline-sprite sub-branches
+      // (guarded by entityType checks that never dereference `video`).
+      // All other quality branches are unreachable when video is null.
+       
+      const v = video!
+
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
-        filePath = video.thumbnailPath
+        filePath = v.thumbnailPath
         contentType = 'image/jpeg'
       } else if (verifiedToken.quality === 'timeline-vtt') {
-        if (!video.project.timelinePreviewsEnabled || !video.timelinePreviewsReady) {
-          return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+        // Handle asset/upload timeline previews
+        if (verifiedToken.entityType === 'asset' && verifiedToken.entityId) {
+          const asset = await prisma.videoAsset.findUnique({ where: { id: verifiedToken.entityId } })
+          if (!asset || asset.videoId !== v.id) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          }
+          filePath = (asset as any).timelinePreviewVttPath
+          if (!filePath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          contentType = 'text/vtt'
+        } else if (verifiedToken.entityType === 'upload' && verifiedToken.entityId) {
+          const upload = await prisma.$queryRawUnsafe<Array<{ timelinePreviewVttPath: string | null }>>(
+            `SELECT "timelinePreviewVttPath" FROM "ShareUploadFile" WHERE "id" = $1`,
+            verifiedToken.entityId
+          )
+          const row = upload?.[0]
+          if (!row?.timelinePreviewVttPath) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          }
+          filePath = row.timelinePreviewVttPath
+          contentType = 'text/vtt'
+        } else {
+          if (!v.project.timelinePreviewsEnabled || !v.timelinePreviewsReady) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+          }
+          filePath = (v as any).timelinePreviewVttPath
+          contentType = 'text/vtt'
         }
-
-        filePath = (video as any).timelinePreviewVttPath
-        contentType = 'text/vtt'
       } else if (verifiedToken.quality === 'timeline-sprite') {
-        if (!video.project.timelinePreviewsEnabled || !video.timelinePreviewsReady) {
-          return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-        }
-
         const spriteFile = searchParams.get('file')
         if (!spriteFile || !/^sprite-\d{3}\.jpg$/.test(spriteFile)) {
           return NextResponse.json({ error: 'Access denied' }, { status: 403 })
         }
 
-        const spritesBasePath = (video as any).timelinePreviewSpritesPath
-        if (!spritesBasePath) {
-          return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+        // Handle asset/upload timeline previews
+        if (verifiedToken.entityType === 'asset' && verifiedToken.entityId) {
+          const asset = await prisma.videoAsset.findUnique({ where: { id: verifiedToken.entityId } })
+          if (!asset || asset.videoId !== v.id) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          }
+          const spritesBasePath = (asset as any).timelinePreviewSpritesPath
+          if (!spritesBasePath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          filePath = `${spritesBasePath}/${spriteFile}`
+          contentType = 'image/jpeg'
+        } else if (verifiedToken.entityType === 'upload' && verifiedToken.entityId) {
+          const upload = await prisma.$queryRawUnsafe<Array<{ timelinePreviewSpritesPath: string | null }>>(
+            `SELECT "timelinePreviewSpritesPath" FROM "ShareUploadFile" WHERE "id" = $1`,
+            verifiedToken.entityId
+          )
+          const row = upload?.[0]
+          if (!row?.timelinePreviewSpritesPath) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          }
+          filePath = `${row.timelinePreviewSpritesPath}/${spriteFile}`
+          contentType = 'image/jpeg'
+        } else {
+          if (!v.project.timelinePreviewsEnabled || !v.timelinePreviewsReady) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 403 })
+          }
+          const spritesBasePath = (v as any).timelinePreviewSpritesPath
+          if (!spritesBasePath) {
+            return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          }
+          filePath = `${spritesBasePath}/${spriteFile}`
+          contentType = 'image/jpeg'
         }
-
-        filePath = `${spritesBasePath}/${spriteFile}`
-        contentType = 'image/jpeg'
       } else if (verifiedToken.quality === 'original' || verifiedToken.quality === 'download') {
         if (canServeOriginal) {
           filePath = originalPath
         }
       } else if (verifiedToken.quality === '1080p') {
-        filePath = video.preview1080Path || video.preview720Path || (video as any).preview480Path || (canServeOriginal ? originalPath : null)
+        filePath = v.preview1080Path || v.preview720Path || (v as any).preview480Path || (canServeOriginal ? originalPath : null)
       } else if (verifiedToken.quality === '720p') {
-        filePath = video.preview720Path || video.preview1080Path || (video as any).preview480Path || (canServeOriginal ? originalPath : null)
+        filePath = v.preview720Path || v.preview1080Path || (v as any).preview480Path || (canServeOriginal ? originalPath : null)
       } else if (verifiedToken.quality === '480p') {
-        filePath = (video as any).preview480Path || video.preview720Path || video.preview1080Path || (canServeOriginal ? originalPath : null)
+        filePath = (v as any).preview480Path || v.preview720Path || v.preview1080Path || (canServeOriginal ? originalPath : null)
       }
     }
 
@@ -376,18 +434,20 @@ export async function GET(
         // delay the response. Awaiting Redis ops here was adding latency before
         // the first response byte, which caused HAProxy to RST_STREAM on slow
         // Redis round-trips (observed after HAProxy 3.x upgrade).
+         
+        const v = video!
         void recordClientActivity({
           sessionId,
-          projectId: video.projectId,
-          projectTitle: video.project.title,
-          videoId: video.id,
-          videoName: video.name,
-          versionLabel: video.versionLabel || null,
+          projectId: v.projectId,
+          projectTitle: v.project.title,
+          videoId: v.id,
+          videoName: v.name,
+          versionLabel: v.versionLabel || null,
           assetId: assetId || null,
           assetName: filename || null,
           activityType,
           ipAddress: getClientIpAddress(request) || null,
-          throttleKey: `${sessionId}:${video.id}:${assetId || verifiedToken.quality}:${activityType}`,
+          throttleKey: `${sessionId}:${v.id}:${assetId || verifiedToken.quality}:${activityType}`,
           throttleSeconds: 15,
         }).catch(() => undefined)
       }
@@ -418,9 +478,11 @@ export async function GET(
 
       let presignedUrl: string
       if (isDownload) {
+         
+        const v = video!
         const rawFilename = filename
-          || video.originalFileName
-          || `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
+          || v.originalFileName
+          || `${v.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const dlContentType = isThumbnail ? 'image/jpeg' : contentType
         presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, dlContentType)
@@ -459,10 +521,12 @@ export async function GET(
 
       // Record analytics for S3 downloads (presigned redirect — cannot track transfer progress)
       if (isDownload && !isAdminRequest && !isProbe && securitySettings.trackAnalytics) {
+         
+        const v = video!
         await prisma.videoAnalytics.create({
           data: {
-            videoId: video.id,
-            projectId: video.projectId,
+            videoId: v.id,
+            projectId: v.projectId,
             eventType: 'DOWNLOAD_SUCCEEDED',
             assetId: assetId || undefined,
             ipAddress: getClientIpAddress(request) || undefined,
@@ -515,9 +579,11 @@ export async function GET(
 
     if (isDownload) {
       // Use asset filename if available, otherwise generate from video info
+       
+      const v = video!
       const rawFilename = filename
-        || video.originalFileName
-        || `${video.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
+        || v.originalFileName
+        || `${v.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
       const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
 
       // For non-asset streams, determine Content-Type based on quality
@@ -531,12 +597,14 @@ export async function GET(
         // Fire-and-forget: registering the download in Redis must not delay
         // the response start. The tracking record is seeded with the file size
         // and current timestamp; progress is updated during streaming.
+         
+        const v = video!
         void registerTrackedDownload({
           downloadId: downloadId!,
           projectId: verifiedToken.projectId,
           videoId: verifiedToken.videoId,
-          videoName: video.name,
-          versionLabel: video.versionLabel || null,
+          videoName: v.name,
+          versionLabel: v.versionLabel || null,
           assetId: assetId || null,
           fileSizeBytes: stat.size,
           sessionId,

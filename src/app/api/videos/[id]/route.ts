@@ -300,7 +300,7 @@ export async function PATCH(
             timelinePreviewVttPath: string | null
             timelinePreviewSpritesPath: string | null
           }
-          videoAssets: Array<{ id: string; storagePath: string; previewPath: string | null }>
+          videoAssets: Array<{ id: string; storagePath: string; previewPath: string | null; timelinePreviewVttPath: string | null; timelinePreviewSpritesPath: string | null }>
         }
       | null = null
     let videoRenamePlan:
@@ -326,6 +326,8 @@ export async function PATCH(
             storagePath: string
             previewPath: string | null
             fileType: string | null
+            timelinePreviewVttPath: string | null
+            timelinePreviewSpritesPath: string | null
           }>
         }
       | null = null
@@ -393,7 +395,7 @@ export async function PATCH(
 
         const siblingAssets = await prisma.videoAsset.findMany({
           where: { videoId: { in: siblingVideos.map((row) => row.id) } },
-          select: { id: true, videoId: true, storagePath: true, previewPath: true, fileType: true },
+          select: { id: true, videoId: true, storagePath: true, previewPath: true, fileType: true, timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
         })
 
         videoRenamePlan = {
@@ -424,7 +426,7 @@ export async function PATCH(
 
           const videoAssets = await prisma.videoAsset.findMany({
             where: { videoId: id },
-            select: { id: true, storagePath: true, previewPath: true },
+            select: { id: true, storagePath: true, previewPath: true, timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
           })
 
           if (isS3Mode()) {
@@ -596,6 +598,8 @@ export async function PATCH(
             data: {
               storagePath: rebasedStoragePath,
               previewPath: rebasedPreviewPath,
+              timelinePreviewVttPath: replaceStoredStoragePathPrefix(asset.timelinePreviewVttPath, oldVideoStorageRoot, newVideoStorageRoot),
+              timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(asset.timelinePreviewSpritesPath, oldVideoStorageRoot, newVideoStorageRoot),
             },
           })
         }
@@ -657,6 +661,8 @@ export async function PATCH(
             data: {
               storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldMainPrefix, newMainPrefix)!,
               previewPath: replaceStoredStoragePathPrefix(asset.previewPath, oldPreviewPrefix, newPreviewPrefix),
+              timelinePreviewVttPath: replaceStoredStoragePathPrefix(asset.timelinePreviewVttPath, oldPreviewPrefix, newPreviewPrefix),
+              timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(asset.timelinePreviewSpritesPath, oldPreviewPrefix, newPreviewPrefix),
             },
           })
         }

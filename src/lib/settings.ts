@@ -57,6 +57,22 @@ const cachedSafeguardLimits: CachedValue<SafeguardLimits> = {
 }
 const cachedPasswordAttempts: CachedValue<number> = { value: 5, expiresAt: 0 }
 
+// --- SalesSettings caching ---
+
+type SalesSettingsSnapshot = {
+  taxRatePercent: number
+  fiscalYearStartMonth: number
+}
+
+const cachedSalesSettings: CachedValue<SalesSettingsSnapshot> = {
+  value: { taxRatePercent: 10, fiscalYearStartMonth: 7 },
+  expiresAt: 0,
+}
+
+export function invalidateSalesSettingsCaches() {
+  cachedSalesSettings.expiresAt = 0
+}
+
 export function invalidateSecuritySettingsCaches() {
   cachedRateLimits.expiresAt = 0
   cachedSessionTimeout.expiresAt = 0
@@ -115,6 +131,40 @@ export async function getCompanyName(): Promise<string> {
     console.error('Error fetching company name:', error)
     return 'Studio' // Fallback to default
   }
+}
+
+/** Get tax rate and fiscal year from SalesSettings, cached for 60 seconds */
+export async function getSalesSettingsSnapshot(): Promise<SalesSettingsSnapshot> {
+  const now = Date.now()
+  if (cachedSalesSettings.expiresAt > now) {
+    return cachedSalesSettings.value
+  }
+
+  try {
+    const settings = await prisma.salesSettings.findUnique({
+      where: { id: 'default' },
+      select: { taxRatePercent: true, fiscalYearStartMonth: true },
+    })
+
+    cachedSalesSettings.value = {
+      taxRatePercent: settings?.taxRatePercent ?? 10,
+      fiscalYearStartMonth: settings?.fiscalYearStartMonth ?? 7,
+    }
+    cachedSalesSettings.expiresAt = now + SETTINGS_CACHE_TTL_MS
+    return cachedSalesSettings.value
+  } catch {
+    return cachedSalesSettings.value
+  }
+}
+
+/** Convenience: just the tax rate, cached */
+export async function getSalesTaxRate(): Promise<number> {
+  return (await getSalesSettingsSnapshot()).taxRatePercent
+}
+
+/** Convenience: just the fiscal year start month, cached */
+export async function getSalesFiscalYearStartMonth(): Promise<number> {
+  return (await getSalesSettingsSnapshot()).fiscalYearStartMonth
 }
 
 /**

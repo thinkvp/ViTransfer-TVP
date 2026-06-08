@@ -486,7 +486,7 @@ export async function processTimelinePreviews(
   const tileColumns = 10
   const tileRows = 10
   const framesPerSprite = tileColumns * tileRows
-  const frameWidth = 160
+  const frameWidth = 320
   const frameHeight = calculateScaledHeight(metadata.width, metadata.height, frameWidth)
   const segmentDurationSeconds = framesPerSprite * intervalSeconds
 

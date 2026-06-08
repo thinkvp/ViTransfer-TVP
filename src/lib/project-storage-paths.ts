@@ -226,6 +226,21 @@ export function buildVideoTimelineStorageRoot(projectStoragePath: string, videoF
   return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'timeline-previews')
 }
 
+/** Timeline sprite storage root for a video asset's hover previews. */
+export function buildAssetTimelineStorageRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string, assetId: string): string {
+  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'assets', assetId, 'timeline-previews')
+}
+
+/** Timeline sprite storage root for an upload file's hover previews. */
+export function buildUploadTimelineStorageRoot(projectStoragePath: string, folderRelativePath: string, uploadFileId: string): string {
+  const segments = [buildProjectPreviewsRoot(projectStoragePath), 'uploads']
+  if (folderRelativePath) {
+    segments.push(sanitizeStorageName(folderRelativePath))
+  }
+  segments.push(uploadFileId, 'timeline-previews')
+  return path.posix.join(...segments)
+}
+
 /**
  * Returns the root of the preview folder for a specific video version.
  * All preview derivatives (MP4 previews, thumbnail, timeline sprites, asset previews)

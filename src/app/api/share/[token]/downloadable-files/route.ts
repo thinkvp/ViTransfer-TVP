@@ -5,6 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { getAlbumZipFileName } from '@/lib/album-photo-zip'
 import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
+import { generateVideoAccessToken } from '@/lib/video-access'
 import type { DownloadableFile, DownloadableGroup, DownloadableFilesResult } from '@/lib/downloadable-files'
 
 export const runtime = 'nodejs'
@@ -31,6 +32,9 @@ interface ShareUploadFileRow {
   fileType: string
   mediaDurationSeconds: number | null
   previewStatus: string | null
+  timelinePreviewsReady: boolean | null
+  timelinePreviewVttPath: string | null
+  timelinePreviewSpritesPath: string | null
 }
 
 interface ShareUploadFolderRow {
@@ -128,7 +132,7 @@ export async function GET(
       ORDER BY "relativePath" ASC
     `,
     prisma.$queryRaw<ShareUploadFileRow[]>`
-      SELECT "id", "folderRelativePath", "fileName", "fileSize", "fileType", "mediaDurationSeconds", "previewStatus"
+      SELECT "id", "folderRelativePath", "fileName", "fileSize", "fileType", "mediaDurationSeconds", "previewStatus", "timelinePreviewsReady", "timelinePreviewVttPath", "timelinePreviewSpritesPath"
       FROM "ShareUploadFile"
       WHERE "projectId" = ${projectMeta.id}
       ORDER BY "folderRelativePath" ASC, "createdAt" ASC
@@ -139,6 +143,8 @@ export async function GET(
   ])
   const uploadGroupsByPath = new Map<string, DownloadableFile[]>()
 
+  const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `share:${Date.now()}`)
+
   for (const folder of uploadFolders) {
     const folderPath = String(folder.relativePath || '').trim()
     if (!uploadGroupsByPath.has(folderPath)) {
@@ -146,11 +152,36 @@ export async function GET(
     }
   }
 
+  // Generate timeline tokens for upload files that are videos with sprites
+  const uploadTimelineTokens = new Map<string, { vttToken: string; spriteToken: string } | null>()
+  await Promise.all(
+    uploadFiles.map(async (file) => {
+      const isVideo = String(file.fileType || '').toLowerCase().startsWith('video/')
+      const hasTimeline = isVideo && !!(file.timelinePreviewVttPath) && !!(file.timelinePreviewSpritesPath)
+      if (!hasTimeline) {
+        uploadTimelineTokens.set(file.id, null)
+        return
+      }
+      try {
+        const [vttToken, spriteToken] = await Promise.all([
+          generateVideoAccessToken('upload', projectMeta.id, 'timeline-vtt', request, sessionId, undefined, 'upload', file.id),
+          generateVideoAccessToken('upload', projectMeta.id, 'timeline-sprite', request, sessionId, undefined, 'upload', file.id),
+        ])
+        uploadTimelineTokens.set(file.id, { vttToken, spriteToken })
+      } catch {
+        uploadTimelineTokens.set(file.id, null)
+      }
+    })
+  )
+
   for (const file of uploadFiles) {
     const folderPath = String(file.folderRelativePath || '').trim()
     if (!uploadGroupsByPath.has(folderPath)) {
       uploadGroupsByPath.set(folderPath, [])
     }
+
+    const tokens = uploadTimelineTokens.get(file.id)
+    const hasTimeline = tokens !== undefined && tokens !== null
 
     uploadGroupsByPath.get(folderPath)!.push({
       type: 'upload-file',
@@ -164,6 +195,9 @@ export async function GET(
             : undefined)
         : undefined,
       previewStatus: file.previewStatus ?? undefined,
+      hasTimelinePreviews: hasTimeline,
+      timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
+      timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
     })
   }
 
@@ -194,28 +228,89 @@ export async function GET(
 
   const videoGroups: DownloadableGroup[] = []
 
+  // Generate timeline tokens in parallel for all videos that have sprites
+  const videoTimelineTokens = new Map<string, { vttToken: string; spriteToken: string } | null>()
+  await Promise.all(
+    readyVideos.map(async (video) => {
+      const hasTimeline = !!(video as any).timelinePreviewVttPath && !!(video as any).timelinePreviewSpritesPath
+      if (!hasTimeline) {
+        videoTimelineTokens.set(video.id, null)
+        return
+      }
+      try {
+        const [vttToken, spriteToken] = await Promise.all([
+          generateVideoAccessToken(video.id, projectMeta.id, 'timeline-vtt', request, sessionId),
+          generateVideoAccessToken(video.id, projectMeta.id, 'timeline-sprite', request, sessionId),
+        ])
+        videoTimelineTokens.set(video.id, { vttToken, spriteToken })
+      } catch {
+        videoTimelineTokens.set(video.id, null)
+      }
+    })
+  )
+
   for (const [videoName, videos] of videosByName.entries()) {
     const sortedVersions = [...videos].sort((a, b) => b.version - a.version)
-    const versionFiles: DownloadableFile[] = sortedVersions.map((video) => ({
-      type: 'video',
-      videoId: video.id,
-      fileName: video.originalFileName,
-      fileSizeBytes: Number(video.originalFileSize),
-      durationSeconds: Number(video.duration),
-      versionLabel: (video as any).versionLabel ? String((video as any).versionLabel) : undefined,
-      isApproved: video.approved === true,
-      allowApproval: video.allowApproval === true,
-    }))
+    const versionFiles: DownloadableFile[] = sortedVersions.map((video) => {
+      const tokens = videoTimelineTokens.get(video.id)
+      const hasTimeline = tokens !== undefined && tokens !== null
+      return {
+        type: 'video',
+        videoId: video.id,
+        fileName: video.originalFileName,
+        fileSizeBytes: Number(video.originalFileSize),
+        durationSeconds: Number(video.duration),
+        versionLabel: (video as any).versionLabel ? String((video as any).versionLabel) : undefined,
+        isApproved: video.approved === true,
+        allowApproval: video.allowApproval === true,
+        hasTimelinePreviews: hasTimeline,
+        timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
+        timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
+      }
+    })
 
     const approvedVideo = sortedVersions.find((video) => video.approved === true)
+
+    // Generate timeline tokens for video assets that are videos with sprites
+    const assetTimelineTokens = new Map<string, { vttToken: string; spriteToken: string } | null>()
+    if (approvedVideo) {
+      await Promise.all(
+        approvedVideo.assets.map(async (asset: any) => {
+          const isVideo = String(asset.fileType || '').toLowerCase().startsWith('video/')
+          const hasTimeline = isVideo && !!(asset.timelinePreviewVttPath) && !!(asset.timelinePreviewSpritesPath)
+          if (!hasTimeline) {
+            assetTimelineTokens.set(asset.id, null)
+            return
+          }
+          try {
+            const [vttToken, spriteToken] = await Promise.all([
+              generateVideoAccessToken(approvedVideo.id, projectMeta.id, 'timeline-vtt', request, sessionId, undefined, 'asset', asset.id),
+              generateVideoAccessToken(approvedVideo.id, projectMeta.id, 'timeline-sprite', request, sessionId, undefined, 'asset', asset.id),
+            ])
+            assetTimelineTokens.set(asset.id, { vttToken, spriteToken })
+          } catch {
+            assetTimelineTokens.set(asset.id, null)
+          }
+        })
+      )
+    }
+
     const assetFiles: DownloadableFile[] = approvedVideo
-      ? approvedVideo.assets.map((asset: any): DownloadableFile => ({
-          type: 'asset',
-          videoId: approvedVideo.id,
-          assetId: asset.id,
-          fileName: asset.fileName,
-          fileSizeBytes: Number(asset.fileSize),
-        }))
+      ? approvedVideo.assets.map((asset: any): DownloadableFile => {
+          const tokens = assetTimelineTokens.get(asset.id)
+          const hasTimeline = tokens !== undefined && tokens !== null
+          return {
+            type: 'asset',
+            videoId: approvedVideo.id,
+            assetId: asset.id,
+            fileName: asset.fileName,
+            fileSizeBytes: Number(asset.fileSize),
+            durationSeconds: typeof asset.mediaDurationSeconds === 'number' ? asset.mediaDurationSeconds : undefined,
+            hasTimelinePreviews: hasTimeline,
+            timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
+            timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
+          }
+        })
       : []
 
     videoGroups.push({
@@ -232,7 +327,6 @@ export async function GET(
   // Build album groups: only include albums with at least one ready zip
   const albumGroups: DownloadableGroup[] = []
   const albumsNeedingThumbnailBackfill = new Set<string>()
-  const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `share:${Date.now()}`)
 
   for (const album of albums) {
     const zips: DownloadableFile[] = []

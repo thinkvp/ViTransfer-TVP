@@ -11,6 +11,7 @@ import { apiFetch } from '@/lib/api-client'
 function LazyAlbumThumbnail({ src, alt }: { src: string; alt: string }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const [isInView, setIsInView] = useState(false)
+  const [imgError, setImgError] = useState(false)
 
   useEffect(() => {
     const el = ref.current
@@ -38,7 +39,7 @@ function LazyAlbumThumbnail({ src, alt }: { src: string; alt: string }) {
 
   return (
     <div ref={ref} className="relative w-full h-36 sm:h-40">
-      {isInView ? (
+      {isInView && !imgError ? (
         <Image
           src={src}
           alt={alt}
@@ -46,6 +47,7 @@ function LazyAlbumThumbnail({ src, alt }: { src: string; alt: string }) {
           unoptimized
           className="object-cover"
           loading="lazy"
+          onError={() => setImgError(true)}
         />
       ) : (
         <div className="absolute inset-0 bg-muted/30" />

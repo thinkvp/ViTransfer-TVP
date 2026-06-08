@@ -410,6 +410,26 @@ export async function computeProjectPreviewBytes(
     }
   }
 
+  // Include asset timeline paths
+  const assetsWithTimeline = await prismaClient.videoAsset.findMany({
+    where: { video: { projectId }, timelinePreviewVttPath: { not: null }, timelinePreviewSpritesPath: { not: null } },
+    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
+  })
+  for (const a of assetsWithTimeline) {
+    if (a.timelinePreviewVttPath) previewFilePaths.add(a.timelinePreviewVttPath)
+    if (a.timelinePreviewSpritesPath) spritePrefixes.add(a.timelinePreviewSpritesPath)
+  }
+
+  // Include upload timeline paths
+  const uploadsWithTimeline = await prismaClient.shareUploadFile.findMany({
+    where: { projectId, timelinePreviewVttPath: { not: null }, timelinePreviewSpritesPath: { not: null } },
+    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
+  })
+  for (const u of uploadsWithTimeline) {
+    if (u.timelinePreviewVttPath) previewFilePaths.add(u.timelinePreviewVttPath)
+    if (u.timelinePreviewSpritesPath) spritePrefixes.add(u.timelinePreviewSpritesPath)
+  }
+
   const [fileSizes, prefixSizes] = await Promise.all([
     Promise.all([...previewFilePaths].map((p) => s3GetFileSize(p))),
     Promise.all([...spritePrefixes].map((p) => s3SumPrefixSize(p))),

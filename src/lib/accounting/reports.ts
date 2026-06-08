@@ -10,6 +10,13 @@ import { calcLineSubtotalCents, sumLineItemsSubtotal, sumLineItemsTax } from '@/
 import type { SalesLineItem } from '@/lib/sales/types'
 import { cashReceiptReportingAmountCents, listSalesCashReceiptsInRange, listSalesCashReceiptsUpTo } from '@/lib/accounting/sales-cash-receipts'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
+import type {
+  ProfitLossReport,
+  BalanceSheetReport,
+} from '@/lib/accounting/types'
+
+// Re-export the canonical types so existing API-route imports continue to work
+export type { ProfitLossReport, BalanceSheetReport }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,12 +25,6 @@ export interface ReportLine {
   code: string
   name: string
   amountCents: number
-}
-
-interface ReportSection {
-  label: string
-  lines: ReportLine[]
-  totalCents: number
 }
 
 type ProfitLossAccountNode = {
@@ -49,33 +50,6 @@ type BalanceSheetAccountNode = {
   name: string
   type: BalanceSheetAccountType
   subType: string | null
-}
-
-export interface ProfitLossReport {
-  fromDate: string
-  toDate: string
-  basis: 'CASH' | 'ACCRUAL'
-  currency: string
-  income: Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number }>
-  totalIncomeCents: number
-  cogs: Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number }>
-  totalCogsCents: number
-  grossProfitCents: number
-  expenses: Array<{ accountId: string | null; accountCode: string | null; accountName: string; amountCents: number }>
-  totalExpenseCents: number
-  netProfitCents: number
-  totalCogsAndExpensesCents: number
-}
-
-export interface BalanceSheetReport {
-  asAt: string
-  currency: string
-  assets: Array<{ accountId?: string | null; accountCode?: string | null; label: string; amountCents: number }>
-  totalAssetsCents: number
-  liabilities: Array<{ accountId?: string | null; accountCode?: string | null; label: string; amountCents: number }>
-  totalLiabilitiesCents: number
-  equity: Array<{ accountId?: string | null; accountCode?: string | null; label: string; amountCents: number }>
-  totalEquityCents: number
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -146,7 +120,11 @@ async function buildPostedBalanceSheetLines(
 
   const accountIds = includedAccounts.map((account) => account.id)
   const accountMap = new Map(includedAccounts.map((account) => [account.id, account]))
-  const isDebitNormal = includedAccounts[0].type === 'ASSET'
+  // Build per-account debit-normal lookup so sign handling is correct even for
+  // mixed-type batches (ASSET = debit-normal; LIABILITY/EQUITY = credit-normal).
+  const debitNormalSet = new Set(
+    includedAccounts.filter((a) => a.type === 'ASSET').map((a) => a.id)
+  )
   const totals = new Map<string, number>()
 
   const addAmount = (accountId: string, amountCents: number) => {
@@ -180,17 +158,25 @@ async function buildPostedBalanceSheetLines(
     }),
   ])
 
+  // Bank transactions use bank-statement convention (positive = money in).
+  // This maps directly to balance sheet accounts: a deposit increases ASSET,
+  // a loan repayment (withdrawal) decreases LIABILITY, etc.  No sign flip needed.
   for (const transaction of bankTransactions) {
     if (!transaction.accountId) continue
-    addAmount(transaction.accountId, isDebitNormal ? -transaction.amountCents : transaction.amountCents)
+    addAmount(transaction.accountId, transaction.amountCents)
   }
 
+  // Journal entries follow accounting convention: positive = debit (increase) for
+  // debit-normal accounts (ASSET), negative = credit (decrease).  Convert to
+  // balance-sheet perspective: ASSET keeps sign, LIABILITY/EQUITY negate.
   for (const journal of journalEntries) {
+    const isDebitNormal = debitNormalSet.has(journal.accountId)
     addAmount(journal.accountId, isDebitNormal ? journal.amountCents : -journal.amountCents)
   }
 
+  // Split lines mirror bank transaction sign convention (same as above).
   for (const splitLine of splitLines) {
-    addAmount(splitLine.accountId, isDebitNormal ? -splitLine.amountCents : splitLine.amountCents)
+    addAmount(splitLine.accountId, splitLine.amountCents)
   }
 
   return sortReportLines(
@@ -498,7 +484,8 @@ export async function buildProfitLossReport(
   }
   for (const j of incomeJournals) {
     if (!j.account) continue
-    const reportingAmountCents = amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
+    // Negate: INCOME is credit-normal, so a credit (negative in journal convention) increases income
+    const reportingAmountCents = -amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
     const existing = otherIncomeMap.get(j.accountId)
     if (existing) { existing.amountCents += reportingAmountCents } else {
       otherIncomeMap.set(j.accountId, { accountId: j.accountId, code: j.account.code, name: j.account.name, amountCents: reportingAmountCents })
@@ -549,7 +536,16 @@ export async function buildProfitLossReport(
 
 // ── Balance Sheet ─────────────────────────────────────────────────────────────
 
-export async function buildBalanceSheetReport(asOf: string): Promise<BalanceSheetReport> {
+/**
+ * @param asOf  Balance sheet date (YYYY-MM-DD)
+ * @param basis Reporting basis for GST liability:
+ *   - CASH:  GST collected = tax on payments received
+ *   - ACCRUAL: GST collected = tax on all issued invoices (default if unset)
+ */
+export async function buildBalanceSheetReport(
+  asOf: string,
+  basis: 'CASH' | 'ACCRUAL' = 'ACCRUAL'
+): Promise<BalanceSheetReport> {
   const settings = await prisma.salesSettings.findUnique({ where: { id: 'default' } })
   const taxRatePercent = settings?.taxRatePercent ?? 10
 
@@ -701,10 +697,27 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
   // GST liability: GST collected on sales minus GST credits on expenses (all time to asOf)
   const gstCreditsCents = gstExpenses.reduce((s, e) => s + e.gstAmount, 0)
 
-  // GST collected: from all payments received to date (prorate GST)
+  // GST collected: cash basis = from payments received; accrual = from invoices issued
   let gstCollectedCents = 0
-  for (const receipt of allReceipts) {
-    gstCollectedCents += receipt.amountCents - cashReceiptReportingAmountCents(receipt.amountCents, receipt.invoice, taxRatePercent, false)
+  if (basis === 'CASH') {
+    for (const receipt of allReceipts) {
+      gstCollectedCents += receipt.amountCents - cashReceiptReportingAmountCents(receipt.amountCents, receipt.invoice, taxRatePercent, false)
+    }
+  } else {
+    // Accrual: GST on all invoices issued (OPEN, SENT, OVERDUE, PARTIALLY_PAID, PAID)
+    const allInvoices = await prisma.salesInvoice.findMany({
+      where: {
+        issueDate: { lte: asOf },
+        status: { in: ['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'] },
+      },
+      select: { itemsJson: true, taxEnabled: true },
+    })
+    for (const inv of allInvoices) {
+      const items = (inv.itemsJson as SalesLineItem[]) ?? []
+      if (inv.taxEnabled) {
+        gstCollectedCents += sumLineItemsTax(items, taxRatePercent)
+      }
+    }
   }
 
   // Subtract BAS payment amounts already posted to the GST Payable CoA account.
@@ -805,6 +818,7 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
 
   return {
     asAt: asOf,
+    basis,
     currency: 'AUD',
     assets: assetLines.map(l => ({ accountId: l.accountId, accountCode: l.code, label: l.name, amountCents: l.amountCents })),
     totalAssetsCents,
@@ -813,88 +827,6 @@ export async function buildBalanceSheetReport(asOf: string): Promise<BalanceShee
     equity: equityLines.map(l => ({ accountId: l.accountId, accountCode: l.code, label: l.name, amountCents: l.amountCents })),
     totalEquityCents,
   }
-}
-
-// ── Trial Balance ─────────────────────────────────────────────────────────────
-
-export interface TrialBalanceRow {
-  accountId: string
-  code: string
-  name: string
-  type: string
-  debitCents: number
-  creditCents: number
-}
-
-export interface TrialBalanceReport {
-  asAt: string
-  currency: string
-  rows: TrialBalanceRow[]
-  totalDebitCents: number
-  totalCreditCents: number
-}
-
-export async function buildTrialBalanceReport(asOf: string): Promise<TrialBalanceReport> {
-  const accounts = await prisma.account.findMany({
-    where: { isActive: true },
-    orderBy: { code: 'asc' },
-    select: { id: true, code: true, name: true, type: true },
-  })
-
-  const rows: TrialBalanceRow[] = []
-
-  for (const acct of accounts) {
-    // Sum all entries posted to this account up to asOf
-    const [expenses, bankTxns, journals, splits, salesEntries] = await Promise.all([
-      prisma.expense.aggregate({
-        where: { accountId: acct.id, date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] } },
-        _sum: { amountIncGst: true },
-      }),
-      prisma.bankTransaction.aggregate({
-        where: { accountId: acct.id, date: { lte: asOf }, status: 'MATCHED' },
-        _sum: { amountCents: true },
-      }),
-      prisma.journalEntry.aggregate({
-        where: { accountId: acct.id, date: { lte: asOf } },
-        _sum: { amountCents: true },
-      }),
-      prisma.splitLine.aggregate({
-        where: { accountId: acct.id, bankTransaction: { date: { lte: asOf }, status: 'MATCHED' } },
-        _sum: { amountCents: true },
-      }),
-      // Sales invoice allocations to this account (via label mapping) are already
-      // captured in income lines from P&L; skip to keep trial balance simple for now.
-      Promise.resolve(0),
-    ])
-
-    const total =
-      (expenses._sum.amountIncGst ?? 0) +
-      (bankTxns._sum.amountCents ?? 0) +
-      (journals._sum.amountCents ?? 0) +
-      (splits._sum.amountCents ?? 0)
-
-    if (total === 0) continue
-
-    // Debit-normal accounts: ASSET, EXPENSE, COGS
-    // Credit-normal accounts: LIABILITY, EQUITY, INCOME
-    const isDebitNormal = ['ASSET', 'EXPENSE', 'COGS'].includes(acct.type)
-    const debitCents = isDebitNormal ? Math.max(0, total) : Math.max(0, -total)
-    const creditCents = isDebitNormal ? Math.max(0, -total) : Math.max(0, total)
-
-    rows.push({
-      accountId: acct.id,
-      code: acct.code,
-      name: acct.name,
-      type: acct.type,
-      debitCents,
-      creditCents,
-    })
-  }
-
-  const totalDebitCents = rows.reduce((s, r) => s + r.debitCents, 0)
-  const totalCreditCents = rows.reduce((s, r) => s + r.creditCents, 0)
-
-  return { asAt: asOf, currency: 'AUD', rows, totalDebitCents, totalCreditCents }
 }
 
 // ── Aged Receivables ──────────────────────────────────────────────────────────

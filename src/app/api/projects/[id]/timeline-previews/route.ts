@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
-import { getVideoQueue } from '@/lib/queue'
+import { getVideoQueue, getAssetTimelineQueue, getUploadTimelineQueue } from '@/lib/queue'
 import { deleteDirectory } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -92,15 +92,35 @@ export async function POST(
 
       await Promise.allSettled(deletions)
 
-      // Clear DB fields for all project videos
-      await prisma.video.updateMany({
-        where: { projectId },
-        data: {
-          timelinePreviewsReady: false,
-          timelinePreviewVttPath: null,
-          timelinePreviewSpritesPath: null,
-        },
-      })
+      // Clear DB fields for all project videos, assets, and uploads
+      await Promise.all([
+        prisma.video.updateMany({
+          where: { projectId },
+          data: {
+            timelinePreviewsReady: false,
+            timelinePreviewVttPath: null,
+            timelinePreviewSpritesPath: null,
+          },
+        }),
+        prisma.videoAsset.updateMany({
+          where: { video: { projectId }, timelinePreviewsReady: true },
+          data: { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null },
+        }),
+        prisma.shareUploadFile.updateMany({
+          where: { projectId, timelinePreviewsReady: true },
+          data: { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null },
+        }),
+      ])
+
+      // Also delete asset and upload sprite directories
+      const [assetSprites, uploadSprites] = await Promise.all([
+        prisma.videoAsset.findMany({ where: { video: { projectId }, timelinePreviewSpritesPath: { not: null } }, select: { timelinePreviewSpritesPath: true } }),
+        prisma.shareUploadFile.findMany({ where: { projectId, timelinePreviewSpritesPath: { not: null } }, select: { timelinePreviewSpritesPath: true } }),
+      ])
+      await Promise.allSettled([
+        ...assetSprites.map(a => deleteDirectory(a.timelinePreviewSpritesPath!).catch(() => {})),
+        ...uploadSprites.map(u => deleteDirectory(u.timelinePreviewSpritesPath!).catch(() => {})),
+      ])
 
       return NextResponse.json({
         success: true,
@@ -110,51 +130,81 @@ export async function POST(
     }
 
     // action === 'generate'
-    const readyVideos = await prisma.video.findMany({
-      where: {
-        projectId,
-        status: 'READY',
-        timelinePreviewsReady: false,
-      },
-      select: {
-        id: true,
-        originalStoragePath: true,
-        name: true,
-        versionLabel: true,
-      },
-    })
+    const [readyVideos, eligibleAssets, eligibleUploads] = await Promise.all([
+      prisma.video.findMany({
+        where: { projectId, status: 'READY', timelinePreviewsReady: false },
+        select: { id: true, originalStoragePath: true, name: true, versionLabel: true },
+      }),
+      prisma.videoAsset.findMany({
+        where: {
+          video: { projectId, status: 'READY', approved: true },
+          timelinePreviewsReady: false,
+          fileType: { startsWith: 'video/', mode: 'insensitive' },
+        },
+        select: { id: true, videoId: true, storagePath: true, fileName: true, mediaDurationSeconds: true, mediaWidth: true, mediaHeight: true, video: { select: { id: true, name: true, projectId: true } } },
+      }),
+      prisma.shareUploadFile.findMany({
+        where: {
+          projectId,
+          timelinePreviewsReady: false,
+          fileType: { startsWith: 'video/', mode: 'insensitive' },
+        },
+        select: { id: true, storagePath: true, fileName: true, mediaDurationSeconds: true, mediaWidth: true, mediaHeight: true, projectId: true },
+      }),
+    ])
 
-    if (readyVideos.length === 0) {
-      return NextResponse.json({
-        success: true,
-        action: 'generate',
-        count: 0,
-        message: 'No videos need timeline preview generation',
-      })
+    const totalCount = readyVideos.length + eligibleAssets.length + eligibleUploads.length
+    if (totalCount === 0) {
+      return NextResponse.json({ success: true, action: 'generate', count: 0, message: 'No videos, assets, or uploads need timeline preview generation' })
     }
 
     const videoQueue = getVideoQueue()
+    const assetTimelineQueue = getAssetTimelineQueue()
+    const uploadTimelineQueue = getUploadTimelineQueue()
+
+    let queuedVideos = 0
+    let queuedAssets = 0
+    let queuedUploads = 0
 
     for (const video of readyVideos) {
-      // Mark the video so it appears in Running Jobs while staying READY for viewing.
-      // If queueing fails, immediately clear the marker so it does not get stuck.
-      await prisma.video.update({
-        where: { id: video.id },
-        data: { processingPhase: 'timeline', processingProgress: 0 },
-      })
-
+      await prisma.video.update({ where: { id: video.id }, data: { processingPhase: 'timeline', processingProgress: 0 } })
       try {
-        await videoQueue.add('process-video', {
-          videoId: video.id,
-          originalStoragePath: video.originalStoragePath,
-          projectId,
-          timelineOnly: true,
-        })
+        await videoQueue.add('process-video', { videoId: video.id, originalStoragePath: video.originalStoragePath, projectId, timelineOnly: true })
+        queuedVideos++
       } catch (error) {
-        await prisma.video.update({
-          where: { id: video.id },
-          data: { processingPhase: null, processingProgress: 0 },
-        }).catch(() => {})
+        await prisma.video.update({ where: { id: video.id }, data: { processingPhase: null, processingProgress: 0 } }).catch(() => {})
+        throw error
+      }
+    }
+
+    for (const asset of eligibleAssets) {
+      await prisma.videoAsset.update({ where: { id: asset.id }, data: { processingPhase: 'timeline', processingProgress: 0 } })
+      try {
+        await assetTimelineQueue.add('process-asset-timeline', {
+          assetId: asset.id, videoId: asset.videoId, projectId,
+          storagePath: asset.storagePath,
+          durationSeconds: asset.mediaDurationSeconds ?? 0,
+          width: asset.mediaWidth ?? 0, height: asset.mediaHeight ?? 0,
+        })
+        queuedAssets++
+      } catch (error) {
+        await prisma.videoAsset.update({ where: { id: asset.id }, data: { processingPhase: null, processingProgress: 0 } }).catch(() => {})
+        throw error
+      }
+    }
+
+    for (const upload of eligibleUploads) {
+      await prisma.shareUploadFile.update({ where: { id: upload.id }, data: { processingPhase: 'timeline', processingProgress: 0 } })
+      try {
+        await uploadTimelineQueue.add('process-upload-timeline', {
+          uploadFileId: upload.id, projectId,
+          storagePath: upload.storagePath,
+          durationSeconds: upload.mediaDurationSeconds ?? 0,
+          width: upload.mediaWidth ?? 0, height: upload.mediaHeight ?? 0,
+        })
+        queuedUploads++
+      } catch (error) {
+        await prisma.shareUploadFile.update({ where: { id: upload.id }, data: { processingPhase: null, processingProgress: 0 } }).catch(() => {})
         throw error
       }
     }
@@ -162,12 +212,11 @@ export async function POST(
     return NextResponse.json({
       success: true,
       action: 'generate',
-      count: readyVideos.length,
-      videos: readyVideos.map(v => ({
-        id: v.id,
-        name: v.name,
-        versionLabel: v.versionLabel,
-      })),
+      count: totalCount,
+      videos: readyVideos.map(v => ({ id: v.id, name: v.name, versionLabel: v.versionLabel })),
+      assets: eligibleAssets.map(a => ({ id: a.id, fileName: a.fileName, videoName: a.video.name })),
+      uploads: eligibleUploads.map(u => ({ id: u.id, fileName: u.fileName })),
+      summary: { videos: queuedVideos, assets: queuedAssets, uploads: queuedUploads },
     })
   } catch (error) {
     console.error('[TIMELINE] Error managing timeline previews:', error)

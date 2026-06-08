@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
+import VideoHoverPreview from '@/components/VideoHoverPreview'
 import type { TransferItem } from '@/lib/transfer-state'
 import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
 import {
@@ -2070,6 +2071,18 @@ export function ShareFilesBrowser({
       file.type === 'video' &&
       !hasMultipleVideoVersionsInOpenFolder &&
       Boolean(folderPreviewByName?.[openFolder?.name || ''])
+    // Determine timeline hover preview eligibility — works for videos, assets, and uploads
+    // videoThumbnailSrc may be empty for upload/asset videos whose image preview
+    // is still processing while timeline sprites are already ready (separate jobs).
+    const videoThumbnailSrc = showImagePreview ? previewSrc : showVideoPreview ? (folderPreviewByName?.[openFolder?.name || ''] || '') : null
+    const showTimelineHover =
+      file.hasTimelinePreviews === true &&
+      typeof file.timelineVttUrl === 'string' &&
+      file.timelineVttUrl.length > 0 &&
+      typeof file.timelineSpriteBaseUrl === 'string' &&
+      file.timelineSpriteBaseUrl.length > 0 &&
+      typeof file.durationSeconds === 'number' &&
+      file.durationSeconds > 0
     const sizeLabel = formatFileSize(file.fileSizeBytes)
     const durationLabel = fileKind === 'video'
       ? formatDuration(file.durationSeconds ?? derivedVideoDurationByFileKey[fileKey] ?? undefined)
@@ -2232,7 +2245,16 @@ export function ShareFilesBrowser({
         <div className={cn('relative bg-gradient-to-b from-muted/70 to-muted/35', compact ? 'p-2 pb-1.5' : 'p-2.5 pb-2')}>
           <div className={cn('relative rounded-lg border border-border/80 bg-card shadow-inner shadow-black/10', compact ? 'p-1' : 'p-1.5')}>
             <div className={cn('relative rounded-md overflow-hidden bg-black/85', compact ? 'aspect-[4/3]' : 'aspect-[16/10]')}>
-              {showImagePreview ? (
+              {showTimelineHover ? (
+                <VideoHoverPreview
+                  thumbnailUrl={videoThumbnailSrc || ''}
+                  vttUrl={file.timelineVttUrl!}
+                  spriteBaseUrl={file.timelineSpriteBaseUrl!}
+                  durationSeconds={file.durationSeconds!}
+                  alt={file.fileName}
+                  className="w-full h-full"
+                />
+              ) : showImagePreview ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={previewSrc!}

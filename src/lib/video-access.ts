@@ -116,6 +116,10 @@ interface VideoAccessToken {
   sessionId: string
   ipAddress: string
   createdAt: number
+  /** For asset/upload timeline tokens: the type of entity the token targets. */
+  entityType?: 'video' | 'asset' | 'upload'
+  /** For asset/upload timeline tokens: the entity's ID (assetId or uploadFileId). */
+  entityId?: string
 }
 
 function normalizeHostHeader(hostHeader: string | null): string | null {
@@ -148,7 +152,9 @@ export async function generateVideoAccessToken(
   quality: string,
   request: NextRequest,
   sessionId: string,
-  ttlOverrideSeconds?: number
+  ttlOverrideSeconds?: number,
+  entityType?: 'video' | 'asset' | 'upload',
+  entityId?: string,
 ): Promise<string> {
   const redis = getRedis()
 
@@ -156,8 +162,9 @@ export async function generateVideoAccessToken(
     || quality === 'original'
     || quality === 'download'
     || quality === 'asset-download'
+    || entityType !== undefined
 
-  const cacheKey = `video_token_cache:${sessionId}:${videoId}:${quality}`
+  const cacheKey = `video_token_cache:${sessionId}:${videoId}:${quality}${entityId ? `:${entityId}` : ''}`
   const cachedToken = shouldBypassCache ? null : await redis.get(cacheKey)
 
   if (cachedToken) {
@@ -177,6 +184,7 @@ export async function generateVideoAccessToken(
     sessionId,
     ipAddress,
     createdAt: Date.now(),
+    ...(entityType ? { entityType, entityId } : {}),
   }
 
   const ttlSeconds = ttlOverrideSeconds ?? await getClientSessionTimeoutSeconds()

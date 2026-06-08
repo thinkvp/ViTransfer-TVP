@@ -16,7 +16,9 @@ import { deleteDirectory, deleteFile } from '@/lib/storage'
 import {
   enqueueShareUploadPreview,
   getAlbumPhotoSocialQueue,
+  getAssetTimelineQueue,
   getShareUploadPreviewQueue,
+  getUploadTimelineQueue,
   getVideoQueue,
 } from '@/lib/queue'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
@@ -190,16 +192,21 @@ export async function POST(
           fileName: true,
           mediaDurationSeconds: true,
           previewPath: true,
+          timelinePreviewVttPath: true,
+          timelinePreviewSpritesPath: true,
         },
       }),
       prisma.videoAsset.findMany({
         where: { video: { projectId } },
         select: {
           id: true,
+          videoId: true,
           storagePath: true,
           fileType: true,
           fileName: true,
           previewPath: true,
+          timelinePreviewVttPath: true,
+          timelinePreviewSpritesPath: true,
           video: {
             select: {
               projectId: true,
@@ -258,6 +265,9 @@ export async function POST(
     for (const file of previewableUploadFiles) {
       addPathCandidate(filePathsToDelete, file.previewPath)
       addPathCandidate(filePathsToDelete, buildProjectUploadVideoThumbnailStoragePath(projectStoragePath, file.storagePath))
+      // Also delete timeline sprites for video-type uploads
+      addPathCandidate(filePathsToDelete, (file as any).timelinePreviewVttPath)
+      addPathCandidate(directoryPathsToDelete, (file as any).timelinePreviewSpritesPath)
     }
 
     const previewableVideoAssets = videoAssets.filter((asset) => isPreviewableFileType(asset.fileType))
@@ -266,6 +276,9 @@ export async function POST(
       addPathCandidate(filePathsToDelete, asset.previewPath)
       addPathCandidate(filePathsToDelete, buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, asset.video.versionLabel, asset.storagePath, '.jpg'))
       addPathCandidate(filePathsToDelete, buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, asset.video.versionLabel, asset.storagePath, '.mp4'))
+      // Also delete timeline sprites for video-type assets
+      addPathCandidate(filePathsToDelete, (asset as any).timelinePreviewVttPath)
+      addPathCandidate(directoryPathsToDelete, (asset as any).timelinePreviewSpritesPath)
     }
 
     for (const photo of albumPhotos) {
@@ -311,8 +324,12 @@ export async function POST(
     }
 
     const shareUploadPreviewQueue = getShareUploadPreviewQueue()
+    const assetTimelineQueue = getAssetTimelineQueue()
+    const uploadTimelineQueue = getUploadTimelineQueue()
     let queuedUploadPreviewJobs = 0
+    let queuedUploadTimelineJobs = 0
     for (const file of previewableUploadFiles) {
+      const isVideo = String(file.fileType || '').toLowerCase().startsWith('video/')
       await prisma.shareUploadFile.update({
         where: { id: file.id },
         data: {
@@ -323,6 +340,7 @@ export async function POST(
           previewFileSize: null,
           previewAttempts: 0,
           previewQueuedAt: null,
+          ...(isVideo ? { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null } : {}),
         },
       })
 
@@ -336,10 +354,26 @@ export async function POST(
         durationSeconds: file.mediaDurationSeconds,
       })
       queuedUploadPreviewJobs += 1
+
+      // Also enqueue timeline sprite generation for video-type uploads
+      // (processor probes metadata when duration/width/height are 0)
+      if (isVideo) {
+        await uploadTimelineQueue.add('process-upload-timeline', {
+          uploadFileId: file.id,
+          projectId,
+          storagePath: file.storagePath,
+          durationSeconds: typeof file.mediaDurationSeconds === 'number' ? file.mediaDurationSeconds : 0,
+          width: 0,
+          height: 0,
+        })
+        queuedUploadTimelineJobs += 1
+      }
     }
 
     let queuedVideoAssetPreviewJobs = 0
+    let queuedAssetTimelineJobs = 0
     for (const asset of previewableVideoAssets) {
+      const isVideo = String(asset.fileType || '').toLowerCase().startsWith('video/')
       await prisma.videoAsset.update({
         where: { id: asset.id },
         data: {
@@ -350,6 +384,7 @@ export async function POST(
           previewFileSize: null,
           previewAttempts: 0,
           previewQueuedAt: null,
+          ...(isVideo ? { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null } : {}),
         },
       })
 
@@ -362,6 +397,20 @@ export async function POST(
         fileName: asset.fileName,
       })
       queuedVideoAssetPreviewJobs += 1
+
+      // Also enqueue timeline sprite generation for video-type assets
+      if (isVideo) {
+        await assetTimelineQueue.add('process-asset-timeline', {
+          assetId: asset.id,
+          videoId: asset.videoId,
+          projectId,
+          storagePath: asset.storagePath,
+          durationSeconds: 0,
+          width: 0,
+          height: 0,
+        })
+        queuedAssetTimelineJobs += 1
+      }
     }
 
     const albumPhotoIds = albumPhotos.map((photo) => photo.id)
@@ -417,7 +466,9 @@ export async function POST(
       deletedDirectoriesAttempted: directoryPathsToDelete.size,
       queuedVideoJobs,
       queuedUploadPreviewJobs,
+      queuedUploadTimelineJobs,
       queuedVideoAssetPreviewJobs,
+      queuedAssetTimelineJobs,
       queuedAlbumPhotoSocialJobs,
       queuedAlbumThumbnailJobs,
     })

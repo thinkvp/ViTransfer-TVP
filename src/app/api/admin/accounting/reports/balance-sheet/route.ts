@@ -2,11 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { buildBalanceSheetReport } from '@/lib/accounting/reports'
+import { getAccountingReportingBasis } from '@/lib/accounting/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// GET /api/admin/accounting/reports/balance-sheet?asOf=YYYY-MM-DD
+// GET /api/admin/accounting/reports/balance-sheet?asOf=YYYY-MM-DD&basis=CASH|ACCRUAL
 export async function GET(request: NextRequest) {
   const authResult = await requireApiMenu(request, 'accounting')
   if (authResult instanceof Response) return authResult
@@ -21,12 +22,17 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const asOf = searchParams.get('asOf') ?? new Date().toISOString().split('T')[0]
+  const requestedBasis = searchParams.get('basis')
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
     return NextResponse.json({ error: 'asOf must be in YYYY-MM-DD format' }, { status: 400 })
   }
 
-  const report = await buildBalanceSheetReport(asOf)
+  const basis = requestedBasis === 'CASH' || requestedBasis === 'ACCRUAL'
+    ? requestedBasis
+    : await getAccountingReportingBasis()
+
+  const report = await buildBalanceSheetReport(asOf, basis)
 
   const res = NextResponse.json({ report })
   res.headers.set('Cache-Control', 'no-store')

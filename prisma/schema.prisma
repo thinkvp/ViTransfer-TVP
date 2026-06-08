@@ -70,6 +70,13 @@ model Role {
   users User[]
 }
 
+enum JobStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
 /// Tracks a background S3 folder rename (copy + delete) job.
 /// Used when renaming a project or client in S3 mode, where the operation
 /// may involve gigabytes of data and cannot complete within a single HTTP request.
@@ -86,7 +93,7 @@ model FolderRenameJob {
   oldPrefix     String
   newPrefix     String
   /// PENDING | IN_PROGRESS | COMPLETED | FAILED
-  status        String    @default("PENDING")
+  status        JobStatus @default(PENDING)
   totalObjects  Int       @default(0)
   copiedObjects Int       @default(0)
   totalBytes    BigInt    @default(0)
@@ -109,7 +116,7 @@ model AlbumThumbnailJob {
   projectId      String
   albumName      String
   projectName    String
-  status         String    @default("PENDING")
+  status         JobStatus @default(PENDING)
   totalPhotos    Int       @default(0)
   processedPhotos Int      @default(0)
   totalBytes     BigInt    @default(0)
@@ -639,12 +646,22 @@ model ShareUploadFile {
   previewAttempts    Int       @default(0)
   previewQueuedAt    DateTime?
 
+  // Timeline hover previews (sprite sheets + VTT) — only for video-type uploads
+  timelinePreviewsReady      Boolean  @default(false)
+  timelinePreviewVttPath     String?
+  timelinePreviewSpritesPath String?
+
+  // Processing phase for Running Jobs visibility
+  processingPhase    String?
+  processingProgress Float?    @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([projectId, folderRelativePath])
   @@index([projectId, category])
   @@index([previewStatus])
+  @@index([projectId, previewStatus])
 }
 
 model ProjectUser {
@@ -786,6 +803,11 @@ model VideoAsset {
   storagePath String // Path in storage system
   category    String? // Optional category: "image", "audio", "project", "other"
 
+  // Media metadata for video/audio assets
+  mediaDurationSeconds Float?
+  mediaWidth           Int?
+  mediaHeight          Int?
+
   // Upload metadata
   expiresAt      DateTime?
   uploadedByName String? // Display name of uploader
@@ -798,6 +820,15 @@ model VideoAsset {
   previewFileSize    BigInt?
   previewAttempts    Int       @default(0)
   previewQueuedAt    DateTime?
+
+  // Timeline hover previews (sprite sheets + VTT) — only for video-type assets
+  timelinePreviewsReady      Boolean  @default(false)
+  timelinePreviewVttPath     String?
+  timelinePreviewSpritesPath String?
+
+  // Processing phase for Running Jobs visibility
+  processingPhase    String?
+  processingProgress Float?    @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2048,6 +2079,73 @@ model CommentFile {
   @@index([projectId, createdAt])
 }
 
+// ===== StoredFile Registry =====
+// Normalized table acting as the single source of truth for every file the system
+// knows about.  Instead of scattering path columns (preview480Path, thumbnailPath,
+// timelinePreviewVttPath, etc.) across a dozen entity tables, every file — original
+// uploads, derived previews, thumbnails, ZIPs, branding assets — gets one row here.
+//
+// This makes scans, renames, storage totals, closed-project cleanup, and migration
+// all operate on a single table instead of enumerating columns across every model.
+
+enum EntityType {
+  VIDEO
+  VIDEO_ASSET
+  SHARE_UPLOAD_FILE
+  ALBUM_PHOTO
+  ALBUM
+  PROJECT_FILE
+  CLIENT_FILE
+  USER_FILE
+  USER_AVATAR
+  PROJECT_EMAIL
+  PROJECT_EMAIL_ATTACHMENT
+  COMMENT_FILE
+  ACCOUNTING_ATTACHMENT
+  SETTINGS_BRANDING
+}
+
+enum FileRole {
+  ORIGINAL
+  PREVIEW_480
+  PREVIEW_720
+  PREVIEW_1080
+  THUMBNAIL
+  PREVIEW_IMAGE
+  PREVIEW_MP4
+  SOCIAL
+  TIMELINE_VTT
+  TIMELINE_SPRITES
+  AVATAR
+  COMPANY_LOGO
+  COMPANY_DARK_LOGO
+  COMPANY_FAVICON
+  RAW_EMAIL
+  ZIP_FULL
+  ZIP_SOCIAL
+}
+
+model StoredFile {
+  id          String     @id @default(cuid())
+  entityType  EntityType
+  entityId    String     // owning record ID (Video.id, AlbumPhoto.id, etc.)
+  fileRole    FileRole
+
+  storagePath String
+  fileName    String?    // cached display name
+  fileSize    BigInt?    // 0 = unknown
+  status      String?    // PENDING | READY | ERROR (null for simple files)
+  generatedAt DateTime?
+  metadata    Json?      // { width, height, duration, codec, ... }
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([entityType, entityId, fileRole])
+  @@index([entityType, entityId])
+  @@index([storagePath])
+}
+
 model UserProjectViewSettings {
   id       String  @id @default(cuid())
   userId   String
@@ -2326,7 +2424,7 @@ model JournalEntry {
   account     Account  @relation(fields: [accountId], references: [id], onDelete: Restrict)
   description String   @db.Text
   amountCents Int                                      // Positive = debit to account, Negative = credit from account
-  taxCode     AccountTaxCode @default(BAS_EXCLUDED)
+  taxCode     AccountTaxCode                           // Set by API layer (Zod schema defaults to BAS_EXCLUDED)
   reference   String?  @db.VarChar(500)
   notes       String?  @db.Text
   userId      String?
@@ -2586,7 +2684,7 @@ model BasPeriod {
 model AccountingSettings {
   id String @id @default("default")
 
-  reportingBasis String @default("ACCRUAL")
+  reportingBasis String @default("CASH")
 
   // Default Chart of Accounts for BAS payment splitting
   basGstAccountId                String?   // Account for the GST net component (1A − 1B)

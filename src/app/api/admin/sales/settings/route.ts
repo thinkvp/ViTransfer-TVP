@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
+import { invalidateSalesSettingsCaches } from '@/lib/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -106,6 +107,8 @@ export async function POST(request: NextRequest) {
     create: { id: 'default', ...input },
     update: { ...input },
   })
+
+  invalidateSalesSettingsCaches()
 
   return NextResponse.json({ ok: true, settings: salesSettingsFromDb(row as any) })
 }

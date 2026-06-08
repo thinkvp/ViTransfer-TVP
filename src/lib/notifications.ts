@@ -28,6 +28,7 @@ interface ApprovalNotificationContext {
   authorName?: string | null
   authorEmail?: string | null
   isComplete?: boolean // true = all videos approved, false = partial approval
+  performedByAdmin?: boolean // true = admin/internal user performed the action
 }
 
 /**
@@ -427,13 +428,17 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
     console.log(`[IMMEDIATE→CLIENT] Skipped - partial approval (${approvedVideos?.length || 0} videos), not sending to client`)
   }
 
-  // Send to admins - notify them when client approves OR unapproves ANY video
+  // Send to admins - notify them when a *client* approves OR unapproves ANY video.
+  // Skip this email when the action was performed by an internal admin (no need to
+  // notify other admins that an admin clicked approve).
   const globalSettings = await prisma.settings.findUnique({
     where: { id: 'default' },
     select: { adminEmailProjectApproved: true },
   })
 
-  if (internalEmails.length > 0 && globalSettings?.adminEmailProjectApproved !== false) {
+  if (context.performedByAdmin) {
+    console.log(`[IMMEDIATE→ADMIN] Skipped - action performed by internal admin, not notifying other admins`)
+  } else if (internalEmails.length > 0 && globalSettings?.adminEmailProjectApproved !== false) {
     const action = approved ? 'approval' : 'unapproval'
     console.log(`[IMMEDIATE→ADMIN] Sending ${action} notice to ${internalEmails.length} internal user(s)`)
 
@@ -493,7 +498,7 @@ async function sendApprovalImmediately(context: ApprovalNotificationContext) {
     projectId: project.id,
     projectName: project.title,
     title: `Video ${approved ? 'Approved' : 'Unapproved'}`,
-    message: `Client ${approvalStatus} video${videosForPush.length > 1 ? 's' : ''}`,
+    message: `${authorName || 'Client'} ${approvalStatus} video${videosForPush.length > 1 ? 's' : ''}`,
     details: {
       'Project': project.title,
       'Video(s)': videoNames,

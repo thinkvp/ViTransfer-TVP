@@ -7,11 +7,12 @@ import Image from 'next/image'
 type Video = any
 type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings, Loader2, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings, Loader2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
-import { timecodeToSeconds } from '@/lib/timecode'
+import { timecodeToSeconds, secondsToTimecode } from '@/lib/timecode'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
+import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,23 @@ function formatTimestampForDuration(seconds: number, durationSeconds: number): s
   // Duration is MM:SS, so keep current time as MM:SS (pad minutes to 2 digits).
   const minutes = Math.floor(totalSeconds / 60)
   return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
+
+/**
+ * Format a timestamp for display, respecting the user's time display mode.
+ * - 'duration': MM:SS or H:MM:SS (current behaviour)
+ * - 'timecode': HH:MM:SS:FF using the selected video's FPS
+ */
+function formatTimestampDisplay(
+  seconds: number,
+  durationSeconds: number,
+  fps: number | undefined,
+  mode: 'duration' | 'timecode',
+): string {
+  if (mode === 'timecode' && typeof fps === 'number' && fps > 0) {
+    return secondsToTimecode(seconds, fps)
+  }
+  return formatTimestampForDuration(seconds, durationSeconds)
 }
 
 interface VideoPlayerProps {
@@ -96,6 +114,16 @@ interface VideoPlayerProps {
   // 100dvh instead of the default 60dvh. Useful when the player is the only
   // content on the page (e.g. Guest Video Link).
   mobileFullHeight?: boolean
+
+  // Optional: project-level default for time display mode (duration vs timecode).
+  // When true, the player defaults to full timecode (HH:MM:SS:FF) display.
+  // Users can override this per-device via a local toggle stored in localStorage.
+  useFullTimecode?: boolean
+
+  // Optional: when true, shows a small dropdown arrow next to the time display
+  // that lets the viewer toggle between Duration (MM:SS) and Timecode (HH:MM:SS:FF).
+  // Typically enabled on the share page for client viewing.
+  showTimeDisplayToggle?: boolean
 }
 
 export default function VideoPlayer({
@@ -124,6 +152,8 @@ export default function VideoPlayer({
   fillContainer = false,
   pinControlsToBottom = false,
   mobileFullHeight = false,
+  useFullTimecode = false, // Default to duration mode
+  showTimeDisplayToggle = false, // Default: hide the toggle (admin view)
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
@@ -151,6 +181,30 @@ export default function VideoPlayer({
   const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false)
 
   const [showApprovedDownloadOptions, setShowApprovedDownloadOptions] = useState(false)
+
+  // Time display mode: 'duration' (MM:SS) or 'timecode' (HH:MM:SS:FF)
+  // Uses a shared hook so the setting syncs with CommentSection / CommentInput.
+  const { timeDisplayMode, setTimeDisplayMode } = useTimeDisplayMode(useFullTimecode)
+  const [showTimeDisplayMenu, setShowTimeDisplayMenu] = useState(false)
+
+  // Close time display menu on outside click (uses class-based detection to
+  // support multiple instances rendered in different control layouts).
+  useEffect(() => {
+    if (!showTimeDisplayMenu) return
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest('.time-display-toggle') && !target.closest('.time-display-menu')) {
+        setShowTimeDisplayMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showTimeDisplayMenu])
+
+  const toggleTimeDisplayMode = useCallback((mode: 'duration' | 'timecode') => {
+    setTimeDisplayMode(mode)
+    setShowTimeDisplayMenu(false)
+  }, [setTimeDisplayMode])
 
   // Quality selector state
   const [selectedQuality, setSelectedQuality] = useState<'auto' | '480p' | '720p' | '1080p'>('auto')
@@ -397,6 +451,8 @@ export default function VideoPlayer({
 
   const effectiveDurationSeconds =
     durationSeconds || ((selectedVideo as any)?.duration as number | undefined) || 0
+
+  const effectiveFps = (selectedVideo as any)?.fps as number | undefined
 
   const selectedVideoWidth = (selectedVideo as any)?.width as number | undefined
   const selectedVideoHeight = (selectedVideo as any)?.height as number | undefined
@@ -2063,9 +2119,50 @@ export default function VideoPlayer({
                 </>
               )}
 
-              <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
-                {formatTimestampForDuration(effectiveDurationSeconds, effectiveDurationSeconds)}
+              <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap flex items-center gap-0.5">
+                <span>
+                  {formatTimestampDisplay(currentTimeSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)} /{' '}
+                  {formatTimestampDisplay(effectiveDurationSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)}
+                </span>
+                {showTimeDisplayToggle && (
+                <div className="relative time-display-toggle">
+                  <button
+                    type="button"
+                    className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0 bg-transparent border-0 cursor-pointer"
+                    onClick={() => setShowTimeDisplayMenu((v) => !v)}
+                    aria-label="Toggle time display format"
+                    title="Switch between duration and timecode"
+                  >
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {showTimeDisplayMenu && (
+                    <div className="time-display-menu absolute bottom-full left-0 mb-1 bg-popover border border-border rounded-md shadow-md py-1 z-50 min-w-[100px]">
+                      <button
+                        type="button"
+                        className={cn(
+                          'block w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors',
+                          timeDisplayMode === 'duration' && 'text-foreground font-medium',
+                        )}
+                        onClick={() => toggleTimeDisplayMode('duration')}
+                      >
+                        Duration
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'block w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors',
+                          timeDisplayMode === 'timecode' && 'text-foreground font-medium',
+                          (!effectiveFps || effectiveFps <= 0) && 'text-muted-foreground/40 pointer-events-none',
+                        )}
+                        onClick={() => effectiveFps && effectiveFps > 0 && toggleTimeDisplayMode('timecode')}
+                        title={!effectiveFps || effectiveFps <= 0 ? 'Timecode requires FPS metadata on this video' : undefined}
+                      >
+                        Timecode
+                      </button>
+                    </div>
+                  )}
+                </div>
+                )}
               </div>
             </div>
 
@@ -2458,19 +2555,26 @@ export default function VideoPlayer({
                     </div>
                   )}
 
-                  {timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl && (
+                  {timelineCues.length > 0 && timelineHover.visible && timelineHover.spriteUrl && (() => {
+                    const maxW = 250
+                    const maxH = 300
+                    const scale = Math.min(maxW / timelineHover.w, maxH / timelineHover.h, 1)
+                    const displayW = Math.round(timelineHover.w * scale)
+                    const displayH = Math.round(timelineHover.h * scale)
+                    return (
                     <>
                       <div
                         className="rounded-md border border-border overflow-hidden bg-card"
-                        style={{ width: timelineHover.w, height: timelineHover.h }}
+                        style={{ width: displayW, height: displayH }}
                       >
                         <div
                           style={{
-                            width: timelineHover.w,
-                            height: timelineHover.h,
+                            width: displayW,
+                            height: displayH,
                             backgroundImage: `url(${timelineHover.spriteUrl})`,
+                            backgroundSize: `${displayW * 10}px auto`,
+                            backgroundPosition: `-${Math.round(timelineHover.x * scale)}px -${Math.round(timelineHover.y * scale)}px`,
                             backgroundRepeat: 'no-repeat',
-                            backgroundPosition: `-${timelineHover.x}px -${timelineHover.y}px`,
                           }}
                         />
                       </div>
@@ -2478,7 +2582,8 @@ export default function VideoPlayer({
                         {formatTimestampForDuration(timelineHover.timeSeconds, effectiveDurationSeconds)}
                       </div>
                     </>
-                  )}
+                    )
+                  })()}
                 </div>
               )}
             </div>
@@ -2606,9 +2711,50 @@ export default function VideoPlayer({
               </div>
 
               {/* Centre: Time */}
-              <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap text-center">
-                {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
-                {formatTimestampForDuration(effectiveDurationSeconds, effectiveDurationSeconds)}
+              <div className="flex items-center justify-center gap-0.5">
+                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap text-center">
+                  {formatTimestampDisplay(currentTimeSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)} /{' '}
+                  {formatTimestampDisplay(effectiveDurationSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)}
+                </div>
+                {showTimeDisplayToggle && (
+                <div className="relative time-display-toggle">
+                  <button
+                    type="button"
+                    className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0 bg-transparent border-0 cursor-pointer"
+                    onClick={() => setShowTimeDisplayMenu((v) => !v)}
+                    aria-label="Toggle time display format"
+                    title="Switch between duration and timecode"
+                  >
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  {showTimeDisplayMenu && (
+                    <div className="time-display-menu absolute bottom-full left-0 mb-1 bg-popover border border-border rounded-md shadow-md py-1 z-50 min-w-[100px]">
+                      <button
+                        type="button"
+                        className={cn(
+                          'block w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors',
+                          timeDisplayMode === 'duration' && 'text-foreground font-medium',
+                        )}
+                        onClick={() => toggleTimeDisplayMode('duration')}
+                      >
+                        Duration
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'block w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors',
+                          timeDisplayMode === 'timecode' && 'text-foreground font-medium',
+                          (!effectiveFps || effectiveFps <= 0) && 'text-muted-foreground/40 pointer-events-none',
+                        )}
+                        onClick={() => effectiveFps && effectiveFps > 0 && toggleTimeDisplayMode('timecode')}
+                        title={!effectiveFps || effectiveFps <= 0 ? 'Timecode requires FPS metadata on this video' : undefined}
+                      >
+                        Timecode
+                      </button>
+                    </div>
+                  )}
+                </div>
+                )}
               </div>
 
               {/* Right: Quality, Comments (fullscreen), Fullscreen, Download */}
@@ -2717,9 +2863,50 @@ export default function VideoPlayer({
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </Button>
 
-                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap truncate min-w-0">
-                  {formatTimestampForDuration(currentTimeSeconds, effectiveDurationSeconds)} /{' '}
-                  {formatTimestampForDuration(effectiveDurationSeconds, effectiveDurationSeconds)}
+                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap truncate min-w-0 flex items-center gap-0.5">
+                  <span>
+                    {formatTimestampDisplay(currentTimeSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)} /{' '}
+                    {formatTimestampDisplay(effectiveDurationSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)}
+                  </span>
+                  {showTimeDisplayToggle && (
+                  <div className="relative time-display-toggle flex-shrink-0">
+                    <button
+                      type="button"
+                      className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0 bg-transparent border-0 cursor-pointer"
+                      onClick={() => setShowTimeDisplayMenu((v) => !v)}
+                      aria-label="Toggle time display format"
+                      title="Switch between duration and timecode"
+                    >
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    {showTimeDisplayMenu && (
+                      <div className="time-display-menu absolute bottom-full left-0 mb-1 bg-popover border border-border rounded-md shadow-md py-1 z-50 min-w-[100px]">
+                        <button
+                          type="button"
+                          className={cn(
+                            'block w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors',
+                            timeDisplayMode === 'duration' && 'text-foreground font-medium',
+                          )}
+                          onClick={() => toggleTimeDisplayMode('duration')}
+                        >
+                          Duration
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            'block w-full text-left px-3 py-1.5 text-xs hover:bg-accent transition-colors',
+                            timeDisplayMode === 'timecode' && 'text-foreground font-medium',
+                            (!effectiveFps || effectiveFps <= 0) && 'text-muted-foreground/40 pointer-events-none',
+                          )}
+                          onClick={() => effectiveFps && effectiveFps > 0 && toggleTimeDisplayMode('timecode')}
+                          title={!effectiveFps || effectiveFps <= 0 ? 'Timecode requires FPS metadata on this video' : undefined}
+                        >
+                          Timecode
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  )}
                 </div>
               </div>
 

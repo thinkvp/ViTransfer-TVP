@@ -256,7 +256,9 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
           UPDATE "VideoAsset"
           SET
             "storagePath" = REPLACE("storagePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("previewPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END
+            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("previewPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewVttPath" = CASE WHEN "timelinePreviewVttPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewVttPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewSpritesPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END
           WHERE "storagePath" LIKE ${renameJob.oldPrefix + '%'}
         `
       })
@@ -352,7 +354,9 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
           UPDATE "VideoAsset"
           SET
             "storagePath" = REPLACE("storagePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END
+            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewVttPath" = CASE WHEN "timelinePreviewVttPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewVttPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
+            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewSpritesPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END
           WHERE "videoId" = ${renameJob.entityId}
         `
       })

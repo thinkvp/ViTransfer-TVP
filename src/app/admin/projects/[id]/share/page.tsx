@@ -17,6 +17,8 @@ import { ArrowLeft } from 'lucide-react'
 import { apiFetch, attemptRefresh } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
+import { useContentImageRefresh } from '@/hooks/useContentImageRefresh'
 import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
@@ -873,6 +875,67 @@ export default function AdminSharePage() {
     })
   }, [project?.videosByName, fetchSidebarVideos])
 
+  // ── Comprehensive content-token refresh ──────────────────────────────────
+  // Called by useContentImageRefresh on: image load errors, periodic timer,
+  // and visibility change (tab hidden >30 s → visible).  Covers video
+  // thumbnails/sprites, album photos, and upload previews.
+  const refreshAllContentTokens = useCallback(() => {
+    // Clear all token caches so subsequent fetches produce fresh URLs.
+    tokenCacheRef.current.clear()
+    tokenRequestCacheRef.current.clear()
+    sidebarVideoCacheRef.current.clear()
+    sidebarThumbnailRequestCacheRef.current.clear()
+
+    // Refresh video tokens (thumbnails, sprites, VTT) for all videos.
+    if (project?.videosByName) {
+      const allVideos = Object.values(project.videosByName).flat() as any[]
+      if (allVideos.length > 0) {
+        void fetchSidebarVideos(allVideos).then((tokenized) => {
+          setAllVideosByName((prev) => {
+            const updated = { ...prev }
+            tokenized.forEach((video: any) => {
+              const videoName = Object.entries(project.videosByName).find(
+                ([_, versions]: any) => (versions as any[]).some((v: any) => v.id === video.id)
+              )?.[0]
+              if (videoName) {
+                if (!updated[videoName]) updated[videoName] = []
+                updated[videoName] = updated[videoName].map((v: any) =>
+                  v.id === video.id ? video : v
+                )
+                if (!updated[videoName].some((v: any) => v.id === video.id)) {
+                  updated[videoName].push(video)
+                }
+              }
+            })
+            return updated
+          })
+
+          // Also re-tokenize the active video for the player.
+          if (activeVideoName && project.videosByName[activeVideoName]) {
+            void fetchTokensForVideos(project.videosByName[activeVideoName]).then((tokenizedActive) => {
+              setActiveVideos(tokenizedActive)
+            })
+          }
+        })
+      }
+    }
+
+    // Refresh downloadable files (album photo tokens, upload access URLs).
+    void fetchDownloadableFiles()
+
+    // Refresh album list (sidebar album thumbnail URLs).
+    if (project?.slug) {
+      void fetchAlbums(String(project.slug))
+    }
+  }, [project?.videosByName, project?.slug, activeVideoName, fetchSidebarVideos, fetchTokensForVideos, fetchDownloadableFiles, fetchAlbums])
+
+  // Global content-image error capture + proactive periodic token refresh +
+  // visibility-change refresh.
+  useContentImageRefresh({
+    onRefresh: refreshAllContentTokens,
+    enabled: !loading && !!project,
+  })
+
   // Handle video selection (identical to public share)
   const handleVideoSelect = (videoName: string) => {
     if (!activeAlbumId && activeVideoName === videoName) return
@@ -1141,7 +1204,7 @@ export default function AdminSharePage() {
           ? {
               ...item,
               status: 'preparing',
-              progressPercent: 10,
+              progressPercent: 0,
               speedBytesPerSecond: null,
               etaSeconds: null,
               errorMessage: null,
@@ -2172,6 +2235,7 @@ export default function AdminSharePage() {
                       onApprove={undefined}
                       hideDownloadButton={true}
                       commentsForTimeline={filteredComments}
+                      showTimeDisplayToggle={true}
                       fillContainer
                     />
                   </div>
@@ -2360,6 +2424,11 @@ function AdminShareFeedbackGrid({
   const permissions = normalizeRolePermissions(adminUser?.permissions)
   const canManageShareComments = canDoAction(permissions, 'manageSharePageComments')
 
+  // Share the user's time-display preference so that CommentSectionView and
+  // CommentInput stay in sync with the VideoPlayer toggle.
+  const { timeDisplayMode } = useTimeDisplayMode(Boolean(project?.useFullTimecode))
+  const effectiveUseFullTimecode = timeDisplayMode === 'timecode'
+
   const management = useCommentManagement({
     projectId: String(project.id),
     initialComments: serverComments as any,
@@ -2455,6 +2524,7 @@ function AdminShareFeedbackGrid({
               hideDownloadButton={true}
               commentsForTimeline={management.comments as any}
               disableFullscreenCommentsUI={commentsDisabled}
+              showTimeDisplayToggle={true}
               fillContainer
               pinControlsToBottom={false}
             />
@@ -2484,7 +2554,7 @@ function AdminShareFeedbackGrid({
                 onClearRange={management.handleClearRange}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
-                useFullTimecode={Boolean(project?.useFullTimecode)}
+                useFullTimecode={effectiveUseFullTimecode}
                 replyingToComment={management.replyingToComment}
                 onCancelReply={management.handleCancelReply}
                 showAuthorInput={false}
@@ -2535,7 +2605,7 @@ function AdminShareFeedbackGrid({
               clientEmail={project.recipients?.[0]?.email}
               isApproved={isApproved}
               restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
-              useFullTimecode={Boolean(project?.useFullTimecode)}
+              useFullTimecode={effectiveUseFullTimecode}
               videos={readyVideos as any}
               isAdminView={true}
               canAdminDeleteComments={canManageShareComments}
@@ -2581,7 +2651,7 @@ function AdminShareFeedbackGrid({
                 onClearRange={management.handleClearRange}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
-                useFullTimecode={Boolean(project?.useFullTimecode)}
+                useFullTimecode={effectiveUseFullTimecode}
                 replyingToComment={management.replyingToComment}
                 onCancelReply={management.handleCancelReply}
                 showAuthorInput={false}

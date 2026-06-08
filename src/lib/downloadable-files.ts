@@ -37,6 +37,12 @@ export interface DownloadableFile {
   previewStatus?: string
   /** Optional tokenized direct download URL. */
   downloadUrl?: string
+  /** Whether this video has timeline hover previews (sprite sheets + VTT). */
+  hasTimelinePreviews?: boolean
+  /** Tokenized URL to the timeline VTT index file. */
+  timelineVttUrl?: string
+  /** Tokenized base URL for timeline sprite images (append sprite filename). */
+  timelineSpriteBaseUrl?: string
 }
 
 export interface DownloadableGroup {

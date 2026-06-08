@@ -3,15 +3,16 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { deleteFile, deleteDirectory } from '@/lib/storage'
+import { deleteFile } from '@/lib/storage'
 
 export const runtime = 'nodejs'
 
 /**
  * POST /api/settings/delete-closed-project-previews
  *
- * Deletes project video previews (480p, 720p, 1080p), timeline sprite directories,
- * and video-asset playback previews for all CLOSED projects.
+ * Deletes project video previews (480p, 720p, 1080p) and video-asset
+ * playback previews for all CLOSED projects. Timeline sprites are preserved
+ * since they are small and regenerating them is costly.
  *
  * Body: { dryRun?: boolean }   (default true)
  */
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
   const dryRun = body.dryRun !== false
 
   try {
-    // Find all CLOSED projects that still have videos with preview paths or timeline sprites
+    // Find all CLOSED projects that still have videos with preview paths
     const closedProjects = await prisma.project.findMany({
       where: { status: 'CLOSED' },
       select: {
@@ -44,8 +45,6 @@ export async function POST(request: NextRequest) {
               { preview480Path: { not: null } },
               { preview720Path: { not: null } },
               { preview1080Path: { not: null } },
-              { timelinePreviewVttPath: { not: null } },
-              { timelinePreviewSpritesPath: { not: null } },
             ],
           },
           select: {
@@ -53,9 +52,6 @@ export async function POST(request: NextRequest) {
             preview480Path: true,
             preview720Path: true,
             preview1080Path: true,
-            timelinePreviewVttPath: true,
-            timelinePreviewSpritesPath: true,
-            timelinePreviewsReady: true,
           },
         },
       },
@@ -104,11 +100,8 @@ export async function POST(request: NextRequest) {
     let totalVideos = 0
     let totalVideoAssets = 0
     let totalPreviewFiles = 0
-    let totalTimelineDirs = 0
     let deletedPreviewFiles = 0
     let failedPreviewFiles = 0
-    let deletedTimelineDirs = 0
-    let failedTimelineDirs = 0
     const errors: Array<{ projectId: string; path: string; error: string }> = []
 
     for (const project of projectsWithPreviews) {
@@ -124,17 +117,8 @@ export async function POST(request: NextRequest) {
         ].filter(Boolean) as string[]
         totalPreviewFiles += previewPaths.length
 
-        const timelineVttPath = video.timelinePreviewVttPath || null
-        if (timelineVttPath) {
-          totalPreviewFiles++
-        }
-
-        if (video.timelinePreviewSpritesPath) {
-          totalTimelineDirs++
-        }
-
         if (!dryRun) {
-          const updateData: Record<string, null | boolean> = {}
+          const updateData: Record<string, null> = {}
 
           // Delete preview files
           for (const path of previewPaths) {
@@ -147,38 +131,10 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          if (timelineVttPath) {
-            try {
-              await deleteFile(timelineVttPath)
-              deletedPreviewFiles++
-            } catch (err: any) {
-              failedPreviewFiles++
-              errors.push({ projectId: project.id, path: timelineVttPath, error: err?.message || 'Unknown error' })
-            }
-          }
-
-          if (previewPaths.length > 0 || timelineVttPath) {
+          if (previewPaths.length > 0) {
             updateData.preview480Path = null
             updateData.preview720Path = null
             updateData.preview1080Path = null
-          }
-
-          // Delete timeline sprite directory
-          if (video.timelinePreviewSpritesPath) {
-            try {
-              await deleteDirectory(video.timelinePreviewSpritesPath)
-              deletedTimelineDirs++
-            } catch (err: any) {
-              failedTimelineDirs++
-              errors.push({
-                projectId: project.id,
-                path: video.timelinePreviewSpritesPath,
-                error: err?.message || 'Unknown error',
-              })
-            }
-            updateData.timelinePreviewsReady = false
-            updateData.timelinePreviewVttPath = null
-            updateData.timelinePreviewSpritesPath = null
           }
 
           if (Object.keys(updateData).length > 0) {
@@ -241,14 +197,11 @@ export async function POST(request: NextRequest) {
       videosWithPreviews: totalVideos,
       videoAssetsWithPreviews: totalVideoAssets,
       previewFiles: totalPreviewFiles,
-      timelineDirs: totalTimelineDirs,
       ...(!dryRun
         ? {
             deleted: {
               previewFiles: deletedPreviewFiles,
               previewFilesFailed: failedPreviewFiles,
-              timelineDirs: deletedTimelineDirs,
-              timelineDirsFailed: failedTimelineDirs,
             },
           }
         : {}),

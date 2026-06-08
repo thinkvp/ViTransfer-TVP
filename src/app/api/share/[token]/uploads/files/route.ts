@@ -14,7 +14,7 @@ import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storag
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
-import { enqueueShareUploadPreview } from '@/lib/queue'
+import { enqueueShareUploadPreview, getUploadTimelineQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -169,6 +169,20 @@ export async function POST(
       fileName: storageFileName,
       durationSeconds: mediaMetadata?.durationSeconds ?? null,
     }).catch((e) => console.warn('[PREVIEW] Failed to enqueue preview after upload:', e))
+
+    // Also enqueue timeline sprite generation for video uploads
+    // (processor probes metadata when duration/width/height are 0)
+    if (isShareUploadVideoFileType(mimeType)) {
+      const uploadTimelineQueue = getUploadTimelineQueue()
+      void uploadTimelineQueue.add('process-upload-timeline', {
+        uploadFileId: createdFile.id,
+        projectId: access.project.id,
+        storagePath,
+        durationSeconds: mediaMetadata?.durationSeconds ?? 0,
+        width: mediaMetadata?.width ?? 0,
+        height: mediaMetadata?.height ?? 0,
+      }).catch((e) => console.warn('[TIMELINE] Failed to enqueue upload timeline after upload:', e))
+    }
   }
 
   return NextResponse.json({

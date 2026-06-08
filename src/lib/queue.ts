@@ -14,6 +14,8 @@ let albumPhotoThumbnailQueueInstance: Queue<AlbumPhotoThumbnailJob> | null = nul
 let albumPhotoZipQueueInstance: Queue<AlbumPhotoZipJob> | null = null
 let folderRenameQueueInstance: Queue<FolderRenameJobPayload> | null = null
 let shareUploadPreviewQueueInstance: Queue<ShareUploadPreviewJob> | null = null
+let assetTimelineQueueInstance: Queue<AssetTimelineJob> | null = null
+let uploadTimelineQueueInstance: Queue<UploadTimelineJob> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -89,6 +91,33 @@ export interface ShareUploadPreviewJob {
   fileType: string
   fileName: string
   durationSeconds?: number | null
+}
+
+/** Payload for generating timeline hover sprites for a video asset. */
+export interface AssetTimelineJob {
+  assetId: string
+  videoId: string
+  projectId: string
+  storagePath: string
+  /** Duration in seconds (from media metadata). */
+  durationSeconds: number
+  /** Video width in pixels. */
+  width: number
+  /** Video height in pixels. */
+  height: number
+}
+
+/** Payload for generating timeline hover sprites for an upload video. */
+export interface UploadTimelineJob {
+  uploadFileId: string
+  projectId: string
+  storagePath: string
+  /** Duration in seconds (from media metadata). */
+  durationSeconds: number
+  /** Video width in pixels. */
+  width: number
+  /** Video height in pixels. */
+  height: number
 }
 
 export function getVideoQueue(): Queue<VideoProcessingJob> {
@@ -382,6 +411,46 @@ export function getShareUploadPreviewQueue(): Queue<ShareUploadPreviewJob> {
   }
 
   return shareUploadPreviewQueueInstance
+}
+
+export function getAssetTimelineQueue(): Queue<AssetTimelineJob> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!assetTimelineQueueInstance) {
+    assetTimelineQueueInstance = new Queue<AssetTimelineJob>('asset-timeline', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { age: 3600 },
+        removeOnFail: { age: 86400 },
+      },
+    })
+  }
+
+  return assetTimelineQueueInstance
+}
+
+export function getUploadTimelineQueue(): Queue<UploadTimelineJob> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!uploadTimelineQueueInstance) {
+    uploadTimelineQueueInstance = new Queue<UploadTimelineJob>('upload-timeline', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { age: 3600 },
+        removeOnFail: { age: 86400 },
+      },
+    })
+  }
+
+  return uploadTimelineQueueInstance
 }
 
 /**

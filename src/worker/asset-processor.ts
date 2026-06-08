@@ -166,10 +166,10 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
 
     // Enqueue preview generation for image and video assets
     if (fileType.mime.startsWith('image/') || fileType.mime.startsWith('video/')) {
-      const { enqueueShareUploadPreview } = await import('@/lib/queue')
+      const { enqueueShareUploadPreview, getAssetTimelineQueue } = await import('@/lib/queue')
       const asset = await prisma.videoAsset.findUnique({
         where: { id: assetId },
-        select: { id: true, storagePath: true, fileName: true },
+        select: { id: true, storagePath: true, fileName: true, videoId: true, video: { select: { projectId: true } } },
       })
       if (asset) {
         enqueueShareUploadPreview({
@@ -179,6 +179,21 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
           fileType: fileType.mime,
           fileName: asset.fileName,
         }).catch((e) => console.warn(`[PREVIEW] Failed to enqueue preview for asset ${assetId}:`, e))
+
+        // Also enqueue timeline sprite generation for video assets
+        // (processor probes metadata when duration/width/height are 0)
+        if (fileType.mime.startsWith('video/')) {
+          const assetTimelineQueue = getAssetTimelineQueue()
+          void assetTimelineQueue.add('process-asset-timeline', {
+            assetId: asset.id,
+            videoId: asset.videoId,
+            projectId: (asset.video as any)?.projectId || projectId,
+            storagePath: asset.storagePath,
+            durationSeconds: 0,
+            width: 0,
+            height: 0,
+          }).catch((e) => console.warn(`[TIMELINE] Failed to enqueue asset timeline for ${assetId}:`, e))
+        }
       }
     }
 

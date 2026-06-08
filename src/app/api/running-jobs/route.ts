@@ -115,9 +115,50 @@ export async function GET(request: NextRequest) {
       }
     })
 
+    // Also include asset and upload timeline jobs
+    const [assetJobs, uploadJobs] = await Promise.all([
+      prisma.videoAsset.findMany({
+        where: { processingPhase: { not: null } },
+        select: { id: true, fileName: true, processingPhase: true, processingProgress: true,
+          video: { select: { id: true, name: true, projectId: true, project: { select: { title: true } } } },
+        },
+      }),
+      prisma.shareUploadFile.findMany({
+        where: { processingPhase: { not: null } },
+        select: { id: true, fileName: true, processingPhase: true, processingProgress: true,
+          projectId: true, project: { select: { title: true } },
+        },
+      }),
+    ])
+
+    const extraJobs = [
+      ...assetJobs.map((a) => ({
+        id: a.id,
+        projectId: a.video.projectId,
+        projectName: a.video.project.title,
+        videoName: `${a.video.name} / ${a.fileName}`,
+        versionLabel: 'asset',
+        status: (a.processingProgress ?? 0) > 0 ? 'PROCESSING' as const : 'QUEUED' as const,
+        processingProgress: a.processingProgress ?? 0,
+        processingPhase: a.processingPhase,
+      })),
+      ...uploadJobs.map((u) => ({
+        id: u.id,
+        projectId: u.projectId,
+        projectName: u.project.title,
+        videoName: u.fileName,
+        versionLabel: 'upload',
+        status: (u.processingProgress ?? 0) > 0 ? 'PROCESSING' as const : 'QUEUED' as const,
+        processingProgress: u.processingProgress ?? 0,
+        processingPhase: u.processingPhase,
+      })),
+    ]
+
+    const allJobs = [...resolvedJobs, ...extraJobs]
+
     await loadCpuConfigOverrides(getRedis())
     const alloc = getCpuAllocation()
-    const activeProcessingCount = resolvedJobs.filter((job) => job.status === 'PROCESSING').length
+    const activeProcessingCount = allJobs.filter((job) => job.status === 'PROCESSING').length
     const configuredThreadPool = alloc.maxThreadsUsedEstimate
 
     let dynamicThreadsPerJob: number
@@ -132,7 +173,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const jobs = resolvedJobs.map((job) => {
+    const jobs = allJobs.map((job) => {
       const isActive = job.status === 'PROCESSING'
 
       let allocatedThreads: number | null = null

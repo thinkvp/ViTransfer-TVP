@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { expenseFromDb } from '@/lib/accounting/db-mappers'
+import { getSalesTaxRate } from '@/lib/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -134,8 +135,8 @@ export async function POST(request: NextRequest) {
   const amountIncGstCents = Math.round(d.amountIncGst * 100)
   let gstAmountCents = 0
   if (d.taxCode === 'GST') {
-    const settings = await prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } })
-    const taxRate = (settings?.taxRatePercent ?? 10) / 100 // e.g. 0.10
+    const taxRatePercent = await getSalesTaxRate()
+    const taxRate = taxRatePercent / 100 // e.g. 0.10
     gstAmountCents = Math.round(amountIncGstCents * taxRate / (1 + taxRate))
   }
   const amountExGstCents = amountIncGstCents - gstAmountCents
