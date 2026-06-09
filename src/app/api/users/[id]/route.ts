@@ -64,7 +64,7 @@ export async function GET(
         name: true,
         notes: true,
         phone: true,
-        avatarPath: true,
+
         displayColor: true,
         active: true,
         appRoleId: true,
@@ -353,7 +353,6 @@ export async function PATCH(
         name: true,
         notes: true,
         phone: true,
-        avatarPath: true,
         displayColor: true,
         active: true,
         appRoleId: true,

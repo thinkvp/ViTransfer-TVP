@@ -103,7 +103,6 @@ export async function GET(
                 id: true,
                 name: true,
                 versionLabel: true,
-                originalFileName: true,
                 assets: {
                   select: {
                     id: true,

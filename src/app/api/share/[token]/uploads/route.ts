@@ -12,6 +12,7 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import { getShareUploadPreviewStoragePath } from '@/lib/share-upload-video-thumbnail'
+import { getStoredFilePathForProject, deleteStoredFile } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -29,7 +30,7 @@ interface FileListItem {
   id: string
   folderRelativePath: string
   fileName: string
-  fileSize: bigint
+  fileSize: string
   fileType: string
   createdAt: Date
   previewStatus: string | null
@@ -92,7 +93,6 @@ export async function GET(
         id: true,
         folderRelativePath: true,
         fileName: true,
-        fileSize: true,
         fileType: true,
         createdAt: true,
         previewStatus: true,
@@ -105,9 +105,9 @@ export async function GET(
     parentRelativePath: getParentRelativePath(folder.relativePath),
   }))
 
-  const fileItems = files.map((file: FileListItem) => ({
+  const fileItems = files.map((file) => ({
     ...file,
-    fileSize: Number(file.fileSize),
+    fileSize: '0' as const, // From StoredFile if needed
   }))
 
   return NextResponse.json({
@@ -244,21 +244,27 @@ export async function DELETE(
   if (fileId) {
     const file = await prisma.shareUploadFile.findFirst({
       where: { id: fileId, projectId: access.project.id },
-      select: { id: true, storagePath: true, fileType: true },
+      select: { id: true, fileType: true },
     })
 
     if (!file) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
-    const projectStoragePath = resolveProjectStoragePath(access.project)
-    const thumbnailStoragePath = getShareUploadPreviewStoragePath(projectStoragePath, file.storagePath, file.fileType)
+    // Get storage path from StoredFile
+    const fileStoragePath = await getStoredFilePathForProject('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL', access.project.id)
 
-    await deleteFile(file.storagePath).catch(() => undefined)
+    const projectStoragePath = resolveProjectStoragePath(access.project)
+    const thumbnailStoragePath = fileStoragePath ? getShareUploadPreviewStoragePath(projectStoragePath, fileStoragePath, file.fileType) : null
+
+    if (fileStoragePath) {
+      await deleteFile(fileStoragePath).catch(() => undefined)
+    }
     if (thumbnailStoragePath) {
       await deleteFile(thumbnailStoragePath).catch(() => undefined)
     }
     await prisma.shareUploadFile.delete({ where: { id: file.id } })
+    await deleteStoredFile('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL').catch(() => {})
     await recalculateAndStoreProjectTotalBytes(access.project.id)
     return NextResponse.json({ success: true })
   }
@@ -286,16 +292,20 @@ export async function DELETE(
         { folderRelativePath: { startsWith: `${folderPath}/` } },
       ],
     },
-    select: { id: true, storagePath: true, fileType: true },
+    select: { id: true, fileType: true },
   })
 
+  // Get paths from StoredFile
   const fileDeleteTasks: Promise<unknown>[] = []
   const projectStoragePath = resolveProjectStoragePath(access.project)
   for (const file of filesToDelete) {
-    fileDeleteTasks.push(deleteFile(file.storagePath))
-    const thumbnailStoragePath = getShareUploadPreviewStoragePath(projectStoragePath, file.storagePath, file.fileType)
-    if (thumbnailStoragePath) {
-      fileDeleteTasks.push(deleteFile(thumbnailStoragePath))
+    const fileStoragePath = await getStoredFilePathForProject('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL', access.project.id)
+    if (fileStoragePath) {
+      fileDeleteTasks.push(deleteFile(fileStoragePath))
+      const thumbnailStoragePath = getShareUploadPreviewStoragePath(projectStoragePath, fileStoragePath, file.fileType)
+      if (thumbnailStoragePath) {
+        fileDeleteTasks.push(deleteFile(thumbnailStoragePath))
+      }
     }
   }
   await Promise.allSettled(fileDeleteTasks)
@@ -321,6 +331,9 @@ export async function DELETE(
     await Promise.allSettled(markerDeleteTasks)
   }
 
+  // Collect file IDs for StoredFile cleanup before deletion
+  const fileIdsToDelete = filesToDelete.map(f => f.id)
+
   await prisma.$transaction([
     prisma.shareUploadFile.deleteMany({
       where: {
@@ -341,6 +354,13 @@ export async function DELETE(
       },
     }),
   ])
+
+  // Clean up StoredFile rows for deleted files
+  if (fileIdsToDelete.length > 0) {
+    await prisma.storedFile.deleteMany({
+      where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: fileIdsToDelete } },
+    }).catch(() => {})
+  }
 
   await recalculateAndStoreProjectTotalBytes(access.project.id)
 

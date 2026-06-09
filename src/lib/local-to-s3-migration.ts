@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import { getFilePath } from '@/lib/storage'
+import { getAllStoredPaths } from '@/lib/stored-file'
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { S3Client, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
@@ -32,8 +33,7 @@ export type S3MigrationConfig = {
 }
 
 export type S3MigrationDryRunResult = {
-  ok: true
-  discoveredPaths: number
+  ok: true, discoveredPaths: number
   existingLocalFiles: number
   missingLocalFiles: number
   totalBytes: number
@@ -192,247 +192,30 @@ function getConfig(input: Partial<S3MigrationConfig>): S3MigrationConfig {
 
 async function collectReferencedPaths(): Promise<Set<string>> {
   const keys = new Set<string>()
-  type UploadFilePathRow = { storagePath: string | null }
-  type UploadFolderPathRow = { storagePath: string | null }
 
-  const [
-    videos,
-    videoAssets,
-    commentFiles,
-    shareUploadFiles,
-    shareUploadFolders,
-    projectFiles,
-    albumPhotos,
-    albums,
-    projectEmails,
-    projectEmailAttachments,
-    clientFiles,
-    userFiles,
-    users,
-    settings,
-  ] = await Promise.all([
-    prisma.video.findMany({
-      select: {
-        originalStoragePath: true,
-        preview480Path: true,
-        preview720Path: true,
-        preview1080Path: true,
-        thumbnailPath: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
-      },
-    }),
-    prisma.videoAsset.findMany({
-      select: {
-        storagePath: true,
-        fileType: true,
-        previewPath: true,
-        video: {
-          select: {
-            storageFolderName: true,
-            name: true,
-            versionLabel: true,
-            project: {
-              select: {
-                storagePath: true,
-                title: true,
-                companyName: true,
-                client: { select: { name: true } },
-              },
-            },
-          },
-        },
-      },
-    }),
-    prisma.commentFile.findMany({ select: { storagePath: true } }),
-    prisma.$queryRaw<UploadFilePathRow[]>`SELECT "storagePath" FROM "ShareUploadFile"`,
-    prisma.$queryRaw<UploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
-    prisma.projectFile.findMany({ select: { storagePath: true } }),
-    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
-    prisma.album.findMany({
-      select: {
-        name: true,
-        storageFolderName: true,
-        fullZipFileSize: true,
-        socialZipFileSize: true,
-        project: {
-          select: {
-            storagePath: true,
-            title: true,
-            companyName: true,
-            client: { select: { name: true } },
-          },
-        },
-      },
-    }),
-    prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
-    prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
-    prisma.clientFile.findMany({ select: { storagePath: true } }),
-    prisma.userFile.findMany({ select: { storagePath: true } }),
-    prisma.user.findMany({ select: { avatarPath: true } }),
-    prisma.settings.findUnique({
-      where: { id: 'default' },
-      select: {
-        companyLogoPath: true,
-        companyFaviconPath: true,
-      },
-    }),
-  ])
+  // Use StoredFile as the single source of truth for all file paths (paginated).
+  // Replaces ~250 lines of per-entity-table queries.
+  let cursor: string | undefined
+  do {
+    const page = await getAllStoredPaths({ cursor, take: 5000 })
+    for (const entry of page.items) {
+      if (!entry.storagePath) continue
 
-  for (const row of videos) {
-    const candidates = [
-      row.originalStoragePath,
-      row.preview480Path,
-      row.preview720Path,
-      row.preview1080Path,
-      row.thumbnailPath,
-      row.timelinePreviewVttPath,
-      row.timelinePreviewSpritesPath,
-    ]
-    for (const candidate of candidates) {
-      const key = normalizeKey(candidate || '')
+      // TIMELINE_SPRITES paths are directories; enumerate their children later
+      // via buildMainLocalEntries, which detects directories.
+      const key = normalizeKey(entry.storagePath)
       if (key) keys.add(key)
     }
-  }
+    cursor = page.nextCursor
+  } while (cursor)
 
-  for (const row of videoAssets) {
-    const key = normalizeKey(row.storagePath)
-    if (key) keys.add(key)
-    const previewKey = normalizeKey(row.previewPath || '')
-    if (previewKey) keys.add(previewKey)
-
-    if (String(row.fileType || '').toLowerCase().startsWith('video/')) {
-      const projectStoragePath = row.video.project.storagePath
-        || buildProjectStorageRoot(row.video.project.client?.name || row.video.project.companyName || 'Client', row.video.project.title)
-      const jpgPreviewPath = buildVideoAssetPreviewStoragePath(
-        projectStoragePath,
-        row.video.storageFolderName || row.video.name,
-        row.video.versionLabel,
-        row.storagePath,
-        '.jpg',
-      )
-      const jpgPreviewKey = normalizeKey(jpgPreviewPath)
-      if (jpgPreviewKey) keys.add(jpgPreviewKey)
-    }
-  }
-
-  // Include asset timeline paths in S3 migration key set
-  const assetsWithTimeline = await prisma.videoAsset.findMany({
-    where: {
-      OR: [
-        { timelinePreviewVttPath: { not: null } },
-        { timelinePreviewSpritesPath: { not: null } },
-      ],
-    },
-    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
-  })
-  for (const a of assetsWithTimeline) {
-    const vttKey = normalizeKey(a.timelinePreviewVttPath || '')
-    if (vttKey) keys.add(vttKey)
-    const spritesKey = normalizeKey(a.timelinePreviewSpritesPath || '')
-    if (spritesKey) keys.add(spritesKey)
-  }
-
-  // Include upload timeline paths in S3 migration key set
-  const uploadsWithTimeline = await prisma.shareUploadFile.findMany({
-    where: {
-      OR: [
-        { timelinePreviewVttPath: { not: null } },
-        { timelinePreviewSpritesPath: { not: null } },
-      ],
-    },
-    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
-  })
-  for (const u of uploadsWithTimeline) {
-    const vttKey = normalizeKey(u.timelinePreviewVttPath || '')
-    if (vttKey) keys.add(vttKey)
-    const spritesKey = normalizeKey(u.timelinePreviewSpritesPath || '')
-    if (spritesKey) keys.add(spritesKey)
-  }
-
-  for (const row of commentFiles) {
-    const key = normalizeKey(row.storagePath)
-    if (key) keys.add(key)
-  }
-
-  for (const row of shareUploadFiles) {
-    const key = normalizeKey(row.storagePath || '')
-    if (key) keys.add(key)
-  }
-
-  for (const row of shareUploadFolders) {
-    const folderKey = normalizeKey(row.storagePath || '')
+  // Upload folder markers are not in StoredFile — collect separately
+  const shareUploadFolders = await prisma.$queryRaw<Array<{ storagePath: string | null }>>`SELECT "storagePath" FROM "ShareUploadFolder"`
+  for (const folder of shareUploadFolders) {
+    const folderKey = normalizeKey(folder.storagePath || '')
     if (!folderKey) continue
     const markerKey = normalizeKey(`${folderKey}/${UPLOAD_FOLDER_MARKER}`)
     if (markerKey) keys.add(markerKey)
-  }
-
-  for (const row of projectFiles) {
-    const key = normalizeKey(row.storagePath)
-    if (key) keys.add(key)
-  }
-
-  for (const row of albumPhotos) {
-    const key = normalizeKey(row.storagePath)
-    if (key) keys.add(key)
-    const socialKey = normalizeKey(row.socialStoragePath || '')
-    if (socialKey) keys.add(socialKey)
-    const thumbnailKey = normalizeKey(row.thumbnailStoragePath || '')
-    if (thumbnailKey) keys.add(thumbnailKey)
-  }
-
-  for (const album of albums) {
-    const projectStoragePath = album.project.storagePath
-      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
-    const albumFolderName = album.storageFolderName || album.name
-    const zipPaths = getAlbumZipStoragePaths({
-      projectStoragePath,
-      albumFolderName,
-      albumName: album.name,
-    })
-
-    if (Number(album.fullZipFileSize || 0) > 0) {
-      const fullKey = normalizeKey(zipPaths.full)
-      if (fullKey) keys.add(fullKey)
-    }
-    if (Number(album.socialZipFileSize || 0) > 0) {
-      const socialKey = normalizeKey(zipPaths.social)
-      if (socialKey) keys.add(socialKey)
-    }
-  }
-
-  for (const row of projectEmails) {
-    const key = normalizeKey(row.rawStoragePath)
-    if (key) keys.add(key)
-  }
-
-  for (const row of projectEmailAttachments) {
-    const key = normalizeKey(row.storagePath)
-    if (key) keys.add(key)
-  }
-
-  for (const row of clientFiles) {
-    const key = normalizeKey(row.storagePath)
-    if (key) keys.add(key)
-  }
-
-  for (const row of userFiles) {
-    const key = normalizeKey(row.storagePath)
-    if (key) keys.add(key)
-  }
-
-  for (const row of users) {
-    const key = normalizeKey(row.avatarPath || '')
-    if (key) keys.add(key)
-  }
-
-  const brandCandidates = [
-    settings?.companyLogoPath,
-    settings?.companyFaviconPath,
-  ]
-  for (const candidate of brandCandidates) {
-    const key = normalizeKey(candidate || '')
-    if (key) keys.add(key)
   }
 
   return keys
@@ -443,13 +226,17 @@ async function collectReferencedPaths(): Promise<Set<string>> {
  * These live under ACCOUNTING_STORAGE_ROOT and are uploaded to S3 under the 'accounting/' prefix.
  */
 async function buildAccountingLocalEntries(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number; missingKeys: string[] }> {
-  const attachments = await prisma.accountingAttachment.findMany({ select: { storagePath: true } })
+  const storedFiles = await prisma.storedFile.findMany({
+    where: { entityType: 'ACCOUNTING_ATTACHMENT' },
+    select: { entityId: true, storagePath: true, fileSize: true },
+  })
+  const pathMap = new Map(storedFiles.map(s => [s.entityId, s]))
   const entries: LocalEntry[] = []
   let missingLocalFiles = 0
   const missingKeys: string[] = []
 
-  for (const attachment of attachments) {
-    const relPath = attachment.storagePath?.trim()
+  for (const [entityId, sf] of pathMap) {
+    const relPath = sf.storagePath?.trim()
     if (!relPath) continue
 
     const normalized = relPath.replace(/\\/g, '/').replace(/^\/+/, '')
@@ -482,7 +269,7 @@ async function buildAccountingLocalEntries(): Promise<{ entries: LocalEntry[]; d
     entries.push({ key, absPath, size: stats.size })
   }
 
-  return { entries, discoveredPaths: attachments.length, missingLocalFiles, missingKeys }
+  return { entries, discoveredPaths: storedFiles.length, missingLocalFiles, missingKeys }
 }
 
 async function buildLocalManifest(): Promise<{ entries: LocalEntry[]; discoveredPaths: number; missingLocalFiles: number; missingKeys: string[] }> {

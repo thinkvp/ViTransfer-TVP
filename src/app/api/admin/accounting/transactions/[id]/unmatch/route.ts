@@ -26,11 +26,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
     include: {
-      expense: { select: { id: true, accountingAttachments: { select: { storagePath: true } } } },
+      expense: { select: { id: true, accountingAttachments: { select: { id: true } } } },
       invoicePayment: { select: { id: true, invoiceId: true } },
-      // Also load multi-invoice payments linked via bankTransactionId
       invoicePayments: { select: { id: true, invoiceId: true } },
-      accountingAttachments: { select: { id: true, storagePath: true } },
+      accountingAttachments: { select: { id: true } },
       basPeriod: { select: { id: true } },
     },
   })
@@ -92,16 +91,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     })
   })
 
-  // Delete files after the DB transaction (best-effort)
-  const filesToDelete = [
-    ...txn.accountingAttachments.map(a => a.storagePath),
-  ]
+  // Delete files after the DB transaction (best-effort) — paths from StoredFile
+  const txnAttachmentIds = txn.accountingAttachments.map(a => a.id)
+  const txnAttachmentStored = txnAttachmentIds.length > 0
+    ? await prisma.storedFile.findMany({
+        where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: txnAttachmentIds } },
+        select: { storagePath: true },
+      })
+    : []
+  const filesToDelete = txnAttachmentStored.map(s => s.storagePath)
   await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
   // Delete the expense attachment files if an expense was removed
   if (txn.matchType === 'EXPENSE' && txn.expense) {
-    const expenseFiles = [
-      ...(txn.expense.accountingAttachments ?? []).map(a => a.storagePath),
-    ]
+    const expenseAttachmentIds = (txn.expense.accountingAttachments ?? []).map(a => a.id)
+    const expenseStored = expenseAttachmentIds.length > 0
+      ? await prisma.storedFile.findMany({
+          where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: expenseAttachmentIds } },
+          select: { storagePath: true },
+        })
+      : []
+    const expenseFiles = expenseStored.map(s => s.storagePath)
     await Promise.all(expenseFiles.map(p => deleteAccountingFile(p).catch(() => {})))
   }
 

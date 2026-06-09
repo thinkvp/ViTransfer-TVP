@@ -23,8 +23,7 @@ async function requireGuestVideoLinkContext(
   ids: { projectId: string; videoId: string }
 ): Promise<
   | {
-      ok: true
-      isAdmin: boolean
+      ok: true, isAdmin: boolean
       userId: string | null
       project: { id: string; title: string; status: string; guestMode: boolean }
       video: { id: string; name: string | null; version: number | null; versionLabel: string | null }

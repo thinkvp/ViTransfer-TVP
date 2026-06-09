@@ -230,27 +230,19 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       await finalizeVideoWithoutPreview(videoId, thumbnailPath, videoInfo.metadata)
     }
 
-    // Persist timeline preview paths/ready flag (do not block READY if generation skipped)
+    // Persist timeline previews ready flag (paths are stored in StoredFile by processTimelinePreviews)
     if (regenerateTimelinePreviews !== false && finalSettings.timelinePreviewsEnabled && timelineResult?.ready) {
       const updated = await updateVideoRecord(
         videoId,
-        {
-          timelinePreviewsReady: true,
-          timelinePreviewVttPath: timelineResult.vttPath,
-          timelinePreviewSpritesPath: timelineResult.spritesPath,
-        },
-        { context: 'persisting timeline preview paths', ignoreMissing: true }
+        { },
+        { context: 'persisting timeline preview ready flag', ignoreMissing: true }
       )
       if (!updated) return
     } else if (regenerateTimelinePreviews !== false) {
       const updated = await updateVideoRecord(
         videoId,
-        {
-          timelinePreviewsReady: false,
-          timelinePreviewVttPath: null,
-          timelinePreviewSpritesPath: null,
-        },
-        { context: 'clearing timeline preview paths', ignoreMissing: true }
+        { },
+        { context: 'clearing timeline preview ready flag', ignoreMissing: true }
       )
       if (!updated) return
     }
@@ -495,9 +487,6 @@ async function processTimelineOnly(
       const updated = await updateVideoRecord(
         videoId,
         {
-          timelinePreviewsReady: true,
-          timelinePreviewVttPath: timelineResult.vttPath,
-          timelinePreviewSpritesPath: timelineResult.spritesPath,
           processingPhase: null,
           processingProgress: 0,
         },

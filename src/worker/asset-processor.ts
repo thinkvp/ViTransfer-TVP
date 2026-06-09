@@ -169,13 +169,13 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
       const { enqueueShareUploadPreview, getAssetTimelineQueue } = await import('@/lib/queue')
       const asset = await prisma.videoAsset.findUnique({
         where: { id: assetId },
-        select: { id: true, storagePath: true, fileName: true, videoId: true, video: { select: { projectId: true } } },
+        select: { id: true, fileName: true, videoId: true, video: { select: { projectId: true } } },
       })
       if (asset) {
         enqueueShareUploadPreview({
           type: 'videoAsset',
           recordId: asset.id,
-          storagePath: asset.storagePath,
+          storagePath: '',
           fileType: fileType.mime,
           fileName: asset.fileName,
         }).catch((e) => console.warn(`[PREVIEW] Failed to enqueue preview for asset ${assetId}:`, e))
@@ -188,7 +188,7 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
             assetId: asset.id,
             videoId: asset.videoId,
             projectId: (asset.video as any)?.projectId || projectId,
-            storagePath: asset.storagePath,
+            storagePath: '',
             durationSeconds: 0,
             width: 0,
             height: 0,

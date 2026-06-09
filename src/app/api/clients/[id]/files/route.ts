@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { validateAssetFile } from '@/lib/file-validation'
 import { buildClientFilesStoragePath } from '@/lib/project-storage-paths'
+import { registerStoredFile } from '@/lib/stored-file'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -50,7 +51,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     select: {
       id: true,
       fileName: true,
-      fileSize: true,
       fileType: true,
       category: true,
       createdAt: true,
@@ -58,9 +58,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   })
 
+  // Resolve file sizes from StoredFile
+  const ids = files.map(f => f.id)
+  const sizeMap = new Map<string, number>()
+  if (ids.length > 0) {
+    const stored = await prisma.storedFile.findMany({
+      where: { entityType: 'CLIENT_FILE', entityId: { in: ids }, fileRole: 'ORIGINAL' },
+      select: { entityId: true, fileSize: true, storagePath: true },
+    })
+    for (const s of stored) {
+      if (s.fileSize != null) sizeMap.set(s.entityId, Number(s.fileSize))
+    }
+  }
+
   const serialized = files.map((f) => ({
     ...f,
-    fileSize: f.fileSize.toString(),
+    fileSize: String(sizeMap.get(f.id) ?? 0),
   }))
 
   return NextResponse.json({ files: serialized })
@@ -118,14 +131,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     data: {
       clientId,
       fileName: sanitizedFileName,
-      fileSize: BigInt(fileSize),
       fileType: 'application/octet-stream',
-      storagePath,
       category,
       uploadedBy: currentUser.id,
       uploadedByName: currentUser.name || currentUser.email,
     },
     select: { id: true },
+  })
+
+  // Register in StoredFile
+  await prisma.storedFile.create({
+    data: {
+      entityType: 'CLIENT_FILE',
+      entityId: record.id,
+      fileRole: 'ORIGINAL',
+      storagePath,
+      fileName: sanitizedFileName,
+      fileSize: BigInt(fileSize),
+    },
   })
 
   return NextResponse.json({ clientFileId: record.id })

@@ -3,6 +3,7 @@ import { reconcileAllAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import { getFilePath } from '@/lib/storage'
 import { isS3Mode, s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
 import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
+import { getStoredPathsForEntities, type FileRole } from '@/lib/stored-file'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -117,93 +118,48 @@ export async function computeProjectTotalBytes(
   const ZERO = BigInt(0)
   if (!projectId) return ZERO
 
-  const [videoIds, albumIds, projectEmailIds] = await Promise.all([
-    prismaClient.video.findMany({
-      where: { projectId },
-      select: { id: true },
-    }),
-    prismaClient.album.findMany({
-      where: { projectId },
-      select: { id: true },
-    }),
-    prismaClient.projectEmail.findMany({
-      where: { projectId },
-      select: { id: true },
-    }),
-  ])
+  // Resolve entity IDs first
+  const videoIds = await prismaClient.video.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(v => v.id))
+  const albumIds = await prismaClient.album.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(a => a.id))
+  const projectEmailIds = await prismaClient.projectEmail.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(e => e.id))
+  const projectFileIds = await prismaClient.projectFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
+  const commentFileIds = await prismaClient.commentFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
+  const shareUploadFileIds = await prismaClient.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
 
-  const videoIdList = videoIds.map((v) => v.id)
-  const albumIdList = albumIds.map((a) => a.id)
-  const projectEmailIdList = projectEmailIds.map((e) => e.id)
+  // Resolve asset and photo IDs through parent entities
+  const assetIds = videoIds.length > 0
+    ? await prismaClient.videoAsset.findMany({ where: { videoId: { in: videoIds } }, select: { id: true } }).then(r => r.map(a => a.id))
+    : [] as string[]
+  const photoIds = albumIds.length > 0
+    ? await prismaClient.albumPhoto.findMany({ where: { albumId: { in: albumIds } }, select: { id: true } }).then(r => r.map(p => p.id))
+    : [] as string[]
+  const emailAttachmentIds = projectEmailIds.length > 0
+    ? await prismaClient.projectEmailAttachment.findMany({ where: { projectEmailId: { in: projectEmailIds } }, select: { id: true } }).then(r => r.map(a => a.id))
+    : [] as string[]
 
-  const [
-    videoRow,
-    projectEmailRow,
-    commentFileRow,
-    projectFileRow,
-    shareUploadFileRow,
-    assetRows,
-    albumRow,
-    albumPhotoRows,
-    projectEmailAttachmentRows,
-  ] = await Promise.all([
-    prismaClient.video.aggregate({
-      where: { projectId },
-      _sum: { originalFileSize: true },
-    }),
-    prismaClient.projectEmail.aggregate({
-      where: { projectId },
-      _sum: { rawFileSize: true },
-    }),
-    prismaClient.commentFile.aggregate({
-      where: { projectId },
-      _sum: { fileSize: true },
-    }),
-    prismaClient.projectFile.aggregate({
-      where: { projectId },
-      _sum: { fileSize: true },
-    }),
-    prismaClient.shareUploadFile.aggregate({
-      where: { projectId },
-      _sum: { fileSize: true },
-    }),
-    videoIdList.length > 0
-      ? prismaClient.videoAsset.aggregate({
-          where: { videoId: { in: videoIdList } },
-          _sum: { fileSize: true },
-        })
-      : Promise.resolve({ _sum: { fileSize: ZERO as any } } as any),
-    prismaClient.album.aggregate({
-      where: { projectId },
-      _sum: { fullZipFileSize: true, socialZipFileSize: true },
-    }),
-    albumIdList.length > 0
-      ? prismaClient.albumPhoto.aggregate({
-          where: { albumId: { in: albumIdList } },
-          _sum: { fileSize: true, socialFileSize: true, thumbnailFileSize: true },
-        })
-      : Promise.resolve({ _sum: { fileSize: ZERO as any, socialFileSize: ZERO as any, thumbnailFileSize: ZERO as any } } as any),
-    projectEmailIdList.length > 0
-      ? prismaClient.projectEmailAttachment.aggregate({
-          where: { projectEmailId: { in: projectEmailIdList } },
-          _sum: { fileSize: true },
-        })
-      : Promise.resolve({ _sum: { fileSize: ZERO as any } } as any),
-  ])
+  // Aggregate all file sizes through StoredFile — single source of truth
+  const orClauses: any[] = [
+    videoIds.length > 0 && { entityType: 'VIDEO', entityId: { in: videoIds } },
+    assetIds.length > 0 && { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } },
+    shareUploadFileIds.length > 0 && { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: shareUploadFileIds } },
+    albumIds.length > 0 && { entityType: 'ALBUM', entityId: { in: albumIds } },
+    photoIds.length > 0 && { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds } },
+    projectFileIds.length > 0 && { entityType: 'PROJECT_FILE', entityId: { in: projectFileIds } },
+    commentFileIds.length > 0 && { entityType: 'COMMENT_FILE', entityId: { in: commentFileIds } },
+    projectEmailIds.length > 0 && { entityType: 'PROJECT_EMAIL', entityId: { in: projectEmailIds } },
+    emailAttachmentIds.length > 0 && { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: emailAttachmentIds } },
+  ].filter(Boolean)
 
-  const total =
-    toBigIntSafe((videoRow as any)?._sum?.originalFileSize) +
-    toBigIntSafe((projectEmailRow as any)?._sum?.rawFileSize) +
-    toBigIntSafe((commentFileRow as any)?._sum?.fileSize) +
-    toBigIntSafe((projectFileRow as any)?._sum?.fileSize) +
-    toBigIntSafe((shareUploadFileRow as any)?._sum?.fileSize) +
-    toBigIntSafe((assetRows as any)?._sum?.fileSize) +
-    toBigIntSafe((albumRow as any)?._sum?.fullZipFileSize) +
-    toBigIntSafe((albumRow as any)?._sum?.socialZipFileSize) +
-    toBigIntSafe((albumPhotoRows as any)?._sum?.fileSize) +
-    toBigIntSafe((albumPhotoRows as any)?._sum?.socialFileSize) +
-    toBigIntSafe((albumPhotoRows as any)?._sum?.thumbnailFileSize) +
-    toBigIntSafe((projectEmailAttachmentRows as any)?._sum?.fileSize)
+  const groupRows = await prismaClient.storedFile.groupBy({
+    by: ['entityType'],
+    where: { OR: orClauses },
+    _sum: { fileSize: true },
+  })
+
+  let total = ZERO
+  for (const row of groupRows) {
+    total += toBigIntSafe(row._sum.fileSize)
+  }
 
   return total > ZERO ? total : ZERO
 }
@@ -321,7 +277,7 @@ export async function reconcileAllProjectsDiskBytes(
 
 /**
  * Compute the total bytes used by S3-stored video preview files for a project.
- * Reads preview path fields from the Video DB records and queries S3 for their sizes.
+ * Uses StoredFile registry as the single source of truth for preview file paths.
  * Returns 0 in local/disk storage mode.
  */
 export async function computeProjectPreviewBytes(
@@ -331,103 +287,44 @@ export async function computeProjectPreviewBytes(
   const ZERO = BigInt(0)
   if (!projectId || !isS3Mode()) return ZERO
 
-  const videos = await prismaClient.video.findMany({
-    where: { projectId },
-    select: {
-      preview480Path: true,
-      preview720Path: true,
-      preview1080Path: true,
-      thumbnailPath: true,
-      timelinePreviewVttPath: true,
-      timelinePreviewSpritesPath: true,
-    },
-  })
+  // Resolve entity IDs
+  const videoIds = await prismaClient.video.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(v => v.id))
+  const assetIds = videoIds.length > 0
+    ? await prismaClient.videoAsset.findMany({ where: { videoId: { in: videoIds } }, select: { id: true } }).then(r => r.map(a => a.id))
+    : [] as string[]
+  const uploadIds = await prismaClient.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
 
-  const videoAssets = await prismaClient.videoAsset.findMany({
-    where: { video: { projectId } },
-    select: {
-      storagePath: true,
-      fileType: true,
-      previewPath: true,
-      previewStatus: true,
-      video: {
-        select: {
-          storageFolderName: true,
-          name: true,
-          versionLabel: true,
-          project: {
-            select: {
-              storagePath: true,
-              title: true,
-              companyName: true,
-              client: { select: { name: true } },
-            },
-          },
-        },
-      },
-    },
-  })
+  // Collect all preview file paths from StoredFile
+  const previewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL',
+    'TIMELINE_VTT', 'TIMELINE_SPRITES', 'PREVIEW_IMAGE', 'PREVIEW_MP4']
+  const spriteRoles: FileRole[] = ['TIMELINE_SPRITES']
 
-  if (videos.length === 0) return ZERO
+  const rows: Array<{ storagePath: string; fileRole: string }> = []
+  const baseWhere = { storagePath: { not: '' } } as const
+  if (videoIds.length > 0) {
+    const paths = await prisma.storedFile.findMany({ where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: { in: previewRoles }, ...baseWhere }, select: { storagePath: true, fileRole: true } })
+    rows.push(...paths.map(r => ({ storagePath: r.storagePath, fileRole: r.fileRole })))
+  }
+  if (assetIds.length > 0) {
+    const paths = await prisma.storedFile.findMany({ where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds }, fileRole: { in: previewRoles }, ...baseWhere }, select: { storagePath: true, fileRole: true } })
+    rows.push(...paths.map(r => ({ storagePath: r.storagePath, fileRole: r.fileRole })))
+  }
+  if (uploadIds.length > 0) {
+    const paths = await prisma.storedFile.findMany({ where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: uploadIds }, fileRole: { in: previewRoles }, ...baseWhere }, select: { storagePath: true, fileRole: true } })
+    rows.push(...paths.map(r => ({ storagePath: r.storagePath, fileRole: r.fileRole })))
+  }
+
+  if (rows.length === 0) return ZERO
 
   const previewFilePaths = new Set<string>()
   const spritePrefixes = new Set<string>()
-  const videoAssetStoragePaths = new Set(videoAssets.map((a) => a.storagePath))
 
-  for (const video of videos) {
-    if (video.preview480Path) previewFilePaths.add(video.preview480Path)
-    if (video.preview720Path) previewFilePaths.add(video.preview720Path)
-    if (video.preview1080Path) previewFilePaths.add(video.preview1080Path)
-    if (video.thumbnailPath && !videoAssetStoragePaths.has(video.thumbnailPath)) {
-      previewFilePaths.add(video.thumbnailPath)
+  for (const row of rows) {
+    if (spriteRoles.includes(row.fileRole as any)) {
+      spritePrefixes.add(row.storagePath)
+    } else {
+      previewFilePaths.add(row.storagePath)
     }
-    if (video.timelinePreviewVttPath) previewFilePaths.add(video.timelinePreviewVttPath)
-    if (video.timelinePreviewSpritesPath) spritePrefixes.add(video.timelinePreviewSpritesPath)
-  }
-
-  for (const asset of videoAssets) {
-    const normalizedFileType = String(asset.fileType || '').toLowerCase()
-    const hasPlaybackPreview = Boolean(asset.previewPath && asset.previewPath.toLowerCase().endsWith('.mp4'))
-    const hasReadyGeneratedThumbnail = normalizedFileType.startsWith('video/') && asset.previewStatus === 'READY'
-
-    if (hasPlaybackPreview && asset.previewPath) {
-      previewFilePaths.add(asset.previewPath)
-    }
-
-    if (hasReadyGeneratedThumbnail) {
-      // Closed-project cleanup can retain the companion JPEG while removing the
-      // playback MP4, so READY video assets still contribute their card thumbnail.
-      const projectStoragePath = asset.video.project.storagePath
-        || buildProjectStorageRoot(asset.video.project.client?.name || asset.video.project.companyName || 'Client', asset.video.project.title)
-      const assetPreviewJpgPath = buildVideoAssetPreviewStoragePath(
-        projectStoragePath,
-        asset.video.storageFolderName || asset.video.name,
-        asset.video.versionLabel,
-        asset.storagePath,
-        '.jpg',
-      )
-      previewFilePaths.add(assetPreviewJpgPath)
-    }
-  }
-
-  // Include asset timeline paths
-  const assetsWithTimeline = await prismaClient.videoAsset.findMany({
-    where: { video: { projectId }, timelinePreviewVttPath: { not: null }, timelinePreviewSpritesPath: { not: null } },
-    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
-  })
-  for (const a of assetsWithTimeline) {
-    if (a.timelinePreviewVttPath) previewFilePaths.add(a.timelinePreviewVttPath)
-    if (a.timelinePreviewSpritesPath) spritePrefixes.add(a.timelinePreviewSpritesPath)
-  }
-
-  // Include upload timeline paths
-  const uploadsWithTimeline = await prismaClient.shareUploadFile.findMany({
-    where: { projectId, timelinePreviewVttPath: { not: null }, timelinePreviewSpritesPath: { not: null } },
-    select: { timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
-  })
-  for (const u of uploadsWithTimeline) {
-    if (u.timelinePreviewVttPath) previewFilePaths.add(u.timelinePreviewVttPath)
-    if (u.timelinePreviewSpritesPath) spritePrefixes.add(u.timelinePreviewSpritesPath)
   }
 
   const [fileSizes, prefixSizes] = await Promise.all([

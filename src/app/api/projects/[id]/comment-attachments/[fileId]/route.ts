@@ -69,21 +69,25 @@ export async function GET(
     select: {
       fileName: true,
       fileType: true,
-      storagePath: true,
     },
   })
 
   if (!file) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
+  // Get path from StoredFile
+  const { getStoredFilePath } = await import('@/lib/stored-file')
+  const storagePath = await getStoredFilePath('COMMENT_FILE', fileId, 'ORIGINAL')
+  if (!storagePath) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
+
   const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
   const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
 
   if (isS3Mode()) {
-    const presignedUrl = await s3GetPresignedDownloadUrl(file.storagePath, 300, file.fileName, contentType)
+    const presignedUrl = await s3GetPresignedDownloadUrl(storagePath, 300, file.fileName, contentType)
     return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
   }
 
-  const fullPath = getFilePath(file.storagePath)
+  const fullPath = getFilePath(storagePath)
   const stat = await fs.promises.stat(fullPath)
   if (!stat.isFile()) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 

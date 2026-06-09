@@ -104,10 +104,10 @@ export async function POST(
       folderRelativePath: normalizedFolderPath,
     },
     select: {
-      storagePath: true,
+      fileName: true,
     },
   })
-  const existingNames = existingFilesInFolder.map((entry) => entry.storagePath.split('/').pop() || '')
+  const existingNames = existingFilesInFolder.map((entry) => entry.fileName)
   const storageFileName = allocateUniqueUploadFileName(fileName, existingNames)
   const folderStoragePath = await resolveUploadFolderStoragePath({
     projectId: access.project.id,

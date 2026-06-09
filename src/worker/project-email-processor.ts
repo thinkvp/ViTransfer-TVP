@@ -1,6 +1,7 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
 import { downloadFile, deleteFile, initStorage, uploadFile } from '../lib/storage'
+import { getStoredFilePath, registerStoredFile } from '@/lib/stored-file'
 import { sanitizeFilename } from '../lib/file-validation'
 import { simpleParser, type SimpleParserOptions } from 'mailparser'
 import type { ProjectEmailProcessingJob } from '../lib/queue'
@@ -34,10 +35,10 @@ export async function processProjectEmail(job: Job<ProjectEmailProcessingJob>) {
   // Load record and ensure it belongs to the expected project
   const email = await prisma.projectEmail.findUnique({
     where: { id: projectEmailId },
-    include: { attachments: true, project: { select: { storagePath: true, title: true, companyName: true, client: { select: { name: true } } } } },
+    include: { attachments: true, project: { select: { title: true, companyName: true, client: { select: { name: true } } } } },
   })
 
-  if (!email || email.projectId !== projectId || email.rawStoragePath !== rawStoragePath) {
+  if (!email || email.projectId !== projectId) {
     console.error(`[WORKER] ProjectEmail not found/mismatch: ${projectEmailId}`)
     return
   }
@@ -51,7 +52,8 @@ export async function processProjectEmail(job: Job<ProjectEmailProcessingJob>) {
   if (email.attachments.length > 0) {
     for (const a of email.attachments) {
       try {
-        await deleteFile(a.storagePath)
+        const path = await getStoredFilePath('PROJECT_EMAIL_ATTACHMENT', a.id, 'ORIGINAL')
+        if (path) await deleteFile(path)
       } catch {
         // ignore
       }
@@ -131,7 +133,7 @@ export async function processProjectEmail(job: Job<ProjectEmailProcessingJob>) {
       const referencedByCid = cid ? (htmlForInlineCheck.includes(`cid:${cid}`) || htmlForInlineCheck.includes(`cid:<${cid}>`)) : false
       const isInline = att.contentDisposition === 'inline' || referencedByCid
 
-      const projectStoragePath = email.project.storagePath
+      const projectStoragePath = (email.project as any).storagePath
         || buildProjectStorageRoot(email.project.client?.name || email.project.companyName || 'Client', email.project.title)
       const storagePath = buildProjectEmailAttachmentStoragePath(projectStoragePath, projectEmailId, safeName, now, i + 1)
 
@@ -160,13 +162,34 @@ export async function processProjectEmail(job: Job<ProjectEmailProcessingJob>) {
         data: createdAttachments.map((a) => ({
           projectEmailId,
           fileName: a.fileName,
-          fileSize: a.fileSize,
           fileType: a.fileType,
-          storagePath: a.storagePath,
           isInline: a.isInline,
           contentId: a.contentId,
         })),
       })
+
+      // Register each attachment in StoredFile (legacy path/size columns dropped)
+      const created = await prisma.projectEmailAttachment.findMany({
+        where: { projectEmailId },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      })
+      // Map by index — createdAttachments and DB rows are in the same order
+      await Promise.allSettled(
+        createdAttachments.map((a, i) => {
+          const dbRow = created[i]
+          if (!dbRow) return Promise.resolve()
+          return registerStoredFile({
+            entityType: 'PROJECT_EMAIL_ATTACHMENT',
+            entityId: dbRow.id,
+            fileRole: 'ORIGINAL',
+            storagePath: a.storagePath,
+            fileName: a.fileName,
+            fileSize: a.fileSize,
+            status: 'READY',
+          })
+        })
+      )
     }
 
     await prisma.projectEmail.update({

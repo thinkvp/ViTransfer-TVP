@@ -9,6 +9,7 @@ import {
   PROJECT_REDIRECTS_INDEX_FILENAME,
   STORAGE_ROOT,
 } from '@/lib/storage'
+import { getAllStoredPaths } from '@/lib/stored-file'
 import { isS3Mode, s3DeleteFile, getS3Bucket, getS3Client } from '@/lib/s3-storage'
 import { ListObjectsV2Command } from '@aws-sdk/client-s3'
 import {
@@ -42,8 +43,7 @@ type VideoAssetPreviewPathRow = {
 }
 
 export type ProjectStorageOrphanCleanupResult = {
-  ok: true
-  dryRun: boolean
+  ok: true, dryRun: boolean
   scannedDirectories: number
   scannedProjects: number
   scannedFiles: number
@@ -106,6 +106,8 @@ function isIgnoredStoragePath(relPath: string): boolean {
     // the main S3 scan from treating all accounting files as orphans.
     || normalized === ACCOUNTING_S3_PREFIX
     || normalized.startsWith(`${ACCOUNTING_S3_PREFIX}/`)
+    // Upload folder markers — metadata files, not content
+    || path.posix.basename(normalized) === '.vitransfer_folder'
   )
 }
 
@@ -149,10 +151,9 @@ async function buildProjectRootIndex(): Promise<ProjectRootIndex> {
 
   const projects = await prisma.project.findMany({
     select: {
-      id: true,
-      storagePath: true,
-      title: true,
+      id: true, title: true,
       companyName: true,
+      storagePath: true,
       client: { select: { name: true } },
     },
   })
@@ -234,210 +235,31 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
   const exactFilePaths = new Set<string>()
   const protectedDirectoryPrefixes = new Set<string>()
 
-  const [videos, videoAssets, commentFiles, shareUploadFiles, shareUploadFolders, projectFiles, albumPhotos, projectEmails, projectEmailAttachments, albums, clientFiles, userFiles, users, settings] = await Promise.all([
-    prisma.video.findMany({
-      select: {
-        projectId: true,
-        name: true,
-        storageFolderName: true,
-        versionLabel: true,
-        originalStoragePath: true,
-        preview480Path: true,
-        preview720Path: true,
-        preview1080Path: true,
-        thumbnailPath: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
-        project: {
-          select: {
-            storagePath: true,
-            title: true,
-            companyName: true,
-            client: { select: { name: true } },
-          },
-        },
-      },
-    }),
-    prisma.videoAsset.findMany({
-      select: {
-        storagePath: true,
-        previewPath: true,
-        fileType: true,
-        previewStatus: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
-        video: {
-          select: {
-            storageFolderName: true,
-            name: true,
-            versionLabel: true,
-            project: {
-              select: {
-                storagePath: true,
-                title: true,
-                companyName: true,
-                client: { select: { name: true } },
-              },
-            },
-          },
-        },
-      },
-    }),
-    prisma.commentFile.findMany({ select: { storagePath: true } }),
-    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath", "timelinePreviewVttPath", "timelinePreviewSpritesPath" FROM "ShareUploadFile"`,
-    prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
-    prisma.projectFile.findMany({ select: { storagePath: true } }),
-    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
-    prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
-    prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
-    prisma.album.findMany({
-      select: {
-        id: true,
-        projectId: true,
-        name: true,
-        storageFolderName: true,
-        socialCopiesEnabled: true,
-        project: {
-          select: {
-            storagePath: true,
-            title: true,
-            companyName: true,
-            client: { select: { name: true } },
-          },
-        },
-      },
-    }),
-    prisma.clientFile.findMany({ select: { storagePath: true } }),
-    prisma.userFile.findMany({ select: { storagePath: true } }),
-    prisma.user.findMany({ select: { avatarPath: true } }),
-    prisma.settings.findUnique({
-      where: { id: 'default' },
-      select: {
-        companyLogoPath: true,
-        companyFaviconPath: true,
-      },
-    }),
-  ])
-
-  for (const video of videos) {
-    addResolvedFilePath(exactFilePaths, video.originalStoragePath)
-    addResolvedFilePath(exactFilePaths, video.preview480Path)
-    addResolvedFilePath(exactFilePaths, video.preview720Path)
-    addResolvedFilePath(exactFilePaths, video.preview1080Path)
-    addResolvedFilePath(exactFilePaths, video.thumbnailPath)
-    addResolvedFilePath(exactFilePaths, video.timelinePreviewVttPath)
-    addResolvedDirectoryPrefix(protectedDirectoryPrefixes, video.timelinePreviewSpritesPath)
-
-    // Also protect the canonical thumbnail path derived from project/video fields.
-    // This mirrors the content API's buildCanonicalFallbackPath logic and prevents
-    // false-positive orphan reports for videos where thumbnailPath is null or stale.
-    const canonicalProjectStoragePath = video.project?.storagePath
-      || buildProjectStorageRoot(
-          video.project?.client?.name || video.project?.companyName || 'Client',
-          video.project?.title || 'Untitled',
-        )
-    const canonicalVideoFolderName = video.storageFolderName || video.name
-    if (canonicalVideoFolderName && video.versionLabel) {
-      addResolvedFilePath(
-        exactFilePaths,
-        buildVideoThumbnailStoragePath(canonicalProjectStoragePath, canonicalVideoFolderName, video.versionLabel),
-      )
-    }
-
-    // Third fallback: derive the thumbnail location directly from originalStoragePath's
-    // parent directory. The original video file and thumbnail always reside in the same
-    // version root folder, so this covers edge cases where thumbnailPath is null/stale
-    // AND the storageFolderName-based canonical path doesn't match the physical folder
-    // name on disk (e.g. due to Unicode path differences like en-dash vs hyphen, or a
-    // partial rename where folder names diverged from DB fields).
-    const rawOriginalPath = normalizeStoredReferencePath(video.originalStoragePath)
-    if (rawOriginalPath) {
-      try {
-        const originalRelPath = normalizeRelativeStoragePath(toStorageRelative(getFilePath(rawOriginalPath)))
-        const versionRoot = path.posix.dirname(originalRelPath)
-        if (versionRoot && versionRoot !== '.') {
-          exactFilePaths.add(path.posix.join(
-            canonicalProjectStoragePath,
-            '.previews',
-            path.posix.relative(canonicalProjectStoragePath, versionRoot),
-            'thumbnail.jpg',
-          ))
-        }
-      } catch {
-        // Ignore; the canonical check above will still cover this video's thumbnail
+  // Use StoredFile as the single source of truth for all file paths (paginated).
+  // Replaces ~200 lines of per-entity-table queries across 14 models.
+  let cursor: string | undefined
+  do {
+    const page = await getAllStoredPaths({ cursor, take: 10000 })
+    for (const entry of page.items) {
+      if (!entry.storagePath) continue
+      // TIMELINE_SPRITES paths are directories (contain multiple files); protect the prefix
+      if (entry.fileRole === 'TIMELINE_SPRITES') {
+        try {
+          const rel = normalizeRelativeStoragePath(toStorageRelative(getFilePath(entry.storagePath)))
+          // The stored path IS the sprite directory — protect it as-is, stripping
+          // any trailing slash so comparisons against storage listings are consistent.
+          const dir = rel.replace(/\/+$/, '')
+          if (dir && dir !== '.') protectedDirectoryPrefixes.add(dir)
+        } catch { /* malformed path — skip */ }
+      } else {
+        try {
+          const rel = normalizeRelativeStoragePath(toStorageRelative(getFilePath(entry.storagePath)))
+          exactFilePaths.add(rel)
+        } catch { /* malformed path — skip */ }
       }
     }
-  }
-
-  for (const videoAsset of videoAssets) {
-    addResolvedFilePath(exactFilePaths, videoAsset.storagePath)
-    addResolvedFilePath(exactFilePaths, videoAsset.previewPath)
-    addResolvedFilePath(exactFilePaths, videoAsset.timelinePreviewVttPath)
-    addResolvedDirectoryPrefix(protectedDirectoryPrefixes, videoAsset.timelinePreviewSpritesPath)
-
-    const previewPath = String(videoAsset.previewPath || '').toLowerCase()
-    const fileType = String(videoAsset.fileType || '').toLowerCase()
-    if (fileType.startsWith('video/') && (previewPath.endsWith('.mp4') || videoAsset.previewStatus === 'READY')) {
-      const projectStoragePath = videoAsset.video.project.storagePath
-        || buildProjectStorageRoot(
-          videoAsset.video.project.client?.name || videoAsset.video.project.companyName || 'Client',
-          videoAsset.video.project.title,
-        )
-      addResolvedFilePath(
-        exactFilePaths,
-        buildVideoAssetPreviewStoragePath(
-          projectStoragePath,
-          videoAsset.video.storageFolderName || videoAsset.video.name,
-          videoAsset.video.versionLabel,
-          videoAsset.storagePath || '',
-          '.jpg',
-        ),
-      )
-    }
-  }
-  for (const commentFile of commentFiles) addResolvedFilePath(exactFilePaths, commentFile.storagePath)
-  for (const shareUploadFile of shareUploadFiles) {
-    addResolvedFilePath(exactFilePaths, shareUploadFile.storagePath)
-    addResolvedFilePath(exactFilePaths, shareUploadFile.previewPath)
-    addResolvedFilePath(exactFilePaths, shareUploadFile.timelinePreviewVttPath)
-    addResolvedDirectoryPrefix(protectedDirectoryPrefixes, shareUploadFile.timelinePreviewSpritesPath)
-  }
-  for (const shareUploadFolder of shareUploadFolders) {
-    if (!shareUploadFolder.storagePath) continue
-    addResolvedFilePath(exactFilePaths, `${shareUploadFolder.storagePath}/${UPLOAD_FOLDER_MARKER}`)
-  }
-  for (const projectFile of projectFiles) addResolvedFilePath(exactFilePaths, projectFile.storagePath)
-
-  for (const albumPhoto of albumPhotos) {
-    addResolvedFilePath(exactFilePaths, albumPhoto.storagePath)
-    addResolvedFilePath(exactFilePaths, albumPhoto.socialStoragePath)
-    addResolvedFilePath(exactFilePaths, albumPhoto.thumbnailStoragePath)
-  }
-
-  for (const projectEmail of projectEmails) addResolvedFilePath(exactFilePaths, projectEmail.rawStoragePath)
-  for (const attachment of projectEmailAttachments) addResolvedFilePath(exactFilePaths, attachment.storagePath)
-  for (const clientFile of clientFiles) addResolvedFilePath(exactFilePaths, clientFile.storagePath)
-  for (const userFile of userFiles) addResolvedFilePath(exactFilePaths, userFile.storagePath)
-  for (const user of users) addResolvedFilePath(exactFilePaths, user.avatarPath)
-
-  addResolvedFilePath(exactFilePaths, settings?.companyLogoPath)
-  addResolvedFilePath(exactFilePaths, settings?.companyFaviconPath)
-
-  for (const album of albums) {
-    const projectStoragePath = album.project.storagePath
-      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
-    const albumFolderName = album.storageFolderName || album.name
-    addResolvedFilePath(
-      exactFilePaths,
-      getAlbumZipStoragePath({ projectStoragePath, albumFolderName, albumName: album.name, variant: 'full' })
-    )
-    if (album.socialCopiesEnabled) {
-      addResolvedFilePath(
-        exactFilePaths,
-        getAlbumZipStoragePath({ projectStoragePath, albumFolderName, albumName: album.name, variant: 'social' })
-      )
-    }
-  }
+    cursor = page.nextCursor
+  } while (cursor)
 
   return { exactFilePaths, protectedDirectoryPrefixes }
 }
@@ -631,176 +453,35 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
   const accountingPaths = new Set<string>()
   const timelineSpritePrefixes = new Set<string>()
 
-  const [videos, videoAssets, commentFiles, shareUploadFiles, shareUploadFolders, projectFiles, albumPhotos, albums, projectEmails, projectEmailAttachments, clientFiles, userFiles, users, settings, accountingAttachments] = await Promise.all([
-    prisma.video.findMany({
-      select: {
-        originalStoragePath: true,
-        preview480Path: true,
-        preview720Path: true,
-        preview1080Path: true,
-        thumbnailPath: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
-      },
-    }),
-    prisma.videoAsset.findMany({
-      select: {
-        storagePath: true,
-        previewPath: true,
-        fileType: true,
-        previewStatus: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
-        video: {
-          select: {
-            storageFolderName: true,
-            name: true,
-            versionLabel: true,
-            project: {
-              select: {
-                storagePath: true,
-                title: true,
-                companyName: true,
-                client: { select: { name: true } },
-              },
-            },
-          },
-        },
-      },
-    }),
-    prisma.commentFile.findMany({ select: { storagePath: true } }),
-    prisma.$queryRaw<ShareUploadPreviewPathRow[]>`SELECT "storagePath", "previewPath", "timelinePreviewVttPath", "timelinePreviewSpritesPath" FROM "ShareUploadFile"`,
-    prisma.$queryRaw<ShareUploadFolderPathRow[]>`SELECT "storagePath" FROM "ShareUploadFolder"`,
-    prisma.projectFile.findMany({ select: { storagePath: true } }),
-    prisma.albumPhoto.findMany({ select: { storagePath: true, socialStoragePath: true, thumbnailStoragePath: true } }),
-    prisma.album.findMany({
-      select: {
-        name: true,
-        storageFolderName: true,
-        socialCopiesEnabled: true,
-        project: {
-          select: {
-            storagePath: true,
-            title: true,
-            companyName: true,
-            client: { select: { name: true } },
-          },
-        },
-      },
-    }),
-    prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
-    prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
-    prisma.clientFile.findMany({ select: { storagePath: true } }),
-    prisma.userFile.findMany({ select: { storagePath: true } }),
-    prisma.user.findMany({ select: { avatarPath: true } }),
-    prisma.settings.findUnique({
-      where: { id: 'default' },
-      select: {
-        companyLogoPath: true,
-        companyFaviconPath: true,
-      },
-    }),
-    prisma.accountingAttachment.findMany({ select: { storagePath: true } }),
-  ])
+  // Use StoredFile as the single source of truth for all file paths (paginated).
+  // Replaces ~250 lines of per-entity-table queries across 14 models.
+  let cursor: string | undefined
+  do {
+    const page = await getAllStoredPaths({ cursor, take: 10000 })
+    for (const entry of page.items) {
+      if (!entry.storagePath) continue
 
-  const addMain = (storagePath: string | null | undefined) => {
-    const normalizedStoragePath = normalizeStoredReferencePath(storagePath)
-    if (!normalizedStoragePath) return
-    try {
-      mainPaths.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(normalizedStoragePath))))
-    } catch { /* malformed historical path */ }
-  }
-
-  const addTimelineSpritePrefix = (storagePath: string | null | undefined) => {
-    const normalizedStoragePath = normalizeStoredReferencePath(storagePath)
-    if (!normalizedStoragePath) return
-    try {
-      timelineSpritePrefixes.add(normalizeRelativeStoragePath(toStorageRelative(getFilePath(normalizedStoragePath))))
-    } catch { /* malformed historical path */ }
-  }
-
-  for (const v of videos) {
-    addMain(v.originalStoragePath)
-    addMain(v.preview480Path)
-    addMain(v.preview720Path)
-    addMain(v.preview1080Path)
-    addMain(v.thumbnailPath)
-    addMain(v.timelinePreviewVttPath)
-    addTimelineSpritePrefix(v.timelinePreviewSpritesPath)
-  }
-  for (const a of videoAssets) {
-    addMain(a.storagePath)
-    addMain(a.previewPath)
-    addMain(a.timelinePreviewVttPath)
-    addTimelineSpritePrefix(a.timelinePreviewSpritesPath)
-
-    const previewPath = String(a.previewPath || '').toLowerCase()
-    const fileType = String(a.fileType || '').toLowerCase()
-    if (fileType.startsWith('video/') && (previewPath.endsWith('.mp4') || a.previewStatus === 'READY')) {
-      const projectStoragePath = a.video.project.storagePath
-        || buildProjectStorageRoot(
-          a.video.project.client?.name || a.video.project.companyName || 'Client',
-          a.video.project.title,
-        )
-      addMain(buildVideoAssetPreviewStoragePath(
-        projectStoragePath,
-        a.video.storageFolderName || a.video.name,
-        a.video.versionLabel,
-        a.storagePath || '',
-        '.jpg',
-      ))
+      if (entry.entityType === 'ACCOUNTING_ATTACHMENT') {
+        // Accounting paths are stored relative to ACCOUNTING_STORAGE_ROOT
+        accountingPaths.add(entry.storagePath.replace(/\\/g, '/'))
+      } else if (entry.fileRole === 'TIMELINE_SPRITES') {
+        try {
+          const rel = normalizeRelativeStoragePath(toStorageRelative(getFilePath(entry.storagePath)))
+          // The stored path IS the sprite directory — use it directly, stripping
+          // any trailing slash so comparisons against storage listings are consistent.
+          const dir = rel.replace(/\/+$/, '')
+          if (dir && dir !== '.') timelineSpritePrefixes.add(dir)
+        } catch { /* malformed path */ }
+      } else {
+        try {
+          mainPaths.add(
+            normalizeRelativeStoragePath(toStorageRelative(getFilePath(entry.storagePath)))
+          )
+        } catch { /* malformed path */ }
+      }
     }
-  }
-  for (const c of commentFiles) addMain(c.storagePath)
-  for (const f of shareUploadFiles) {
-    addMain(f.storagePath)
-    addMain(f.previewPath)
-    addMain(f.timelinePreviewVttPath)
-    addTimelineSpritePrefix(f.timelinePreviewSpritesPath)
-  }
-  for (const folder of shareUploadFolders) {
-    if (!folder.storagePath) continue
-    addMain(`${folder.storagePath}/${UPLOAD_FOLDER_MARKER}`)
-  }
-  for (const f of projectFiles) addMain(f.storagePath)
-  for (const p of albumPhotos) {
-    addMain(p.storagePath)
-    addMain(p.socialStoragePath)
-    addMain(p.thumbnailStoragePath)
-  }
-  for (const album of albums) {
-    const projectStoragePath = album.project.storagePath
-      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
-    const albumFolderName = album.storageFolderName || album.name
-    addMain(getAlbumZipStoragePath({
-      projectStoragePath,
-      albumFolderName,
-      albumName: album.name,
-      variant: 'full',
-    }))
-
-    // Social ZIPs are optional. Only require them when social downloads are enabled.
-    if (album.socialCopiesEnabled) {
-      addMain(getAlbumZipStoragePath({
-        projectStoragePath,
-        albumFolderName,
-        albumName: album.name,
-        variant: 'social',
-      }))
-    }
-  }
-  for (const e of projectEmails) addMain(e.rawStoragePath)
-  for (const a of projectEmailAttachments) addMain(a.storagePath)
-  for (const c of clientFiles) addMain(c.storagePath)
-  for (const u of userFiles) addMain(u.storagePath)
-  for (const u of users) addMain(u.avatarPath)
-  addMain(settings?.companyLogoPath)
-  addMain(settings?.companyFaviconPath)
-
-  for (const a of accountingAttachments) {
-    const relPath = a.storagePath?.trim()
-    if (relPath) accountingPaths.add(relPath.replace(/\\/g, '/'))
-  }
+    cursor = page.nextCursor
+  } while (cursor)
 
   return { mainPaths, accountingPaths, timelineSpritePrefixes }
 }
@@ -877,10 +558,13 @@ async function buildReferencedAccountingPaths(
   prefetched?: Set<string>,
 ): Promise<Set<string>> {
   if (prefetched) return prefetched
-  const attachments = await prisma.accountingAttachment.findMany({ select: { storagePath: true } })
+  const storedFiles = await prisma.storedFile.findMany({
+    where: { entityType: 'ACCOUNTING_ATTACHMENT' },
+    select: { storagePath: true },
+  })
   const referenced = new Set<string>()
-  for (const a of attachments) {
-    const relPath = a.storagePath?.trim()
+  for (const sf of storedFiles) {
+    const relPath = sf.storagePath?.trim()
     if (relPath) referenced.add(relPath.replace(/\\/g, '/'))
   }
   return referenced

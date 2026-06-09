@@ -87,7 +87,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         select: {
           id: true,
           fileName: true,
-          fileSize: true,
           fileType: true,
           category: true,
           createdAt: true,
@@ -101,12 +100,25 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Client not found' }, { status: 404 })
   }
 
-  // BigInt serialization
+  // Resolve file sizes from StoredFile registry
+  const clientFileIds = (client as any).files.map((f: any) => f.id)
+  const sizeMap = new Map<string, number>()
+  if (clientFileIds.length > 0) {
+    const stored = await prisma.storedFile.findMany({
+      where: { entityType: 'CLIENT_FILE', entityId: { in: clientFileIds }, fileRole: 'ORIGINAL' },
+      select: { entityId: true, fileSize: true },
+    })
+    for (const s of stored) {
+      if (s.fileSize != null) sizeMap.set(s.entityId, Number(s.fileSize))
+    }
+  }
+
+  // Serialize with sizes from StoredFile
   const serialized = {
     ...client,
     files: (client as any).files.map((f: any) => ({
       ...f,
-      fileSize: f.fileSize.toString(),
+      fileSize: String(sizeMap.get(f.id) ?? 0),
     })),
   }
 
@@ -226,127 +238,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
             })
           }
 
-          const clientFiles = await tx.clientFile.findMany({
-            where: { clientId: id },
-            select: { id: true, storagePath: true },
-          })
-          for (const file of clientFiles) {
-            await tx.clientFile.update({
-              where: { id: file.id },
-              data: {
-                storagePath: replaceStoredStoragePathPrefix(file.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
-              },
-            })
-          }
-
-          const videos = await tx.video.findMany({
-            where: { project: { clientId: id } },
-            select: {
-              id: true,
-              originalStoragePath: true,
-              preview480Path: true,
-              preview720Path: true,
-              preview1080Path: true,
-              thumbnailPath: true,
-              timelinePreviewVttPath: true,
-              timelinePreviewSpritesPath: true,
-            },
-          })
-          for (const video of videos) {
-            await tx.video.update({
-              where: { id: video.id },
-              data: {
-                originalStoragePath: replaceStoredStoragePathPrefix(video.originalStoragePath, oldClientStorageRoot, newClientStorageRoot)!,
-                preview480Path: replaceStoredStoragePathPrefix(video.preview480Path, oldClientStorageRoot, newClientStorageRoot),
-                preview720Path: replaceStoredStoragePathPrefix(video.preview720Path, oldClientStorageRoot, newClientStorageRoot),
-                preview1080Path: replaceStoredStoragePathPrefix(video.preview1080Path, oldClientStorageRoot, newClientStorageRoot),
-                thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldClientStorageRoot, newClientStorageRoot),
-                timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldClientStorageRoot, newClientStorageRoot),
-                timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldClientStorageRoot, newClientStorageRoot),
-              },
-            })
-          }
-
-          const assets = await tx.videoAsset.findMany({
-            where: { video: { project: { clientId: id } } },
-            select: { id: true, storagePath: true, previewPath: true },
-          })
-          for (const asset of assets) {
-            await tx.videoAsset.update({
-              where: { id: asset.id },
-              data: {
-                storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
-                previewPath: replaceStoredStoragePathPrefix(asset.previewPath, oldClientStorageRoot, newClientStorageRoot),
-              },
-            })
-          }
-
-          const albumPhotos = await tx.albumPhoto.findMany({
-            where: { album: { project: { clientId: id } } },
-            select: { id: true, storagePath: true, socialStoragePath: true, thumbnailStoragePath: true },
-          })
-          for (const photo of albumPhotos) {
-            await tx.albumPhoto.update({
-              where: { id: photo.id },
-              data: {
-                storagePath: replaceStoredStoragePathPrefix(photo.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
-                socialStoragePath: replaceStoredStoragePathPrefix(photo.socialStoragePath, oldClientStorageRoot, newClientStorageRoot),
-                thumbnailStoragePath: replaceStoredStoragePathPrefix(photo.thumbnailStoragePath, oldClientStorageRoot, newClientStorageRoot),
-              },
-            })
-          }
-
-          const projectFiles = await tx.projectFile.findMany({
-            where: { project: { clientId: id } },
-            select: { id: true, storagePath: true },
-          })
-          for (const file of projectFiles) {
-            await tx.projectFile.update({
-              where: { id: file.id },
-              data: {
-                storagePath: replaceStoredStoragePathPrefix(file.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
-              },
-            })
-          }
-
-          const projectEmails = await tx.projectEmail.findMany({
-            where: { project: { clientId: id } },
-            select: { id: true, rawStoragePath: true },
-          })
-          for (const email of projectEmails) {
-            await tx.projectEmail.update({
-              where: { id: email.id },
-              data: {
-                rawStoragePath: replaceStoredStoragePathPrefix(email.rawStoragePath, oldClientStorageRoot, newClientStorageRoot)!,
-              },
-            })
-          }
-
-          const attachments = await tx.projectEmailAttachment.findMany({
-            where: { projectEmail: { project: { clientId: id } } },
-            select: { id: true, storagePath: true },
-          })
-          for (const attachment of attachments) {
-            await tx.projectEmailAttachment.update({
-              where: { id: attachment.id },
-              data: {
-                storagePath: replaceStoredStoragePathPrefix(attachment.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
-              },
-            })
-          }
-
-          const commentFiles = await tx.commentFile.findMany({
-            where: { project: { clientId: id } },
-            select: { id: true, storagePath: true },
-          })
-          for (const commentFile of commentFiles) {
-            await tx.commentFile.update({
-              where: { id: commentFile.id },
-              data: {
-                storagePath: replaceStoredStoragePathPrefix(commentFile.storagePath, oldClientStorageRoot, newClientStorageRoot)!,
-              },
-            })
-          }
+          // All per-entity path columns dropped — StoredFile handles path rebasing
+          // via renameStoredPaths() called by the folder-rename-processor
         }
 
         if (recipientsInput) {

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath } from '@/lib/storage'
 import { isS3Mode, s3DownloadFile, s3FileExists } from '@/lib/s3-storage'
+import { getStoredFilePath } from '@/lib/stored-file'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 import dns from 'dns/promises'
@@ -133,10 +134,11 @@ export async function GET(request: NextRequest) {
   try {
     const settings = await prisma.settings.findUnique({
       where: { id: 'default' },
-      select: { companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true },
+      select: { companyLogoMode: true, companyLogoUrl: true },
     })
 
-    const logoPath = settings?.companyLogoPath
+    // Logo path now lives in StoredFile registry
+    const logoPath = await getStoredFilePath('SETTINGS_BRANDING', 'default', 'COMPANY_LOGO')
     const mode = settings?.companyLogoMode
     const logoUrl = typeof settings?.companyLogoUrl === 'string' ? settings.companyLogoUrl.trim() : ''
 

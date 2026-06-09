@@ -129,7 +129,6 @@ export async function POST(request: NextRequest) {
   const companyLogoUrl = buildCompanyLogoUrl({
     appDomain: emailSettings.appDomain,
     companyLogoMode: emailSettings.companyLogoMode,
-    companyLogoPath: emailSettings.companyLogoPath,
     companyLogoUrl: emailSettings.companyLogoUrl,
     updatedAt: emailSettings.updatedAt,
   })

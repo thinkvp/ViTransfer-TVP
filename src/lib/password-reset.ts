@@ -368,7 +368,7 @@ async function renderPasswordResetEmail({
     ? buildCompanyLogoUrl({
         appDomain: settings.appDomain,
         companyLogoMode: settings.companyLogoMode,
-        companyLogoPath: settings.companyLogoPath,
+        companyLogoPath: null,
         companyLogoUrl: settings.companyLogoUrl,
         updatedAt: settings.updatedAt,
       })

@@ -25,15 +25,21 @@ export async function getProjectUploadUsageBytes(
   projectId: string,
   prismaClient: typeof prisma = prisma,
 ): Promise<ProjectUploadUsage> {
+  // Resolve file IDs for this project (entityId in StoredFile is the file's own ID)
+  const [commentFileIds, uploadFileIds] = await Promise.all([
+    prismaClient.commentFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id)),
+    prismaClient.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id)),
+  ])
+
   const [commentAggregate, uploadsAggregate] = await Promise.all([
-    prismaClient.commentFile.aggregate({
-      where: { projectId },
+    commentFileIds.length > 0 ? prismaClient.storedFile.aggregate({
+      where: { entityType: 'COMMENT_FILE', entityId: { in: commentFileIds }, fileRole: 'ORIGINAL' },
       _sum: { fileSize: true },
-    }),
-    prismaClient.shareUploadFile.aggregate({
-      where: { projectId },
+    }) : { _sum: { fileSize: BigInt(0) } },
+    uploadFileIds.length > 0 ? prismaClient.storedFile.aggregate({
+      where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: uploadFileIds }, fileRole: 'ORIGINAL' },
       _sum: { fileSize: true },
-    }),
+    }) : { _sum: { fileSize: BigInt(0) } },
   ])
 
   const commentBytes = (commentAggregate._sum.fileSize ?? BigInt(0)) as bigint

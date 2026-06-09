@@ -160,15 +160,18 @@ export async function POST(request: NextRequest) {
         versionLabel: effectiveVersionLabel,
         videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
         allowApproval: allowApproval ?? true,
-        originalFileName: sanitizedOriginalFileName,
-        originalFileSize: BigInt(originalFileSize),
-        originalStoragePath,
         status: 'UPLOADING',
         duration: 0,
         width: 0,
         height: 0,
       },
     })
+
+    // Register in StoredFile
+    await prisma.storedFile.create({ data: {
+      entityType: 'VIDEO', entityId: video.id, fileRole: 'ORIGINAL',
+      storagePath: originalStoragePath, fileName: sanitizedOriginalFileName, fileSize: BigInt(originalFileSize),
+    } })
 
     await recalculateAndStoreProjectTotalBytes(projectId)
 

@@ -6,6 +6,7 @@ import { validateRequest, createCommentSchema } from '@/lib/validation'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
+import { batchResolveFileSizes } from '@/lib/stored-file'
 import { getSafeguardLimits } from '@/lib/settings'
 import {
 
@@ -113,7 +114,6 @@ export async function GET(request: NextRequest) {
             username: true,
             email: true,
             displayColor: true,
-            avatarPath: true,
           }
         },
         recipient: {
@@ -125,9 +125,7 @@ export async function GET(request: NextRequest) {
         files: {
           select: {
             id: true,
-            fileName: true,
-            fileSize: true,
-            createdAt: true,
+            fileName: true, createdAt: true,
           },
           orderBy: { createdAt: 'asc' },
         },
@@ -140,7 +138,6 @@ export async function GET(request: NextRequest) {
                 username: true,
                 email: true,
                 displayColor: true,
-                avatarPath: true,
               }
             },
             recipient: {
@@ -152,9 +149,7 @@ export async function GET(request: NextRequest) {
             files: {
               select: {
                 id: true,
-                fileName: true,
-                fileSize: true,
-                createdAt: true,
+                fileName: true, createdAt: true,
               },
               orderBy: { createdAt: 'asc' },
             },
@@ -164,6 +159,28 @@ export async function GET(request: NextRequest) {
       },
       orderBy: { createdAt: 'asc' }
     })
+
+    // Resolve comment file sizes from StoredFile (CommentFile model has no fileSize column)
+    const allFileIds: string[] = []
+    for (const comment of allComments as any[]) {
+      for (const f of (comment.files || [])) allFileIds.push(f.id)
+      for (const reply of (comment.replies || [])) {
+        for (const f of (reply.files || [])) allFileIds.push(f.id)
+      }
+    }
+    const commentFileSizeMap = await batchResolveFileSizes('COMMENT_FILE', allFileIds)
+
+    // Attach resolved sizes to each file object
+    for (const comment of allComments as any[]) {
+      for (const f of (comment.files || [])) {
+        f.fileSize = commentFileSizeMap.get(f.id) ?? 0
+      }
+      for (const reply of (comment.replies || [])) {
+        for (const f of (reply.files || [])) {
+          f.fileSize = commentFileSizeMap.get(f.id) ?? 0
+        }
+      }
+    }
 
     // Sanitize the response data
     const sanitizedComments = allComments.map((comment: any) =>
@@ -389,7 +406,6 @@ export async function POST(request: NextRequest) {
             username: true,
             email: true,
             displayColor: true,
-            avatarPath: true,
           }
         },
         recipient: {
@@ -407,7 +423,6 @@ export async function POST(request: NextRequest) {
                 username: true,
                 email: true,
                 displayColor: true,
-                avatarPath: true,
               }
             }
             ,
@@ -461,6 +476,28 @@ export async function POST(request: NextRequest) {
 
     // Fetch all comments for the project (to keep UI in sync)
     const allComments = await fetchProjectComments(projectId)
+
+    // Resolve comment file sizes from StoredFile (CommentFile model has no fileSize column)
+    const allFileIds: string[] = []
+    for (const comment of allComments as any[]) {
+      for (const f of (comment.files || [])) allFileIds.push(f.id)
+      for (const reply of (comment.replies || [])) {
+        for (const f of (reply.files || [])) allFileIds.push(f.id)
+      }
+    }
+    const commentFileSizeMap = await batchResolveFileSizes('COMMENT_FILE', allFileIds)
+
+    // Attach resolved sizes to each file object
+    for (const comment of allComments as any[]) {
+      for (const f of (comment.files || [])) {
+        f.fileSize = commentFileSizeMap.get(f.id) ?? 0
+      }
+      for (const reply of (comment.replies || [])) {
+        for (const f of (reply.files || [])) {
+          f.fileSize = commentFileSizeMap.get(f.id) ?? 0
+        }
+      }
+    }
 
     // Sanitize the response data
     const sanitizedComments = allComments.map((comment: any) =>

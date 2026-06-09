@@ -41,72 +41,64 @@ export async function GET(request: NextRequest) {
       projectEmailAgg,
       projectEmailAttachmentAgg,
       albumPhotoAgg,
-      albumAgg,
+      albumZipAgg,
+      albumPhotoSocialAgg,
       clientFileAgg,
       userFileAgg,
       projectTotals,
       projectsWithDisk,
-      accountingFilesRow,
+      accountingTotal,
     ] = await Promise.all([
-      prisma.video.aggregate({ _sum: { originalFileSize: true } }),
-      prisma.videoAsset.aggregate({ _sum: { fileSize: true } }),
-      prisma.commentFile.aggregate({ _sum: { fileSize: true } }),
-      prisma.shareUploadFile.aggregate({ _sum: { fileSize: true } }),
-      prisma.projectFile.aggregate({ _sum: { fileSize: true } }),
-      prisma.projectEmail.aggregate({ _sum: { rawFileSize: true } }),
-      prisma.projectEmailAttachment.aggregate({ _sum: { fileSize: true } }),
-      prisma.albumPhoto.aggregate({ _sum: { fileSize: true, socialFileSize: true, thumbnailFileSize: true } }),
-      prisma.album.aggregate({ _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
-      prisma.clientFile.aggregate({ _sum: { fileSize: true } }),
-      prisma.userFile.aggregate({ _sum: { fileSize: true } }),
-      // Aggregate both totalBytes and previewBytes in one query.
+      // All file sizes now come from StoredFile registry
+      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO', fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO_ASSET' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'COMMENT_FILE' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'SHARE_UPLOAD_FILE' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_FILE' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL_ATTACHMENT' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM', fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL', 'SOCIAL', 'THUMBNAIL'] } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', fileRole: { in: ['SOCIAL', 'THUMBNAIL'] } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'CLIENT_FILE' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'USER_FILE' } as any, _sum: { fileSize: true } }),
       prisma.project.aggregate({ _sum: { totalBytes: true, previewBytes: true } }),
-      // For estimating preview bytes in local mode: compare disk vs. DB-tracked.
       isS3Provider
         ? Promise.resolve({ _sum: { totalBytes: 0, diskBytes: 0 } } as any)
         : prisma.project.aggregate({
             where: { diskBytes: { not: null } },
             _sum: { totalBytes: true, diskBytes: true },
           }),
-      // Accounting files total bytes — read from DB (reconciled daily by worker)
-      prisma.settings.findUnique({ where: { id: 'default' }, select: { accountingFilesBytes: true } }),
+      // Accounting files total from StoredFile
+      prisma.storedFile.aggregate({ where: { entityType: 'ACCOUNTING_ATTACHMENT' } as any, _sum: { fileSize: true } }),
     ])
 
-    const originalVideosBytes = asNumber(videoAgg._sum.originalFileSize)
+    const originalVideosBytes = asNumber(videoAgg._sum.fileSize)
     const videoAssetsBytes = asNumber(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumber(commentFileAgg._sum.fileSize)
     const uploadsFilesBytes = asNumber(shareUploadFileAgg._sum.fileSize)
     const communicationsBytes =
-      asNumber(projectEmailAgg._sum.rawFileSize) +
+      asNumber(projectEmailAgg._sum.fileSize) +
       asNumber(projectEmailAttachmentAgg._sum.fileSize)
     const projectFilesBytes = asNumber(projectFileAgg._sum.fileSize)
     const originalPhotosBytes = asNumber(albumPhotoAgg._sum.fileSize)
-    // ZIP sizes are written back to Album.fullZipFileSize / socialZipFileSize by the worker
-    // whenever a ZIP is generated or deleted, so the DB values are reliable.
-    const albumZipFullBytes = asNumber(albumAgg._sum.fullZipFileSize)
-    const albumZipSocialBytes = asNumber(albumAgg._sum.socialZipFileSize)
-    const photoZipBytes =
-      asNumber(albumPhotoAgg._sum.socialFileSize) +
-      asNumber(albumPhotoAgg._sum.thumbnailFileSize) +
-      albumZipFullBytes +
-      albumZipSocialBytes
+    const photoZipBytes = asNumber(albumZipAgg._sum.fileSize) + asNumber(albumPhotoSocialAgg._sum.fileSize)
     const clientFilesBytes = asNumber(clientFileAgg._sum.fileSize)
     const userFilesBytes = asNumber(userFileAgg._sum.fileSize)
-    // Read cached accounting bytes from DB (written by daily reconcile job)
-    const accountingFilesBytes = asNumber(accountingFilesRow?.accountingFilesBytes ?? 0)
+    const accountingFilesBytes = asNumber((accountingTotal as any)._sum.fileSize)
 
     // In S3 mode, use DB-backed previewBytes (reconciled daily) instead of a live S3 scan.
     // In local mode, estimate preview bytes as the difference between disk total and DB-tracked total.
     let videoPreviewsBytes = 0
     if (isS3Provider) {
-      videoPreviewsBytes = asNumber(projectTotals._sum.previewBytes)
+      videoPreviewsBytes = asNumber((projectTotals as any)._sum.previewBytes)
     } else {
-      const diskBytesForProjects = asNumber(projectsWithDisk._sum.diskBytes)
-      const totalBytesForProjectsWithDisk = asNumber(projectsWithDisk._sum.totalBytes)
+      const diskBytesForProjects = asNumber((projectsWithDisk as any)._sum.diskBytes)
+      const totalBytesForProjectsWithDisk = asNumber((projectsWithDisk as any)._sum.totalBytes)
       videoPreviewsBytes = Math.max(0, diskBytesForProjects - totalBytesForProjectsWithDisk)
     }
 
-    const allProjectTotalBytes = asNumber(projectTotals._sum.totalBytes)
+    const allProjectTotalBytes = asNumber((projectTotals as any)._sum.totalBytes)
     const totalBytes =
       allProjectTotalBytes + videoPreviewsBytes + clientFilesBytes + userFilesBytes + accountingFilesBytes
 

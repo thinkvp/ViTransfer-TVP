@@ -11,6 +11,7 @@ import { pipeline } from 'stream/promises'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import { isS3Mode, s3FileExists } from '@/lib/s3-storage'
+import { registerStoredFile, getStoredFilePath } from '@/lib/stored-file'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
@@ -29,11 +30,8 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
     select: {
       id: true,
       albumId: true,
-      storagePath: true,
       status: true,
-      socialStoragePath: true,
       socialStatus: true,
-      socialFileSize: true,
     },
   })
 
@@ -49,7 +47,20 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
     return
   }
 
-  const socialStoragePath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
+  // Get original photo path and social derivative path from StoredFile
+  const origPath = await getStoredFilePath('ALBUM_PHOTO', photoId, 'ORIGINAL')
+  if (!origPath) {
+    console.warn(`[WORKER] Album photo original path not found: ${photoId}`)
+    return
+  }
+  const socialStoragePath = await getStoredFilePath('ALBUM_PHOTO', photoId, 'SOCIAL') || `${origPath}-social.jpg`
+
+  // Read previous social file size from StoredFile for delta computation
+  const prevSocialFile = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photoId, fileRole: 'SOCIAL' } },
+    select: { fileSize: true },
+  })
+  const prevSocialFileSize = prevSocialFile?.fileSize ?? BigInt(0)
 
   // If already generated and exists on disk/S3, treat as done.
   try {
@@ -68,7 +79,6 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
   await prisma.albumPhoto.update({
     where: { id: photoId },
     data: {
-      socialStoragePath,
       socialStatus: 'PROCESSING',
       socialError: null,
     },
@@ -95,7 +105,7 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       tmpInputPath = path.join(tmpDir, `photo-input-${photoId}-${Date.now()}`)
       tmpOutputPath = path.join(tmpDir, `photo-social-${photoId}-${Date.now()}.jpg`)
 
-      const srcStream = await downloadFile(photo.storagePath)
+      const srcStream = await downloadFile(origPath)
       await pipeline(srcStream, fs.createWriteStream(tmpInputPath))
 
       await sharp(tmpInputPath)
@@ -116,7 +126,7 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       const uploadStream = fs.createReadStream(tmpOutputPath)
       await uploadFile(socialStoragePath, uploadStream, outStats.size, 'image/jpeg')
     } else {
-      const inputPath = getFilePath(photo.storagePath)
+      const inputPath = getFilePath(origPath)
       const outputPath = getFilePath(socialStoragePath)
 
       await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
@@ -137,19 +147,21 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       newSocialFileSize = BigInt(outStats.size)
     }
 
-    // Update DB first so we have a stored baseline, then adjust Project.totalBytes by the delta.
-    const prevSocialFileSize = photo.socialFileSize
-
+    // Update DB (legacy path/size columns dropped — StoredFile handles them)
     await prisma.albumPhoto.update({
       where: { id: photoId },
       data: {
-        socialStoragePath,
         socialStatus: 'READY',
         socialError: null,
         socialGeneratedAt: new Date(),
-        socialFileSize: newSocialFileSize,
       },
     })
+
+    // Register in StoredFile registry
+    registerStoredFile({
+      entityType: 'ALBUM_PHOTO', entityId: photoId, fileRole: 'SOCIAL',
+      storagePath: socialStoragePath, fileSize: newSocialFileSize, status: 'READY', generatedAt: new Date(),
+    }).catch((err) => console.error(`[WORKER] StoredFile social register failed for photo ${photoId}:`, err))
 
     // Best-effort: include social derivatives in project totals.
     // If something goes wrong, the daily reconciliation will restore correctness.
@@ -177,9 +189,7 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
           name: true,
           storageFolderName: true,
           project: {
-            select: {
-              storagePath: true,
-              title: true,
+            select: { title: true,
               companyName: true,
               client: { select: { name: true } },
             },
@@ -188,8 +198,7 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       })
 
       if (album) {
-        const projectStoragePath = album.project.storagePath
-          || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+        const projectStoragePath = buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
         const zipStoragePath = getAlbumZipStoragePath({
           projectStoragePath,
           albumFolderName: album.storageFolderName || album.name,
@@ -225,7 +234,6 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
     await prisma.albumPhoto.update({
       where: { id: photoId },
       data: {
-        socialStoragePath,
         socialStatus: 'ERROR',
         socialError: message.substring(0, 2000),
       },

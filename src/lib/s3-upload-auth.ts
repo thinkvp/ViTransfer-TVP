@@ -12,6 +12,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { parseBearerToken, verifyAdminAccessToken } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { getStoredFilePath } from '@/lib/stored-file'
 
 export type S3UploadTarget =
   | { kind: 'video'; videoId: string; s3Key: string }
@@ -45,7 +46,7 @@ export async function verifyVideoUploadAuth(
 
   const video = await prisma.video.findUnique({
     where: { id: videoId },
-    select: { id: true, status: true, originalStoragePath: true },
+    select: { id: true, status: true },
   })
 
   if (!video) {
@@ -73,7 +74,7 @@ export async function verifyVideoUploadAuth(
 
   return {
     ok: true,
-    target: { kind: 'video', videoId: video.id, s3Key: video.originalStoragePath },
+    target: { kind: 'video', videoId: video.id, s3Key: await getStoredFilePath('VIDEO', videoId, 'ORIGINAL') || '' },
   }
 }
 
@@ -96,7 +97,7 @@ export async function verifyAssetUploadAuth(
 
   const asset = await prisma.videoAsset.findUnique({
     where: { id: assetId },
-    select: { id: true, videoId: true, storagePath: true },
+    select: { id: true, videoId: true },
   })
 
   if (!asset) {
@@ -105,7 +106,7 @@ export async function verifyAssetUploadAuth(
 
   return {
     ok: true,
-    target: { kind: 'asset', assetId: asset.id, videoId: asset.videoId, s3Key: asset.storagePath },
+    target: { kind: 'asset', assetId: asset.id, videoId: asset.videoId, s3Key: await getStoredFilePath('VIDEO_ASSET', asset.id, 'ORIGINAL') || '' },
   }
 }
 
@@ -128,7 +129,7 @@ export async function verifyPhotoUploadAuth(
 
   const photo = await prisma.albumPhoto.findUnique({
     where: { id: photoId },
-    select: { id: true, albumId: true, storagePath: true, status: true },
+    select: { id: true, albumId: true, status: true },
   })
 
   if (!photo) {
@@ -147,6 +148,6 @@ export async function verifyPhotoUploadAuth(
 
   return {
     ok: true,
-    target: { kind: 'photo', photoId: photo.id, albumId: photo.albumId, s3Key: photo.storagePath },
+    target: { kind: 'photo', photoId: photo.id, albumId: photo.albumId, s3Key: await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL') || '' },
   }
 }

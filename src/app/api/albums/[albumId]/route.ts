@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteDirectory, deleteFile, moveDirectory, moveFile } from '@/lib/storage'
+import { renameStoredPaths } from '@/lib/stored-file'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -205,34 +206,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     })
 
     if (albumRenamePlan && !isS3Mode()) {
-      const photos = await tx.albumPhoto.findMany({
+      // StoredFile handles path rebasing for album photos and album ZIPs
+      const photoIds = (await tx.albumPhoto.findMany({
         where: { albumId },
-        select: { id: true, storagePath: true, socialStoragePath: true, thumbnailStoragePath: true },
-      })
-      for (const photo of photos) {
-        await tx.albumPhoto.update({
-          where: { id: photo.id },
-          data: {
-            // storagePath and socialStoragePath live under albums/{folder}/ (the main root)
-            storagePath: replaceStoredStoragePathPrefix(
-              photo.storagePath,
-              albumRenamePlan.oldAlbumStorageRoot,
-              albumRenamePlan.newAlbumStorageRoot,
-            )!,
-            socialStoragePath: replaceStoredStoragePathPrefix(
-              photo.socialStoragePath,
-              albumRenamePlan.oldAlbumStorageRoot,
-              albumRenamePlan.newAlbumStorageRoot,
-            ),
-            // thumbnailStoragePath lives under .previews/albums/{folder}/thumbnails/
-            thumbnailStoragePath: replaceStoredStoragePathPrefix(
-              photo.thumbnailStoragePath,
-              albumRenamePlan.oldAlbumPreviewsRoot,
-              albumRenamePlan.newAlbumPreviewsRoot,
-            ),
-          },
-        })
+        select: { id: true },
+      })).map(p => p.id)
+      if (photoIds.length > 0) {
+        await renameStoredPaths('ALBUM_PHOTO', photoIds, albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
       }
+      await renameStoredPaths('ALBUM', [albumId], albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
     }
 
     return updatedAlbum
@@ -275,12 +257,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
         photos: {
           select: {
             id: true,
-            fileSize: true,
-            socialFileSize: true,
-            thumbnailFileSize: true,
-            storagePath: true,
-            socialStoragePath: true,
-            thumbnailStoragePath: true,
           },
         },
       },
@@ -304,27 +280,27 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       }
     }
 
-    // Best-effort: delete physical files
+    // Best-effort: delete physical files via StoredFile
     for (const photo of album.photos) {
       try {
-        const sharedCount = await prisma.albumPhoto.count({
-          where: {
-            storagePath: photo.storagePath,
-            id: { not: photo.id },
-          },
+        const storedFiles = await prisma.storedFile.findMany({
+          where: { entityType: 'ALBUM_PHOTO', entityId: photo.id },
+          select: { storagePath: true },
         })
-
-        if (sharedCount === 0) {
-          await deleteFile(photo.storagePath)
+        for (const sf of storedFiles) {
+          const sharedCount = await prisma.storedFile.count({
+            where: {
+              storagePath: sf.storagePath,
+              entityType: 'ALBUM_PHOTO',
+              entityId: { not: photo.id },
+            },
+          })
+          if (sharedCount === 0) {
+            await deleteFile(sf.storagePath)
+          }
         }
 
-        if (photo.socialStoragePath) {
-          await deleteFile(photo.socialStoragePath).catch(() => {})
-        }
-
-        if (photo.thumbnailStoragePath) {
-          await deleteFile(photo.thumbnailStoragePath).catch(() => {})
-        }
+        // StoredFile already handles all paths — no per-field deletion needed
       } catch {
         // Ignore storage errors; DB is source of truth
       }
@@ -334,11 +310,30 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await prisma.albumPhoto.deleteMany({ where: { albumId } })
     await prisma.album.delete({ where: { id: albumId } })
 
-    const photosDelta = album.photos.reduce(
-      (acc, p) => acc + p.fileSize + p.socialFileSize + (p.thumbnailFileSize ?? BigInt(0)),
-      BigInt(0)
-    )
-    const zipDelta = (album.fullZipFileSize ?? BigInt(0)) + (album.socialZipFileSize ?? BigInt(0))
+    // Clean up StoredFile rows for all deleted photos and the album
+    const photoIds = album.photos.map(p => p.id)
+    await prisma.storedFile.deleteMany({
+      where: {
+        OR: [
+          { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds } },
+          { entityType: 'ALBUM', entityId: albumId },
+        ],
+      },
+    }).catch(() => {})
+
+    // Compute total bytes from StoredFile for adjustment
+    const photoSizeAgg = photoIds.length > 0
+      ? await prisma.storedFile.aggregate({
+          where: { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds } },
+          _sum: { fileSize: true },
+        })
+      : { _sum: { fileSize: BigInt(0) } }
+    const albumZipAgg = await prisma.storedFile.aggregate({
+      where: { entityType: 'ALBUM', entityId: albumId, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
+      _sum: { fileSize: true },
+    })
+    const photosDelta = BigInt(photoSizeAgg._sum.fileSize ?? 0)
+    const zipDelta = BigInt(albumZipAgg._sum.fileSize ?? 0)
     await adjustProjectTotalBytes(album.projectId, (photosDelta + zipDelta) * BigInt(-1))
 
     // Best-effort: delete album directory (if empty or still present)

@@ -4,6 +4,61 @@ import { FolderRenameJobPayload } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { isS3Mode, s3MoveDirectoryWithProgress, s3MoveFile } from '../lib/s3-storage'
 import { getAlbumZipFileName } from '../lib/album-photo-zip'
+import { renameStoredPaths, type EntityType } from '../lib/stored-file'
+
+// ---------------------------------------------------------------------------
+// StoredFile path rebase helper — mirrors the legacy raw-SQL UPDATEs but
+// operates on the StoredFile registry, the future single source of truth.
+// ---------------------------------------------------------------------------
+
+/**
+ * Rename StoredFile paths for all entity types within a project.
+ * Covers VIDEO, VIDEO_ASSET, ALBUM_PHOTO, ALBUM (ZIPs), and simple single-file entities.
+ */
+async function renameStoredFilesForProject(
+  projectId: string,
+  oldPrefix: string,
+  newPrefix: string,
+): Promise<void> {
+  const [videoIds, albumIds, projectEmailIds, projectFileIds, commentFileIds, shareUploadFileIds] = await Promise.all([
+    prisma.video.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(v => v.id)),
+    prisma.album.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(a => a.id)),
+    prisma.projectEmail.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(e => e.id)),
+    prisma.projectFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id)),
+    prisma.commentFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id)),
+    prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id)),
+  ])
+
+  const assetIds = videoIds.length > 0
+    ? await prisma.videoAsset.findMany({ where: { videoId: { in: videoIds } }, select: { id: true } }).then(r => r.map(a => a.id))
+    : [] as string[]
+
+  const photoIds = albumIds.length > 0
+    ? await prisma.albumPhoto.findMany({ where: { albumId: { in: albumIds } }, select: { id: true } }).then(r => r.map(p => p.id))
+    : [] as string[]
+
+  const emailAttachmentIds = projectEmailIds.length > 0
+    ? await prisma.projectEmailAttachment.findMany({ where: { projectEmailId: { in: projectEmailIds } }, select: { id: true } }).then(r => r.map(a => a.id))
+    : [] as string[]
+
+  const renames: Array<{ entityType: EntityType; entityIds: string[] }> = [
+    { entityType: 'VIDEO', entityIds: videoIds },
+    { entityType: 'VIDEO_ASSET', entityIds: assetIds },
+    { entityType: 'ALBUM', entityIds: albumIds },
+    { entityType: 'ALBUM_PHOTO', entityIds: photoIds },
+    { entityType: 'SHARE_UPLOAD_FILE', entityIds: shareUploadFileIds },
+    { entityType: 'PROJECT_FILE', entityIds: projectFileIds },
+    { entityType: 'COMMENT_FILE', entityIds: commentFileIds },
+    { entityType: 'PROJECT_EMAIL', entityIds: projectEmailIds },
+    { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityIds: emailAttachmentIds },
+  ]
+
+  for (const { entityType, entityIds } of renames) {
+    if (entityIds.length > 0) {
+      await renameStoredPaths(entityType, entityIds, oldPrefix, newPrefix)
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Progress throttle: update DB at most every N ms to avoid hammering the DB
@@ -20,67 +75,11 @@ async function updateProjectDbPaths(
   oldPrefix: string,
   newPrefix: string,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await tx.project.update({
-      where: { id: projectId },
-      data: { storagePath: newPrefix },
-    })
-
-    // Use raw SQL so Prisma's @updatedAt auto-touch is bypassed — prevents
-    // READY videos from reappearing in the "Processing complete" running-jobs list.
-    await tx.$executeRaw`
-      UPDATE "Video"
-      SET
-        "originalStoragePath" = REPLACE("originalStoragePath", ${oldPrefix}, ${newPrefix}),
-        "preview480Path"      = CASE WHEN "preview480Path"      IS NULL THEN NULL ELSE REPLACE("preview480Path",      ${oldPrefix}, ${newPrefix}) END,
-        "preview720Path"      = CASE WHEN "preview720Path"      IS NULL THEN NULL ELSE REPLACE("preview720Path",      ${oldPrefix}, ${newPrefix}) END,
-        "preview1080Path"     = CASE WHEN "preview1080Path"     IS NULL THEN NULL ELSE REPLACE("preview1080Path",     ${oldPrefix}, ${newPrefix}) END,
-        "thumbnailPath"       = CASE WHEN "thumbnailPath"       IS NULL THEN NULL ELSE REPLACE("thumbnailPath",       ${oldPrefix}, ${newPrefix}) END,
-        "timelinePreviewVttPath"     = CASE WHEN "timelinePreviewVttPath"     IS NULL THEN NULL ELSE REPLACE("timelinePreviewVttPath",     ${oldPrefix}, ${newPrefix}) END,
-        "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewSpritesPath", ${oldPrefix}, ${newPrefix}) END
-      WHERE "projectId" = ${projectId}
-    `
-
-    await tx.$executeRaw`
-      UPDATE "VideoAsset"
-      SET
-        "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix}),
-        "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPrefix}, ${newPrefix}) END
-      WHERE "videoId" IN (SELECT "id" FROM "Video" WHERE "projectId" = ${projectId})
-    `
-
-    await tx.$executeRaw`
-      UPDATE "AlbumPhoto"
-      SET
-        "storagePath"       = REPLACE("storagePath",       ${oldPrefix}, ${newPrefix}),
-        "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${oldPrefix}, ${newPrefix}) END,
-        "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${oldPrefix}, ${newPrefix}) END
-      WHERE "albumId" IN (SELECT "id" FROM "Album" WHERE "projectId" = ${projectId})
-    `
-
-    await tx.$executeRaw`
-      UPDATE "ProjectFile"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectId" = ${projectId}
-    `
-
-    await tx.$executeRaw`
-      UPDATE "ProjectEmail"
-      SET "rawStoragePath" = REPLACE("rawStoragePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectId" = ${projectId}
-    `
-
-    await tx.$executeRaw`
-      UPDATE "ProjectEmailAttachment"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectEmailId" IN (SELECT "id" FROM "ProjectEmail" WHERE "projectId" = ${projectId})
-    `
-
-    await tx.$executeRaw`
-      UPDATE "CommentFile"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectId" = ${projectId}
-    `
+  // Legacy path columns have been dropped — all path rebasing is now handled
+  // by renameStoredPaths() above. Only folder-root columns remain.
+  await prisma.project.update({
+    where: { id: projectId },
+    data: { storagePath: newPrefix },
   })
 }
 
@@ -89,82 +88,13 @@ async function updateClientDbPaths(
   oldPrefix: string,
   newPrefix: string,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`
-      UPDATE "Project"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "clientId" = ${clientId}
-    `
-
-    await tx.$executeRaw`
-      UPDATE "ClientFile"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "clientId" = ${clientId}
-    `
-
-    await tx.$executeRaw`
-      UPDATE "Video"
-      SET
-        "originalStoragePath" = REPLACE("originalStoragePath", ${oldPrefix}, ${newPrefix}),
-        "preview480Path"      = CASE WHEN "preview480Path"      IS NULL THEN NULL ELSE REPLACE("preview480Path",      ${oldPrefix}, ${newPrefix}) END,
-        "preview720Path"      = CASE WHEN "preview720Path"      IS NULL THEN NULL ELSE REPLACE("preview720Path",      ${oldPrefix}, ${newPrefix}) END,
-        "preview1080Path"     = CASE WHEN "preview1080Path"     IS NULL THEN NULL ELSE REPLACE("preview1080Path",     ${oldPrefix}, ${newPrefix}) END,
-        "thumbnailPath"       = CASE WHEN "thumbnailPath"       IS NULL THEN NULL ELSE REPLACE("thumbnailPath",       ${oldPrefix}, ${newPrefix}) END,
-        "timelinePreviewVttPath"     = CASE WHEN "timelinePreviewVttPath"     IS NULL THEN NULL ELSE REPLACE("timelinePreviewVttPath",     ${oldPrefix}, ${newPrefix}) END,
-        "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewSpritesPath", ${oldPrefix}, ${newPrefix}) END
-      WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
-    `
-
-    await tx.$executeRaw`
-      UPDATE "VideoAsset"
-      SET
-        "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix}),
-        "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPrefix}, ${newPrefix}) END
-      WHERE "videoId" IN (
-        SELECT "id" FROM "Video"
-        WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
-      )
-    `
-
-    await tx.$executeRaw`
-      UPDATE "AlbumPhoto"
-      SET
-        "storagePath"       = REPLACE("storagePath",       ${oldPrefix}, ${newPrefix}),
-        "socialStoragePath" = CASE WHEN "socialStoragePath" IS NULL THEN NULL ELSE REPLACE("socialStoragePath", ${oldPrefix}, ${newPrefix}) END,
-        "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${oldPrefix}, ${newPrefix}) END
-      WHERE "albumId" IN (
-        SELECT "id" FROM "Album"
-        WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
-      )
-    `
-
-    await tx.$executeRaw`
-      UPDATE "ProjectFile"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
-    `
-
-    await tx.$executeRaw`
-      UPDATE "ProjectEmail"
-      SET "rawStoragePath" = REPLACE("rawStoragePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
-    `
-
-    await tx.$executeRaw`
-      UPDATE "ProjectEmailAttachment"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectEmailId" IN (
-        SELECT "id" FROM "ProjectEmail"
-        WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
-      )
-    `
-
-    await tx.$executeRaw`
-      UPDATE "CommentFile"
-      SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
-      WHERE "projectId" IN (SELECT "id" FROM "Project" WHERE "clientId" = ${clientId})
-    `
-  })
+  // Legacy path columns have been dropped — all path rebasing is now handled
+  // by renameStoredPaths() (called per project in processFolderRename).
+  await prisma.$executeRaw`
+    UPDATE "Project"
+    SET "storagePath" = REPLACE("storagePath", ${oldPrefix}, ${newPrefix})
+    WHERE "clientId" = ${clientId}
+  `
 }
 
 // ---------------------------------------------------------------------------
@@ -220,8 +150,26 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
     // Update DB storage paths
     if (renameJob.entityType === 'PROJECT') {
       await updateProjectDbPaths(renameJob.entityId, renameJob.oldPrefix, renameJob.newPrefix)
+      await renameStoredFilesForProject(renameJob.entityId, renameJob.oldPrefix, renameJob.newPrefix)
     } else if (renameJob.entityType === 'CLIENT') {
       await updateClientDbPaths(renameJob.entityId, renameJob.oldPrefix, renameJob.newPrefix)
+
+      // Rename StoredFile paths for all projects under this client
+      const clientProjectIds = await prisma.project.findMany({
+        where: { clientId: renameJob.entityId },
+        select: { id: true },
+      }).then(r => r.map(p => p.id))
+      for (const pid of clientProjectIds) {
+        await renameStoredFilesForProject(pid, renameJob.oldPrefix, renameJob.newPrefix)
+      }
+      // Also rename client files
+      const clientFileIds = await prisma.clientFile.findMany({
+        where: { clientId: renameJob.entityId },
+        select: { id: true },
+      }).then(r => r.map(f => f.id))
+      if (clientFileIds.length > 0) {
+        await renameStoredPaths('CLIENT_FILE', clientFileIds, renameJob.oldPrefix, renameJob.newPrefix)
+      }
     } else if (renameJob.entityType === 'VIDEO_GROUP') {
       // entityId = projectId; update video + asset paths for this folder only
       const projectPrefix = path.posix.dirname(path.posix.dirname(renameJob.oldPrefix))
@@ -237,31 +185,25 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
         console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: video group previews move failed (non-fatal):`, previewMoveError)
       }
 
-      await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`
-          UPDATE "Video"
-          SET
-            "storageFolderName" = ${renameJob.entityName},
-            "originalStoragePath" = REPLACE("originalStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "preview480Path"      = CASE WHEN "preview480Path"      IS NULL THEN NULL ELSE REPLACE(REPLACE("preview480Path",      ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "preview720Path"      = CASE WHEN "preview720Path"      IS NULL THEN NULL ELSE REPLACE(REPLACE("preview720Path",      ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "preview1080Path"     = CASE WHEN "preview1080Path"     IS NULL THEN NULL ELSE REPLACE(REPLACE("preview1080Path",     ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "thumbnailPath"       = CASE WHEN "thumbnailPath"       IS NULL THEN NULL ELSE REPLACE(REPLACE("thumbnailPath",       ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewVttPath"     = CASE WHEN "timelinePreviewVttPath"     IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewVttPath",     ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewSpritesPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END
-          WHERE "projectId" = ${renameJob.entityId}
-            AND "originalStoragePath" LIKE ${renameJob.oldPrefix + '%'}
-        `
-        await tx.$executeRaw`
-          UPDATE "VideoAsset"
-          SET
-            "storagePath" = REPLACE("storagePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("previewPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewVttPath" = CASE WHEN "timelinePreviewVttPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewVttPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE(REPLACE("timelinePreviewSpritesPath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}), ${oldPreviewPrefix}, ${newPreviewPrefix}) END
-          WHERE "storagePath" LIKE ${renameJob.oldPrefix + '%'}
-        `
+      await prisma.$executeRaw`
+        UPDATE "Video"
+        SET "storageFolderName" = ${renameJob.entityName}
+        WHERE "projectId" = ${renameJob.entityId}
+          AND "storageFolderName" = ${oldFolderName}
+      `
+
+      // Rename StoredFile paths for affected videos and assets
+      // Find affected videos via StoredFile registry (originalStoragePath column dropped)
+      const sfVideos = await prisma.storedFile.findMany({
+        where: { entityType: 'VIDEO', fileRole: 'ORIGINAL', storagePath: { startsWith: renameJob.oldPrefix } },
+        select: { entityId: true },
       })
+      const vgVideoIds = sfVideos.map(s => s.entityId)
+      const vgAssetIds = vgVideoIds.length > 0
+        ? await prisma.videoAsset.findMany({ where: { videoId: { in: vgVideoIds } }, select: { id: true } }).then(r => r.map(a => a.id))
+        : []
+      if (vgVideoIds.length > 0) await renameStoredPaths('VIDEO', vgVideoIds, renameJob.oldPrefix, renameJob.newPrefix)
+      if (vgAssetIds.length > 0) await renameStoredPaths('VIDEO_ASSET', vgAssetIds, renameJob.oldPrefix, renameJob.newPrefix)
     } else if (renameJob.entityType === 'ALBUM') {
       // entityId = albumId; update album + photo paths
       // oldPrefix / newPrefix = {proj}/albums/{folder}
@@ -278,21 +220,21 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
         console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: album previews move failed (non-fatal):`, previewMoveError)
       }
 
-      await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`
-          UPDATE "Album"
-          SET "storageFolderName" = ${renameJob.entityName}
-          WHERE "id" = ${renameJob.entityId}
-        `
-        await tx.$executeRaw`
-          UPDATE "AlbumPhoto"
-          SET
-            "storagePath"          = REPLACE("storagePath",       ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "socialStoragePath"    = CASE WHEN "socialStoragePath"    IS NULL THEN NULL ELSE REPLACE("socialStoragePath",    ${renameJob.oldPrefix},       ${renameJob.newPrefix})       END,
-            "thumbnailStoragePath" = CASE WHEN "thumbnailStoragePath" IS NULL THEN NULL ELSE REPLACE("thumbnailStoragePath", ${oldAlbumPreviewsPrefix}, ${newAlbumPreviewsPrefix}) END
-          WHERE "albumId" = ${renameJob.entityId}
-        `
-      })
+      await prisma.$executeRaw`
+        UPDATE "Album"
+        SET "storageFolderName" = ${renameJob.entityName}
+        WHERE "id" = ${renameJob.entityId}
+      `
+
+      // Rename StoredFile paths for album photos and album ZIPs
+      const albumPhotoIds = await prisma.albumPhoto.findMany({
+        where: { albumId: renameJob.entityId },
+        select: { id: true },
+      }).then(r => r.map(p => p.id))
+      if (albumPhotoIds.length > 0) {
+        await renameStoredPaths('ALBUM_PHOTO', albumPhotoIds, renameJob.oldPrefix, renameJob.newPrefix)
+      }
+      await renameStoredPaths('ALBUM', [renameJob.entityId], renameJob.oldPrefix, renameJob.newPrefix)
 
       // Rename the zip files inside the (now-moved) zips/ subdirectory.
       // The zip filename encodes the album display name, so a prefix copy alone is not enough.
@@ -335,31 +277,15 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
         console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: previews move failed (non-fatal):`, previewMoveError)
       }
 
-      // Rebase all stored path columns for this video and its assets.
-      await prisma.$transaction(async (tx) => {
-        // originalStoragePath lives under the main prefix; preview paths live under the preview prefix.
-        await tx.$executeRaw`
-          UPDATE "Video"
-          SET
-            "originalStoragePath" = REPLACE("originalStoragePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "preview480Path"      = CASE WHEN "preview480Path"      IS NULL THEN NULL ELSE REPLACE("preview480Path",      ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "preview720Path"      = CASE WHEN "preview720Path"      IS NULL THEN NULL ELSE REPLACE("preview720Path",      ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "preview1080Path"     = CASE WHEN "preview1080Path"     IS NULL THEN NULL ELSE REPLACE("preview1080Path",     ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "thumbnailPath"       = CASE WHEN "thumbnailPath"       IS NULL THEN NULL ELSE REPLACE("thumbnailPath",       ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewVttPath"     = CASE WHEN "timelinePreviewVttPath"     IS NULL THEN NULL ELSE REPLACE("timelinePreviewVttPath",     ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewSpritesPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END
-          WHERE "id" = ${renameJob.entityId}
-        `
-        await tx.$executeRaw`
-          UPDATE "VideoAsset"
-          SET
-            "storagePath" = REPLACE("storagePath", ${renameJob.oldPrefix}, ${renameJob.newPrefix}),
-            "previewPath" = CASE WHEN "previewPath" IS NULL THEN NULL ELSE REPLACE("previewPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewVttPath" = CASE WHEN "timelinePreviewVttPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewVttPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END,
-            "timelinePreviewSpritesPath" = CASE WHEN "timelinePreviewSpritesPath" IS NULL THEN NULL ELSE REPLACE("timelinePreviewSpritesPath", ${oldPreviewPrefix}, ${newPreviewPrefix}) END
-          WHERE "videoId" = ${renameJob.entityId}
-        `
-      })
+      // Rename StoredFile paths for this video and its assets
+      await renameStoredPaths('VIDEO', [renameJob.entityId], renameJob.oldPrefix, renameJob.newPrefix)
+      const vvAssetIds = await prisma.videoAsset.findMany({
+        where: { videoId: renameJob.entityId },
+        select: { id: true },
+      }).then(r => r.map(a => a.id))
+      if (vvAssetIds.length > 0) {
+        await renameStoredPaths('VIDEO_ASSET', vvAssetIds, renameJob.oldPrefix, renameJob.newPrefix)
+      }
     }
 
     // Mark complete (final progress values will be consistent with totalObjects)

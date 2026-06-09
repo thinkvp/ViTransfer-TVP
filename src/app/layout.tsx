@@ -76,7 +76,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const siteName = companyName || 'Portal'
 
   const faviconConfigured =
-    (settings?.companyFaviconMode === 'UPLOAD' && !!settings.companyFaviconPath) ||
+    (settings?.companyFaviconMode === 'UPLOAD') ||
     (settings?.companyFaviconMode === 'LINK' && typeof settings.companyFaviconUrl === 'string' && !!settings.companyFaviconUrl.trim())
 
   const faviconUrl = faviconConfigured

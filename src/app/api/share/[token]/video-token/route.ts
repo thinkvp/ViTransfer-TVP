@@ -8,36 +8,28 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 function canIssueShareVideoToken(
-  video: {
-    approved: boolean
-    originalStoragePath: string | null
-    thumbnailPath: string | null
-    preview480Path: string | null
-    preview720Path: string | null
-    preview1080Path: string | null
-    timelinePreviewVttPath: string | null
-    timelinePreviewSpritesPath: string | null
-  },
+  storedRoles: Set<string>,
+  approved: boolean,
   quality: string,
 ): boolean {
-  const canUseOriginal = Boolean(video.originalStoragePath && video.approved)
+  const canUseOriginal = approved
 
   switch (quality) {
     case '480p':
-      return Boolean(video.preview480Path || video.preview720Path || video.preview1080Path || canUseOriginal)
+      return storedRoles.has('PREVIEW_480') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || canUseOriginal
     case '720p':
-      return Boolean(video.preview720Path || video.preview1080Path || video.preview480Path || canUseOriginal)
+      return storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_480') || canUseOriginal
     case '1080p':
-      return Boolean(video.preview1080Path || video.preview720Path || video.preview480Path || canUseOriginal)
+      return storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_480') || canUseOriginal
     case 'thumbnail':
-      return Boolean(video.thumbnailPath)
+      return storedRoles.has('THUMBNAIL')
     case 'timeline-vtt':
-      return Boolean(video.timelinePreviewVttPath)
+      return storedRoles.has('TIMELINE_VTT')
     case 'timeline-sprite':
-      return Boolean(video.timelinePreviewSpritesPath)
+      return storedRoles.has('TIMELINE_SPRITES')
     case 'original':
     case 'download':
-      return canUseOriginal
+      return canUseOriginal && storedRoles.has('ORIGINAL')
     default:
       return false
   }
@@ -65,13 +57,8 @@ export async function GET(
   if (limited) return limited
 
   let project: { id: string; slug: string; enableVideos: boolean | null } | null
-  let video: {
-    id: string; projectId: string; approved: boolean;
-    originalStoragePath: string | null; thumbnailPath: string | null;
-    preview480Path: string | null; preview720Path: string | null;
-    preview1080Path: string | null; timelinePreviewVttPath: string | null;
-    timelinePreviewSpritesPath: string | null;
-  } | null
+  let video: { id: string; projectId: string; approved: boolean } | null
+  let storedRoles = new Set<string>()
   try {
     project = await prisma.project.findUnique({
       where: { id: shareContext.projectId },
@@ -92,25 +79,25 @@ export async function GET(
         id: true,
         projectId: true,
         approved: true,
-        originalStoragePath: true,
-        thumbnailPath: true,
-        preview480Path: true,
-        preview720Path: true,
-        preview1080Path: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
       },
     })
 
     if (!video || video.projectId !== project.id) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
     }
+
+    // Resolve available file roles from StoredFile registry
+    const storedFiles = await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO', entityId: videoId },
+      select: { fileRole: true },
+    })
+    storedRoles = new Set(storedFiles.map(f => f.fileRole))
   } catch (error) {
     console.error('[SHARE] Failed to load project/video:', error)
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 })
   }
 
-  if (!canIssueShareVideoToken(video!, quality)) {
+  if (!canIssueShareVideoToken(storedRoles, video!.approved, quality)) {
     return NextResponse.json({ error: `${quality} unavailable` }, { status: quality === 'original' ? 403 : 404 })
   }
 

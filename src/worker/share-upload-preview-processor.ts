@@ -8,6 +8,8 @@ import { buildProjectStorageRoot, buildProjectUploadVideoThumbnailStoragePath, b
 import { recalculateAndStoreProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { getFilePath, uploadFile } from '@/lib/storage'
+import { getStoredFilePath } from '@/lib/stored-file'
+import { registerStoredFile } from '@/lib/stored-file'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import type { ShareUploadPreviewJob } from '@/lib/queue'
 import { calculateOutputDimensions, parseResolutions } from './video-processor-helpers'
@@ -171,17 +173,31 @@ async function updateRecordSuccess(
   previewPath: string,
   previewFileSize: bigint,
 ): Promise<void> {
-  const data = {
-    previewStatus: 'READY',
-    previewPath,
-    previewFileSize,
-    previewGeneratedAt: new Date(),
-    previewError: null as string | null,
-  }
+  // Legacy path/size columns have been dropped — status tracking only on entity tables.
+  // All file path data is now stored exclusively in StoredFile.
   if (type === 'shareUploadFile') {
-    await prisma.shareUploadFile.update({ where: { id: recordId }, data })
+    await prisma.shareUploadFile.update({ where: { id: recordId }, data: {
+      previewStatus: 'READY',
+      previewGeneratedAt: new Date(),
+      previewError: null,
+    } })
+
+    await registerStoredFile({
+      entityType: 'SHARE_UPLOAD_FILE', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
+      storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
+    })
   } else {
-    await prisma.videoAsset.update({ where: { id: recordId }, data })
+    await prisma.videoAsset.update({ where: { id: recordId }, data: {
+      previewStatus: 'READY',
+      previewGeneratedAt: new Date(),
+      previewError: null,
+    } })
+
+    const isMp4 = previewPath.toLowerCase().endsWith('.mp4')
+    await registerStoredFile({
+      entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: isMp4 ? 'PREVIEW_MP4' : 'PREVIEW_IMAGE',
+      storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
+    })
   }
 }
 
@@ -234,15 +250,12 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
   const record = type === 'shareUploadFile'
     ? await prisma.shareUploadFile.findUnique({
         where: { id: recordId },
-        select: {
-          storagePath: true,
-          fileType: true,
+        select: { fileType: true,
           fileName: true,
           project: {
-            select: {
-              storagePath: true,
-              title: true,
+            select: { title: true,
               companyName: true,
+              storagePath: true,
               previewResolutions: true,
               watermarkEnabled: true,
               watermarkText: true,
@@ -253,9 +266,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
       })
     : await prisma.videoAsset.findUnique({
         where: { id: recordId },
-        select: {
-          storagePath: true,
-          fileType: true,
+        select: { fileType: true,
           fileName: true,
           video: {
             select: {
@@ -264,10 +275,9 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
               name: true,
               versionLabel: true,
               project: {
-                select: {
-                  storagePath: true,
-                  title: true,
+                select: { title: true,
                   companyName: true,
+                  storagePath: true,
                   previewResolutions: true,
                   watermarkEnabled: true,
                   watermarkText: true,
@@ -297,7 +307,12 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
     )
   }
 
-  const resolvedStoragePath = record.storagePath
+  // StoredFile handles original storage path — resolve if not provided
+  const resolvedStoragePath = storagePath || await getStoredFilePath(
+    type === 'shareUploadFile' ? 'SHARE_UPLOAD_FILE' : 'VIDEO_ASSET',
+    recordId,
+    'ORIGINAL',
+  ) || ''
   const resolvedFileType = record.fileType || fileType
   const resolvedFileName = record.fileName || fileName
 
@@ -519,7 +534,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
         // so we query images and videos separately below.
       },
     },
-    select: { id: true, storagePath: true, fileType: true, fileName: true, mediaDurationSeconds: true },
+    select: { id: true, fileType: true, fileName: true, mediaDurationSeconds: true },
     take: Math.floor(BATCH_CAP / 2),
   })
 
@@ -539,7 +554,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
       ],
       fileType: { startsWith: 'video/' },
     },
-    select: { id: true, storagePath: true, fileType: true, fileName: true, mediaDurationSeconds: true },
+    select: { id: true, fileType: true, fileName: true, mediaDurationSeconds: true },
     take: Math.floor(BATCH_CAP / 4),
   })
 
@@ -560,7 +575,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
       ],
       fileType: { startsWith: 'image/' },
     },
-    select: { id: true, storagePath: true, fileType: true, fileName: true },
+    select: { id: true, fileType: true, fileName: true },
     take: Math.floor(BATCH_CAP / 4),
   })
 
@@ -569,12 +584,9 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
       fileType: { startsWith: 'video/' },
     },
     select: {
-      id: true,
-      storagePath: true,
-      fileType: true,
+      id: true, fileType: true,
       fileName: true,
       previewStatus: true,
-      previewPath: true,
       previewAttempts: true,
       previewGeneratedAt: true,
     },
@@ -583,8 +595,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
 
   const videoAssetsVideoToQueue: typeof videoAssetsVideo = []
   for (const asset of videoAssetsVideo) {
-    const previewPath = String(asset.previewPath || '').toLowerCase()
-    const isStaleReadyPreview = asset.previewStatus === 'READY' && previewPath.length > 0 && !previewPath.endsWith('.mp4')
+    // Preview paths now come from StoredFile — check preview status only
     const needsRetry =
       asset.previewStatus === null ||
       asset.previewStatus === 'PENDING' ||
@@ -593,17 +604,17 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
         (asset.previewAttempts ?? 0) < MAX_PREVIEW_ATTEMPTS &&
         (!asset.previewGeneratedAt || asset.previewGeneratedAt < twoHoursAgo)
       )
-    if (isStaleReadyPreview || needsRetry) {
+    if (needsRetry) {
       videoAssetsVideoToQueue.push(asset)
-    } else if (asset.previewStatus === 'READY' && previewPath.endsWith('.mp4') && asset.previewPath) {
-      // The MP4 playback preview exists in the DB; check whether the companion JPG thumbnail
-      // was also generated. Assets processed before companion-JPG generation was introduced
-      // will have only the MP4 — detect and re-enqueue so the worker can backfill the JPG
-      // without re-encoding the video.
-      const companionJpgPath = asset.previewPath.replace(/\.mp4$/i, '.jpg')
-      const companionExists = await previewExists(companionJpgPath)
-      if (!companionExists) {
-        videoAssetsVideoToQueue.push(asset)
+    } else if (asset.previewStatus === 'READY') {
+      // Check StoredFile for companion JPG
+      const mp4Path = await getStoredFilePath('VIDEO_ASSET', asset.id, 'PREVIEW_MP4')
+      if (mp4Path) {
+        const companionJpgPath = mp4Path.replace(/\.mp4$/i, '.jpg')
+        const companionExists = await previewExists(companionJpgPath)
+        if (!companionExists) {
+          videoAssetsVideoToQueue.push(asset)
+        }
       }
     }
   }
@@ -614,7 +625,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
     await enqueueShareUploadPreview({
       type: 'shareUploadFile',
       recordId: f.id,
-      storagePath: f.storagePath,
+      storagePath: '',
       fileType: f.fileType,
       fileName: f.fileName,
       durationSeconds: f.mediaDurationSeconds,
@@ -626,7 +637,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
     await enqueueShareUploadPreview({
       type: 'shareUploadFile',
       recordId: f.id,
-      storagePath: f.storagePath,
+      storagePath: '',
       fileType: f.fileType,
       fileName: f.fileName,
       durationSeconds: f.mediaDurationSeconds,
@@ -638,7 +649,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
     await enqueueShareUploadPreview({
       type: 'videoAsset',
       recordId: a.id,
-      storagePath: a.storagePath,
+      storagePath: '',
       fileType: a.fileType,
       fileName: a.fileName,
     }, { forceRequeue: true }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for VideoAsset ${a.id}:`, e))
@@ -649,7 +660,7 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
     await enqueueShareUploadPreview({
       type: 'videoAsset',
       recordId: a.id,
-      storagePath: a.storagePath,
+      storagePath: '',
       fileType: a.fileType,
       fileName: a.fileName,
     }, { forceRequeue: true }).catch((e) => console.warn(`[PREVIEW-RECONCILE] Enqueue failed for VideoAsset ${a.id}:`, e))

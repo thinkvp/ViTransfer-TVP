@@ -796,7 +796,7 @@ export default function VideoSidebar({
     const saved = localStorage.getItem('share_transfers_height')
     if (!saved) return
     const height = parseInt(saved, 10)
-    if (height >= 140 && height <= 420) {
+    if (height >= 140 && height <= 600) {
       setTransferPanelHeight(height)
     }
   }, [])
@@ -807,7 +807,7 @@ export default function VideoSidebar({
       const rect = sidebarRef.current.getBoundingClientRect()
       const nextHeight = rect.bottom - e.clientY
       const minHeight = 140
-      const maxHeight = Math.max(180, Math.min(420, Math.round(rect.height * 0.6)))
+      const maxHeight = Math.max(180, Math.min(600, Math.round(rect.height * 0.75)))
       setTransferPanelHeight(Math.max(minHeight, Math.min(maxHeight, nextHeight)))
     }
 

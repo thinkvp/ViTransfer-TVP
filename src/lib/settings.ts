@@ -23,7 +23,6 @@ const cachedExcludeInternalIpsFromAnalytics: CachedValue<boolean> = { value: tru
 type BrandingSettingsSnapshot = {
   companyName: string | null
   companyFaviconMode: string | null
-  companyFaviconPath: string | null
   companyFaviconUrl: string | null
   updatedAt: Date | null
   accentColor: string | null
@@ -100,7 +99,6 @@ export async function getBrandingSettingsSnapshot(): Promise<BrandingSettingsSna
       select: {
         companyName: true,
         companyFaviconMode: true,
-        companyFaviconPath: true,
         companyFaviconUrl: true,
         updatedAt: true,
         accentColor: true,

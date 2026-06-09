@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getStoredFilePath } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import archiver from 'archiver'
@@ -96,7 +97,9 @@ export async function POST(
     // Add files to archive
     for (const asset of assets) {
       try {
-        const fileStream = await downloadFile(asset.storagePath)
+        const assetPath = await getStoredFilePath('VIDEO_ASSET', asset.id, 'ORIGINAL')
+        if (!assetPath) continue
+        const fileStream = await downloadFile(assetPath)
         archive.append(fileStream, { name: asset.fileName })
       } catch (error) {
         console.error(`Error adding file ${asset.fileName} to archive:`, error)

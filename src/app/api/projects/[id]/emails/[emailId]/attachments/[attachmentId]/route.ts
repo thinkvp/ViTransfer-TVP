@@ -76,12 +76,16 @@ export async function GET(
       id: true,
       fileName: true,
       fileType: true,
-      storagePath: true,
       isInline: true,
     },
   })
 
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
+
+  // Get storage path from StoredFile
+  const { getStoredFilePath } = await import('@/lib/stored-file')
+  const storagePath = await getStoredFilePath('PROJECT_EMAIL_ATTACHMENT', attachmentId, 'ORIGINAL')
+  if (!storagePath) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
   const url = new URL(request.url)
   const inlineRequested = url.searchParams.get('inline') === '1'
@@ -94,12 +98,12 @@ export async function GET(
   // S3 mode: redirect to a presigned URL so the browser downloads directly from R2
   if (isS3Mode()) {
     const presignedUrl = dispositionType === 'inline'
-      ? await s3GetPresignedStreamUrl(attachment.storagePath, 300, contentType)
-      : await s3GetPresignedDownloadUrl(attachment.storagePath, 300, attachment.fileName, contentType)
+      ? await s3GetPresignedStreamUrl(storagePath, 300, contentType)
+      : await s3GetPresignedDownloadUrl(storagePath, 300, attachment.fileName, contentType)
     return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
   }
 
-  const fullPath = getFilePath(attachment.storagePath)
+  const fullPath = getFilePath(storagePath)
   const stat = await fs.promises.stat(fullPath)
   if (!stat.isFile()) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 

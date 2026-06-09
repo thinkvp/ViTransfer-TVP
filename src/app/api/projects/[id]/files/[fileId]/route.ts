@@ -7,6 +7,7 @@ import { getTransferTuningSettings } from '@/lib/settings'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { getStoredFilePath, deleteStoredFile } from '@/lib/stored-file'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 
@@ -73,11 +74,16 @@ export async function GET(
       id: true,
       fileName: true,
       fileType: true,
-      storagePath: true,
     },
   })
 
   if (!file) {
+    return NextResponse.json({ error: 'File not found' }, { status: 404 })
+  }
+
+  // Resolve storage path from StoredFile registry
+  const storagePath = await getStoredFilePath('PROJECT_FILE', file.id, 'ORIGINAL')
+  if (!storagePath) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
@@ -86,14 +92,14 @@ export async function GET(
 
   // S3 mode: redirect to a presigned download URL
   if (isS3Mode()) {
-    const presignedUrl = await s3GetPresignedDownloadUrl(file.storagePath, 300, file.fileName, contentType)
+    const presignedUrl = await s3GetPresignedDownloadUrl(storagePath, 300, file.fileName, contentType)
     return NextResponse.redirect(presignedUrl, {
       status: 302,
       headers: { 'Cache-Control': 'no-store' },
     })
   }
 
-  const fullPath = getFilePath(file.storagePath)
+  const fullPath = getFilePath(storagePath)
   const stat = await fs.promises.stat(fullPath)
   if (!stat.isFile()) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
@@ -164,7 +170,6 @@ export async function DELETE(
     },
     select: {
       id: true,
-      storagePath: true,
     },
   })
 
@@ -172,12 +177,19 @@ export async function DELETE(
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
+  // Resolve storage path from StoredFile before deleting
+  const storagePath = await getStoredFilePath('PROJECT_FILE', file.id, 'ORIGINAL')
+
   await prisma.projectFile.delete({ where: { id: fileId } })
-  try {
-    await deleteFile(file.storagePath)
-  } catch {
-    // Ignore storage delete errors; DB is source of truth.
+  if (storagePath) {
+    try {
+      await deleteFile(storagePath)
+    } catch {
+      // Ignore storage delete errors; DB is source of truth.
+    }
   }
+  // Clean up StoredFile record
+  await deleteStoredFile('PROJECT_FILE', fileId, 'ORIGINAL').catch(() => {})
 
   await recalculateAndStoreProjectTotalBytes(projectId)
 

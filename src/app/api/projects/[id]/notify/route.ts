@@ -14,6 +14,7 @@ import crypto from 'crypto'
 import { getRedis } from '@/lib/redis'
 import { getPeriodString, normalizeNotificationDataTimecode, sendNotificationsWithRetry } from '@/worker/notification-helpers'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getStoredFilePath } from '@/lib/stored-file'
 import fs from 'fs'
 export const runtime = 'nodejs'
 
@@ -150,16 +151,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (uniqueFileIds.length > 0) {
         const files = await prisma.projectFile.findMany({
           where: { id: { in: uniqueFileIds }, projectId },
-          select: { id: true, fileName: true, fileType: true, fileSize: true, storagePath: true },
+          select: { id: true, fileName: true, fileType: true },
         })
 
         if (files.length !== uniqueFileIds.length) {
           return NextResponse.json({ error: 'One or more selected files were not found' }, { status: 400 })
         }
 
-        const sizes = files.map((f) => Number(f.fileSize))
+        // Resolve file sizes and storage paths from StoredFile
+        const storedFiles = await prisma.storedFile.findMany({
+          where: { entityType: 'PROJECT_FILE', entityId: { in: files.map(f => f.id) }, fileRole: 'ORIGINAL' },
+          select: { entityId: true, fileSize: true, storagePath: true },
+        })
+        const sizeByFileId = new Map(storedFiles.map(s => [s.entityId, s.fileSize ? Number(s.fileSize) : 0]))
+        const pathByFileId = new Map(storedFiles.filter(s => s.storagePath).map(s => [s.entityId, s.storagePath!]))
+
+        const sizes = files.map((f) => sizeByFileId.get(f.id) ?? 0)
         const totalBytes = sizes.reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0)
-        const oversized = files.filter((f) => Number(f.fileSize) > MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES).map((f) => f.fileName)
+        const oversized = files.filter((f) => (sizeByFileId.get(f.id) ?? 0) > MAX_EMAIL_ATTACHMENTS_SINGLE_BYTES).map((f) => f.fileName)
 
         if (oversized.length > 0) {
           return NextResponse.json(
@@ -177,7 +186,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         // Ensure files exist on disk
         for (const f of files) {
-          const fullPath = getFilePath(f.storagePath)
+          const fPath = pathByFileId.get(f.id)
+          if (!fPath) {
+            return NextResponse.json({ error: `File not found on disk: ${f.fileName}` }, { status: 404 })
+          }
+          const fullPath = getFilePath(fPath)
           const stat = await fs.promises.stat(fullPath)
           if (!stat.isFile()) {
             return NextResponse.json({ error: `File not found on disk: ${f.fileName}` }, { status: 404 })
@@ -186,18 +199,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         attachments = files.map((f) => ({
           filename: sanitizeFilenameForHeader(f.fileName),
-          path: getFilePath(f.storagePath),
+          path: getFilePath(pathByFileId.get(f.id)!),
           contentType: f.fileType || 'application/octet-stream',
         }))
 
-        attachmentsMeta = files.map((f) => ({ fileName: f.fileName, fileSizeBytes: Number(f.fileSize) }))
+        attachmentsMeta = files.map((f) => ({ fileName: f.fileName, fileSizeBytes: sizeByFileId.get(f.id) ?? 0 }))
       }
 
       const emailSettings = await getEmailSettings()
       const companyLogoUrl = buildCompanyLogoUrl({
         appDomain: emailSettings.appDomain,
         companyLogoMode: emailSettings.companyLogoMode,
-        companyLogoPath: emailSettings.companyLogoPath,
         companyLogoUrl: emailSettings.companyLogoUrl,
         updatedAt: emailSettings.updatedAt,
       })
@@ -314,7 +326,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const companyLogoUrl = buildCompanyLogoUrl({
         appDomain,
         companyLogoMode: emailSettings.companyLogoMode,
-        companyLogoPath: emailSettings.companyLogoPath,
         companyLogoUrl: emailSettings.companyLogoUrl,
         updatedAt: emailSettings.updatedAt,
       })

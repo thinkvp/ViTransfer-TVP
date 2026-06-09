@@ -318,7 +318,8 @@ async function handleVideoUploadFinish(
   await validateVideoFile(tusFilePath, upload.metadata?.filename as string)
 
   const { moveUploadedFile } = await import('@/lib/storage')
-  await moveUploadedFile(tusFilePath, video.originalStoragePath, fileSize)
+  const origPath = await (await import('@/lib/stored-file')).getStoredFilePath('VIDEO', videoId, 'ORIGINAL')
+  await moveUploadedFile(tusFilePath, origPath || '', fileSize)
 
   // Update video status to QUEUED — upload is complete and the job is waiting in the worker queue.
   // The worker will advance this to PROCESSING when it actually begins work.
@@ -348,7 +349,7 @@ async function handleVideoUploadFinish(
 
   await vq.add('process-video', {
     videoId: video.id,
-    originalStoragePath: video.originalStoragePath,
+    originalStoragePath: origPath || '',
     projectId: video.projectId,
     ...(skipPreviews ? { thumbnailOnly: true } : {}),
   })
@@ -383,7 +384,8 @@ async function handleAssetUploadFinish(
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
   const { moveUploadedFile } = await import('@/lib/storage')
-  await moveUploadedFile(tusFilePath, asset.storagePath, fileSize)
+  const assetPath = await (await import('@/lib/stored-file')).getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL')
+  await moveUploadedFile(tusFilePath, assetPath || '', fileSize)
 
   // Do not trust client-supplied MIME from upload metadata; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'
@@ -401,7 +403,7 @@ async function handleAssetUploadFinish(
 
   await assetQueue.add('process-asset', {
     assetId: asset.id,
-    storagePath: asset.storagePath,
+    storagePath: assetPath || '',
     expectedCategory: asset.category ?? undefined,
   })
 
@@ -431,7 +433,8 @@ async function handleClientFileUploadFinish(
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
   const { moveUploadedFile } = await import('@/lib/storage')
-  await moveUploadedFile(tusFilePath, clientFile.storagePath, fileSize)
+  const cfPath = await (await import('@/lib/stored-file')).getStoredFilePath('CLIENT_FILE', clientFileId, 'ORIGINAL')
+  await moveUploadedFile(tusFilePath, cfPath || '', fileSize)
 
   // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'
@@ -448,7 +451,7 @@ async function handleClientFileUploadFinish(
   const q = getClientFileQueue()
   await q.add('process-client-file', {
     clientFileId: clientFile.id,
-    storagePath: clientFile.storagePath,
+    storagePath: cfPath || '',
     expectedCategory: clientFile.category ?? undefined,
   })
 
@@ -478,7 +481,8 @@ async function handleUserFileUploadFinish(
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
   const { moveUploadedFile } = await import('@/lib/storage')
-  await moveUploadedFile(tusFilePath, userFile.storagePath, fileSize)
+  const ufPath = await (await import('@/lib/stored-file')).getStoredFilePath('USER_FILE', userFileId, 'ORIGINAL')
+  await moveUploadedFile(tusFilePath, ufPath || '', fileSize)
 
   const actualFileType = 'application/octet-stream'
 
@@ -493,7 +497,7 @@ async function handleUserFileUploadFinish(
   const q = getUserFileQueue()
   await q.add('process-user-file', {
     userFileId: userFile.id,
-    storagePath: userFile.storagePath,
+    storagePath: ufPath || '',
     expectedCategory: userFile.category ?? undefined,
   })
 
@@ -510,11 +514,20 @@ async function handleProjectFileUploadFinish(
   maxUploadSizeBytes: number
 ) {
   const projectFile = await prisma.projectFile.findUnique({
-    where: { id: projectFileId }
+    where: { id: projectFileId },
+    select: { id: true, category: true },
   })
 
   if (!projectFile) {
     console.error(`[UPLOAD] Project file not found: ${projectFileId}`)
+    return {}
+  }
+
+  // Resolve storage path from StoredFile registry
+  const { getStoredFilePath } = await import('@/lib/stored-file')
+  const storagePath = await getStoredFilePath('PROJECT_FILE', projectFileId, 'ORIGINAL')
+  if (!storagePath) {
+    console.error(`[UPLOAD] No storage path for project file: ${projectFileId}`)
     return {}
   }
 
@@ -523,7 +536,7 @@ async function handleProjectFileUploadFinish(
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
   const { moveUploadedFile } = await import('@/lib/storage')
-  await moveUploadedFile(tusFilePath, projectFile.storagePath, fileSize)
+  await moveUploadedFile(tusFilePath, storagePath, fileSize)
 
   // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'
@@ -540,7 +553,7 @@ async function handleProjectFileUploadFinish(
   const q = getProjectFileQueue()
   await q.add('process-project-file', {
     projectFileId: projectFile.id,
-    storagePath: projectFile.storagePath,
+    storagePath,
     expectedCategory: projectFile.category ?? undefined,
   })
 
@@ -570,7 +583,8 @@ async function handleProjectEmailUploadFinish(
   await validateEmlFile(tusFilePath, upload.metadata?.filename as string)
 
   const { moveUploadedFile } = await import('@/lib/storage')
-  await moveUploadedFile(tusFilePath, email.rawStoragePath, fileSize)
+  const emailPath = await (await import('@/lib/stored-file')).getStoredFilePath('PROJECT_EMAIL', projectEmailId, 'RAW_EMAIL')
+  await moveUploadedFile(tusFilePath, emailPath || '', fileSize)
 
   const actualFileType = 'message/rfc822'
 
@@ -589,7 +603,7 @@ async function handleProjectEmailUploadFinish(
   await q.add('process-project-email', {
     projectEmailId: email.id,
     projectId: email.projectId,
-    rawStoragePath: email.rawStoragePath,
+    rawStoragePath: emailPath || '',
   })
 
   console.log(`[UPLOAD] Project email uploaded and queued for processing: ${projectEmailId}`)
@@ -619,7 +633,13 @@ async function handleAlbumPhotoUploadFinish(
   await validateAlbumPhotoFile(tusFilePath, upload.metadata?.filename as string)
 
   const { moveUploadedFile } = await import('@/lib/storage')
-  await moveUploadedFile(tusFilePath, photo.storagePath, fileSize)
+  const { getStoredFilePath } = await import('@/lib/stored-file')
+  const photoPath = await getStoredFilePath('ALBUM_PHOTO', photoId, 'ORIGINAL')
+  if (!photoPath) {
+    console.error(`[UPLOAD] No StoredFile path for album photo: ${photoId}`)
+    return {}
+  }
+  await moveUploadedFile(tusFilePath, photoPath, fileSize)
 
   const { finalizeAlbumPhotoUpload } = await import('@/lib/album-photo-upload-finalize')
   const finalized = await finalizeAlbumPhotoUpload(photoId)

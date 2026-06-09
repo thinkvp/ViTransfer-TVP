@@ -4,6 +4,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest, requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getStoredFilePath, deleteStoredFilesForEntity } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
@@ -105,13 +106,18 @@ export async function GET(
     const sanitizedFilename = sanitizeFilenameForHeader(asset.fileName)
     const contentType = isValidMimeType(asset.fileType) ? asset.fileType : 'application/octet-stream'
 
+    // Get storage path from StoredFile
+    const { getStoredFilePath } = await import('@/lib/stored-file')
+    const assetStoragePath = await getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL')
+    if (!assetStoragePath) return NextResponse.json({ error: 'File not found' }, { status: 404 })
+
     if (isS3Mode()) {
-      const presignedUrl = await s3GetPresignedDownloadUrl(asset.storagePath, 300, asset.fileName, contentType)
+      const presignedUrl = await s3GetPresignedDownloadUrl(assetStoragePath, 300, asset.fileName, contentType)
       return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
     }
 
     // Get the full file path and check if exists
-    const fullPath = getFilePath(asset.storagePath)
+    const fullPath = getFilePath(assetStoragePath)
     const stat = await fs.promises.stat(fullPath)
     if (!stat.isFile()) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
@@ -225,19 +231,23 @@ export async function DELETE(
       }
     }
 
-    // Check if this asset is being used as the video's thumbnail
-    const isCurrentThumbnail = asset.video.thumbnailPath === asset.storagePath
+    // Check if this asset is being used as the video's thumbnail (via StoredFile)
+    const assetThumbPath = await getStoredFilePath('VIDEO_ASSET', assetId, 'THUMBNAIL')
+    const videoThumbPath = await getStoredFilePath('VIDEO', asset.video.id, 'THUMBNAIL')
+    const isCurrentThumbnail = videoThumbPath && assetThumbPath && videoThumbPath === assetThumbPath
 
     // Only delete the physical file if no other assets reference the same storage path
-    const sharedCount = await prisma.videoAsset.count({
+    const assetOrigPath = await getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL')
+    const sharedCount = assetOrigPath ? await prisma.storedFile.count({
       where: {
-        storagePath: asset.storagePath,
-        id: { not: assetId },
+        storagePath: assetOrigPath,
+        entityType: 'VIDEO_ASSET',
+        entityId: { not: assetId },
       },
-    })
+    }) : 0
 
-    if (sharedCount === 0) {
-      await deleteFile(asset.storagePath)
+    if (sharedCount === 0 && assetOrigPath) {
+      await deleteFile(assetOrigPath)
     }
 
     // If this asset was the current thumbnail, revert to system-generated thumbnail
@@ -250,18 +260,20 @@ export async function DELETE(
         asset.video.versionLabel || `v${asset.video.version}`,
       )
 
-      await prisma.video.update({
-        where: { id: videoId },
-        data: {
-          thumbnailPath: systemThumbnailPath,
-        },
-      })
+      // Register thumbnail in StoredFile
+      await prisma.storedFile.create({ data: {
+        entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL',
+        storagePath: systemThumbnailPath, fileName: 'thumbnail.jpg',
+      } })
     }
 
     // Delete database record
     await prisma.videoAsset.delete({
       where: { id: assetId },
     })
+
+    // Clean up StoredFile rows for this asset
+    await deleteStoredFilesForEntity('VIDEO_ASSET', assetId).catch(() => {})
 
     // Update the stored project data total
     await recalculateAndStoreProjectTotalBytes(asset.video.projectId)

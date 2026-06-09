@@ -67,9 +67,7 @@ export async function GET(
         commentId: true,
         projectId: true,
         fileName: true,
-        fileSize: true,
         fileType: true,
-        storagePath: true,
         comment: {
           select: {
             projectId: true,
@@ -88,6 +86,11 @@ export async function GET(
     if (commentFile.commentId !== commentId) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
+
+    // Get storage path from StoredFile
+    const { getStoredFilePath } = await import('@/lib/stored-file')
+    const storagePath = await getStoredFilePath('COMMENT_FILE', fileId, 'ORIGINAL')
+    if (!storagePath) return NextResponse.json({ error: 'File not found' }, { status: 404 })
 
     // Get project for auth check
     const project = await prisma.project.findUnique({
@@ -136,8 +139,7 @@ export async function GET(
     const safeFilename = sanitizeFilenameForHeader(commentFile.fileName)
 
     if (isS3Mode()) {
-      // In S3 mode, redirect to a presigned URL so the browser downloads directly from R2
-      const presignedUrl = await s3GetPresignedDownloadUrl(commentFile.storagePath, 300, commentFile.fileName, mimeType)
+      const presignedUrl = await s3GetPresignedDownloadUrl(storagePath, 300, commentFile.fileName, mimeType)
       return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
     }
 
@@ -148,9 +150,9 @@ export async function GET(
       // Local mode: resolve path and stream from disk
       let fullPath: string
       try {
-        fullPath = getFilePath(commentFile.storagePath)
+        fullPath = getFilePath(storagePath)
       } catch (err) {
-        console.error('[COMMENT_FILE_DOWNLOAD] Invalid storage path', { fileId, storagePath: commentFile.storagePath })
+        console.error('[COMMENT_FILE_DOWNLOAD] Invalid storage path', { fileId, storagePath })
         return NextResponse.json({ error: 'File not found' }, { status: 404 })
       }
 

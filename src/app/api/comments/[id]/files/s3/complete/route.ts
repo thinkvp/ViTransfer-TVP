@@ -134,9 +134,19 @@ export async function POST(
         commentId,
         projectId: comment.projectId,
         fileName,
-        fileSize: BigInt(fileSize),
         fileType: resolvedFileType,
+      },
+    })
+
+    // Register in StoredFile
+    await prisma.storedFile.create({
+      data: {
+        entityType: 'COMMENT_FILE',
+        entityId: commentFile.id,
+        fileRole: 'ORIGINAL',
         storagePath: key,
+        fileName,
+        fileSize: BigInt(fileSize),
       },
     })
 
@@ -148,8 +158,8 @@ export async function POST(
       file: {
         id: commentFile.id,
         fileName: commentFile.fileName,
-        fileSize: Number(commentFile.fileSize),
-        storagePath: commentFile.storagePath,
+        fileSize: fileSize,
+        storagePath: key,
         createdAt: commentFile.createdAt,
       },
     })

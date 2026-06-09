@@ -99,14 +99,12 @@ export function AvatarUploadCrop({
   const PREVIEW_SIZE = 256 // display canvas size (px)
   const OUTPUT_SIZE = 300  // server output size (px)
 
-  // Build current avatar URL
-  const avatarUrl = currentAvatarPath
-    ? `/api/users/${userId}/avatar?t=${Date.now()}`
-    : null
+  // Build current avatar URL (avatarPath column has been dropped, always use API)
+  const avatarUrl = `/api/users/${userId}/avatar?t=${Date.now()}`
   const [displayAvatarUrl, setDisplayAvatarUrl] = useState(avatarUrl)
   useEffect(() => {
-    setDisplayAvatarUrl(currentAvatarPath ? `/api/users/${userId}/avatar` : null)
-  }, [currentAvatarPath, userId])
+    setDisplayAvatarUrl(`/api/users/${userId}/avatar`)
+  }, [userId])
 
   // ─── Canvas drawing ──────────────────────────────────────────────────────
   const drawCanvas = useCallback(() => {
@@ -277,7 +275,7 @@ export function AvatarUploadCrop({
         const body = await res.json().catch(() => ({}))
         throw new Error(body?.error || 'Delete failed')
       }
-      setDisplayAvatarUrl(null)
+      setDisplayAvatarUrl('')
       onAvatarChange?.(null)
     } catch (err: any) {
       setError(err?.message || 'Delete failed')

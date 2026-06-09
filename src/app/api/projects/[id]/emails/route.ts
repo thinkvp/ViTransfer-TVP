@@ -233,9 +233,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     data: {
       projectId,
       rawFileName: sanitizedFileName,
-      rawFileSize: BigInt(fileSize),
       rawFileType: mimeType || 'application/octet-stream',
-      rawStoragePath: storagePath,
       rawSha256: sha256,
       status: 'UPLOADING',
       uploadedBy: currentUser.id,
@@ -243,6 +241,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     },
     select: { id: true },
   })
+
+  // Register in StoredFile
+  await prisma.storedFile.create({ data: {
+    entityType: 'PROJECT_EMAIL', entityId: record.id, fileRole: 'RAW_EMAIL',
+    storagePath, fileName: sanitizedFileName, fileSize: BigInt(fileSize),
+  } })
 
   await recalculateAndStoreProjectTotalBytes(projectId)
 

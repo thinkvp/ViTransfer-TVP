@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
+import { deleteStoredFilesForEntity } from '@/lib/stored-file'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
@@ -58,17 +59,24 @@ export async function DELETE(
       where: { id: photoId, albumId },
       select: {
         id: true,
-        fileSize: true,
-        socialFileSize: true,
-        thumbnailFileSize: true,
-        storagePath: true,
-        socialStoragePath: true,
-        thumbnailStoragePath: true,
         album: { select: { projectId: true, name: true } },
       },
     })
 
     if (!photo) return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
+
+    // Get StoredFile records for sizes and paths
+    const storedFiles = await prisma.storedFile.findMany({
+      where: { entityType: 'ALBUM_PHOTO', entityId: photoId },
+      select: { fileRole: true, storagePath: true, fileSize: true },
+    })
+    const storedByRole = new Map(storedFiles.map(s => [s.fileRole, s]))
+
+    const origStored = storedByRole.get('ORIGINAL')
+    const socialStored = storedByRole.get('SOCIAL')
+    const thumbStored = storedByRole.get('THUMBNAIL')
+
+    const totalSize = BigInt(origStored?.fileSize ?? 0) + BigInt(socialStored?.fileSize ?? 0) + BigInt(thumbStored?.fileSize ?? 0)
 
     if (auth.appRoleIsSystemAdmin !== true) {
       const project = await prisma.project.findUnique({
@@ -88,30 +96,34 @@ export async function DELETE(
 
     await prisma.albumPhoto.delete({ where: { id: photoId } })
 
+    // Clean up StoredFile rows for this photo
+    await deleteStoredFilesForEntity('ALBUM_PHOTO', photoId).catch(() => {})
+
     await adjustProjectTotalBytes(
       photo.album.projectId,
-      (photo.fileSize + photo.socialFileSize + (photo.thumbnailFileSize ?? BigInt(0))) * BigInt(-1)
+      totalSize * BigInt(-1)
     )
 
     try {
-      const sharedCount = await prisma.albumPhoto.count({
+      const origPath = origStored?.storagePath
+      const sharedCount = origPath ? await prisma.storedFile.count({
         where: {
-          storagePath: photo.storagePath,
-          id: { not: photo.id },
+          storagePath: origPath,
+          entityType: 'ALBUM_PHOTO',
+          entityId: { not: photo.id },
         },
-      })
+      }) : 0
 
-      if (sharedCount === 0) {
-        await deleteFile(photo.storagePath)
+      if (sharedCount === 0 && origPath) {
+        await deleteFile(origPath)
       }
 
-      if (photo.socialStoragePath) {
-        // Social derivatives are not shared across records today; delete best-effort.
-        await deleteFile(photo.socialStoragePath).catch(() => {})
+      if (socialStored?.storagePath) {
+        await deleteFile(socialStored.storagePath).catch(() => {})
       }
 
-      if (photo.thumbnailStoragePath) {
-        await deleteFile(photo.thumbnailStoragePath).catch(() => {})
+      if (thumbStored?.storagePath) {
+        await deleteFile(thumbStored.storagePath).catch(() => {})
       }
     } catch {
       // Ignore storage delete errors; DB is source of truth.

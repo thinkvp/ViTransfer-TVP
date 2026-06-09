@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
       members: {
         include: {
           user: {
-            select: { id: true, name: true, email: true, displayColor: true, avatarPath: true },
+            select: { id: true, name: true, email: true, displayColor: true },
           },
         },
       },

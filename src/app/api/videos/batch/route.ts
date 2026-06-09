@@ -5,6 +5,7 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { moveDirectory } from '@/lib/storage'
+import { renameStoredPaths } from '@/lib/stored-file'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import {
@@ -79,15 +80,7 @@ export async function PATCH(request: NextRequest) {
         projectId: true,
         name: true,
         storageFolderName: true,
-        versionLabel: true,
-        originalStoragePath: true,
-        preview480Path: true,
-        preview720Path: true,
-        preview1080Path: true,
-        thumbnailPath: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
-        project: { select: { title: true, companyName: true, storagePath: true, client: { select: { name: true } } } },
+        versionLabel: true, project: { select: { title: true, companyName: true, storagePath: true, client: { select: { name: true } } } },
       },
     })
 
@@ -184,7 +177,7 @@ export async function PATCH(request: NextRequest) {
       const groupAssets = needsPathRebase
         ? await prisma.videoAsset.findMany({
             where: { videoId: { in: group.map((video) => video.id) } },
-            select: { id: true, videoId: true, storagePath: true, previewPath: true, fileType: true },
+            select: { id: true, videoId: true, fileType: true },
           })
         : []
 
@@ -195,19 +188,14 @@ export async function PATCH(request: NextRequest) {
             data: {
               name: trimmedName,
               storageFolderName: nextFolderName,
-              ...(needsPathRebase ? {
-                // originalStoragePath lives under the main videos/{folder}/ root
-                originalStoragePath: replaceStoredStoragePathPrefix(video.originalStoragePath, oldVideoStorageRoot, newVideoStorageRoot)!,
-                // Preview paths live under .previews/videos/{folder}/ — use the preview prefix pair
-                preview480Path: replaceStoredStoragePathPrefix(video.preview480Path, oldVideoPreviewRoot, newVideoPreviewRoot),
-                preview720Path: replaceStoredStoragePathPrefix(video.preview720Path, oldVideoPreviewRoot, newVideoPreviewRoot),
-                preview1080Path: replaceStoredStoragePathPrefix(video.preview1080Path, oldVideoPreviewRoot, newVideoPreviewRoot),
-                thumbnailPath: replaceStoredStoragePathPrefix(video.thumbnailPath, oldVideoPreviewRoot, newVideoPreviewRoot),
-                timelinePreviewVttPath: replaceStoredStoragePathPrefix(video.timelinePreviewVttPath, oldVideoPreviewRoot, newVideoPreviewRoot),
-                timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(video.timelinePreviewSpritesPath, oldVideoPreviewRoot, newVideoPreviewRoot),
-              } : {}),
             },
           })
+
+          if (needsPathRebase) {
+            // StoredFile handles path rebasing
+            await renameStoredPaths('VIDEO', [video.id], oldVideoStorageRoot, newVideoStorageRoot)
+            await renameStoredPaths('VIDEO', [video.id], oldVideoPreviewRoot, newVideoPreviewRoot)
+          }
         }
 
         if (needsPathRebase) {
@@ -216,31 +204,8 @@ export async function PATCH(request: NextRequest) {
           for (const asset of groupAssets) {
             const assetVideo = groupByVideoId.get(asset.videoId)
             if (!assetVideo) continue
-
-            const rebasedStoragePath = replaceStoredStoragePathPrefix(asset.storagePath, oldVideoStorageRoot, newVideoStorageRoot)!
-            const currentPreviewExt = path.posix.extname(String(asset.previewPath || '')).toLowerCase()
-            const desiredPreviewExt = currentPreviewExt === '.mp4' || currentPreviewExt === '.jpg'
-              ? currentPreviewExt
-              : String(asset.fileType || '').toLowerCase().startsWith('video/')
-                ? '.mp4'
-                : '.jpg'
-            const rebasedPreviewPath = asset.previewPath
-              ? buildVideoAssetPreviewStoragePath(
-                  projectStoragePath,
-                  nextFolderName,
-                  assetVideo.versionLabel,
-                  rebasedStoragePath,
-                  desiredPreviewExt,
-                )
-              : null
-
-            await tx.videoAsset.update({
-              where: { id: asset.id },
-              data: {
-                storagePath: rebasedStoragePath,
-                previewPath: rebasedPreviewPath,
-              },
-            })
+            // StoredFile handles path rebasing
+            await renameStoredPaths('VIDEO_ASSET', [asset.id], oldVideoStorageRoot, newVideoStorageRoot)
           }
         }
       })

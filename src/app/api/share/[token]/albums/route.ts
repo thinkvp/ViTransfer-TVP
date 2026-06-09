@@ -64,14 +64,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       notes: true,
       createdAt: true,
       updatedAt: true,
-      fullZipFileSize: true,
-      socialZipFileSize: true,
       _count: { select: { photos: true } },
       photos: {
         where: { status: 'READY' },
         orderBy: { createdAt: 'asc' },
         take: 1,
-        select: { id: true, thumbnailStatus: true, thumbnailStoragePath: true },
+        select: { id: true, thumbnailStatus: true },
       },
     },
   })
@@ -80,12 +78,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const albumsSafe = await Promise.all(
     albums.map(async (a) => {
-      const firstPhoto = (a as any)?.photos?.[0] as { id: string; thumbnailStatus: string; thumbnailStoragePath: string | null } | undefined
+      const firstPhoto = (a as any)?.photos?.[0] as { id: string; thumbnailStatus: string } | undefined
       const firstPhotoId = firstPhoto?.id
       let thumbnailPhotoUrl: string | null = null
 
       if (firstPhotoId) {
         try {
+          // Legacy thumbnailStoragePath column dropped — check StoredFile for THUMBNAIL role
+          const thumbExists = firstPhoto?.thumbnailStatus === 'READY' &&
+            !!(await prisma.storedFile.findUnique({
+              where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: firstPhotoId, fileRole: 'THUMBNAIL' } },
+              select: { id: true },
+            }))
+          if (!thumbExists) {
+            albumsNeedingThumbnailBackfill.add(a.id)
+          }
           const tokenValue = await generateAlbumPhotoAccessToken({
             photoId: firstPhotoId,
             albumId: a.id,
@@ -94,19 +101,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             sessionId,
           })
           thumbnailPhotoUrl = `/api/content/photo/${tokenValue}?variant=thumbnail`
-          if (firstPhoto?.thumbnailStatus !== 'READY' || !firstPhoto?.thumbnailStoragePath) {
-            albumsNeedingThumbnailBackfill.add(a.id)
-          }
         } catch {
           // ignore
         }
       }
 
+      // Legacy fullZipFileSize/socialZipFileSize columns dropped — read from StoredFile
+      const albumZipFiles = await prisma.storedFile.findMany({
+        where: { entityType: 'ALBUM', entityId: a.id, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
+        select: { fileRole: true, fileSize: true },
+      })
+      const zipSizeMap = new Map(albumZipFiles.map(f => [f.fileRole, f.fileSize]))
+
       return {
         ...a,
         thumbnailPhotoUrl,
-        fullZipFileSize: asNumberBigInt((a as any).fullZipFileSize),
-        socialZipFileSize: asNumberBigInt((a as any).socialZipFileSize),
+        fullZipFileSize: asNumberBigInt(zipSizeMap.get('ZIP_FULL')),
+        socialZipFileSize: asNumberBigInt(zipSizeMap.get('ZIP_SOCIAL')),
       }
     })
   )

@@ -196,8 +196,7 @@ export function buildCompanyLogoUrl({
     }
   }
 
-  // UPLOAD
-  if (!companyLogoPath) return null
+  // UPLOAD mode — logo URL always available via the branding API (served from StoredFile)
   const base = (appDomain || process.env.APP_DOMAIN || '').trim()
   if (!base) return null
 
@@ -317,7 +316,6 @@ interface EmailSettings {
   mainCompanyDomain: string | null
   companyName: string | null
   companyLogoMode: 'NONE' | 'UPLOAD' | 'LINK' | null
-  companyLogoPath: string | null
   companyLogoUrl: string | null
   emailTrackingPixelsEnabled: boolean | null
   emailCustomFooterText: string | null
@@ -376,7 +374,7 @@ async function resolveEmailBranding(
   const companyLogoUrl = overrides?.companyLogoUrl ?? buildCompanyLogoUrl({
     appDomain: overrides?.appDomain || settings.appDomain,
     companyLogoMode: settings.companyLogoMode,
-    companyLogoPath: settings.companyLogoPath,
+    companyLogoPath: null,
     companyLogoUrl: settings.companyLogoUrl,
     updatedAt: settings.updatedAt,
   })
@@ -430,7 +428,6 @@ export async function getEmailSettings(): Promise<EmailSettings> {
       mainCompanyDomain: true,
       companyName: true,
       companyLogoMode: true,
-      companyLogoPath: true,
       companyLogoUrl: true,
       emailTrackingPixelsEnabled: true,
       emailCustomFooterText: true,
@@ -457,7 +454,6 @@ export async function getEmailSettings(): Promise<EmailSettings> {
     mainCompanyDomain: null,
     companyName: null,
     companyLogoMode: null,
-    companyLogoPath: null,
     companyLogoUrl: null,
     emailTrackingPixelsEnabled: null,
     emailCustomFooterText: null,
@@ -2201,7 +2197,7 @@ export async function testEmailConnection(testEmail: string, customConfig?: any)
       companyLogoUrl: buildCompanyLogoUrl({
         appDomain: settings.appDomain || dbSettings.appDomain,
         companyLogoMode: settings.companyLogoMode || dbSettings.companyLogoMode,
-        companyLogoPath: dbSettings.companyLogoPath,
+        companyLogoPath: null,
         companyLogoUrl: settings.companyLogoUrl || dbSettings.companyLogoUrl,
         updatedAt: dbSettings.updatedAt,
       }),

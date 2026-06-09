@@ -76,11 +76,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   })
 
-  const albumsSafe = albums.map((a) => ({
-    ...a,
-    fullZipFileSize: asNumberBigInt((a as any).fullZipFileSize),
-    socialZipFileSize: asNumberBigInt((a as any).socialZipFileSize),
-  }))
+  // Legacy fullZipFileSize/socialZipFileSize columns dropped — read from StoredFile
+  const albumIds = albums.map(a => a.id)
+  const albumZipFiles = albumIds.length > 0 ? await prisma.storedFile.findMany({
+    where: { entityType: 'ALBUM', entityId: { in: albumIds }, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
+    select: { entityId: true, fileRole: true, fileSize: true },
+  }) : []
+  const zipSizeByAlbum = new Map<string, Map<string, bigint | null>>()
+  for (const f of albumZipFiles) {
+    if (!zipSizeByAlbum.has(f.entityId)) zipSizeByAlbum.set(f.entityId, new Map())
+    zipSizeByAlbum.get(f.entityId)!.set(f.fileRole, f.fileSize)
+  }
+
+  const albumsSafe = albums.map((a) => {
+    const sizes = zipSizeByAlbum.get(a.id)
+    return {
+      ...a,
+      fullZipFileSize: asNumberBigInt(sizes?.get('ZIP_FULL')),
+      socialZipFileSize: asNumberBigInt(sizes?.get('ZIP_SOCIAL')),
+    }
+  })
 
   return NextResponse.json({ albums: albumsSafe })
 }
@@ -156,8 +171,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     {
       album: {
         ...album,
-        fullZipFileSize: asNumberBigInt((album as any).fullZipFileSize),
-        socialZipFileSize: asNumberBigInt((album as any).socialZipFileSize),
+        fullZipFileSize: 0,
+        socialZipFileSize: 0,
       },
     },
     { status: 201 }

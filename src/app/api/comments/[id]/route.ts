@@ -161,7 +161,6 @@ export async function PATCH(
             username: true,
             email: true,
             displayColor: true,
-            avatarPath: true,
           }
         },
         recipient: {
@@ -179,7 +178,6 @@ export async function PATCH(
                 username: true,
                 email: true,
                 displayColor: true,
-                avatarPath: true,
               }
             }
             ,
@@ -359,10 +357,9 @@ export async function DELETE(
     })
     const commentIds = [id, ...replyIds.map(r => r.id)]
 
-    // Collect file paths for cleanup
     const commentFiles = await prisma.commentFile.findMany({
       where: { commentId: { in: commentIds } },
-      select: { storagePath: true },
+      select: { id: true },
     })
 
     // Delete the comment and its replies (cascade)
@@ -377,14 +374,20 @@ export async function DELETE(
 
     await recalculateAndStoreProjectTotalBytes(existingComment.projectId)
 
-    // Best-effort: remove attachment objects/files from storage
-    for (const file of commentFiles) {
-      try {
-        await deleteFile(file.storagePath)
-      } catch {
-        // Ignore missing/unremovable files to avoid blocking comment deletion.
-        // This now works for both local and S3-backed storage.
+    // Best-effort: remove attachment objects/files from StoredFile
+    const fileIds = commentFiles.map(f => f.id)
+    if (fileIds.length > 0) {
+      const paths = await prisma.storedFile.findMany({
+        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+        select: { storagePath: true },
+      })
+      for (const { storagePath } of paths) {
+        try { await deleteFile(storagePath) } catch {}
       }
+      // Clean up StoredFile rows
+      await prisma.storedFile.deleteMany({
+        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+      }).catch(() => {})
     }
 
     // Return success - client will refresh to get updated comments

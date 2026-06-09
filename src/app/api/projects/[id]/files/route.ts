@@ -9,6 +9,7 @@ import { validateAssetFile } from '@/lib/file-validation'
 import { getSafeguardLimits } from '@/lib/settings'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildProjectFilesStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { registerStoredFile } from '@/lib/stored-file'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -86,7 +87,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     select: {
       id: true,
       fileName: true,
-      fileSize: true,
       fileType: true,
       category: true,
       createdAt: true,
@@ -94,9 +94,37 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   })
 
+  // Resolve file sizes from StoredFile registry
+  const projectFileIds = files.map((f) => f.id)
+  const sizeMap = new Map<string, number>()
+  if (projectFileIds.length > 0) {
+    const stored = await prisma.storedFile.findMany({
+      where: { entityType: 'PROJECT_FILE', entityId: { in: projectFileIds }, fileRole: 'ORIGINAL' },
+      select: { entityId: true, fileSize: true, storagePath: true },
+    })
+    const needsS3Fallback: Array<{ entityId: string; storagePath: string }> = []
+    for (const s of stored) {
+      if (s.fileSize != null) {
+        sizeMap.set(s.entityId, Number(s.fileSize))
+      } else if (s.storagePath) {
+        needsS3Fallback.push({ entityId: s.entityId, storagePath: s.storagePath })
+      }
+    }
+    if (needsS3Fallback.length > 0) {
+      const { isS3Mode, s3GetFileSize } = await import('@/lib/s3-storage')
+      if (isS3Mode()) {
+        const s3Sizes = await Promise.all(needsS3Fallback.map(async (f) => {
+          try { const size = await s3GetFileSize(f.storagePath); return { entityId: f.entityId, size: typeof size === 'number' && size > 0 ? size : 0 } }
+          catch { return { entityId: f.entityId, size: 0 } }
+        }))
+        for (const r of s3Sizes) { if (r.size > 0) sizeMap.set(r.entityId, r.size) }
+      }
+    }
+  }
+
   const serializedProjectFiles = files.map((f) => ({
     ...f,
-    fileSize: f.fileSize.toString(),
+    fileSize: String(sizeMap.get(f.id) ?? 0),
     sourceType: 'projectFile' as const,
     downloadUrl: `/api/projects/${projectId}/files/${f.id}`,
     deleteUrl: canDeleteInternalFiles ? `/api/projects/${projectId}/files/${f.id}` : null,
@@ -170,14 +198,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     data: {
       projectId,
       fileName: sanitizedFileName,
-      fileSize: BigInt(fileSize),
       fileType: 'application/octet-stream',
-      storagePath,
       category,
       uploadedBy: currentUser.id,
       uploadedByName: currentUser.name || currentUser.email,
     },
     select: { id: true },
+  })
+
+  // Register in StoredFile registry
+  await registerStoredFile({
+    entityType: 'PROJECT_FILE',
+    entityId: record.id,
+    fileRole: 'ORIGINAL',
+    storagePath,
+    fileName: sanitizedFileName,
+    fileSize: BigInt(fileSize),
+    status: 'READY',
   })
 
   await recalculateAndStoreProjectTotalBytes(projectId)

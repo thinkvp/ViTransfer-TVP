@@ -6,7 +6,7 @@ import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } f
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
-import { uploadFile } from '@/lib/storage'
+import { uploadFile, deleteFile } from '@/lib/storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -167,9 +167,19 @@ export async function POST(
         commentId,
         projectId: comment.projectId,
         fileName,
-        fileSize: BigInt(fileSize),
         fileType: mimeType,
+      },
+    })
+
+    // Register in StoredFile
+    await prisma.storedFile.create({
+      data: {
+        entityType: 'COMMENT_FILE',
+        entityId: commentFile.id,
+        fileRole: 'ORIGINAL',
         storagePath,
+        fileName,
+        fileSize: BigInt(fileSize),
       },
     })
 
@@ -180,8 +190,8 @@ export async function POST(
       file: {
         id: commentFile.id,
         fileName: commentFile.fileName,
-        fileSize: Number(commentFile.fileSize),
-        storagePath: commentFile.storagePath,
+        fileSize: fileSize,
+        storagePath: storagePath,
         createdAt: commentFile.createdAt,
       },
     })
@@ -259,7 +269,29 @@ export async function DELETE(
       )
     }
 
-    // Delete file from database (file storage cleanup can be done separately)
+    // Get file IDs before deletion for StoredFile cleanup
+    const fileRecords = await prisma.commentFile.findMany({
+      where: { commentId },
+      select: { id: true },
+    })
+    const fileIds = fileRecords.map(f => f.id)
+
+    // Delete physical files via StoredFile
+    if (fileIds.length > 0) {
+      const paths = await prisma.storedFile.findMany({
+        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+        select: { storagePath: true },
+      })
+      for (const { storagePath } of paths) {
+        try { await deleteFile(storagePath) } catch {}
+      }
+      // Clean up StoredFile rows
+      await prisma.storedFile.deleteMany({
+        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+      }).catch(() => {})
+    }
+
+    // Delete file from database
     await prisma.commentFile.deleteMany({
       where: { commentId },
     })

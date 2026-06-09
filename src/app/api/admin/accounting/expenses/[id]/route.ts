@@ -67,7 +67,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const existing = await prisma.expense.findUnique({
     where: { id },
     include: {
-      accountingAttachments: { select: { id: true, storagePath: true, originalName: true } },
+      accountingAttachments: { select: { id: true, originalName: true } },
     },
   })
   if (!existing) {
@@ -137,15 +137,21 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (accountChanged && existing.accountingAttachments.length > 0) {
     for (const attachment of existing.accountingAttachments) {
       try {
+        // Get current path from StoredFile
+        const currentStored = await prisma.storedFile.findUnique({
+          where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: attachment.id, fileRole: 'ORIGINAL' as any } },
+          select: { storagePath: true },
+        })
+        if (!currentStored) continue
         const newPath = await moveAccountingFile(
-          attachment.storagePath,
+          currentStored.storagePath,
           existing.date as string,
           data.accountId!,
           attachment.originalName,
         )
-        if (newPath !== attachment.storagePath) {
-          await prisma.accountingAttachment.update({
-            where: { id: attachment.id },
+        if (newPath !== currentStored.storagePath) {
+          await prisma.storedFile.update({
+            where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: attachment.id, fileRole: 'ORIGINAL' as any } },
             data: { storagePath: newPath },
           })
         }
@@ -189,7 +195,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     select: {
       id: true,
       bankTransactionId: true,
-      accountingAttachments: { select: { storagePath: true } },
+      accountingAttachments: { select: { id: true } },
     },
   })
 
@@ -204,11 +210,15 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     )
   }
 
-  // Delete all attachment files from disk before removing the DB record (CASCADE handles DB rows)
-  const filesToDelete = [
-    ...existing.accountingAttachments.map(a => a.storagePath),
-  ]
-  await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
+  // Delete attachment files via StoredFile
+  const attachmentIds = existing.accountingAttachments.map(a => a.id)
+  if (attachmentIds.length > 0) {
+    const paths = await prisma.storedFile.findMany({
+      where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
+      select: { storagePath: true },
+    })
+    await Promise.all(paths.map(p => deleteAccountingFile(p.storagePath).catch(() => {})))
+  }
 
   await prisma.expense.delete({ where: { id } })
   return NextResponse.json({ ok: true })

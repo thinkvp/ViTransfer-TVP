@@ -181,8 +181,7 @@ export type AccountingAttachmentPathNormalizationSample = {
 }
 
 export type NormalizeAccountingAttachmentStoragePathsResult = {
-  ok: true
-  dryRun: boolean
+  ok: true, dryRun: boolean
   legacyRows: number
   normalizedRows: number
   invalidRows: number
@@ -542,20 +541,20 @@ export async function adjustAccountingFilesBytes(deltaBytes: number): Promise<vo
 export async function normalizeAccountingAttachmentStoragePaths(
   dryRun: boolean,
 ): Promise<NormalizeAccountingAttachmentStoragePathsResult> {
-  const rows = await prisma.accountingAttachment.findMany({
+  // Paths now in StoredFile registry
+  const rows = await prisma.storedFile.findMany({
     where: {
+      entityType: 'ACCOUNTING_ATTACHMENT' as any,
       OR: [
         { storagePath: { startsWith: `${ACCOUNTING_S3_PREFIX}/` } },
         { storagePath: { startsWith: `${ACCOUNTING_S3_PREFIX}\\` } },
       ],
     },
     select: {
-      id: true,
+      entityId: true,
       storagePath: true,
-      originalName: true,
-      uploadedAt: true,
     },
-    orderBy: { uploadedAt: 'desc' },
+    orderBy: { createdAt: 'desc' },
   })
 
   const sampleLimit = 50
@@ -566,14 +565,14 @@ export async function normalizeAccountingAttachmentStoragePaths(
   for (const row of rows) {
     try {
       const normalized = normalizeAccountingStoragePath(row.storagePath)
-      updates.push({ id: row.id, storagePath: normalized })
+      updates.push({ id: row.entityId, storagePath: normalized })
 
       if (sample.length < sampleLimit) {
         sample.push({
-          id: row.id,
+          id: row.entityId,
           from: row.storagePath,
           to: normalized,
-          originalName: row.originalName,
+          originalName: '',
           error: null,
         })
       }
@@ -581,10 +580,10 @@ export async function normalizeAccountingAttachmentStoragePaths(
       invalidRows++
       if (sample.length < sampleLimit) {
         sample.push({
-          id: row.id,
+          id: row.entityId,
           from: row.storagePath,
           to: null,
-          originalName: row.originalName,
+          originalName: '',
           error: error?.message || 'Invalid accounting file path',
         })
       }
@@ -596,8 +595,8 @@ export async function normalizeAccountingAttachmentStoragePaths(
     for (let index = 0; index < updates.length; index += batchSize) {
       const batch = updates.slice(index, index + batchSize)
       await prisma.$transaction(
-        batch.map((row) => prisma.accountingAttachment.update({
-          where: { id: row.id },
+        batch.map((row) => prisma.storedFile.update({
+          where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: row.id, fileRole: 'ORIGINAL' as any } },
           data: { storagePath: row.storagePath },
         })),
       )
@@ -715,9 +714,7 @@ export async function migrateAccountFolderFiles(accountId: string): Promise<void
   const expenseAttachments = await prisma.accountingAttachment.findMany({
     where: { expense: { accountId } },
     select: {
-      id: true,
-      storagePath: true,
-      originalName: true,
+      id: true, originalName: true,
       expense: { select: { date: true } },
     },
   })
@@ -736,20 +733,32 @@ export async function migrateAccountFolderFiles(accountId: string): Promise<void
       },
     },
     select: {
-      id: true,
-      storagePath: true,
-      originalName: true,
+      id: true, originalName: true,
       bankTransaction: { select: { date: true } },
     },
   })
 
+  // Get paths from StoredFile
+  const attachmentIds = [
+    ...expenseAttachments.map(a => a.id),
+    ...txnAttachments.map(a => a.id),
+  ]
+  const storedMap = new Map<string, string>()
+  if (attachmentIds.length > 0) {
+    const stored = await prisma.storedFile.findMany({
+      where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
+      select: { entityId: true, storagePath: true },
+    })
+    for (const s of stored) storedMap.set(s.entityId, s.storagePath)
+  }
+
   const all: Array<{ id: string; storagePath: string; originalName: string; date: string }> = [
     ...expenseAttachments
       .filter((a) => a.expense)
-      .map((a) => ({ id: a.id, storagePath: a.storagePath, originalName: a.originalName, date: a.expense!.date })),
+      .map((a) => ({ id: a.id, storagePath: storedMap.get(a.id) || '', originalName: a.originalName, date: a.expense!.date })),
     ...txnAttachments
       .filter((a) => a.bankTransaction)
-      .map((a) => ({ id: a.id, storagePath: a.storagePath, originalName: a.originalName, date: a.bankTransaction!.date })),
+      .map((a) => ({ id: a.id, storagePath: storedMap.get(a.id) || '', originalName: a.originalName, date: a.bankTransaction!.date })),
   ]
 
   for (const attachment of all) {
@@ -760,8 +769,8 @@ export async function migrateAccountFolderFiles(accountId: string): Promise<void
       attachment.originalName,
     )
     if (newPath !== attachment.storagePath) {
-      await prisma.accountingAttachment.update({
-        where: { id: attachment.id },
+      await prisma.storedFile.update({
+        where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: attachment.id, fileRole: 'ORIGINAL' as any } },
         data: { storagePath: newPath },
       })
     }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteDirectory, deleteFile, moveDirectory, pruneEmptyParentDirectories, getFilePath } from '@/lib/storage'
+import { getStoredFilePath, renameStoredPaths, deleteStoredFilesForEntity } from '@/lib/stored-file'
 import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
 import { getSecuritySettings } from '@/lib/video-access'
@@ -291,16 +292,8 @@ export async function PATCH(
           newMainPrefix: string
           oldPreviewPrefix: string
           newPreviewPrefix: string
-          currentVideo: {
-            originalStoragePath: string
-            preview480Path: string | null
-            preview720Path: string | null
-            preview1080Path: string | null
-            thumbnailPath: string | null
-            timelinePreviewVttPath: string | null
-            timelinePreviewSpritesPath: string | null
-          }
-          videoAssets: Array<{ id: string; storagePath: string; previewPath: string | null; timelinePreviewVttPath: string | null; timelinePreviewSpritesPath: string | null }>
+          currentVideo: Record<string, string | null>
+          videoAssets: Array<{ id: string }>
         }
       | null = null
     let videoRenamePlan:
@@ -312,22 +305,11 @@ export async function PATCH(
             name: string
             storageFolderName: string | null
             versionLabel: string
-            originalStoragePath: string
-            preview480Path: string | null
-            preview720Path: string | null
-            preview1080Path: string | null
-            thumbnailPath: string | null
-            timelinePreviewVttPath: string | null
-            timelinePreviewSpritesPath: string | null
           }>
           siblingAssets: Array<{
             id: string
             videoId: string
-            storagePath: string
-            previewPath: string | null
             fileType: string | null
-            timelinePreviewVttPath: string | null
-            timelinePreviewSpritesPath: string | null
           }>
         }
       | null = null
@@ -371,13 +353,6 @@ export async function PATCH(
             name: true,
             storageFolderName: true,
             versionLabel: true,
-            originalStoragePath: true,
-            preview480Path: true,
-            preview720Path: true,
-            preview1080Path: true,
-            thumbnailPath: true,
-            timelinePreviewVttPath: true,
-            timelinePreviewSpritesPath: true,
           },
         })
         const otherVideoFolderRows = await prisma.video.findMany({
@@ -395,7 +370,7 @@ export async function PATCH(
 
         const siblingAssets = await prisma.videoAsset.findMany({
           where: { videoId: { in: siblingVideos.map((row) => row.id) } },
-          select: { id: true, videoId: true, storagePath: true, previewPath: true, fileType: true, timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
+          select: { id: true, videoId: true, previewStatus: true, fileType: true },
         })
 
         videoRenamePlan = {
@@ -426,7 +401,7 @@ export async function PATCH(
 
           const videoAssets = await prisma.videoAsset.findMany({
             where: { videoId: id },
-            select: { id: true, storagePath: true, previewPath: true, timelinePreviewVttPath: true, timelinePreviewSpritesPath: true },
+            select: { id: true, previewStatus: true },
           })
 
           if (isS3Mode()) {
@@ -465,19 +440,25 @@ export async function PATCH(
             // rebased by the background worker once the S3 copy completes.
           } else {
             // Local mode: plan an inline directory move + path rebase.
+            // Paths from StoredFile registry (legacy columns dropped)
+            const storedPaths = await prisma.storedFile.findMany({
+              where: { entityType: 'VIDEO', entityId: id },
+              select: { fileRole: true, storagePath: true },
+            })
+            const pathMap = new Map(storedPaths.map(f => [f.fileRole, f.storagePath]))
             versionLabelRenamePlan = {
               oldMainPrefix,
               newMainPrefix,
               oldPreviewPrefix,
               newPreviewPrefix,
               currentVideo: {
-                originalStoragePath: (video as any).originalStoragePath,
-                preview480Path: (video as any).preview480Path ?? null,
-                preview720Path: (video as any).preview720Path ?? null,
-                preview1080Path: (video as any).preview1080Path ?? null,
-                thumbnailPath: (video as any).thumbnailPath ?? null,
-                timelinePreviewVttPath: (video as any).timelinePreviewVttPath ?? null,
-                timelinePreviewSpritesPath: (video as any).timelinePreviewSpritesPath ?? null,
+                originalStoragePath: pathMap.get('ORIGINAL') ?? null,
+                preview480Path: pathMap.get('PREVIEW_480') ?? null,
+                preview720Path: pathMap.get('PREVIEW_720') ?? null,
+                preview1080Path: pathMap.get('PREVIEW_1080') ?? null,
+                thumbnailPath: pathMap.get('THUMBNAIL') ?? null,
+                timelinePreviewVttPath: pathMap.get('TIMELINE_VTT') ?? null,
+                timelinePreviewSpritesPath: pathMap.get('TIMELINE_SPRITES') ?? null,
               },
               videoAssets,
             }
@@ -511,53 +492,18 @@ export async function PATCH(
           if (!oldFolderName) continue
 
           const oldVideoStorageRoot = buildVideoStorageRoot(videoRenamePlan.projectStoragePath, oldFolderName)
-          const rebasedVideoData = {
-            name: updateData.name,
-            storageFolderName: videoRenamePlan.newVideoFolderName,
-            originalStoragePath: replaceStoredStoragePathPrefix(
-              siblingVideo.originalStoragePath,
-              oldVideoStorageRoot,
-              newVideoStorageRoot,
-            )!,
-            preview480Path: replaceStoredStoragePathPrefix(
-              siblingVideo.preview480Path,
-              oldVideoStorageRoot,
-              newVideoStorageRoot,
-            ),
-            preview720Path: replaceStoredStoragePathPrefix(
-              siblingVideo.preview720Path,
-              oldVideoStorageRoot,
-              newVideoStorageRoot,
-            ),
-            preview1080Path: replaceStoredStoragePathPrefix(
-              siblingVideo.preview1080Path,
-              oldVideoStorageRoot,
-              newVideoStorageRoot,
-            ),
-            thumbnailPath: replaceStoredStoragePathPrefix(
-              siblingVideo.thumbnailPath,
-              oldVideoStorageRoot,
-              newVideoStorageRoot,
-            ),
-            timelinePreviewVttPath: replaceStoredStoragePathPrefix(
-              siblingVideo.timelinePreviewVttPath,
-              oldVideoStorageRoot,
-              newVideoStorageRoot,
-            ),
-            timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(
-              siblingVideo.timelinePreviewSpritesPath,
-              oldVideoStorageRoot,
-              newVideoStorageRoot,
-            ),
-          }
+
+          // StoredFile handles path rebasing via renameStoredPaths()
+          await renameStoredPaths('VIDEO', [siblingVideo.id], oldVideoStorageRoot, newVideoStorageRoot)
 
           await tx.video.update({
             where: { id: siblingVideo.id },
             data:
               siblingVideo.id === id
-                ? { ...updateData, ...rebasedVideoData }
+                ? { ...updateData, name: updateData.name, storageFolderName: videoRenamePlan.newVideoFolderName }
                 : {
-                    ...rebasedVideoData,
+                    name: updateData.name,
+                    storageFolderName: videoRenamePlan.newVideoFolderName,
                     ...(approved ? { approved: false, approvedAt: null } : {}),
                   },
           })
@@ -567,41 +513,10 @@ export async function PATCH(
           const oldFolderName = siblingFolderByVideoId.get(asset.videoId)
           if (!oldFolderName) continue
 
-          const siblingVideo = videoRenamePlan.siblingVideos.find((row) => row.id === asset.videoId)
-          if (!siblingVideo) continue
-
           const oldVideoStorageRoot = buildVideoStorageRoot(videoRenamePlan.projectStoragePath, oldFolderName)
-          const rebasedStoragePath = replaceStoredStoragePathPrefix(
-            asset.storagePath,
-            oldVideoStorageRoot,
-            newVideoStorageRoot,
-          )!
 
-          const currentPreviewExt = path.posix.extname(String(asset.previewPath || '')).toLowerCase()
-          const desiredPreviewExt = currentPreviewExt === '.mp4' || currentPreviewExt === '.jpg'
-            ? currentPreviewExt
-            : String(asset.fileType || '').toLowerCase().startsWith('video/')
-              ? '.mp4'
-              : '.jpg'
-          const rebasedPreviewPath = asset.previewPath
-            ? buildVideoAssetPreviewStoragePath(
-                videoRenamePlan.projectStoragePath,
-                videoRenamePlan.newVideoFolderName,
-                siblingVideo.versionLabel,
-                rebasedStoragePath,
-                desiredPreviewExt,
-              )
-            : null
-
-          await tx.videoAsset.update({
-            where: { id: asset.id },
-            data: {
-              storagePath: rebasedStoragePath,
-              previewPath: rebasedPreviewPath,
-              timelinePreviewVttPath: replaceStoredStoragePathPrefix(asset.timelinePreviewVttPath, oldVideoStorageRoot, newVideoStorageRoot),
-              timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(asset.timelinePreviewSpritesPath, oldVideoStorageRoot, newVideoStorageRoot),
-            },
-          })
+          // StoredFile handles path rebasing
+          await renameStoredPaths('VIDEO_ASSET', [asset.id], oldVideoStorageRoot, newVideoStorageRoot)
         }
       })
     } else if (versionLabelRenamePlan) {
@@ -612,59 +527,31 @@ export async function PATCH(
 
       const { oldMainPrefix, newMainPrefix, oldPreviewPrefix, newPreviewPrefix } = versionLabelRenamePlan
 
+      // StoredFile handles path rebasing via renameStoredPaths()
+      // called by the folder-rename-processor or inline below
       await prisma.$transaction(async (tx) => {
         await tx.video.update({
           where: { id },
-          data: {
-            ...updateData,
-            originalStoragePath: replaceStoredStoragePathPrefix(
-              versionLabelRenamePlan.currentVideo.originalStoragePath,
-              oldMainPrefix,
-              newMainPrefix,
-            )!,
-            preview480Path: replaceStoredStoragePathPrefix(
-              versionLabelRenamePlan.currentVideo.preview480Path,
-              oldPreviewPrefix,
-              newPreviewPrefix,
-            ),
-            preview720Path: replaceStoredStoragePathPrefix(
-              versionLabelRenamePlan.currentVideo.preview720Path,
-              oldPreviewPrefix,
-              newPreviewPrefix,
-            ),
-            preview1080Path: replaceStoredStoragePathPrefix(
-              versionLabelRenamePlan.currentVideo.preview1080Path,
-              oldPreviewPrefix,
-              newPreviewPrefix,
-            ),
-            thumbnailPath: replaceStoredStoragePathPrefix(
-              versionLabelRenamePlan.currentVideo.thumbnailPath,
-              oldPreviewPrefix,
-              newPreviewPrefix,
-            ),
-            timelinePreviewVttPath: replaceStoredStoragePathPrefix(
-              versionLabelRenamePlan.currentVideo.timelinePreviewVttPath,
-              oldPreviewPrefix,
-              newPreviewPrefix,
-            ),
-            timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(
-              versionLabelRenamePlan.currentVideo.timelinePreviewSpritesPath,
-              oldPreviewPrefix,
-              newPreviewPrefix,
-            ),
-          },
+          data: updateData,
         })
 
-        for (const asset of versionLabelRenamePlan.videoAssets) {
-          await tx.videoAsset.update({
-            where: { id: asset.id },
-            data: {
-              storagePath: replaceStoredStoragePathPrefix(asset.storagePath, oldMainPrefix, newMainPrefix)!,
-              previewPath: replaceStoredStoragePathPrefix(asset.previewPath, oldPreviewPrefix, newPreviewPrefix),
-              timelinePreviewVttPath: replaceStoredStoragePathPrefix(asset.timelinePreviewVttPath, oldPreviewPrefix, newPreviewPrefix),
-              timelinePreviewSpritesPath: replaceStoredStoragePathPrefix(asset.timelinePreviewSpritesPath, oldPreviewPrefix, newPreviewPrefix),
-            },
-          })
+        // Rename StoredFile paths for this video (OLD prefix → NEW prefix)
+        if (oldMainPrefix !== newMainPrefix) {
+          await renameStoredPaths('VIDEO', [id], oldMainPrefix, newMainPrefix)
+        }
+        if (oldPreviewPrefix !== newPreviewPrefix) {
+          await renameStoredPaths('VIDEO', [id], oldPreviewPrefix, newPreviewPrefix)
+        }
+
+        // Rename StoredFile paths for all assets of this video
+        const assetIds = versionLabelRenamePlan.videoAssets.map(a => a.id)
+        if (assetIds.length > 0) {
+          if (oldMainPrefix !== newMainPrefix) {
+            await renameStoredPaths('VIDEO_ASSET', assetIds, oldMainPrefix, newMainPrefix)
+          }
+          if (oldPreviewPrefix !== newPreviewPrefix) {
+            await renameStoredPaths('VIDEO_ASSET', assetIds, oldPreviewPrefix, newPreviewPrefix)
+          }
         }
       })
     } else {
@@ -817,47 +704,55 @@ export async function DELETE(
         },
         select: {
           id: true,
-          storagePath: true,
         },
       })
 
       const commentFileIdsToDelete = commentFiles.map((f) => f.id)
-      for (const file of commentFiles) {
-        try {
-          // Only delete if no other CommentFile row references the same storagePath
-          // outside of the set that will be cascade-deleted.
-          const sharedCount = await prisma.commentFile.count({
+      // Delete comment file physical files via StoredFile
+      if (commentFileIdsToDelete.length > 0) {
+        const cfPaths = await prisma.storedFile.findMany({
+          where: { entityType: 'COMMENT_FILE', entityId: { in: commentFileIdsToDelete } },
+          select: { storagePath: true, entityId: true },
+        })
+        for (const cf of cfPaths) {
+          try {
+            const sharedCount = await prisma.storedFile.count({
+              where: {
+                storagePath: cf.storagePath,
+                entityType: 'COMMENT_FILE',
+                entityId: { notIn: commentFileIdsToDelete },
+              },
+            })
+            if (sharedCount === 0) {
+              await deleteFile(cf.storagePath)
+            }
+          } catch {
+            // Ignore per-file errors
+          }
+        }
+      }
+
+      // Delete asset files via StoredFile
+      for (const asset of video.assets) {
+        const assetPath = await getStoredFilePath('VIDEO_ASSET', asset.id, 'ORIGINAL')
+        if (assetPath) {
+          const sharedCount = await prisma.storedFile.count({
             where: {
-              storagePath: file.storagePath,
-              id: { notIn: commentFileIdsToDelete },
+              storagePath: assetPath,
+              entityType: 'VIDEO_ASSET',
+              entityId: { not: asset.id },
             },
           })
-
           if (sharedCount === 0) {
-            await deleteFile(file.storagePath)
+            await deleteFile(assetPath)
           }
-        } catch {
-          // Ignore per-file errors to avoid blocking video deletion
         }
       }
 
-      // Delete asset files only if no other assets point to the same storage path
-      for (const asset of video.assets) {
-        const sharedCount = await prisma.videoAsset.count({
-          where: {
-            storagePath: asset.storagePath,
-            id: { not: asset.id },
-          },
-        })
-
-        if (sharedCount === 0) {
-          await deleteFile(asset.storagePath)
-        }
-      }
-
-      // Delete original file
-      if (video.originalStoragePath) {
-        await deleteFile(video.originalStoragePath)
+      // Delete original file (path from StoredFile registry)
+      const origPath = await getStoredFilePath('VIDEO', id, 'ORIGINAL')
+      if (origPath) {
+        await deleteFile(origPath)
       }
 
       // Delete the entire preview tree for this video version. That covers preview mp4s,
@@ -867,23 +762,26 @@ export async function DELETE(
       // If the selected thumbnail points outside the generated preview tree (for example,
       // a custom thumbnail set from an asset), delete that physical file only when it is
       // not referenced by any other video or asset.
-      if (video.thumbnailPath && !video.thumbnailPath.startsWith(`${previewRoot}/`)) {
-        const thumbnailSharedAssets = await prisma.videoAsset.count({
+      const thumbPath = await getStoredFilePath('VIDEO', id, 'THUMBNAIL')
+      if (thumbPath && !thumbPath.startsWith(`${previewRoot}/`)) {
+        const thumbnailSharedAssets = await prisma.storedFile.count({
           where: {
-            storagePath: video.thumbnailPath,
-            videoId: { not: id },
+            storagePath: thumbPath,
+            entityType: 'VIDEO_ASSET',
+            entityId: { not: id },
           },
         })
-        const thumbnailSharedVideos = await prisma.video.count({
+        const thumbnailSharedVideos = await prisma.storedFile.count({
           where: {
-            thumbnailPath: video.thumbnailPath,
-            id: { not: id },
+            storagePath: thumbPath,
+            entityType: 'VIDEO',
+            entityId: { not: id },
           },
         })
 
         // Only delete if no other assets or videos reference this thumbnail path
         if (thumbnailSharedAssets === 0 && thumbnailSharedVideos === 0) {
-          await deleteFile(video.thumbnailPath)
+          await deleteFile(thumbPath)
         }
       }
     } catch (error) {
@@ -895,6 +793,12 @@ export async function DELETE(
     await prisma.video.delete({
       where: { id },
     })
+
+    // Clean up StoredFile rows for this video and its assets
+    await deleteStoredFilesForEntity('VIDEO', id).catch(() => {})
+    for (const asset of video.assets) {
+      await deleteStoredFilesForEntity('VIDEO_ASSET', asset.id).catch(() => {})
+    }
 
     // Update the stored project data totals
     await Promise.allSettled([

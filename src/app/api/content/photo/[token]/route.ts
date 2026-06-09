@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getStoredFilePath } from '@/lib/stored-file'
 import { getAuthContext } from '@/lib/auth'
 import { getSecuritySettings } from '@/lib/video-access'
 import { verifyAlbumPhotoAccessToken } from '@/lib/photo-access'
@@ -63,12 +64,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Photo not ready' }, { status: 404 })
   }
 
-  let storagePath = photo.storagePath
+  // Get paths from StoredFile
+  const origPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL')
+  const socialPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'SOCIAL')
+  const thumbPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'THUMBNAIL')
+
+  let storagePath = origPath
   if (variant === 'social') {
-    if (photo.socialStatus !== 'READY' || !photo.socialStoragePath) {
+    if (photo.socialStatus !== 'READY' || !socialPath) {
       return NextResponse.json({ error: 'Social photo not ready' }, { status: 409 })
     }
-    storagePath = photo.socialStoragePath
+    storagePath = socialPath
   }
 
   async function streamInlineImage(candidateStoragePath: string): Promise<NextResponse | null> {
@@ -100,27 +106,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   if (variant === 'thumbnail') {
-    if (photo.thumbnailStatus === 'READY' && photo.thumbnailStoragePath) {
-      const thumbnailResponse = await streamInlineImage(photo.thumbnailStoragePath)
+    if (photo.thumbnailStatus === 'READY' && thumbPath) {
+      const thumbnailResponse = await streamInlineImage(thumbPath)
       if (thumbnailResponse) return thumbnailResponse
     }
 
-    if (photo.socialStatus === 'READY' && photo.socialStoragePath) {
-      const previewResponse = await streamInlineImage(photo.socialStoragePath)
+    if (photo.socialStatus === 'READY' && socialPath) {
+      const previewResponse = await streamInlineImage(socialPath)
       if (previewResponse) return previewResponse
     }
     // Fall through to the original as a graceful last resort.
   }
 
-  // Preview: serve the social-sized derivative (2048px long edge) when ready,
-  // otherwise fall through to the original so the viewer is never broken.
   if (variant === 'preview') {
-    if (photo.socialStatus === 'READY' && photo.socialStoragePath) {
-      const previewResponse = await streamInlineImage(photo.socialStoragePath)
+    if (photo.socialStatus === 'READY' && socialPath) {
+      const previewResponse = await streamInlineImage(socialPath)
       if (previewResponse) return previewResponse
     }
     // Social derivative not ready yet — fall through and serve the original as a graceful fallback.
   }
+
+  if (!storagePath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
 
   // Check the target file exists before streaming.
   if (isS3Mode()) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
+import { getStoredFilePath } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
@@ -22,7 +23,6 @@ export async function GET(request: NextRequest) {
       where: { id: 'default' },
       select: {
         companyLogoMode: true,
-        companyLogoPath: true,
         companyLogoUrl: true,
         mainCompanyDomain: true,
         companyName: true,
@@ -30,9 +30,11 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    // Logo existence checked via StoredFile registry
+    const logoPath = await getStoredFilePath('SETTINGS_BRANDING', 'default', 'COMPANY_LOGO')
     const hasLogo =
       settings?.companyLogoMode === 'UPLOAD'
-        ? Boolean(settings.companyLogoPath)
+        ? Boolean(logoPath)
         : settings?.companyLogoMode === 'LINK'
           ? Boolean(settings.companyLogoUrl)
           : false

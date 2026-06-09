@@ -555,10 +555,6 @@ async function buildAlbumZipJobs({
     const recentlyUpdatedAlbums = await prisma.album.findMany({
       where: {
         updatedAt: { gte: cutoff },
-        OR: [
-          { fullZipFileSize: { gt: 0 } },
-          { socialZipFileSize: { gt: 0 } },
-        ],
         project: {
           status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
           ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
@@ -569,12 +565,24 @@ async function buildAlbumZipJobs({
         name: true,
         projectId: true,
         project: { select: { title: true } },
-        fullZipFileSize: true,
-        socialZipFileSize: true,
         updatedAt: true,
       },
       orderBy: { updatedAt: 'desc' },
     })
+
+    // Check StoredFile for ZIP sizes (legacy album columns dropped)
+    const albumIds = recentlyUpdatedAlbums.map(a => a.id)
+    const albumZipSizes = albumIds.length > 0 ? await prisma.storedFile.findMany({
+      where: { entityType: 'ALBUM', entityId: { in: albumIds }, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
+      select: { entityId: true, fileRole: true, fileSize: true },
+    }) : []
+    const zipSizeByAlbum = new Map<string, { full: bigint; social: bigint }>()
+    for (const az of albumZipSizes) {
+      let entry = zipSizeByAlbum.get(az.entityId)
+      if (!entry) { entry = { full: BigInt(0), social: BigInt(0) }; zipSizeByAlbum.set(az.entityId, entry) }
+      if (az.fileRole === 'ZIP_FULL') entry.full = az.fileSize ?? BigInt(0)
+      else if (az.fileRole === 'ZIP_SOCIAL') entry.social = az.fileSize ?? BigInt(0)
+    }
 
     const activeAlbumVariantSet = new Set(active.map((j) => `${j.albumId}:${j.variant}`))
 
@@ -588,9 +596,10 @@ async function buildAlbumZipJobs({
     }> = []
 
     for (const album of recentlyUpdatedAlbums) {
+      const sizes = zipSizeByAlbum.get(album.id) ?? { full: BigInt(0), social: BigInt(0) }
       for (const variant of ['full', 'social'] as const) {
-        const sizeKey = variant === 'full' ? 'fullZipFileSize' as const : 'socialZipFileSize' as const
-        if (album[sizeKey] > 0 && !activeAlbumVariantSet.has(`${album.id}:${variant}`)) {
+        const size = variant === 'full' ? sizes.full : sizes.social
+        if (size > 0 && !activeAlbumVariantSet.has(`${album.id}:${variant}`)) {
           const variantLabel = variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
           completed.push({
             id: `${album.id}:${variant}`,

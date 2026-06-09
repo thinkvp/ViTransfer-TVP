@@ -9,32 +9,24 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 function canIssueAdminVideoToken(
-  video: {
-    originalStoragePath: string | null
-    thumbnailPath: string | null
-    preview480Path: string | null
-    preview720Path: string | null
-    preview1080Path: string | null
-    timelinePreviewVttPath: string | null
-    timelinePreviewSpritesPath: string | null
-  },
+  storedRoles: Set<string>,
   quality: string,
 ): boolean {
-  const canUseOriginal = Boolean(video.originalStoragePath)
+  const canUseOriginal = storedRoles.has('ORIGINAL')
 
   switch (quality) {
     case '480p':
-      return Boolean(video.preview480Path || video.preview720Path || video.preview1080Path || canUseOriginal)
+      return storedRoles.has('PREVIEW_480') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || canUseOriginal
     case '720p':
-      return Boolean(video.preview720Path || video.preview1080Path || video.preview480Path || canUseOriginal)
+      return storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_480') || canUseOriginal
     case '1080p':
-      return Boolean(video.preview1080Path || video.preview720Path || video.preview480Path || canUseOriginal)
+      return storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_480') || canUseOriginal
     case 'thumbnail':
-      return Boolean(video.thumbnailPath)
+      return storedRoles.has('THUMBNAIL')
     case 'timeline-vtt':
-      return Boolean(video.timelinePreviewVttPath)
+      return storedRoles.has('TIMELINE_VTT')
     case 'timeline-sprite':
-      return Boolean(video.timelinePreviewSpritesPath)
+      return storedRoles.has('TIMELINE_SPRITES')
     case 'original':
     case 'download':
       return canUseOriginal
@@ -90,13 +82,6 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         projectId: true,
-        originalStoragePath: true,
-        preview480Path: true,
-        preview720Path: true,
-        preview1080Path: true,
-        thumbnailPath: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
       }
     })
 
@@ -107,7 +92,14 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    if (!canIssueAdminVideoToken(video, quality)) {
+    // Resolve available file roles from StoredFile registry
+    const storedFiles = await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO', entityId: videoId },
+      select: { fileRole: true },
+    })
+    const storedRoles = new Set(storedFiles.map(f => f.fileRole))
+
+    if (!canIssueAdminVideoToken(storedRoles, quality)) {
       return NextResponse.json({ error: `${quality} unavailable` }, { status: 404 })
     }
 

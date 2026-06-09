@@ -1,28 +1,27 @@
 /**
  * One-shot script to backfill the StoredFile registry from legacy path columns.
  *
- * Usage:
- *   docker compose run --rm --no-deps app npx tsx scripts/backfill-stored-files.ts
+ * **DEPRECATED.** The migration `20260608000002_add_stored_file_registry` already
+ * ran the backfill SQL, and migration `20260609000000_drop_legacy_path_and_size_columns`
+ * has dropped all legacy path/size columns.  This script is now a no-op.
  *
- * Safe to run multiple times — uses ON CONFLICT DO NOTHING.
- * Run this AFTER the migration `20260608000002_add_stored_file_registry` has been applied.
+ * Usage (historical):
+ *   docker compose run --rm --no-deps app npx tsx scripts/backfill-stored-files.ts
  */
 
 import { backfillStoredFiles } from '../src/lib/stored-file'
 
 async function main() {
-  console.log('[backfill-stored-files] Starting backfill from legacy path columns...')
-  const start = Date.now()
+  console.log('[backfill-stored-files] Legacy columns have been dropped — nothing to backfill.')
 
   const result = await backfillStoredFiles()
 
-  const elapsed = ((Date.now() - start) / 1000).toFixed(1)
-  console.log(`[backfill-stored-files] Done: ${result.inserted} rows inserted in ${elapsed}s`)
+  console.log(`[backfill-stored-files] Done: ${result.inserted} rows inserted`)
 
   // Verify
   const { prisma } = await import('../src/lib/db')
   const count = await prisma.storedFile.count()
-  console.log(`[backfill-stored-files] StoredFile table now has ${count} total rows`)
+  console.log(`[backfill-stored-files] StoredFile table has ${count} total rows`)
   await prisma.$disconnect()
 }
 

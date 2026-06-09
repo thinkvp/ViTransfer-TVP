@@ -6,6 +6,7 @@ import { generateTimelineSprite, getVideoMetadata } from '@/lib/ffmpeg'
 import { moveUploadedFile } from '@/lib/storage'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import { buildAssetTimelineStorageRoot, buildUploadTimelineStorageRoot } from '@/lib/project-storage-paths'
+import { getStoredFilePath } from '@/lib/stored-file'
 import type { AssetTimelineJob, UploadTimelineJob } from '@/lib/queue'
 
 const DEBUG = process.env.DEBUG_FFMPEG === 'true'
@@ -111,6 +112,9 @@ export async function processAssetTimeline(job: { data: AssetTimelineJob }): Pro
   const { assetId, videoId, storagePath, durationSeconds, width, height } = job.data
   console.log(`[WORKER] Starting asset timeline generation for asset ${assetId}`)
 
+  // Resolve original storage path from StoredFile if not provided
+  const resolvedStoragePath = storagePath || await getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL') || ''
+
   await prisma.videoAsset.update({ where: { id: assetId }, data: { processingPhase: 'timeline', processingProgress: 0 } }).catch(() => {})
 
   let materializedInput: { localPath: string; isTemporary: boolean } | null = null
@@ -123,7 +127,7 @@ export async function processAssetTimeline(job: { data: AssetTimelineJob }): Pro
 
     // Materialize the asset file from S3 (or use local path in local mode)
     materializedInput = await materializeStoragePathToLocalFile({
-      rawPath: storagePath,
+      rawPath: resolvedStoragePath,
       tempDir: path.join(os.tmpdir(), 'vitransfer-asset-timeline'),
       suggestedName: `${assetId}-source.bin`,
     })
@@ -162,10 +166,23 @@ export async function processAssetTimeline(job: { data: AssetTimelineJob }): Pro
     })
 
     if (result?.ready) {
-      await prisma.videoAsset.update({ where: { id: assetId }, data: {
-        timelinePreviewsReady: true, timelinePreviewVttPath: result.vttPath, timelinePreviewSpritesPath: result.spritesPath,
-        processingPhase: null, processingProgress: 100,
-      }})
+      // Register timeline paths in StoredFile
+      await Promise.all([
+        prisma.storedFile.upsert({
+          where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_VTT' } },
+          create: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_VTT', storagePath: result.vttPath, status: 'READY' },
+          update: { storagePath: result.vttPath, status: 'READY' },
+        }),
+        prisma.storedFile.upsert({
+          where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_SPRITES' } },
+          create: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_SPRITES', storagePath: result.spritesPath, status: 'READY' },
+          update: { storagePath: result.spritesPath, status: 'READY' },
+        }),
+        prisma.videoAsset.update({ where: { id: assetId }, data: {
+          timelinePreviewsReady: true,
+          processingPhase: null, processingProgress: 100,
+        }}),
+      ])
       console.log(`[WORKER] Asset timeline done: ${assetId}`)
     } else {
       console.error(`[WORKER] Asset timeline generation returned null/not-ready for ${assetId} (duration=${effectiveDuration})`)
@@ -186,6 +203,9 @@ export async function processUploadTimeline(job: { data: UploadTimelineJob }): P
   const { uploadFileId, projectId, storagePath, durationSeconds, width, height } = job.data
   console.log(`[WORKER] Starting upload timeline generation for upload ${uploadFileId}`)
 
+  // Resolve original storage path from StoredFile if not provided
+  const resolvedStoragePath = storagePath || await getStoredFilePath('SHARE_UPLOAD_FILE', uploadFileId, 'ORIGINAL') || ''
+
   await prisma.shareUploadFile.update({ where: { id: uploadFileId }, data: { processingPhase: 'timeline', processingProgress: 0 } }).catch(() => {})
 
   let materializedInput: { localPath: string; isTemporary: boolean } | null = null
@@ -198,7 +218,7 @@ export async function processUploadTimeline(job: { data: UploadTimelineJob }): P
 
     // Materialize the upload file from S3 (or use local path in local mode)
     materializedInput = await materializeStoragePathToLocalFile({
-      rawPath: storagePath,
+      rawPath: resolvedStoragePath,
       tempDir: path.join(os.tmpdir(), 'vitransfer-upload-timeline'),
       suggestedName: `${uploadFileId}-source.bin`,
     })
@@ -233,10 +253,23 @@ export async function processUploadTimeline(job: { data: UploadTimelineJob }): P
     })
 
     if (result?.ready) {
-      await prisma.shareUploadFile.update({ where: { id: uploadFileId }, data: {
-        timelinePreviewsReady: true, timelinePreviewVttPath: result.vttPath, timelinePreviewSpritesPath: result.spritesPath,
-        processingPhase: null, processingProgress: 100,
-      }})
+      // Register timeline paths in StoredFile (legacy columns dropped)
+      await Promise.all([
+        prisma.storedFile.upsert({
+          where: { entityType_entityId_fileRole: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_VTT' } },
+          create: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_VTT', storagePath: result.vttPath, status: 'READY' },
+          update: { storagePath: result.vttPath, status: 'READY' },
+        }),
+        prisma.storedFile.upsert({
+          where: { entityType_entityId_fileRole: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_SPRITES' } },
+          create: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_SPRITES', storagePath: result.spritesPath, status: 'READY' },
+          update: { storagePath: result.spritesPath, status: 'READY' },
+        }),
+        prisma.shareUploadFile.update({ where: { id: uploadFileId }, data: {
+          timelinePreviewsReady: true,
+          processingPhase: null, processingProgress: 100,
+        }}),
+      ])
       console.log(`[WORKER] Upload timeline done: ${uploadFileId}`)
     } else {
       console.error(`[WORKER] Upload timeline generation returned null/not-ready for ${uploadFileId} (duration=${effectiveDuration})`)

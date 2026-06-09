@@ -155,13 +155,11 @@ export default async function SalesDocPublicViewPage(
     select: { enabled: true, label: true, currencies: true, feePercent: true, feeFixedCents: true },
   }).catch(() => null)
 
-  const logoSettings = await prisma.settings.findUnique({
-    where: { id: 'default' },
-    select: {
-      companyLogoPath: true, companyLogoMode: true, companyLogoUrl: true,
-    },
+  const logoSettings = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO' } },
+    select: { storagePath: true },
   })
-  const showLogo = hasConfiguredLogo(logoSettings)
+  const showLogo = !!logoSettings?.storagePath
 
   const businessName = safeString(settings?.businessName) || 'Business'
   const address = safeString(settings?.address)

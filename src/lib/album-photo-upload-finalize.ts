@@ -5,36 +5,56 @@ import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumPhotoSocialQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
+import { registerStoredFile } from '@/lib/stored-file'
 
 export async function finalizeAlbumPhotoUpload(photoId: string): Promise<{ ok: true } | { ok: false; reason: 'not-found' }> {
   const photo = await prisma.albumPhoto.findUnique({
     where: { id: photoId },
-    include: { album: { include: { project: { select: { storagePath: true, title: true, companyName: true, client: { select: { name: true } } } } } } },
+    include: { album: { include: { project: { select: { title: true, companyName: true, client: { select: { name: true } } } } } } },
   })
 
   if (!photo) {
     return { ok: false, reason: 'not-found' }
   }
 
-  const projectStoragePath = photo.album.project.storagePath
-    || buildProjectStorageRoot(photo.album.project.client?.name || photo.album.project.companyName || 'Client', photo.album.project.title)
-  const socialStoragePath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
-  const thumbnailStoragePath = photo.thumbnailStoragePath || buildAlbumPhotoThumbnailStoragePath(projectStoragePath, photo.storagePath)
+  // Resolve paths from StoredFile registry (legacy columns dropped)
+  const origPath = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photoId, fileRole: 'ORIGINAL' } },
+    select: { storagePath: true },
+  }).then(r => r?.storagePath || '')
+  const project = photo.album.project
+  const projectStoragePath = buildProjectStorageRoot(
+    project.client?.name || project.companyName || 'Client',
+    project.title,
+  )
+  const socialStoragePath = `${origPath}-social.jpg`
+  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(projectStoragePath, origPath)
 
+  // Update photo status (legacy path columns dropped — StoredFile handles them)
   await prisma.albumPhoto.update({
     where: { id: photo.id },
     data: {
       fileType: 'image/jpeg',
       status: 'READY',
       error: null,
-      socialStoragePath,
       socialStatus: 'PENDING',
       socialError: null,
-      thumbnailStoragePath,
       thumbnailStatus: 'PENDING',
       thumbnailError: null,
     },
   })
+
+  // Register derived paths in StoredFile
+  await Promise.all([
+    registerStoredFile({
+      entityType: 'ALBUM_PHOTO', entityId: photoId, fileRole: 'SOCIAL',
+      storagePath: socialStoragePath, status: 'PENDING',
+    }),
+    registerStoredFile({
+      entityType: 'ALBUM_PHOTO', entityId: photoId, fileRole: 'THUMBNAIL',
+      storagePath: thumbnailStoragePath, status: 'PENDING',
+    }),
+  ])
 
   await prisma.album.update({
     where: { id: photo.albumId },

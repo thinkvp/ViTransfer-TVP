@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath } from '@/lib/storage'
 import { isS3Mode, s3DownloadFile, s3FileExists } from '@/lib/s3-storage'
+import { getStoredFilePath } from '@/lib/stored-file'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 import dns from 'dns/promises'
@@ -130,11 +131,11 @@ export async function GET(request: NextRequest) {
   try {
     const settings = (await prisma.settings.findUnique({
       where: { id: 'default' },
-      // NOTE: keep types happy if Prisma Client isn't regenerated yet.
-      select: { companyFaviconPath: true, companyFaviconMode: true, companyFaviconUrl: true } as any,
-    } as any)) as any
+      select: { companyFaviconMode: true, companyFaviconUrl: true },
+    }))
 
-    const faviconPath = settings?.companyFaviconPath
+    // Legacy companyFaviconPath column dropped — read from StoredFile
+    const faviconPath = await getStoredFilePath('SETTINGS_BRANDING', 'default', 'COMPANY_FAVICON')
     const mode = settings?.companyFaviconMode
     const faviconUrl = typeof settings?.companyFaviconUrl === 'string' ? settings.companyFaviconUrl.trim() : ''
 

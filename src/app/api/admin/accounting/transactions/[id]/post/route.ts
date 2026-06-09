@@ -43,7 +43,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
-      accountingAttachments: { select: { id: true, storagePath: true, originalName: true } },
+      accountingAttachments: { select: { id: true, originalName: true } },
     },
   })
 
@@ -128,11 +128,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return newExpense
     })
 
-    // Move all AccountingAttachment files into the expense account folder
+    // Move all AccountingAttachment files via StoredFile
     for (const a of txn.accountingAttachments) {
-      const newPath = await moveAccountingFile(a.storagePath, txn.date, d.accountId, a.originalName)
-      if (newPath !== a.storagePath) {
-        await prisma.accountingAttachment.update({ where: { id: a.id }, data: { storagePath: newPath } })
+      const stored = await prisma.storedFile.findUnique({
+        where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: a.id, fileRole: 'ORIGINAL' as any } },
+        select: { storagePath: true },
+      })
+      if (!stored) continue
+      const newPath = await moveAccountingFile(stored.storagePath, txn.date, d.accountId, a.originalName)
+      if (newPath !== stored.storagePath) {
+        await prisma.storedFile.update({
+          where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: a.id, fileRole: 'ORIGINAL' as any } },
+          data: { storagePath: newPath },
+        })
       }
     }
   } else {

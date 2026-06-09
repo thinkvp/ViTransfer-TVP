@@ -18,7 +18,6 @@ model User {
   name         String?
   notes        String?
   phone        String?  // Optional phone number
-  avatarPath   String?  // Storage path for profile picture (300x300 JPEG)
   displayColor String?  @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   active       Boolean  @default(true)
   appRoleId    String
@@ -196,9 +195,7 @@ model ClientFile {
   client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   fileName    String
-  fileSize    BigInt
   fileType    String
-  storagePath String
   category    String?
 
   uploadedBy     String?
@@ -217,9 +214,7 @@ model UserFile {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   fileName    String
-  fileSize    BigInt
   fileType    String
-  storagePath String
   category    String?
 
   uploadedBy     String?
@@ -427,9 +422,7 @@ model ProjectEmail {
 
   // Original uploaded EML
   rawFileName    String
-  rawFileSize    BigInt
   rawFileType    String
-  rawStoragePath String
   rawSha256      String? @db.VarChar(64)
 
   // Parsed metadata
@@ -469,9 +462,7 @@ model ProjectEmailAttachment {
   projectEmail   ProjectEmail @relation(fields: [projectEmailId], references: [id], onDelete: Cascade)
 
   fileName    String
-  fileSize    BigInt
   fileType    String
-  storagePath String
 
   // Inline images support (cid:)
   isInline  Boolean @default(false)
@@ -492,11 +483,6 @@ model Album {
   notes String? @db.VarChar(500)
 
   status AlbumStatus @default(READY)
-
-  // Cached ZIP artifacts (bytes). Updated by the album ZIP worker.
-  // These represent storage usage of generated download zips.
-  fullZipFileSize   BigInt @default(0)
-  socialZipFileSize BigInt @default(0)
 
   // Whether social-media-sized photo derivatives (long edge scaled to 2048px) are generated for this album.
   socialCopiesEnabled Boolean @default(true)
@@ -524,23 +510,17 @@ model AlbumPhoto {
   album   Album  @relation(fields: [albumId], references: [id], onDelete: Cascade)
 
   fileName    String
-  fileSize    BigInt
   fileType    String
-  storagePath String
   status      AlbumPhotoStatus @default(UPLOADING)
   error       String?
 
-  socialStoragePath String?
   socialStatus      AlbumPhotoSocialStatus @default(PENDING)
   socialError       String?
   socialGeneratedAt DateTime?
-  socialFileSize    BigInt                 @default(0)
 
-  thumbnailStoragePath String?
   thumbnailStatus      AlbumPhotoThumbnailStatus @default(PENDING)
   thumbnailError       String?
   thumbnailGeneratedAt DateTime?
-  thumbnailFileSize    BigInt                    @default(0)
 
   analytics AlbumAnalytics[]
 
@@ -582,9 +562,7 @@ model ProjectFile {
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   fileName    String
-  fileSize    BigInt
   fileType    String
-  storagePath String
   category    String?
 
   uploadedBy     String?
@@ -625,9 +603,7 @@ model ShareUploadFile {
 
   folderRelativePath String
   fileName           String
-  fileSize           BigInt
   fileType           String
-  storagePath        String
   category           String?
   mediaDurationSeconds Float?
   mediaWidth         Int?
@@ -639,17 +615,13 @@ model ShareUploadFile {
 
   // Preview lifecycle
   previewStatus      String?   // PENDING | PROCESSING | READY | FAILED
-  previewPath        String?   // storage path of generated preview image
   previewError       String?   // last error message on failure
   previewGeneratedAt DateTime?
-  previewFileSize    BigInt?
   previewAttempts    Int       @default(0)
   previewQueuedAt    DateTime?
 
   // Timeline hover previews (sprite sheets + VTT) — only for video-type uploads
   timelinePreviewsReady      Boolean  @default(false)
-  timelinePreviewVttPath     String?
-  timelinePreviewSpritesPath String?
 
   // Processing phase for Running Jobs visibility
   processingPhase    String?
@@ -739,11 +711,6 @@ model Video {
   // Optional notes shown to clients/admins (max 500 chars)
   videoNotes String? @db.VarChar(500)
 
-  // Original file
-  originalFileName    String
-  originalFileSize    BigInt
-  originalStoragePath String
-
   // Video metadata
   duration Float // in seconds
   width    Int
@@ -758,21 +725,13 @@ model Video {
   processingPhase    String?     // Current processing phase: 'transcode' | 'thumbnail' | 'timeline'
   processingError    String?
 
-  // Preview versions (watermarked)
-  preview1080Path String?
-  preview720Path  String?
-  preview480Path  String?
-  thumbnailPath   String?
-
-  // Timeline preview thumbnails (sprite sheets)
-  timelinePreviewsReady      Boolean @default(false)
-  timelinePreviewVttPath     String?
-  timelinePreviewSpritesPath String?
-
   // Per-video approval
   approved   Boolean   @default(false)
   approvedAt DateTime?
   allowApproval Boolean @default(false)
+
+  // Timeline hover previews (sprite sheets + VTT)
+  timelinePreviewsReady Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -798,9 +757,7 @@ model VideoAsset {
 
   // File information
   fileName    String // Original filename (e.g., "project.prproj", "music.mp3", "photo.jpg")
-  fileSize    BigInt
   fileType    String // MIME type (e.g., "application/octet-stream", "image/jpeg", "audio/mpeg")
-  storagePath String // Path in storage system
   category    String? // Optional category: "image", "audio", "project", "other"
 
   // Media metadata for video/audio assets
@@ -814,17 +771,13 @@ model VideoAsset {
 
   // Preview lifecycle
   previewStatus      String?   // PENDING | PROCESSING | READY | FAILED
-  previewPath        String?   // storage path of generated preview image
   previewError       String?   // last error message on failure
   previewGeneratedAt DateTime?
-  previewFileSize    BigInt?
   previewAttempts    Int       @default(0)
   previewQueuedAt    DateTime?
 
   // Timeline hover previews (sprite sheets + VTT) — only for video-type assets
   timelinePreviewsReady      Boolean  @default(false)
-  timelinePreviewVttPath     String?
-  timelinePreviewSpritesPath String?
 
   // Processing phase for Running Jobs visibility
   processingPhase    String?
@@ -956,11 +909,9 @@ model Settings {
   // Company Branding
   companyName     String?         @default("Studio") // Displayed in feedback/comments
   companyLogoMode CompanyLogoMode @default(NONE)
-  companyLogoPath String? // Stored logo for email communications (storage path)
   companyLogoUrl  String? // Direct URL to a hosted logo (PNG/JPG)
   darkLogoEnabled Boolean         @default(false) // Whether a separate dark-theme logo is active
   darkLogoMode    CompanyLogoMode @default(NONE)
-  darkLogoPath    String? // Stored dark-theme logo (storage path)
   darkLogoUrl     String? // Direct URL to a hosted dark-theme logo (PNG/JPG)
   accentColor     String? // Custom accent hex colour (e.g. "#FF6600") — overrides default blue app-wide
   accentTextMode  String  @default("LIGHT") // LIGHT (white) or DARK (almost-black) text on accent-coloured buttons
@@ -975,7 +926,6 @@ model Settings {
 
   // Browser Branding
   companyFaviconMode CompanyLogoMode @default(NONE)
-  companyFaviconPath String? // Stored favicon (storage path)
   companyFaviconUrl  String? // Direct URL to a hosted favicon (PNG)
 
   // SMTP Email Configuration
@@ -2066,9 +2016,7 @@ model CommentFile {
   commentId   String
   projectId   String
   fileName    String // Original filename (e.g., "design.pdf")
-  fileSize    BigInt // Size in bytes
   fileType    String // MIME type (e.g., "application/pdf")
-  storagePath String // Path relative to project uploads directory
   createdAt   DateTime @default(now())
 
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
@@ -2459,9 +2407,7 @@ model SplitLine {
 /// Supports multiple files per record, stored in ACCOUNTING_STORAGE_ROOT.
 model AccountingAttachment {
   id                  String  @id @default(cuid())
-  storagePath         String                               // Relative path in ACCOUNTING_STORAGE_ROOT
   originalName        String  @db.VarChar(500)
-  fileSize            Int     @default(0)                 // Stored file size in bytes (after any image processing)
 
   bankTransactionId   String?
   bankTransaction     BankTransaction? @relation(fields: [bankTransactionId], references: [id], onDelete: Cascade)

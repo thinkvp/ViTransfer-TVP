@@ -6,6 +6,7 @@ import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot, buildProjectUploadsRoot } from '@/lib/project-storage-paths'
+import { computeProjectPreviewBytes } from '@/lib/project-total-bytes'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -121,9 +122,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     // Use stored project totalBytes for consistency with the dashboard.
     // Breakdown is computed from DB fields for UI display.
+    // Pre-fetch entity IDs for StoredFile aggregates
+    const [videoIds, assetIds, commentFileIds, shareUploadFileIds, projectFileIds,
+           projectEmailIds, projectEmailAttachmentIds, albumIds, albumPhotoIds] = await Promise.all([
+      prisma.video.findMany({ where: { projectId }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.commentFile.findMany({ where: { projectId }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.projectFile.findMany({ where: { projectId }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.projectEmail.findMany({ where: { projectId }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.projectEmailAttachment.findMany({ where: { projectEmail: { projectId } }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.album.findMany({ where: { projectId }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+      prisma.albumPhoto.findMany({ where: { album: { projectId } }, select: { id: true } }).then(rows => rows.map(r => r.id)),
+    ])
+
     const [
       project,
       videoAgg,
+      videoOrigAgg,
       assetAgg,
       commentFileAgg,
       shareUploadFileAgg,
@@ -131,6 +147,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       projectEmailAgg,
       projectEmailAttachmentAgg,
       albumPhotoAgg,
+      albumPhotoOrigAgg,
       albumAgg,
     ] = await Promise.all([
       prisma.project.findUnique({
@@ -144,48 +161,42 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           client: { select: { name: true } },
         },
       }),
-      prisma.video.aggregate({ where: { projectId }, _sum: { originalFileSize: true } }),
-      prisma.videoAsset.aggregate({ where: { video: { projectId } }, _sum: { fileSize: true } }),
-      prisma.commentFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
-      prisma.shareUploadFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
-      prisma.projectFile.aggregate({ where: { projectId }, _sum: { fileSize: true } }),
-      prisma.projectEmail.aggregate({ where: { projectId }, _sum: { rawFileSize: true } }),
-      prisma.projectEmailAttachment.aggregate({ where: { projectEmail: { projectId } }, _sum: { fileSize: true } }),
-      prisma.albumPhoto.aggregate({ where: { album: { projectId } }, _sum: { fileSize: true, socialFileSize: true, thumbnailFileSize: true } }),
-      prisma.album.aggregate({ where: { projectId }, _sum: { fullZipFileSize: true, socialZipFileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO', entityId: { in: videoIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'COMMENT_FILE', entityId: { in: commentFileIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: shareUploadFileIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_FILE', entityId: { in: projectFileIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL', entityId: { in: projectEmailIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: projectEmailAttachmentIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoIds } }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoIds }, fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
+      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM', entityId: { in: albumIds } }, _sum: { fileSize: true } }),
     ])
 
-    const videosBytes = asNumberBigInt(videoAgg._sum.originalFileSize)
+    const videosBytes = asNumberBigInt(videoAgg._sum.fileSize)
+    const originalVideosBytes = asNumberBigInt(videoOrigAgg._sum.fileSize)
     const videoAssetsBytes = asNumberBigInt(assetAgg._sum.fileSize)
     const commentAttachmentsBytes = asNumberBigInt(commentFileAgg._sum.fileSize)
     const uploadsFilesBytes = asNumberBigInt(shareUploadFileAgg._sum.fileSize)
 
     const projectFilesBytes = asNumberBigInt(projectFileAgg._sum.fileSize)
     const communicationsBytes =
-      asNumberBigInt(projectEmailAgg._sum.rawFileSize) +
+      asNumberBigInt(projectEmailAgg._sum.fileSize) +
       asNumberBigInt(projectEmailAttachmentAgg._sum.fileSize)
 
-    const photosOriginalBytes = asNumberBigInt(albumPhotoAgg._sum.fileSize)
-    const socialPhotosBytes = asNumberBigInt(albumPhotoAgg._sum.socialFileSize)
-    const thumbnailPhotosBytes = asNumberBigInt(albumPhotoAgg._sum.thumbnailFileSize)
-
+    const photosBytes = asNumberBigInt(albumPhotoAgg._sum.fileSize)
+    const originalPhotosBytes = asNumberBigInt(albumPhotoOrigAgg._sum.fileSize)
+    // photoZipBytes = derived photo files (social + thumbnails) + album ZIPs
+    const photoZipBytes =
+      Math.max(0, photosBytes - originalPhotosBytes) +
+      asNumberBigInt(albumAgg._sum.fileSize)
+    // S3 video previews: use computeProjectPreviewBytes which fetches live S3 sizes
+    // (StoredFile.fileSize is null for preview entries from migration backfill)
     let s3VideoPreviewsBytes = 0
-    // Use DB-backed previewBytes (reconciled daily) instead of a live S3 scan.
     if (isS3Provider) {
-      s3VideoPreviewsBytes = asNumberBigInt(project?.previewBytes)
+      s3VideoPreviewsBytes = Number(await computeProjectPreviewBytes(projectId, prisma))
     }
-
-    // ZIP sizes are written back to Album.fullZipFileSize / socialZipFileSize by the worker
-    // whenever a ZIP is generated or deleted, so the DB values are reliable.
-    const albumZipFullBytes = asNumberBigInt(albumAgg._sum.fullZipFileSize)
-    const albumZipSocialBytes = asNumberBigInt(albumAgg._sum.socialZipFileSize)
-
-    const originalVideosBytes = videosBytes
-    const originalPhotosBytes = photosOriginalBytes
-    const photoZipBytes = socialPhotosBytes + thumbnailPhotosBytes + albumZipFullBytes + albumZipSocialBytes
-
-    // Fold sub-categories into the existing breakdown rows used by the UI.
-    const photosBytes = originalPhotosBytes + photoZipBytes
     let videoPreviewsBytes = isS3Provider ? s3VideoPreviewsBytes : 0
 
     const totalBytesStored = asNumberBigInt(project?.totalBytes)
@@ -247,27 +258,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       ] = await Promise.all([
         prisma.video.findMany({
           where: { projectId },
-          select: {
-            originalStoragePath: true,
-            preview480Path: true,
-            preview720Path: true,
-            preview1080Path: true,
-            thumbnailPath: true,
-            timelinePreviewVttPath: true,
-            timelinePreviewSpritesPath: true,
-          },
+          select: { id: true },
         }),
         prisma.videoAsset.findMany({
           where: { video: { projectId } },
-          select: { storagePath: true },
+          select: { id: true },
         }),
         prisma.albumPhoto.findMany({
           where: { album: { projectId } },
-          select: {
-            storagePath: true,
-            socialStoragePath: true,
-            thumbnailStoragePath: true,
-          },
+          select: { id: true },
         }),
         prisma.album.findMany({
           where: { projectId },
@@ -280,34 +279,41 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         computeDirectorySizeBytes(uploadsAbs),
       ])
 
-      const videoAssetStoragePaths = new Set(videoAssetEntries.map((a) => a.storagePath))
+      const videoAssetStoragePaths = new Set<string>()
+      // Disk bytes via StoredFile — batch-load all paths for this project's entities
+      const [videoStored, assetStored, photoStored] = await Promise.all([
+        prisma.storedFile.findMany({
+          where: { entityType: 'VIDEO', entityId: { in: videoEntries.map(v => v.id) } },
+          select: { storagePath: true, fileRole: true, entityId: true },
+        }),
+        prisma.storedFile.findMany({
+          where: { entityType: 'VIDEO_ASSET', entityId: { in: videoAssetEntries.map(a => a.id) } },
+          select: { storagePath: true },
+        }),
+        prisma.storedFile.findMany({
+          where: { entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoEntries.map(p => p.id) } },
+          select: { storagePath: true, fileRole: true },
+        }),
+      ])
+
+      // Asset original paths
+      const assetOrigPaths = assetStored.map(s => s.storagePath).filter(Boolean)
+      videoAssetStoragePaths as any // unused now — StoredFile has canonical paths
+
+      const originalVideoPaths = videoStored.filter(s => s.fileRole === 'ORIGINAL').map(s => s.storagePath)
+      const previewVideoPaths = videoStored.filter(s => ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'].includes(s.fileRole)).map(s => s.storagePath)
+      const originalPhotoPaths = photoStored.filter(s => s.fileRole === 'ORIGINAL').map(s => s.storagePath)
+      const socialPhotoPaths = photoStored.filter(s => s.fileRole === 'SOCIAL').map(s => s.storagePath)
+      const thumbnailPhotoPaths = photoStored.filter(s => s.fileRole === 'THUMBNAIL').map(s => s.storagePath)
+
       const [originalVideosBytesDisk, videoPreviewsBytesDisk, videoAssetsBytesDisk, originalPhotosBytesDisk, photoZipBytesDisk] = await Promise.all([
-        sumStorageEntrySizes(videoEntries.map((video) => video.originalStoragePath)),
-        sumStorageEntrySizes(
-          videoEntries.flatMap((video) => {
-            const previewPaths: string[] = []
-
-            if (video.preview480Path) previewPaths.push(video.preview480Path)
-            if (video.preview720Path) previewPaths.push(video.preview720Path)
-            if (video.preview1080Path) previewPaths.push(video.preview1080Path)
-            if (video.thumbnailPath && !videoAssetStoragePaths.has(video.thumbnailPath)) {
-              previewPaths.push(video.thumbnailPath)
-            }
-            if (video.timelinePreviewSpritesPath) {
-              previewPaths.push(video.timelinePreviewSpritesPath)
-            }
-            if (video.timelinePreviewVttPath) {
-              previewPaths.push(video.timelinePreviewVttPath)
-            }
-
-            return previewPaths
-          })
-        ),
-        sumStorageEntrySizes(videoAssetEntries.map((a) => a.storagePath)),
-        sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.storagePath)),
+        sumStorageEntrySizes(originalVideoPaths),
+        sumStorageEntrySizes(previewVideoPaths),
+        sumStorageEntrySizes(assetOrigPaths),
+        sumStorageEntrySizes(originalPhotoPaths),
         Promise.all([
-          sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.socialStoragePath)),
-          sumStorageEntrySizes(albumPhotoEntries.map((photo) => photo.thumbnailStoragePath)),
+          sumStorageEntrySizes(socialPhotoPaths),
+          sumStorageEntrySizes(thumbnailPhotoPaths),
           sumStorageEntrySizes(
             albumEntries.flatMap((album) => [
               getAlbumZipStoragePath({
@@ -395,14 +401,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       availableBytes,
       breakdown: {
         originalVideosBytes,
-        videoPreviewsBytes,
         videosBytes,
+        videoPreviewsBytes,
+        videosBytesTotal: originalVideosBytes + videoPreviewsBytes + videoAssetsBytes,
         videoAssetsBytes,
         commentAttachmentsBytes,
         uploadsFilesBytes,
         originalPhotosBytes,
-        photoZipBytes,
         photosBytes,
+        photoZipBytes,
+        photosTotal: originalPhotosBytes + photoZipBytes,
         communicationsBytes,
         projectFilesBytes,
       },

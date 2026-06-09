@@ -69,7 +69,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     select: {
       id: true,
       status: true,
-      accountingAttachments: { select: { id: true, storagePath: true } },
+      accountingAttachments: { select: { id: true } },
     },
   })
 
@@ -84,11 +84,15 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     )
   }
 
-  // Delete attachment files from disk before removing the DB record (CASCADE handles DB rows)
-  const filesToDelete = [
-    ...txn.accountingAttachments.map(a => a.storagePath),
-  ]
-  await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
+  // Delete attachment files via StoredFile
+  const attachmentIds = txn.accountingAttachments.map(a => a.id)
+  if (attachmentIds.length > 0) {
+    const paths = await prisma.storedFile.findMany({
+      where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
+      select: { storagePath: true },
+    })
+    await Promise.all(paths.map(p => deleteAccountingFile(p.storagePath).catch(() => {})))
+  }
 
   await prisma.bankTransaction.delete({ where: { id } })
   return NextResponse.json({ ok: true })

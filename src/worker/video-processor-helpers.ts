@@ -11,7 +11,7 @@ import {
   buildVideoThumbnailStoragePath,
   buildVideoTimelineStorageRoot,
 } from '@/lib/project-storage-paths'
-import { resolveVideoOriginalPath } from '@/lib/resolve-video-original'
+import { registerStoredFile, registerStoredFiles, type FileRole, type RegisterStoredFileParams } from '@/lib/stored-file'
 import fs from 'fs'
 import path from 'path'
 import { pipeline } from 'stream/promises'
@@ -44,10 +44,9 @@ async function getCanonicalVideoStorageContext(videoId: string): Promise<{ proje
       versionLabel: true,
       storageFolderName: true,
       project: {
-        select: {
-          storagePath: true,
-          title: true,
+        select: { title: true,
           companyName: true,
+          storagePath: true,
           client: { select: { name: true } },
         },
       },
@@ -155,26 +154,30 @@ async function resolveExistingVideoOriginalPath(videoId: string, storagePath: st
 
   pushCandidate(trimmedStoragePath)
 
+  // Get video metadata for canonical path construction (no dropped columns)
   const video = await prisma.video.findUnique({
     where: { id: videoId },
     select: {
       id: true,
       name: true,
       versionLabel: true,
-      originalFileName: true,
-      originalStoragePath: true,
       storageFolderName: true,
-      projectId: true,
       project: {
         select: {
           title: true,
-          companyName: true,
-          storagePath: true,
-          client: { select: { name: true } },
+          companyName: true, client: { select: { name: true } },
         },
       },
     },
   })
+
+  // Get the original file name and path from StoredFile (single query)
+  const storedFile = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: videoId, fileRole: 'ORIGINAL' } },
+    select: { storagePath: true, fileName: true },
+  })
+  const originalPath = storedFile?.storagePath ?? null
+  const originalFileName = storedFile?.fileName || `${video?.name || 'video'}.mp4`
 
   if (!video) {
     if (isS3Mode()) {
@@ -184,11 +187,10 @@ async function resolveExistingVideoOriginalPath(videoId: string, storagePath: st
         }
       }
     }
-
     return candidates[0] || trimmedStoragePath
   }
 
-  const projectStoragePath = video.project.storagePath
+  const projectStoragePath = (video.project as any).storagePath
     || buildProjectStorageRoot(
       video.project.client?.name || video.project.companyName || 'Client',
       video.project.title,
@@ -199,7 +201,7 @@ async function resolveExistingVideoOriginalPath(videoId: string, storagePath: st
       projectStoragePath,
       video.storageFolderName || video.name,
       video.versionLabel,
-      video.originalFileName,
+      originalFileName,
     )
   )
 
@@ -209,11 +211,17 @@ async function resolveExistingVideoOriginalPath(videoId: string, storagePath: st
         return candidate
       }
     }
-
     return candidates[0] || trimmedStoragePath
   }
 
-  return resolveVideoOriginalPath(video) || storagePath
+  // For local mode, try the stored path as primary fallback
+  if (originalPath && originalPath !== trimmedStoragePath) {
+    if (fs.existsSync(getFilePath(originalPath))) {
+      return originalPath
+    }
+  }
+
+  return trimmedStoragePath
 }
 
 export interface OutputDimensions {
@@ -594,7 +602,31 @@ export async function processTimelinePreviews(
     await moveTempFileToLogicalStorage(localSpritePath, `${spritesPath}/${spriteFile}`)
   }
 
+  // Register timeline files in StoredFile registry
+  await registerTimelineStoredFiles(videoId, vttPath, spritesPath)
+
   return { vttPath, spritesPath, ready: true }
+}
+
+/**
+ * Persist timeline preview paths to StoredFile registry.
+ * Exported so video-processor.ts can also call it for timeline-only flows.
+ */
+export async function registerTimelineStoredFiles(
+  videoId: string,
+  vttPath: string,
+  spritesPath: string,
+): Promise<void> {
+  try {
+    const vttSize = await fs.promises.stat(getFilePath(vttPath)).then(s => s.size).catch(() => null)
+    await registerStoredFiles([
+      { entityType: 'VIDEO', entityId: videoId, fileRole: 'TIMELINE_VTT', storagePath: vttPath, status: 'READY', fileSize: vttSize },
+      // TIMELINE_SPRITES is a directory — no single fileSize; leave null
+      { entityType: 'VIDEO', entityId: videoId, fileRole: 'TIMELINE_SPRITES', storagePath: spritesPath, status: 'READY' },
+    ])
+  } catch (err) {
+    console.error(`[WORKER] StoredFile timeline register failed for video ${videoId}:`, err)
+  }
 }
 
 /**
@@ -818,7 +850,39 @@ export async function processThumbnail(
 }
 
 /**
- * Update video record with final processing results
+ * Check whether a video's current THUMBNAIL StoredFile entry points to a
+ * VideoAsset (user-set custom thumbnail) rather than a generated thumbnail.
+ * Returns true if the existing thumbnail should be preserved.
+ */
+async function videoHasCustomThumbnail(videoId: string): Promise<boolean> {
+  try {
+    const existingThumbRecord = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL' } },
+      select: { storagePath: true },
+    })
+    if (!existingThumbRecord?.storagePath) return false
+
+    const assetIds = (await prisma.videoAsset.findMany({ where: { videoId }, select: { id: true } })).map(a => a.id)
+    if (assetIds.length === 0) return false
+
+    const assetOwnsThumbnail = await prisma.storedFile.findFirst({
+      where: {
+        entityType: 'VIDEO_ASSET',
+        entityId: { in: assetIds },
+        storagePath: existingThumbRecord.storagePath,
+      },
+      select: { id: true },
+    })
+    return !!assetOwnsThumbnail
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Update video record with final processing results.
+ * Legacy path columns (preview*Path, thumbnailPath) have been dropped —
+ * all file data is now stored exclusively in StoredFile via registerStoredFiles().
  */
 export async function finalizeVideo(
   videoId: string,
@@ -827,21 +891,7 @@ export async function finalizeVideo(
   metadata: VideoMetadata,
   resolution: string
 ): Promise<void> {
-  // Preserve user-supplied thumbnails (assets) when reprocessing so we don't overwrite them
-  const existingThumbnail = await prisma.video.findUnique({
-    where: { id: videoId },
-    select: { thumbnailPath: true },
-  })
-
-  const hasCustomThumbnail = existingThumbnail?.thumbnailPath
-    ? !!(await prisma.videoAsset.findFirst({
-        where: {
-          videoId,
-          storagePath: existingThumbnail.thumbnailPath,
-        },
-        select: { id: true },
-      }))
-    : false
+  const hasCustomThumbnail = await videoHasCustomThumbnail(videoId)
 
   const updateData: any = {
     status: 'READY',
@@ -854,25 +904,27 @@ export async function finalizeVideo(
     codec: metadata.codec,
   }
 
-  if (thumbnailPath !== null) {
-    // Keep custom thumbnails; only overwrite system-generated ones
-    updateData.thumbnailPath = hasCustomThumbnail ? existingThumbnail?.thumbnailPath : thumbnailPath
-  }
+  // Stat the files for accurate fileSize before registering
+  const [previewSize, thumbSize] = await Promise.all([
+    fs.promises.stat(getFilePath(previewPath)).then(s => s.size).catch(() => null),
+    thumbnailPath !== null && !hasCustomThumbnail
+      ? fs.promises.stat(getFilePath(thumbnailPath)).then(s => s.size).catch(() => null)
+      : Promise.resolve(null),
+  ])
 
-  // Store preview path in correct field based on resolution
-  if (resolution === '480p') {
-    updateData.preview480Path = previewPath
-  } else if (resolution === '720p') {
-    updateData.preview720Path = previewPath
-  } else if (resolution === '1080p') {
-    updateData.preview1080Path = previewPath
+  // Register the preview file in StoredFile registry
+  const previewRole: FileRole =
+    resolution === '480p' ? 'PREVIEW_480' : resolution === '720p' ? 'PREVIEW_720' : 'PREVIEW_1080'
+  const sfEntries: RegisterStoredFileParams[] = [
+    { entityType: 'VIDEO', entityId: videoId, fileRole: previewRole, storagePath: previewPath, status: 'READY', fileSize: previewSize },
+  ]
+  if (thumbnailPath !== null && !hasCustomThumbnail) {
+    sfEntries.push({ entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL', storagePath: thumbnailPath, status: 'READY', fileSize: thumbSize })
   }
+  await registerStoredFiles(sfEntries)
 
   debugLog('Updating database with final video data...')
-  debugLog('Update data:', updateData)
-
   await updateVideoRecord(videoId, updateData, { context: 'finalizing processed video' })
-
   debugLog('Database updated to READY status')
 }
 
@@ -881,20 +933,7 @@ export async function finalizeVideoWithoutPreview(
   thumbnailPath: string | null,
   metadata: VideoMetadata
 ): Promise<void> {
-  const existingThumbnail = await prisma.video.findUnique({
-    where: { id: videoId },
-    select: { thumbnailPath: true },
-  })
-
-  const hasCustomThumbnail = existingThumbnail?.thumbnailPath
-    ? !!(await prisma.videoAsset.findFirst({
-        where: {
-          videoId,
-          storagePath: existingThumbnail.thumbnailPath,
-        },
-        select: { id: true },
-      }))
-    : false
+  const hasCustomThumbnail = await videoHasCustomThumbnail(videoId)
 
   const updateData: any = {
     status: 'READY',
@@ -907,8 +946,12 @@ export async function finalizeVideoWithoutPreview(
     codec: metadata.codec,
   }
 
-  if (thumbnailPath !== null) {
-    updateData.thumbnailPath = hasCustomThumbnail ? existingThumbnail?.thumbnailPath : thumbnailPath
+  if (thumbnailPath !== null && !hasCustomThumbnail) {
+    const thumbSize = await fs.promises.stat(getFilePath(thumbnailPath)).then(s => s.size).catch(() => null)
+    await registerStoredFile({
+      entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL',
+      storagePath: thumbnailPath, status: 'READY', fileSize: thumbSize,
+    })
   }
 
   await updateVideoRecord(videoId, updateData, { context: 'finalizing video without preview changes' })

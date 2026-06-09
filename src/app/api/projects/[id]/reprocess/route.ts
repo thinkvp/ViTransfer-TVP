@@ -8,6 +8,8 @@ import {
   getVideoQueue,
 } from '@/lib/queue'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
+import { getStoredFilePath, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import type { FileRole } from '@/lib/stored-file'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import {
@@ -113,80 +115,98 @@ export async function POST(
     }
 
     const videoQueue = getVideoQueue()
-    const reprocessed = []
+    const reprocessed: Array<{ id: string; name: string; versionLabel: string }> = []
     const targetedPreviewGeneration = Array.isArray(previewResolutions) && previewResolutions.length > 0
     const thumbnailOnlyMode = thumbnailOnly === true
 
+    // Batch-load StoredFile records for all videos to reprocess
+    const reprocessVideoIds = videosToReprocess.map(v => v.id)
+    const videoStoredFiles = await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO', entityId: { in: reprocessVideoIds } },
+      select: { entityId: true, fileRole: true, storagePath: true },
+    })
+
+    const storedByVideo = new Map<string, Map<string, string>>()
+    for (const sf of videoStoredFiles) {
+      let map = storedByVideo.get(sf.entityId)
+      if (!map) { map = new Map(); storedByVideo.set(sf.entityId, map) }
+      map.set(sf.fileRole, sf.storagePath)
+    }
+
+    // Check for custom thumbnails (asset-based) via StoredFile
+    const assetThumbnailStored = await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO_ASSET', entityId: { in: videoIds }, fileRole: 'THUMBNAIL' },
+      select: { entityId: true },
+    })
+    const customThumbnailVideoIds = new Set(assetThumbnailStored.map(s => s.entityId))
+
     for (const video of videosToReprocess) {
-      // Preserve user-uploaded thumbnails (asset-based) so reprocessing doesn't delete them
-      const hasCustomThumbnail = video.thumbnailPath
-        ? !!(await prisma.videoAsset.findFirst({
-            where: {
-              videoId: video.id,
-              storagePath: video.thumbnailPath,
-            },
-            select: { id: true },
-          }))
-        : false
+      const stored = storedByVideo.get(video.id) ?? new Map()
+      const hasCustomThumbnail = customThumbnailVideoIds.has(video.id)
 
-      // Delete old preview files (keep original safe)
-      const previewFieldsByResolution = {
-        '480p': video.preview480Path,
-        '720p': video.preview720Path,
-        '1080p': video.preview1080Path,
-      } as const
+      // Collect StoredFile roles to delete
+      const rolesToDelete: FileRole[] = []
 
-      const filesToDelete = [
-        ...(thumbnailOnlyMode
-          ? []
-          : targetedPreviewGeneration
-          ? previewResolutions.map((resolution) => previewFieldsByResolution[resolution]).filter(Boolean)
-          : [video.preview480Path, video.preview720Path, video.preview1080Path]),
-        // Only delete system-generated thumbnails; keep custom assets intact
-        ((thumbnailOnlyMode || !targetedPreviewGeneration) && !hasCustomThumbnail) || regenerateThumbnail === true
-          ? (hasCustomThumbnail ? null : video.thumbnailPath)
-          : null,
-      ].filter(Boolean) as string[]
+      // Preview roles
+      const resolutionRoles: Record<string, FileRole> = {
+        '480p': 'PREVIEW_480',
+        '720p': 'PREVIEW_720',
+        '1080p': 'PREVIEW_1080',
+      }
+
+      if (thumbnailOnlyMode) {
+        // Only thumbnail
+      } else if (targetedPreviewGeneration) {
+        for (const res of previewResolutions!) {
+          rolesToDelete.push(resolutionRoles[res])
+        }
+      } else {
+        rolesToDelete.push('PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080')
+      }
+
+      // Thumbnail
+      if ((thumbnailOnlyMode || !targetedPreviewGeneration) && !hasCustomThumbnail) {
+        rolesToDelete.push('THUMBNAIL')
+      } else if (regenerateThumbnail === true) {
+        if (!hasCustomThumbnail) rolesToDelete.push('THUMBNAIL')
+      }
+
+      // Delete files from storage
+      const pathsToDelete = rolesToDelete
+        .map(role => stored.get(role))
+        .filter((p): p is string => !!p)
 
       await Promise.allSettled(
-        filesToDelete.map(filePath => deleteFile(filePath))
+        pathsToDelete.map(fp => deleteFile(fp))
       )
 
-      // Reset video status and clear preview paths.
-      // Use QUEUED (not PROCESSING) so the worker advances the status
-      // when it actually picks up the job — matching the upload flow.
+      // Delete StoredFile records
+      if (rolesToDelete.length > 0) {
+        await deleteStoredFilesByCriteria({
+          entityType: 'VIDEO',
+          entityIds: [video.id],
+          fileRoles: rolesToDelete,
+        })
+      }
+
+      // Reset video status
       await prisma.video.update({
         where: { id: video.id },
         data: {
           status: 'QUEUED',
           processingProgress: 0,
           processingPhase: null,
-          ...(thumbnailOnlyMode
-            ? {}
-            : targetedPreviewGeneration
-            ? {
-                ...(previewResolutions.includes('480p') ? { preview480Path: null } : {}),
-                ...(previewResolutions.includes('720p') ? { preview720Path: null } : {}),
-                ...(previewResolutions.includes('1080p') ? { preview1080Path: null } : {}),
-              }
-            : {
-                preview480Path: null,
-                preview720Path: null,
-                preview1080Path: null,
-              }),
-          ...((regenerateThumbnail === true || !targetedPreviewGeneration)
-            ? {
-                // Keep custom thumbnails; regenerate only system thumbnails
-                thumbnailPath: hasCustomThumbnail ? video.thumbnailPath : null,
-              }
-            : {}),
         },
       })
+
+      // Get original path from StoredFile
+      const originalPath = stored.get('ORIGINAL')
+      if (!originalPath) continue
 
       // Re-queue video for processing
       await videoQueue.add('process-video', {
         videoId: video.id,
-        originalStoragePath: video.originalStoragePath,
+        originalStoragePath: originalPath,
         projectId: project.id,
         ...(thumbnailOnlyMode ? { thumbnailOnly: true } : {}),
         ...(targetedPreviewGeneration ? { requestedPreviewResolutions: previewResolutions } : {}),
@@ -203,17 +223,23 @@ export async function POST(
 
     // --- Also reprocess video assets (attached files) for these videos ---
     const reprocessedVideoIds = reprocessed.map((v) => v.id)
+    if (reprocessedVideoIds.length === 0) {
+      return NextResponse.json({
+        success: true,
+        count: 0,
+        videos: [],
+        queuedAssetPreviewJobs: 0,
+        queuedAssetTimelineJobs: 0,
+      })
+    }
+
     const videoAssets = await prisma.videoAsset.findMany({
       where: { videoId: { in: reprocessedVideoIds } },
       select: {
         id: true,
         videoId: true,
-        storagePath: true,
         fileType: true,
         fileName: true,
-        previewPath: true,
-        timelinePreviewVttPath: true,
-        timelinePreviewSpritesPath: true,
         video: {
           select: {
             projectId: true,
@@ -225,51 +251,58 @@ export async function POST(
       },
     })
 
-    const projectStoragePath =
-      project.storagePath ||
-      buildProjectStorageRoot(project.companyName || 'Studio', project.title)
-
     const previewableAssets = videoAssets.filter((a) => {
       const ft = String(a.fileType || '').toLowerCase()
       return ft.startsWith('image/') || ft.startsWith('video/')
     })
 
-    // Delete old asset preview files
-    const assetFilePathsToDelete = new Set<string>()
-    const assetDirPathsToDelete = new Set<string>()
+    // Batch-load StoredFile records for all assets
+    const assetIds = previewableAssets.map(a => a.id)
+    const assetStoredFiles = await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } },
+      select: { entityId: true, fileRole: true, storagePath: true },
+    })
+
+    const storedByAsset = new Map<string, Map<string, string>>()
+    for (const sf of assetStoredFiles) {
+      let map = storedByAsset.get(sf.entityId)
+      if (!map) { map = new Map(); storedByAsset.set(sf.entityId, map) }
+      map.set(sf.fileRole, sf.storagePath)
+    }
+
+    // Delete old asset preview/timeline files and StoredFile records
+    const assetFilePathsToDelete: string[] = []
+    const assetDirPathsToDelete: string[] = []
+    const assetRolesToDelete: FileRole[] = ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES']
 
     for (const asset of previewableAssets) {
-      const videoFolderName = asset.video.storageFolderName || asset.video.name
-      if (asset.previewPath) assetFilePathsToDelete.add(asset.previewPath)
-      assetFilePathsToDelete.add(
-        buildVideoAssetPreviewStoragePath(
-          projectStoragePath,
-          videoFolderName,
-          asset.video.versionLabel,
-          asset.storagePath,
-          '.jpg',
-        ),
-      )
-      assetFilePathsToDelete.add(
-        buildVideoAssetPreviewStoragePath(
-          projectStoragePath,
-          videoFolderName,
-          asset.video.versionLabel,
-          asset.storagePath,
-          '.mp4',
-        ),
-      )
-      if (asset.timelinePreviewVttPath) assetFilePathsToDelete.add(asset.timelinePreviewVttPath)
-      if (asset.timelinePreviewSpritesPath) assetDirPathsToDelete.add(asset.timelinePreviewSpritesPath)
-      assetDirPathsToDelete.add(
-        buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, asset.video.versionLabel),
-      )
+      const stored = storedByAsset.get(asset.id)
+      if (!stored) continue
+
+      const previewImage = stored.get('PREVIEW_IMAGE')
+      const previewMp4 = stored.get('PREVIEW_MP4')
+      const timelineVtt = stored.get('TIMELINE_VTT')
+      const timelineSprites = stored.get('TIMELINE_SPRITES')
+
+      if (previewImage) assetFilePathsToDelete.push(previewImage)
+      if (previewMp4) assetFilePathsToDelete.push(previewMp4)
+      if (timelineVtt) assetFilePathsToDelete.push(timelineVtt)
+      if (timelineSprites) assetDirPathsToDelete.push(timelineSprites)
     }
 
     await Promise.allSettled([
-      ...[...assetFilePathsToDelete].map((fp) => deleteFile(fp)),
-      ...[...assetDirPathsToDelete].map((dp) => deleteDirectory(dp)),
+      ...assetFilePathsToDelete.map((fp) => deleteFile(fp)),
+      ...assetDirPathsToDelete.map((dp) => deleteDirectory(dp)),
     ])
+
+    // Delete StoredFile records for all reprocessed assets
+    if (assetIds.length > 0) {
+      await deleteStoredFilesByCriteria({
+        entityType: 'VIDEO_ASSET',
+        entityIds: assetIds,
+        fileRoles: assetRolesToDelete,
+      })
+    }
 
     // Reset asset preview status and enqueue reprocessing jobs
     const shareUploadPreviewQueue = getShareUploadPreviewQueue()
@@ -284,18 +317,12 @@ export async function POST(
         where: { id: asset.id },
         data: {
           previewStatus: null,
-          previewPath: null,
           previewError: null,
           previewGeneratedAt: null,
-          previewFileSize: null,
           previewAttempts: 0,
           previewQueuedAt: null,
           ...(isVideo
-            ? {
-                timelinePreviewsReady: false,
-                timelinePreviewVttPath: null,
-                timelinePreviewSpritesPath: null,
-              }
+            ? { timelinePreviewsReady: false }
             : {}),
         },
       })
@@ -306,7 +333,7 @@ export async function POST(
       await enqueueShareUploadPreview({
         type: 'videoAsset',
         recordId: asset.id,
-        storagePath: asset.storagePath,
+        storagePath: '', // Worker resolves from StoredFile
         fileType: asset.fileType,
         fileName: asset.fileName,
       })
@@ -317,7 +344,7 @@ export async function POST(
           assetId: asset.id,
           videoId: asset.videoId,
           projectId: project.id,
-          storagePath: asset.storagePath,
+          storagePath: '', // Worker resolves from StoredFile
           durationSeconds: 0,
           width: 0,
           height: 0,

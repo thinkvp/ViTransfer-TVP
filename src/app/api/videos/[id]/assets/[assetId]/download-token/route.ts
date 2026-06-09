@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
+import { getStoredFilePath } from '@/lib/stored-file'
 
 /**
  * Generate a temporary download token for asset downloads (admins and share users)
@@ -52,16 +53,17 @@ export async function POST(
     const isPreviewableImage = normalizedFileType.startsWith('image/') || imageExtensions.includes(fileNameExt)
     const isPreviewableVideo = normalizedFileType.startsWith('video/') || videoExtensions.includes(fileNameExt)
     const isAudioAsset = normalizedFileType.startsWith('audio/') || audioExtensions.includes(fileNameExt)
+    // Check StoredFile for preview paths
+    const previewMp4 = await getStoredFilePath('VIDEO_ASSET', assetId, 'PREVIEW_MP4')
+    const previewImage = await getStoredFilePath('VIDEO_ASSET', assetId, 'PREVIEW_IMAGE')
     const hasReadyGeneratedPlaybackPreview =
       asset.previewStatus === 'READY'
-      && typeof asset.previewPath === 'string'
-      && asset.previewPath.length > 0
-      && asset.previewPath.toLowerCase().endsWith('.mp4')
+      && !!previewMp4
     const hasReadyGeneratedPreview =
       asset.previewStatus === 'READY'
       && (
         isPreviewableVideo
-        || (typeof asset.previewPath === 'string' && asset.previewPath.length > 0)
+        || !!previewImage
       )
 
     // Verify user has access to this project

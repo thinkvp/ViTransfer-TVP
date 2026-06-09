@@ -4,6 +4,7 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile, uploadFile } from '@/lib/storage'
 import { getImageDimensions } from '@/lib/image-dimensions'
+import { registerStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import type { Prisma } from '@prisma/client'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { invalidateSettingsCaches } from '@/lib/settings'
@@ -74,27 +75,27 @@ export async function POST(request: NextRequest) {
 
     const storagePath = 'branding/company-favicon.png'
 
-    const existing = (await prisma.settings.findUnique({
-      where: { id: 'default' },
-      // NOTE: keep types happy if Prisma Client isn't regenerated yet.
-      select: { companyFaviconPath: true } as any,
-    } as any)) as any
+    // Clean up old favicon from storage (read previous path from StoredFile)
+    const oldFaviconPath = await getStoredFilePath('SETTINGS_BRANDING', 'default', 'COMPANY_FAVICON')
+    if (oldFaviconPath && oldFaviconPath !== storagePath) {
+      await deleteFile(oldFaviconPath).catch(() => {})
+    }
 
     await uploadFile(storagePath, buffer, buffer.length, 'image/png')
 
-    if (existing?.companyFaviconPath && existing.companyFaviconPath !== storagePath) {
-      await deleteFile(existing.companyFaviconPath).catch(() => {})
-    }
+    // Register in StoredFile (legacy companyFaviconPath column dropped)
+    await registerStoredFile({
+      entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_FAVICON',
+      storagePath, status: 'READY',
+    })
 
     const updateData: Prisma.SettingsUpdateInput = {
       companyFaviconMode: 'UPLOAD',
-      companyFaviconPath: storagePath,
       companyFaviconUrl: null,
     } as any
     const createData: Prisma.SettingsCreateInput = {
       id: 'default',
       companyFaviconMode: 'UPLOAD',
-      companyFaviconPath: storagePath,
       companyFaviconUrl: null,
     } as any
 

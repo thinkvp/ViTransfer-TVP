@@ -50,14 +50,10 @@ export async function POST(
     select: {
       id: true,
       projectId: true,
-      storagePath: true,
       fileName: true,
       fileType: true,
-      fileSize: true,
       mediaDurationSeconds: true,
       previewStatus: true,
-      previewPath: true,
-      previewFileSize: true,
     },
   })
 
@@ -65,13 +61,19 @@ export async function POST(
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
+  // Get paths and sizes from StoredFile
+  const origStored = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'SHARE_UPLOAD_FILE', entityId: file.id, fileRole: 'ORIGINAL' } },
+    select: { storagePath: true, fileSize: true },
+  })
+
   const downloadToken = await generateShareUploadAccessToken({
     projectId: file.projectId,
     fileId: file.id,
-    storagePath: file.storagePath,
+    storagePath: origStored?.storagePath ?? '',
     fileName: file.fileName,
     fileType: file.fileType,
-    fileSize: Number(file.fileSize),
+    fileSize: origStored?.fileSize ? Number(origStored.fileSize) : 0,
     request,
     sessionId: access.shareTokenSessionId || null,
   })
@@ -83,15 +85,19 @@ export async function POST(
   let previewUrl: string | null = null
 
   if (isPreviewable) {
-    if (file.previewStatus === 'READY' && file.previewPath) {
-      // Preview is ready — serve thumbnail directly
+    // Check StoredFile for preview existence
+    const previewStored = await prisma.storedFile.findFirst({
+      where: { entityType: 'SHARE_UPLOAD_FILE', entityId: file.id, fileRole: { in: ['PREVIEW_IMAGE', 'PREVIEW_MP4'] } },
+      select: { storagePath: true, fileSize: true },
+    })
+    if (file.previewStatus === 'READY' && previewStored) {
       const thumbnailToken = await generateShareUploadAccessToken({
         projectId: file.projectId,
         fileId: file.id,
-        storagePath: file.previewPath,
+        storagePath: previewStored.storagePath,
         fileName: `${file.fileName}.jpg`,
         fileType: 'image/jpeg',
-        fileSize: Math.max(0, Number(file.previewFileSize || 0)),
+        fileSize: Math.max(0, Number(previewStored.fileSize || 0)),
         request,
         sessionId: access.shareTokenSessionId || null,
       })
@@ -103,11 +109,10 @@ export async function POST(
     // For videos with PENDING/PROCESSING/FAILED/null: previewUrl stays null → icon + badge in UI
 
     if (!file.previewStatus || file.previewStatus === 'FAILED') {
-      // Missing or failed — trigger backfill enqueue (non-blocking best effort)
       void enqueueShareUploadPreview({
         type: 'shareUploadFile',
         recordId: file.id,
-        storagePath: file.storagePath,
+        storagePath: origStored?.storagePath ?? '',
         fileType: file.fileType,
         fileName: file.fileName,
         durationSeconds: file.mediaDurationSeconds,

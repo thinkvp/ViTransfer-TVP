@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeFilenameForHeader } from '@/lib/storage'
+import { deleteStoredFile } from '@/lib/stored-file'
 import { deleteAccountingFile, resolveAccountingFilePath, adjustAccountingFilesBytes, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs from 'fs'
@@ -26,11 +27,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params
   const attachment = await prisma.accountingAttachment.findUnique({
     where: { id },
-    select: { id: true, storagePath: true, originalName: true },
+    select: { id: true, originalName: true },
   })
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
-  const ext = attachment.storagePath.split('.').pop()?.toLowerCase() ?? ''
+  // Get storage path from StoredFile
+  const storedFile = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: id, fileRole: 'ORIGINAL' as any } },
+    select: { storagePath: true },
+  })
+  const storagePath = storedFile?.storagePath
+  if (!storagePath) return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
+
+  const ext = storagePath.split('.').pop()?.toLowerCase() ?? ''
   const contentType =
     ext === 'pdf' ? 'application/pdf'
     : ext === 'png' ? 'image/png'
@@ -41,7 +50,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   // S3 mode: redirect to a presigned download URL so bytes go direct from R2 to browser
   if (isS3Mode()) {
-    const key = toAccountingS3Key(attachment.storagePath)
+    const key = toAccountingS3Key(storagePath)
     const presignedUrl = await s3GetPresignedDownloadUrl(key, 300, attachment.originalName, contentType)
     return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
   }
@@ -49,7 +58,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // Local storage: read file and stream buffer
   let fullPath: string
   try {
-    fullPath = resolveAccountingFilePath(attachment.storagePath)
+    fullPath = resolveAccountingFilePath(storagePath)
   } catch {
     return NextResponse.json({ error: 'Invalid attachment path' }, { status: 500 })
   }
@@ -85,13 +94,22 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params
   const attachment = await prisma.accountingAttachment.findUnique({
     where: { id },
-    select: { id: true, storagePath: true, fileSize: true },
+    select: { id: true },
   })
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
-  await deleteAccountingFile(attachment.storagePath).catch(() => {})
+  // Get path and size from StoredFile
+  const stored = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: id, fileRole: 'ORIGINAL' as any } },
+    select: { storagePath: true, fileSize: true },
+  })
+
+  if (stored?.storagePath) {
+    await deleteAccountingFile(stored.storagePath).catch(() => {})
+  }
   await prisma.accountingAttachment.delete({ where: { id } })
-  void adjustAccountingFilesBytes(-(attachment.fileSize ?? 0))
+  await deleteStoredFile('ACCOUNTING_ATTACHMENT' as any, id, 'ORIGINAL' as any).catch(() => {})
+  void adjustAccountingFilesBytes(-Number(stored?.fileSize ?? 0))
 
   return NextResponse.json({ ok: true })
 }

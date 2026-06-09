@@ -9,6 +9,7 @@ import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { deleteFile, downloadFile, getFilePath, uploadFile } from '@/lib/storage'
 import { isS3Mode, s3FileExists } from '@/lib/s3-storage'
+import { registerStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import type { AlbumPhotoThumbnailJob } from '@/lib/queue'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
@@ -20,12 +21,8 @@ type AlbumPhotoCandidate = {
   id: string
   albumId: string
   fileName: string
-  fileSize: bigint
-  storagePath: string
   status: 'UPLOADING' | 'READY' | 'ERROR'
-  thumbnailStoragePath: string | null
   thumbnailStatus: 'PENDING' | 'PROCESSING' | 'READY' | 'ERROR'
-  thumbnailFileSize: bigint
 }
 
 async function thumbnailExists(storagePath: string | null | undefined): Promise<boolean> {
@@ -47,21 +44,22 @@ async function resolveAlbumCandidates(albumId: string, projectStoragePath: strin
       id: true,
       albumId: true,
       fileName: true,
-      fileSize: true,
-      storagePath: true,
       status: true,
-      thumbnailStoragePath: true,
       thumbnailStatus: true,
-      thumbnailFileSize: true,
     },
   })
 
   const candidates: AlbumPhotoCandidate[] = []
   for (const photo of photos) {
-    const thumbnailStoragePath = photo.thumbnailStoragePath || buildAlbumPhotoThumbnailStoragePath(projectStoragePath, photo.storagePath)
+    // Get the original photo path from StoredFile
+    const origPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL')
+    const thumbnailStoragePath = origPath
+      ? buildAlbumPhotoThumbnailStoragePath(projectStoragePath, origPath)
+      : null
+    if (!thumbnailStoragePath) continue
     const alreadyReady = photo.thumbnailStatus === 'READY' && await thumbnailExists(thumbnailStoragePath)
     if (alreadyReady) continue
-    candidates.push({ ...photo, thumbnailStoragePath })
+    candidates.push({ ...photo, thumbnailStoragePath } as AlbumPhotoCandidate)
   }
 
   return candidates
@@ -87,12 +85,21 @@ async function rescheduleAlbumThumbnailJob(params: {
 }
 
 async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string, projectStoragePath: string): Promise<{ processedBytes: bigint; error?: string }> {
-  const thumbnailStoragePath = photo.thumbnailStoragePath || buildAlbumPhotoThumbnailStoragePath(projectStoragePath, photo.storagePath)
+  // Get original path from StoredFile
+  const origPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL')
+  if (!origPath) return { processedBytes: BigInt(0), error: 'Original file path not found' }
+  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(projectStoragePath, origPath)
+
+  // Read previous thumbnail size from StoredFile for delta computation
+  const prevThumbFile = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'THUMBNAIL' } },
+    select: { fileSize: true },
+  })
+  const prevThumbFileSize = prevThumbFile?.fileSize ?? BigInt(0)
 
   await prisma.albumPhoto.update({
     where: { id: photo.id },
     data: {
-      thumbnailStoragePath,
       thumbnailStatus: 'PROCESSING',
       thumbnailError: null,
     },
@@ -112,7 +119,7 @@ async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string,
       tmpInputPath = path.join(tmpDir, `album-photo-thumb-input-${photo.id}-${Date.now()}`)
       tmpOutputPath = path.join(tmpDir, `album-photo-thumb-output-${photo.id}-${Date.now()}.jpg`)
 
-      const srcStream = await downloadFile(photo.storagePath)
+      const srcStream = await downloadFile(origPath)
       await pipeline(srcStream, fs.createWriteStream(tmpInputPath))
 
       await sharp(tmpInputPath)
@@ -130,7 +137,7 @@ async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string,
       newThumbnailFileSize = BigInt(outStats.size)
       await uploadFile(thumbnailStoragePath, fs.createReadStream(tmpOutputPath), outStats.size, 'image/jpeg')
     } else {
-      const inputPath = getFilePath(photo.storagePath)
+      const inputPath = getFilePath(origPath)
       const outputPath = getFilePath(thumbnailStoragePath)
       await fs.promises.mkdir(path.dirname(outputPath), { recursive: true })
 
@@ -152,27 +159,35 @@ async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string,
     await prisma.albumPhoto.update({
       where: { id: photo.id },
       data: {
-        thumbnailStoragePath,
         thumbnailStatus: 'READY',
         thumbnailError: null,
         thumbnailGeneratedAt: new Date(),
-        thumbnailFileSize: newThumbnailFileSize,
       },
     })
 
-    const delta = newThumbnailFileSize - photo.thumbnailFileSize
+    // Register in StoredFile registry
+    registerStoredFile({
+      entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'THUMBNAIL',
+      storagePath: thumbnailStoragePath, fileSize: newThumbnailFileSize, status: 'READY', generatedAt: new Date(),
+    }).catch((err) => console.error(`[WORKER] StoredFile thumbnail register failed for photo ${photo.id}:`, err))
+
+    const delta = newThumbnailFileSize - prevThumbFileSize
     if (delta !== BigInt(0)) {
       await adjustProjectTotalBytes(projectId, delta)
     }
 
-    return { processedBytes: photo.fileSize }
+    // Read original file size from StoredFile
+    const origFile = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'ORIGINAL' } },
+      select: { fileSize: true },
+    })
+    return { processedBytes: origFile?.fileSize ?? BigInt(0) }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
 
     await prisma.albumPhoto.update({
       where: { id: photo.id },
       data: {
-        thumbnailStoragePath,
         thumbnailStatus: 'ERROR',
         thumbnailError: message.substring(0, 2000),
       },
@@ -180,7 +195,12 @@ async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string,
 
     await deleteFile(thumbnailStoragePath).catch(() => {})
 
-    return { processedBytes: photo.fileSize, error: message }
+    // Get file size from StoredFile
+    const origStored = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'ORIGINAL' } },
+      select: { fileSize: true },
+    })
+    return { processedBytes: origStored?.fileSize ?? BigInt(0), error: message }
   } finally {
     if (tmpInputPath) await fs.promises.unlink(tmpInputPath).catch(() => {})
     if (tmpOutputPath) await fs.promises.unlink(tmpOutputPath).catch(() => {})
@@ -209,7 +229,7 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
       id: true,
       name: true,
       projectId: true,
-      project: { select: { title: true, storagePath: true, companyName: true, client: { select: { name: true } } } },
+      project: { select: { title: true, companyName: true, storagePath: true, client: { select: { name: true } } } },
     },
   })
 
@@ -227,7 +247,7 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
 
   const projectStoragePath = album.project.storagePath || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
   const candidates = await resolveAlbumCandidates(album.id, projectStoragePath)
-  const totalBytes = candidates.reduce((sum, photo) => sum + photo.fileSize, BigInt(0))
+  const totalBytes = BigInt(0) // Computed from StoredFile as needed
 
   await prisma.albumThumbnailJob.update({
     where: { id: albumThumbnailJobId },
@@ -300,7 +320,6 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
         status: 'READY',
         OR: [
           { thumbnailStatus: 'PENDING' },
-          { thumbnailStoragePath: null },
         ],
       },
     }),

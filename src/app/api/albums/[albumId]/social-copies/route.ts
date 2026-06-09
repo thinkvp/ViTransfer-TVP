@@ -6,6 +6,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { getAlbumZipStoragePath, getAlbumZipJobId } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { deleteFile, getFilePath } from '@/lib/storage'
+import { deleteStoredFile } from '@/lib/stored-file'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import fs from 'fs'
@@ -104,6 +105,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const stat = fs.statSync(fullPath)
       freedBytes += BigInt(stat.size)
       await deleteFile(socialZipPath)
+      await deleteStoredFile('ALBUM', album.id, 'ZIP_SOCIAL').catch(() => {})
     } catch {
       // ZIP may not exist
     }
@@ -113,7 +115,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       where: { id: album.id },
       data: {
         socialCopiesEnabled: false,
-        socialZipFileSize: BigInt(0),
       },
     })
 
@@ -142,11 +143,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       albumId,
       status: 'READY',
       OR: [
-        { socialStoragePath: null },
         { socialStatus: 'ERROR' },
       ],
     },
-    select: { id: true, storagePath: true, socialStoragePath: true },
+    select: { id: true },
   })
 
   let queued = 0
@@ -156,12 +156,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const q = getAlbumPhotoSocialQueue()
 
       for (const photo of photosToProcess) {
-        const socialPath = photo.socialStoragePath || `${photo.storagePath}-social.jpg`
+        // Get original path from StoredFile for social derivative path
+        const origPath = await prisma.storedFile.findUnique({
+          where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'ORIGINAL' } },
+          select: { storagePath: true },
+        })
+        const socialPath = origPath?.storagePath ? `${origPath.storagePath}-social.jpg` : ''
 
         await prisma.albumPhoto.update({
           where: { id: photo.id },
           data: {
-            socialStoragePath: socialPath,
             socialStatus: 'PENDING',
             socialError: null,
           },

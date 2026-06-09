@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
+import { getStoredFilePath } from '@/lib/stored-file'
 import {
   buildProjectStorageRoot,
   buildVideoAssetPreviewStoragePath,
@@ -24,46 +25,6 @@ import { createWebReadableStream } from '@/lib/stream-utils'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-function buildCanonicalFallbackPath(params: {
-  video: any
-  quality: string
-  asset?: { fileName: string } | null
-  spriteFile?: string | null
-}): string | null {
-  const { video, quality, asset, spriteFile } = params
-  const projectStoragePath = video?.project?.storagePath
-  const videoFolderName = video?.storageFolderName || video?.name
-  const versionLabel = video?.versionLabel
-
-  if (!projectStoragePath || !videoFolderName || !versionLabel) return null
-
-  if (asset?.fileName) {
-    return buildVideoAssetStoragePath(projectStoragePath, videoFolderName, versionLabel, asset.fileName)
-  }
-
-  switch (quality) {
-    case 'thumbnail':
-      return buildVideoThumbnailStoragePath(projectStoragePath, videoFolderName, versionLabel)
-    case 'timeline-vtt':
-      return `${buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, versionLabel)}/index.vtt`
-    case 'timeline-sprite':
-      return spriteFile
-        ? `${buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, versionLabel)}/${spriteFile}`
-        : null
-    case '480p':
-    case '720p':
-    case '1080p':
-      return buildVideoPreviewStoragePath(projectStoragePath, videoFolderName, versionLabel, quality)
-    case 'original':
-    case 'download':
-      return video?.originalFileName
-        ? buildVideoOriginalStoragePath(projectStoragePath, videoFolderName, versionLabel, video.originalFileName)
-        : null
-    default:
-      return null
-  }
-}
 
 function isValidMimeType(value: unknown): value is string {
   if (typeof value !== 'string') return false
@@ -242,9 +203,25 @@ export async function GET(
       return NextResponse.json({ error: 'Access denied' }, { status: 404 })
     }
 
-    const originalPath = video?.originalStoragePath ?? null
+    // Resolve all file paths from StoredFile registry (single batch query)
+    let storedPaths: Map<string, string> = new Map()
+    let storedFileNames: Map<string, string> = new Map()
+    if (!isUploadEntity && video) {
+      const files = await prisma.storedFile.findMany({
+        where: { entityType: 'VIDEO', entityId: video.id },
+        select: { fileRole: true, storagePath: true, fileName: true },
+      })
+      storedPaths = new Map(files.map(f => [f.fileRole, f.storagePath]))
+      for (const f of files) {
+        if (f.fileRole === 'ORIGINAL' && f.fileName) {
+          storedFileNames.set(f.fileRole, f.fileName)
+        }
+      }
+    }
+
+    const originalPath = storedPaths.get('ORIGINAL') ?? null
     let filePath: string | null = null
-    let filename: string | null = null
+    let filename: string | null = storedFileNames.get('ORIGINAL') ?? null
     let contentType = 'video/mp4'
     let selectedAsset: { fileName: string } | null = null
     const canServeOriginal = Boolean(originalPath && (isAdminRequest || video?.approved))
@@ -276,31 +253,39 @@ export async function GET(
         : 'application/octet-stream'
       const normalizedAssetType = typeof asset.fileType === 'string' ? asset.fileType.toLowerCase() : ''
 
-      filePath = asset.storagePath
+      // Batch all asset StoredFile lookups into one query
+      const assetFiles = await prisma.storedFile.findMany({
+        where: { entityType: 'VIDEO_ASSET', entityId: assetId },
+        select: { fileRole: true, storagePath: true },
+      })
+      const assetPaths = new Map(assetFiles.map(f => [f.fileRole, f.storagePath]))
+
+      filePath = assetPaths.get('ORIGINAL') ?? null
       filename = asset.fileName
       selectedAsset = { fileName: asset.fileName }
 
       if (wantsAssetPlaybackPreview) {
+        const previewPath = assetPaths.get('PREVIEW_MP4') ?? null
         const hasReadyGeneratedPreview =
           asset.previewStatus === 'READY'
-          && typeof asset.previewPath === 'string'
-          && asset.previewPath.length > 0
-          && asset.previewPath.toLowerCase().endsWith('.mp4')
+          && previewPath
+          && previewPath.toLowerCase().endsWith('.mp4')
 
         if (!hasReadyGeneratedPreview) {
           return NextResponse.json({ error: 'Preview not ready' }, { status: 404 })
         }
 
-        filePath = asset.previewPath
+        filePath = previewPath
         filename = `${asset.fileName}.mp4`
         contentType = 'video/mp4'
         selectedAsset = null
       } else if (wantsAssetGeneratedPreview) {
+        const previewPath = assetPaths.get('PREVIEW_IMAGE') ?? null
         const hasReadyGeneratedPreview =
           asset.previewStatus === 'READY'
           && (
             normalizedAssetType.startsWith('video/')
-            || (typeof asset.previewPath === 'string' && asset.previewPath.length > 0)
+            || !!previewPath
           )
 
         if (!hasReadyGeneratedPreview) {
@@ -312,15 +297,16 @@ export async function GET(
             (video.project as any).companyName || 'Client',
             video.project.title,
           )
+          const assetOrigPath = assetPaths.get('ORIGINAL') || ''
           filePath = buildVideoAssetPreviewStoragePath(
             projectStoragePath,
             video.storageFolderName || video.name,
             video.versionLabel,
-            asset.storagePath,
+            assetOrigPath,
             '.jpg',
           )
         } else {
-          filePath = asset.previewPath
+          filePath = previewPath
         }
 
         filename = `${asset.fileName}.jpg`
@@ -336,7 +322,7 @@ export async function GET(
 
       // Handle video download/stream
       if (verifiedToken.quality === 'thumbnail') {
-        filePath = v.thumbnailPath
+        filePath = storedPaths.get('THUMBNAIL') ?? null
         contentType = 'image/jpeg'
       } else if (verifiedToken.quality === 'timeline-vtt') {
         // Handle asset/upload timeline previews
@@ -345,25 +331,18 @@ export async function GET(
           if (!asset || asset.videoId !== v.id) {
             return NextResponse.json({ error: 'Access denied' }, { status: 404 })
           }
-          filePath = (asset as any).timelinePreviewVttPath
+          filePath = await getStoredFilePath('VIDEO_ASSET', verifiedToken.entityId, 'TIMELINE_VTT')
           if (!filePath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
           contentType = 'text/vtt'
         } else if (verifiedToken.entityType === 'upload' && verifiedToken.entityId) {
-          const upload = await prisma.$queryRawUnsafe<Array<{ timelinePreviewVttPath: string | null }>>(
-            `SELECT "timelinePreviewVttPath" FROM "ShareUploadFile" WHERE "id" = $1`,
-            verifiedToken.entityId
-          )
-          const row = upload?.[0]
-          if (!row?.timelinePreviewVttPath) {
-            return NextResponse.json({ error: 'Access denied' }, { status: 404 })
-          }
-          filePath = row.timelinePreviewVttPath
+          filePath = await getStoredFilePath('SHARE_UPLOAD_FILE', verifiedToken.entityId, 'TIMELINE_VTT')
+          if (!filePath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
           contentType = 'text/vtt'
         } else {
-          if (!v.project.timelinePreviewsEnabled || !v.timelinePreviewsReady) {
+          if (!v.project.timelinePreviewsEnabled) {
             return NextResponse.json({ error: 'Access denied' }, { status: 403 })
           }
-          filePath = (v as any).timelinePreviewVttPath
+          filePath = storedPaths.get('TIMELINE_VTT') ?? null
           contentType = 'text/vtt'
         }
       } else if (verifiedToken.quality === 'timeline-sprite') {
@@ -372,36 +351,39 @@ export async function GET(
           return NextResponse.json({ error: 'Access denied' }, { status: 403 })
         }
 
+        // Normalise a TIMELINE_SPRITES stored path to the directory prefix.
+        // Workers store the directory; the orphan-backfill script may have stored
+        // an individual sprite file before it was fixed.  Strip any trailing
+        // sprite-NNN.jpg and ensure a trailing / so we can append the requested file.
+        const spriteDir = (raw: string) => {
+          const dir = raw.replace(/sprite-\d{3}\.jpg$/, '')
+          return dir.endsWith('/') ? dir : `${dir}/`
+        }
+
         // Handle asset/upload timeline previews
         if (verifiedToken.entityType === 'asset' && verifiedToken.entityId) {
           const asset = await prisma.videoAsset.findUnique({ where: { id: verifiedToken.entityId } })
           if (!asset || asset.videoId !== v.id) {
             return NextResponse.json({ error: 'Access denied' }, { status: 404 })
           }
-          const spritesBasePath = (asset as any).timelinePreviewSpritesPath
-          if (!spritesBasePath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
-          filePath = `${spritesBasePath}/${spriteFile}`
+          const rawPath = await getStoredFilePath('VIDEO_ASSET', verifiedToken.entityId, 'TIMELINE_SPRITES')
+          if (!rawPath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          filePath = `${spriteDir(rawPath)}${spriteFile}`
           contentType = 'image/jpeg'
         } else if (verifiedToken.entityType === 'upload' && verifiedToken.entityId) {
-          const upload = await prisma.$queryRawUnsafe<Array<{ timelinePreviewSpritesPath: string | null }>>(
-            `SELECT "timelinePreviewSpritesPath" FROM "ShareUploadFile" WHERE "id" = $1`,
-            verifiedToken.entityId
-          )
-          const row = upload?.[0]
-          if (!row?.timelinePreviewSpritesPath) {
-            return NextResponse.json({ error: 'Access denied' }, { status: 404 })
-          }
-          filePath = `${row.timelinePreviewSpritesPath}/${spriteFile}`
+          const rawPath = await getStoredFilePath('SHARE_UPLOAD_FILE', verifiedToken.entityId, 'TIMELINE_SPRITES')
+          if (!rawPath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+          filePath = `${spriteDir(rawPath)}${spriteFile}`
           contentType = 'image/jpeg'
         } else {
-          if (!v.project.timelinePreviewsEnabled || !v.timelinePreviewsReady) {
+          if (!v.project.timelinePreviewsEnabled) {
             return NextResponse.json({ error: 'Access denied' }, { status: 403 })
           }
-          const spritesBasePath = (v as any).timelinePreviewSpritesPath
+          const spritesBasePath = storedPaths.get('TIMELINE_SPRITES')
           if (!spritesBasePath) {
             return NextResponse.json({ error: 'Access denied' }, { status: 404 })
           }
-          filePath = `${spritesBasePath}/${spriteFile}`
+          filePath = `${spriteDir(spritesBasePath)}${spriteFile}`
           contentType = 'image/jpeg'
         }
       } else if (verifiedToken.quality === 'original' || verifiedToken.quality === 'download') {
@@ -409,11 +391,11 @@ export async function GET(
           filePath = originalPath
         }
       } else if (verifiedToken.quality === '1080p') {
-        filePath = v.preview1080Path || v.preview720Path || (v as any).preview480Path || (canServeOriginal ? originalPath : null)
+        filePath = storedPaths.get('PREVIEW_1080') || storedPaths.get('PREVIEW_720') || storedPaths.get('PREVIEW_480') || (canServeOriginal ? originalPath : null)
       } else if (verifiedToken.quality === '720p') {
-        filePath = v.preview720Path || v.preview1080Path || (v as any).preview480Path || (canServeOriginal ? originalPath : null)
+        filePath = storedPaths.get('PREVIEW_720') || storedPaths.get('PREVIEW_1080') || storedPaths.get('PREVIEW_480') || (canServeOriginal ? originalPath : null)
       } else if (verifiedToken.quality === '480p') {
-        filePath = (v as any).preview480Path || v.preview720Path || v.preview1080Path || (canServeOriginal ? originalPath : null)
+        filePath = storedPaths.get('PREVIEW_480') || storedPaths.get('PREVIEW_720') || storedPaths.get('PREVIEW_1080') || (canServeOriginal ? originalPath : null)
       }
     }
 
@@ -463,17 +445,8 @@ export async function GET(
     if (isS3Mode()) {
       const fileExists = await s3FileExists(filePath)
       if (!fileExists) {
-        // Try canonical fallback path (e.g. legacy project paths that were migrated)
-        const fallback = buildCanonicalFallbackPath({
-          video,
-          quality: verifiedToken.quality,
-          asset: selectedAsset,
-          spriteFile: searchParams.get('file'),
-        })
-        if (!fallback || fallback === filePath || !(await s3FileExists(fallback))) {
-          return NextResponse.json({ error: 'Access denied' }, { status: 404 })
-        }
-        filePath = fallback
+        // File not found — no canonical fallback (StoredFile is the canonical path now)
+        return NextResponse.json({ error: 'Access denied' }, { status: 404 })
       }
 
       let presignedUrl: string
@@ -481,7 +454,6 @@ export async function GET(
          
         const v = video!
         const rawFilename = filename
-          || v.originalFileName
           || `${v.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const dlContentType = isThumbnail ? 'image/jpeg' : contentType
@@ -547,20 +519,8 @@ export async function GET(
 
     let fullPath = getFilePath(filePath)
     if (!existsSync(fullPath)) {
-      const fallbackPath = buildCanonicalFallbackPath({
-        video,
-        quality: verifiedToken.quality,
-        asset: selectedAsset,
-        spriteFile: searchParams.get('file'),
-      })
-
-      if (fallbackPath && fallbackPath !== filePath) {
-        const fallbackFullPath = getFilePath(fallbackPath)
-        if (existsSync(fallbackFullPath)) {
-          fullPath = fallbackFullPath
-          filePath = fallbackPath
-        }
-      }
+      // No canonical fallback — StoredFile is the canonical path now
+      return NextResponse.json({ error: 'Access denied' }, { status: 404 })
     }
     if (!existsSync(fullPath)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 404 })
@@ -582,7 +542,6 @@ export async function GET(
        
       const v = video!
       const rawFilename = filename
-        || v.originalFileName
         || `${v.project.title.replace(/[^a-z0-9]/gi, '_')}_${verifiedToken.quality}.mp4`
       const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { deleteFile } from '@/lib/storage'
+import { deleteStoredFilesByCriteria } from '@/lib/stored-file'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
@@ -16,6 +17,12 @@ const RESOLUTION_TO_FIELD = {
   '720p': 'preview720Path',
   '1080p': 'preview1080Path',
 } as const
+
+const RESOLUTION_TO_ROLE: Record<string, string> = {
+  '480p': 'PREVIEW_480',
+  '720p': 'PREVIEW_720',
+  '1080p': 'PREVIEW_1080',
+}
 
 export async function POST(
   request: NextRequest,
@@ -60,6 +67,8 @@ export async function POST(
     }
 
     let deletedCount = 0
+    const videoIdsToCleanup: string[] = []
+    const rolesToCleanup: string[] = resolutions.map(r => RESOLUTION_TO_ROLE[r])
 
     for (const video of project.videos) {
       const filesToDelete: string[] = []
@@ -80,8 +89,18 @@ export async function POST(
           where: { id: video.id },
           data: dbUpdate,
         })
+        videoIdsToCleanup.push(video.id)
         deletedCount += filesToDelete.length
       }
+    }
+
+    // Clean up StoredFile rows for deleted previews
+    if (videoIdsToCleanup.length > 0) {
+      await deleteStoredFilesByCriteria({
+        entityType: 'VIDEO',
+        entityIds: videoIdsToCleanup,
+        fileRoles: rolesToCleanup as any,
+      }).catch(() => {})
     }
 
     return NextResponse.json({

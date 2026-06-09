@@ -28,7 +28,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     select: {
       id: true,
       status: true,
-      accountingAttachments: { select: { storagePath: true } },
+      accountingAttachments: { select: { id: true } },
     },
   })
 
@@ -56,7 +56,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     })
   })
 
-  await Promise.all(txn.accountingAttachments.map(a => deleteAccountingFile(a.storagePath).catch(() => {})))
+  // Delete files via StoredFile
+  const attachmentIds = txn.accountingAttachments.map(a => a.id)
+  if (attachmentIds.length > 0) {
+    const paths = await prisma.storedFile.findMany({
+      where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
+      select: { storagePath: true },
+    })
+    await Promise.all(paths.map(p => deleteAccountingFile(p.storagePath).catch(() => {})))
+  }
 
   const res = NextResponse.json({ transaction: bankTransactionFromDb(updated) })
   res.headers.set('Cache-Control', 'no-store')

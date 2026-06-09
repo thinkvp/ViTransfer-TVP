@@ -10,6 +10,8 @@ import archiver from 'archiver'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
+import { registerStoredFile } from '@/lib/stored-file'
+import { getStoredFilePath } from '@/lib/stored-file'
 
 const ZIP_RETRY_DELAY_MS = 30_000
 
@@ -111,12 +113,9 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       name: true,
       storageFolderName: true,
       socialCopiesEnabled: true,
-      fullZipFileSize: true,
-      socialZipFileSize: true,
       project: {
         select: {
           title: true,
-          storagePath: true,
           companyName: true,
           client: { select: { name: true } },
         },
@@ -133,8 +132,7 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
   const projectId = album.projectId
   const albumName = album.name
   const projectTitle = album.project.title
-  const projectStoragePath = album.project.storagePath
-    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', projectTitle)
+  const projectStoragePath = buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', projectTitle)
   const albumFolderName = album.storageFolderName || albumName
 
   const zipArgs = { projectStoragePath, albumFolderName, albumName }
@@ -191,7 +189,7 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       // If all social derivatives errored, the social ZIP will never be created —
       // don't let that block the album from becoming READY.
       const socialUsableCount = await prisma.albumPhoto.count({
-        where: { albumId, status: 'READY', socialStatus: 'READY', NOT: { socialStoragePath: null } },
+        where: { albumId, status: 'READY', socialStatus: 'READY' },
       })
       const needSocialZip = album!.socialCopiesEnabled && socialUsableCount > 0
 
@@ -226,17 +224,8 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
   }
 
   let photos = await prisma.albumPhoto.findMany({
-    where: {
-      albumId,
-      status: 'READY',
-    },
-    select: {
-      id: true,
-      fileName: true,
-      storagePath: true,
-      socialStatus: true,
-      socialStoragePath: true,
-    },
+    where: { albumId, status: 'READY' },
+    select: { id: true, fileName: true, socialStatus: true },
     orderBy: { createdAt: 'asc' },
   })
 
@@ -248,14 +237,17 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     })
     await deleteFile(zipStoragePath).catch(() => {})
 
-    const prevSize = variant === 'social' ? album.socialZipFileSize : album.fullZipFileSize
+    const zipRole = variant === 'social' ? 'ZIP_SOCIAL' as const : 'ZIP_FULL' as const
+    const prevFile = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: zipRole } },
+      select: { fileSize: true },
+    })
+    const prevSize = prevFile?.fileSize ?? BigInt(0)
     if (prevSize > BigInt(0)) {
       try {
-        await prisma.album.update({
-          where: { id: album.id },
-          data: {
-            ...(variant === 'social' ? { socialZipFileSize: BigInt(0) } : { fullZipFileSize: BigInt(0) }),
-          },
+        await prisma.storedFile.update({
+          where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: zipRole } },
+          data: { fileSize: BigInt(0) },
         })
         await adjustProjectTotalBytes(album.projectId, prevSize * BigInt(-1))
       } catch {
@@ -293,7 +285,14 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     }
 
     // Only include photos with a usable social derivative; skip errored ones.
-    const socialReady = photos.filter((p) => p.socialStatus === 'READY' && p.socialStoragePath)
+    const socialReadyIds = new Set<string>()
+    for (const p of photos) {
+      if (p.socialStatus === 'READY') {
+        const socialPath = await getStoredFilePath('ALBUM_PHOTO', p.id, 'SOCIAL')
+        if (socialPath) socialReadyIds.add(p.id)
+      }
+    }
+    const socialReady = photos.filter((p) => socialReadyIds.has(p.id))
     if (socialReady.length === 0) {
       // All social derivatives failed — no ZIP to create, but still evaluate readiness.
       await maybeMarkAlbumReady()
@@ -304,13 +303,15 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
     photos = socialReady
   }
 
-  const entries = photos.map((p) => {
-    const storagePath = variant === 'social' ? (p.socialStoragePath as string) : p.storagePath
+  const fileRole = variant === 'social' ? 'SOCIAL' as const : 'ORIGINAL' as const
+  const entries = await Promise.all(photos.map(async (p) => {
+    const storagePath = await getStoredFilePath('ALBUM_PHOTO', p.id, fileRole)
+    if (!storagePath) return null
     return {
       name: p.fileName,
       storagePath,
     }
-  })
+  })).then(results => results.filter((e): e is NonNullable<typeof e> => e !== null))
 
   await writeZipFile({
     outputStoragePath: zipStoragePath,
@@ -329,14 +330,21 @@ export async function processAlbumPhotoZip(job: Job<AlbumPhotoZipJob>) {
       newSize = BigInt(zipStats.size)
     }
 
-    const prevSize = variant === 'social' ? album.socialZipFileSize : album.fullZipFileSize
+    const zipRole = variant === 'social' ? 'ZIP_SOCIAL' as const : 'ZIP_FULL' as const
 
-    await prisma.album.update({
-      where: { id: album.id },
-      data: {
-        ...(variant === 'social' ? { socialZipFileSize: newSize } : { fullZipFileSize: newSize }),
-      },
+    const prevFile = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: albumId, fileRole: zipRole } },
+      select: { fileSize: true },
     })
+    const prevSize = prevFile?.fileSize ?? BigInt(0)
+
+    // NOTE: Legacy Album ZIP size columns dropped — StoredFile is the source of truth
+
+    // Register in StoredFile registry
+    registerStoredFile({
+      entityType: 'ALBUM', entityId: albumId, fileRole: zipRole,
+      storagePath: zipStoragePath, fileSize: newSize, status: 'READY',
+    }).catch((err) => console.error(`[WORKER] StoredFile ${variant} ZIP register failed for album ${albumId}:`, err))
 
     await adjustProjectTotalBytes(album.projectId, newSize - prevSize)
   } catch {

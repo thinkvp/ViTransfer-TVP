@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile, getFilePath, uploadFile } from '@/lib/storage'
 import { isS3Mode, s3GetPresignedStreamUrl, s3FileExists } from '@/lib/s3-storage'
+import { registerStoredFile, deleteStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import { createReadStream, statSync } from 'fs'
 import sharp from 'sharp'
 
@@ -29,28 +30,27 @@ export async function GET(
   try {
     const { id } = await params
 
-    const user = await prisma.user.findUnique({
-      where: { id },
-      select: { avatarPath: true },
-    })
+    // Resolve avatar path from StoredFile registry, with fallback to legacy path
+    let avatarPath = await getStoredFilePath('USER_AVATAR', id, 'AVATAR')
+    if (!avatarPath) {
+      // Fallback: try the standard avatar path (for avatars uploaded before StoredFile migration)
+      avatarPath = `users/${id}/avatar.jpg`
+    }
 
-    if (!user?.avatarPath) {
+    if (!avatarPath) {
       return NextResponse.json({ error: 'No avatar' }, { status: 404 })
     }
 
     // S3 mode: redirect to a presigned stream URL
     if (isS3Mode()) {
-      const exists = await s3FileExists(user.avatarPath)
-      if (!exists) return NextResponse.json({ error: 'Avatar file not found' }, { status: 404 })
-
-      const presignedUrl = await s3GetPresignedStreamUrl(user.avatarPath, 86400, 'image/jpeg')
+      const presignedUrl = await s3GetPresignedStreamUrl(avatarPath, 86400, 'image/jpeg')
       return NextResponse.redirect(presignedUrl, {
         status: 302,
         headers: { 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=600' },
       })
     }
 
-    const fullPath = getFilePath(user.avatarPath)
+    const fullPath = getFilePath(avatarPath)
     let stat: ReturnType<typeof statSync>
     try {
       stat = statSync(fullPath)
@@ -120,7 +120,7 @@ export async function POST(
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, avatarPath: true },
+      select: { id: true },
     })
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -160,13 +160,15 @@ export async function POST(
     await uploadFile(storagePath, processed, processed.length, 'image/jpeg')
 
     // Delete old avatar file if it was at a different path
-    if (user.avatarPath && user.avatarPath !== storagePath) {
-      await deleteFile(user.avatarPath).catch(() => {})
+    const oldAvatarPath = await getStoredFilePath('USER_AVATAR', userId, 'AVATAR')
+    if (oldAvatarPath && oldAvatarPath !== storagePath) {
+      await deleteFile(oldAvatarPath).catch(() => {})
     }
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { avatarPath: storagePath },
+    // Register the new avatar in StoredFile
+    await registerStoredFile({
+      entityType: 'USER_AVATAR', entityId: userId, fileRole: 'AVATAR',
+      storagePath, fileSize: processed.length, status: 'READY',
     })
 
     return NextResponse.json({ ok: true, avatarPath: storagePath })
@@ -194,20 +196,20 @@ export async function DELETE(
   try {
     const { id: userId } = await params
 
+    // Verify user exists
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, avatarPath: true },
+      select: { id: true },
     })
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    if (user.avatarPath) {
-      await deleteFile(user.avatarPath).catch(() => {})
-      await prisma.user.update({
-        where: { id: userId },
-        data: { avatarPath: null },
-      })
+    // Delete the avatar file and StoredFile record
+    const avatarPath = await getStoredFilePath('USER_AVATAR', userId, 'AVATAR')
+    if (avatarPath) {
+      await deleteFile(avatarPath).catch(() => {})
+      await deleteStoredFile('USER_AVATAR', userId, 'AVATAR')
     }
 
     return NextResponse.json({ ok: true })

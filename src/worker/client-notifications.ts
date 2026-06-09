@@ -179,7 +179,7 @@ export async function processClientNotifications() {
           const companyLogoUrl = buildCompanyLogoUrl({
             appDomain,
             companyLogoMode: emailSettings.companyLogoMode,
-            companyLogoPath: emailSettings.companyLogoPath,
+            companyLogoPath: null,
             companyLogoUrl: emailSettings.companyLogoUrl,
             updatedAt: emailSettings.updatedAt,
           })

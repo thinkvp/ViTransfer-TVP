@@ -333,12 +333,20 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (kind === 'expense') {
     const expense = await prisma.expense.findUnique({
       where: { id: entryId },
-      select: { id: true, accountId: true, bankTransactionId: true, accountingAttachments: { select: { storagePath: true } } },
+      select: { id: true, accountId: true, bankTransactionId: true, accountingAttachments: { select: { id: true } } },
     })
     if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
     if (expense.accountId !== accountId) return NextResponse.json({ error: 'Entry does not belong to this account' }, { status: 403 })
 
-    const attachmentPaths = expense.accountingAttachments.map(a => a.storagePath)
+    // Get attachment paths from StoredFile
+    const attachmentIds = expense.accountingAttachments.map(a => a.id)
+    const attachmentStored = attachmentIds.length > 0
+      ? await prisma.storedFile.findMany({
+          where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
+          select: { storagePath: true },
+        })
+      : []
+    const attachmentPaths = attachmentStored.map(s => s.storagePath)
     await prisma.$transaction(async (tx) => {
       // If this expense was linked to a bank transaction, unlink it
       if (expense.bankTransactionId) {
@@ -358,9 +366,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const txn = await prisma.bankTransaction.findUnique({
     where: { id: entryId },
     include: {
-      expense: { select: { id: true, accountingAttachments: { select: { storagePath: true } } } },
+      expense: { select: { id: true, accountingAttachments: { select: { id: true } } } },
       invoicePayment: { select: { id: true, invoiceId: true } },
-      accountingAttachments: { select: { id: true, storagePath: true } },
+      accountingAttachments: { select: { id: true } },
     },
   })
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
@@ -394,15 +402,25 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     })
   })
 
-  // Delete attachment files after the DB transaction (best-effort)
-  const txnFilesToDelete = [
-    ...txn.accountingAttachments.map(a => a.storagePath),
-  ]
+  // Delete attachment files after the DB transaction (best-effort) — paths from StoredFile
+  const txnAttachmentIds = txn.accountingAttachments.map(a => a.id)
+  const txnAttachmentStored = txnAttachmentIds.length > 0
+    ? await prisma.storedFile.findMany({
+        where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: txnAttachmentIds } },
+        select: { storagePath: true },
+      })
+    : []
+  const txnFilesToDelete = txnAttachmentStored.map(s => s.storagePath)
   await Promise.all(txnFilesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
   if (txn.matchType === 'EXPENSE' && txn.expense) {
-    const expFiles = [
-      ...(txn.expense.accountingAttachments ?? []).map(a => a.storagePath),
-    ]
+    const expAttachmentIds = (txn.expense.accountingAttachments ?? []).map(a => a.id)
+    const expStored = expAttachmentIds.length > 0
+      ? await prisma.storedFile.findMany({
+          where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: expAttachmentIds } },
+          select: { storagePath: true },
+        })
+      : []
+    const expFiles = expStored.map(s => s.storagePath)
     await Promise.all(expFiles.map(p => deleteAccountingFile(p).catch(() => {})))
   }
 

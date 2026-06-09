@@ -75,12 +75,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const attachment = await prisma.accountingAttachment.create({
       data: {
-        storagePath: storagePath.relativePath,
         originalName: rawName.slice(0, 500),
-        fileSize: finalBuffer.length,
         expenseId: id,
       },
     })
+    await prisma.storedFile.create({ data: {
+      entityType: 'ACCOUNTING_ATTACHMENT', entityId: attachment.id, fileRole: 'ORIGINAL',
+      storagePath: storagePath.relativePath, fileName: rawName.slice(0, 500), fileSize: BigInt(finalBuffer.length),
+    } })
     void adjustAccountingFilesBytes(finalBuffer.length)
     created.push(accountingAttachmentFromDb(attachment))
   }

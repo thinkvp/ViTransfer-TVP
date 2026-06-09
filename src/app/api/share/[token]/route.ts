@@ -162,23 +162,52 @@ export async function GET(
       }, { status: 401 })
     }
 
-    const videosSanitizedBase = project.videos.map((video: any) => ({
-      ...video,
-      originalFileSize: video.originalFileSize.toString(),
-      streamUrl480p: '',
-      streamUrl720p: '',
-      streamUrl1080p: '',
-      downloadUrl: null,
-      thumbnailUrl: null,
-      hasThumbnail: !!video.thumbnailPath,
-      preview480Path: !!video.preview480Path,
-      preview720Path: !!video.preview720Path,
-      preview1080Path: !!video.preview1080Path,
-      originalStoragePath: undefined,
-      thumbnailPath: undefined,
-      timelinePreviewVttPath: undefined,
-      timelinePreviewSpritesPath: undefined,
-    }))
+    // Resolve preview availability and original file sizes from StoredFile
+    const videoIds = project.videos.map((v: any) => v.id)
+    const storedPreviews = videoIds.length > 0 ? await prisma.storedFile.findMany({
+      where: {
+        entityType: 'VIDEO',
+        entityId: { in: videoIds },
+        fileRole: { in: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'] },
+      },
+      select: { entityId: true, fileRole: true, fileSize: true, fileName: true },
+    }) : []
+
+    const previewMap = new Map<string, Set<string>>()
+    const sizeMap = new Map<string, number>()
+    const nameMap = new Map<string, string>()
+    for (const s of storedPreviews) {
+      if (!previewMap.has(s.entityId)) previewMap.set(s.entityId, new Set())
+      previewMap.get(s.entityId)!.add(s.fileRole)
+      if (s.fileRole === 'ORIGINAL') {
+        if (s.fileSize != null) sizeMap.set(s.entityId, Number(s.fileSize))
+        if (s.fileName) nameMap.set(s.entityId, s.fileName)
+      }
+    }
+
+    const videosSanitizedBase = project.videos.map((video: any) => {
+      const previews = previewMap.get(video.id) ?? new Set<string>()
+      const hasOriginal = previews.has('ORIGINAL')
+      const hasThumb = previews.has('THUMBNAIL')
+      return {
+        ...video,
+        originalFileSize: String(sizeMap.get(video.id) ?? 0),
+        streamUrl480p: '',
+        streamUrl720p: '',
+        streamUrl1080p: '',
+        downloadUrl: null,
+        thumbnailUrl: null,
+        hasThumbnail: hasThumb,
+        thumbnailPath: hasThumb,       // used as boolean by admin share page
+        preview480Path: previews.has('PREVIEW_480'),
+        preview720Path: previews.has('PREVIEW_720'),
+        preview1080Path: previews.has('PREVIEW_1080'),
+        originalStoragePath: hasOriginal, // used as boolean by admin share page
+        originalFileName: hasOriginal ? (nameMap.get(video.id) ?? undefined) : undefined,
+        timelinePreviewVttPath: undefined,
+        timelinePreviewSpritesPath: undefined,
+      }
+    })
 
     const videosByName = videosSanitizedBase.reduce((acc: any, video: any) => {
       const name = video.name
@@ -211,7 +240,6 @@ export async function GET(
           companyName: true,
           defaultPreviewResolutions: true,
           companyLogoMode: true,
-          companyLogoPath: true,
           companyLogoUrl: true,
           mainCompanyDomain: true,
         },
@@ -243,10 +271,6 @@ export async function GET(
       height: video.height,
       fps: video.fps,
       status: video.status,
-      timelinePreviewsReady: video.timelinePreviewsReady,
-      preview480Path: video.preview480Path,
-      preview720Path: video.preview720Path,
-      preview1080Path: video.preview1080Path,
       streamUrl480p: video.streamUrl480p,
       streamUrl720p: video.streamUrl720p,
       streamUrl1080p: video.streamUrl1080p,
@@ -266,10 +290,6 @@ export async function GET(
         height: video.height,
         fps: video.fps,
         status: video.status,
-        timelinePreviewsReady: video.timelinePreviewsReady,
-        preview480Path: video.preview480Path,
-        preview720Path: video.preview720Path,
-        preview1080Path: video.preview1080Path,
         streamUrl480p: video.streamUrl480p,
         streamUrl720p: video.streamUrl720p,
         streamUrl1080p: video.streamUrl1080p,
@@ -327,7 +347,7 @@ export async function GET(
         companyName: globalSettings?.companyName || 'Studio',
         defaultPreviewResolutions: globalSettings?.defaultPreviewResolutions || '["720p"]',
         hasLogo: globalSettings?.companyLogoMode === 'UPLOAD'
-          ? Boolean(globalSettings.companyLogoPath)
+          ? true // StoredFile handles logo paths
           : globalSettings?.companyLogoMode === 'LINK'
             ? Boolean(globalSettings.companyLogoUrl)
             : false,

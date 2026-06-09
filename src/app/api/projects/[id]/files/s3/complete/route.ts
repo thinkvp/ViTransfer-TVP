@@ -13,6 +13,7 @@ import { requireApiAuth, getCurrentUserFromRequest } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { registerStoredFile } from '@/lib/stored-file'
 import { prisma } from '@/lib/db'
 
 export const runtime = 'nodejs'
@@ -113,14 +114,23 @@ export async function POST(
     data: {
       projectId,
       fileName,
-      fileSize: BigInt(fileSize),
       fileType: resolvedFileType,
-      storagePath: key,
       category: resolvedCategory,
       uploadedBy: currentUser.id,
       uploadedByName: currentUser.name || currentUser.email,
     },
     select: { id: true },
+  })
+
+  // Register in StoredFile registry
+  await registerStoredFile({
+    entityType: 'PROJECT_FILE',
+    entityId: record.id,
+    fileRole: 'ORIGINAL',
+    storagePath: key,
+    fileName,
+    fileSize: BigInt(fileSize),
+    status: 'READY',
   })
 
   await recalculateAndStoreProjectTotalBytes(projectId)

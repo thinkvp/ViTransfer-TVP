@@ -11,8 +11,6 @@ type AlbumZipAlbumRow = {
   projectId: string
   name: string
   storageFolderName: string | null
-  fullZipFileSize: bigint
-  socialZipFileSize: bigint
   project: {
     storagePath: string | null
     title: string
@@ -89,13 +87,10 @@ export async function syncAlbumZipSizes(params: { albumId: string; projectId: st
       projectId: true,
       name: true,
       storageFolderName: true,
-      fullZipFileSize: true,
-      socialZipFileSize: true,
       project: {
-        select: {
-          storagePath: true,
-          title: true,
+        select: { title: true,
           companyName: true,
+          storagePath: true,
           client: { select: { name: true } },
         },
       },
@@ -105,18 +100,34 @@ export async function syncAlbumZipSizes(params: { albumId: string; projectId: st
 
   const { actualFull, actualSocial } = await resolveAlbumZipSizes(album)
 
-  const deltaFull = actualFull - album.fullZipFileSize
-  const deltaSocial = actualSocial - album.socialZipFileSize
+  // Read previous ZIP sizes from StoredFile registry
+  const [prevFull, prevSocial] = await Promise.all([
+    prisma.storedFile.findUnique({ where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_FULL' } }, select: { fileSize: true } }),
+    prisma.storedFile.findUnique({ where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_SOCIAL' } }, select: { fileSize: true } }),
+  ])
+  const prevFullSize = prevFull?.fileSize ?? BigInt(0)
+  const prevSocialSize = prevSocial?.fileSize ?? BigInt(0)
+
+  const deltaFull = actualFull - prevFullSize
+  const deltaSocial = actualSocial - prevSocialSize
 
   if (deltaFull === BigInt(0) && deltaSocial === BigInt(0)) return
 
-  await prisma.album.update({
-    where: { id: albumId },
-    data: {
-      fullZipFileSize: actualFull,
-      socialZipFileSize: actualSocial,
-    },
-  })
+  // Update StoredFile (legacy Album columns dropped)
+  await Promise.all([
+    prisma.storedFile.upsert({
+      where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_FULL' } },
+      create: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_FULL',
+        storagePath: getAlbumZipPaths(album).full, fileSize: actualFull, status: 'READY' },
+      update: { fileSize: actualFull },
+    }),
+    prisma.storedFile.upsert({
+      where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_SOCIAL' } },
+      create: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_SOCIAL',
+        storagePath: getAlbumZipPaths(album).social, fileSize: actualSocial, status: 'READY' },
+      update: { fileSize: actualSocial },
+    }),
+  ])
 
   await adjustProjectTotalBytes(projectId, deltaFull + deltaSocial)
 }
@@ -130,13 +141,10 @@ export async function reconcileAllAlbumZipSizes(
       projectId: true,
       name: true,
       storageFolderName: true,
-      fullZipFileSize: true,
-      socialZipFileSize: true,
       project: {
-        select: {
-          storagePath: true,
-          title: true,
+        select: { title: true,
           companyName: true,
+          storagePath: true,
           client: { select: { name: true } },
         },
       },
@@ -146,17 +154,28 @@ export async function reconcileAllAlbumZipSizes(
   let updatedCount = 0
   await asyncPool(4, albums, async (album) => {
     const { actualFull, actualSocial } = await resolveAlbumZipSizes(album)
-    if (actualFull === album.fullZipFileSize && actualSocial === album.socialZipFileSize) {
+
+    const [prevFull, prevSocial] = await Promise.all([
+      prismaClient.storedFile.findUnique({ where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_FULL' } }, select: { fileSize: true } }),
+      prismaClient.storedFile.findUnique({ where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_SOCIAL' } }, select: { fileSize: true } }),
+    ])
+    if ((prevFull?.fileSize ?? BigInt(0)) === actualFull && (prevSocial?.fileSize ?? BigInt(0)) === actualSocial) {
       return
     }
 
-    await prismaClient.album.update({
-      where: { id: album.id },
-      data: {
-        fullZipFileSize: actualFull,
-        socialZipFileSize: actualSocial,
-      },
-    })
+    const zipPaths = getAlbumZipPaths(album)
+    await Promise.all([
+      prismaClient.storedFile.upsert({
+        where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_FULL' } },
+        create: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_FULL', storagePath: zipPaths.full, fileSize: actualFull, status: 'READY' },
+        update: { fileSize: actualFull },
+      }),
+      prismaClient.storedFile.upsert({
+        where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_SOCIAL' } },
+        create: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_SOCIAL', storagePath: zipPaths.social, fileSize: actualSocial, status: 'READY' },
+        update: { fileSize: actualSocial },
+      }),
+    ])
     updatedCount++
   })
 

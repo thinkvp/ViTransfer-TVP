@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
+import { deleteStoredFile } from '@/lib/stored-file'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })
 
   await deleteFile(fullZipPath).catch(() => {})
+  await deleteStoredFile('ALBUM', album.id, 'ZIP_FULL').catch(() => {})
 
   if (album.socialCopiesEnabled) {
     const socialZipPath = getAlbumZipStoragePath({
@@ -95,6 +97,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       variant: 'social',
     })
     await deleteFile(socialZipPath).catch(() => {})
+    await deleteStoredFile('ALBUM', album.id, 'ZIP_SOCIAL').catch(() => {})
   }
 
   await prisma.album.update({

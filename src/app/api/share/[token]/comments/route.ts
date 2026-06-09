@@ -4,6 +4,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
+import { batchResolveFileSizes } from '@/lib/stored-file'
 import { getRateLimitSettings } from '@/lib/settings'
 export const runtime = 'nodejs'
 
@@ -97,7 +98,6 @@ export async function GET(
             username: true,
             email: true,
             displayColor: true,
-            avatarPath: true,
           }
         },
         recipient: {
@@ -110,7 +110,6 @@ export async function GET(
           select: {
             id: true,
             fileName: true,
-            fileSize: true,
           }
         },
         replies: {
@@ -122,7 +121,6 @@ export async function GET(
                 username: true,
                 email: true,
                 displayColor: true,
-                avatarPath: true,
               }
             },
             recipient: {
@@ -135,7 +133,6 @@ export async function GET(
               select: {
                 id: true,
                 fileName: true,
-                fileSize: true,
               }
             }
           },
@@ -144,6 +141,28 @@ export async function GET(
       },
       orderBy: { createdAt: 'asc' }
     })
+
+    // Resolve comment file sizes from StoredFile (CommentFile model has no fileSize column)
+    const allFileIds: string[] = []
+    for (const comment of comments as any[]) {
+      for (const f of (comment.files || [])) allFileIds.push(f.id)
+      for (const reply of (comment.replies || [])) {
+        for (const f of (reply.files || [])) allFileIds.push(f.id)
+      }
+    }
+    const commentFileSizeMap = await batchResolveFileSizes('COMMENT_FILE', allFileIds)
+
+    // Attach resolved sizes to each file object
+    for (const comment of comments as any[]) {
+      for (const f of (comment.files || [])) {
+        f.fileSize = commentFileSizeMap.get(f.id) ?? 0
+      }
+      for (const reply of (comment.replies || [])) {
+        for (const f of (reply.files || [])) {
+          f.fileSize = commentFileSizeMap.get(f.id) ?? 0
+        }
+      }
+    }
 
     // Sanitize comments - never expose PII to non-admins
     const sanitizedComments = comments.map((comment: any) => sanitizeComment(

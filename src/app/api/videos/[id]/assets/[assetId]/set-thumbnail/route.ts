@@ -4,6 +4,7 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
+import { getStoredFilePath } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 
@@ -85,12 +86,10 @@ export async function POST(
         video.versionLabel || `v${video.version}`,
       )
 
-      await prisma.video.update({
-        where: { id: videoId },
-        data: {
-          thumbnailPath: systemThumbnailPath,
-        },
-      })
+      // Delete custom thumbnail from StoredFile, reverting to system-generated
+      await prisma.storedFile.delete({
+        where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL' } },
+      }).catch(() => {})
 
       return NextResponse.json({
         success: true,
@@ -134,13 +133,15 @@ export async function POST(
       )
     }
 
-    // Update video thumbnail path to point to this asset
-    await prisma.video.update({
-      where: { id: videoId },
-      data: {
-        thumbnailPath: asset.storagePath,
-      },
-    })
+    // Update StoredFile thumbnail path (Video.thumbnailPath column dropped)
+    const assetStoragePath = await getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL')
+    if (assetStoragePath) {
+      await prisma.storedFile.upsert({
+        where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL' } },
+        create: { entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL', storagePath: assetStoragePath, status: 'READY' },
+        update: { storagePath: assetStoragePath, status: 'READY' },
+      })
+    }
 
     return NextResponse.json({
       success: true,

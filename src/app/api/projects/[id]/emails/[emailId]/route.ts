@@ -7,6 +7,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { deleteDirectory, deleteFile, pruneEmptyParentDirectories } from '@/lib/storage'
 import { sanitizeEmailHtml } from '@/lib/security/email-html-sanitization'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { getStoredFilePath } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 const MAX_EMAIL_HTML_FOR_CID_REWRITE_CHARS = 250_000
@@ -104,7 +105,6 @@ export async function GET(
         select: {
           id: true,
           fileName: true,
-          fileSize: true,
           fileType: true,
           isInline: true,
           contentId: true,
@@ -115,6 +115,19 @@ export async function GET(
   })
 
   if (!email) return NextResponse.json({ error: 'Email not found' }, { status: 404 })
+
+  // Resolve attachment sizes from StoredFile (legacy fileSize column dropped)
+  const attachmentIds = email.attachments.map(a => a.id)
+  const attachSizeMap = new Map<string, number>()
+  if (attachmentIds.length > 0) {
+    const stored = await prisma.storedFile.findMany({
+      where: { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: attachmentIds }, fileRole: 'ORIGINAL' },
+      select: { entityId: true, fileSize: true },
+    })
+    for (const s of stored) {
+      if (s.fileSize != null) attachSizeMap.set(s.entityId, Number(s.fileSize))
+    }
+  }
 
   const sanitizedHtml = (() => {
     if (!email.htmlBody) return null
@@ -147,8 +160,8 @@ export async function GET(
       attachments: email.attachments.map((a) => ({
         id: a.id,
         fileName: a.fileName,
-        fileSize: a.fileSize.toString(),
         fileType: a.fileType,
+        fileSize: String(attachSizeMap.get(a.id) ?? 0),
         isInline: a.isInline,
         contentId: a.contentId,
         createdAt: a.createdAt,
@@ -191,18 +204,31 @@ export async function DELETE(
     where: { id: emailId, projectId },
     select: {
       id: true,
-      rawStoragePath: true,
-      attachments: { select: { id: true, storagePath: true } },
+      attachments: { select: { id: true } },
     },
   })
 
   if (!email) return NextResponse.json({ error: 'Email not found' }, { status: 404 })
 
-  const rawDirectoryPath = path.posix.dirname(email.rawStoragePath)
+  // Get paths from StoredFile
+  const emailStored = await prisma.storedFile.findFirst({
+    where: { entityType: 'PROJECT_EMAIL', entityId: emailId, fileRole: 'RAW_EMAIL' },
+    select: { storagePath: true },
+  })
+  const attachmentIds = email.attachments.map(a => a.id)
+  const attachmentStored = attachmentIds.length > 0
+    ? await prisma.storedFile.findMany({
+        where: { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: attachmentIds } },
+        select: { storagePath: true },
+      })
+    : []
+
+  const rawStoragePath = emailStored?.storagePath ?? ''
+  const rawDirectoryPath = path.posix.dirname(rawStoragePath)
   const projectStoragePath = path.posix.dirname(path.posix.dirname(rawDirectoryPath))
   const attachmentDirectoryPaths = Array.from(new Set(
-    email.attachments
-      .map((attachment) => attachment.storagePath)
+    attachmentStored
+      .map(s => s.storagePath)
       .filter(Boolean)
       .map((storagePath) => path.posix.dirname(storagePath))
   ))
@@ -215,12 +241,10 @@ export async function DELETE(
 
   await recalculateAndStoreProjectTotalBytes(projectId)
 
-  // Best-effort storage cleanup
+  // Best-effort storage cleanup via StoredFile
   try {
-    await deleteFile(email.rawStoragePath)
-  } catch {
-    // ignore
-  }
+    await deleteFile(rawStoragePath)
+  } catch {}
 
   try {
     await pruneEmptyParentDirectories(toLocalStoragePath(rawDirectoryPath), toLocalStoragePath(projectStoragePath))
@@ -228,12 +252,8 @@ export async function DELETE(
     // ignore
   }
 
-  for (const att of email.attachments) {
-    try {
-      await deleteFile(att.storagePath)
-    } catch {
-      // ignore
-    }
+  for (const sf of attachmentStored) {
+    try { await deleteFile(sf.storagePath) } catch {}
   }
 
   for (const attachmentDirectoryPath of attachmentDirectoryPaths) {

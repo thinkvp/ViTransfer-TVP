@@ -433,7 +433,6 @@ export async function fetchProjectComments(projectId: string) {
           username: true,
           email: true,
           displayColor: true,
-          avatarPath: true,
         }
       },
       recipient: {
@@ -445,9 +444,7 @@ export async function fetchProjectComments(projectId: string) {
       files: {
         select: {
           id: true,
-          fileName: true,
-          fileSize: true,
-        },
+          fileName: true },
       },
       replies: {
         include: {
@@ -458,7 +455,6 @@ export async function fetchProjectComments(projectId: string) {
               username: true,
               email: true,
               displayColor: true,
-              avatarPath: true,
             }
           },
           recipient: {
@@ -470,9 +466,7 @@ export async function fetchProjectComments(projectId: string) {
           files: {
             select: {
               id: true,
-              fileName: true,
-              fileSize: true,
-            },
+              fileName: true },
           },
         },
         orderBy: { createdAt: 'asc' }

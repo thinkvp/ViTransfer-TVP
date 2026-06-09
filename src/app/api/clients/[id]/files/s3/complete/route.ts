@@ -101,15 +101,19 @@ export async function POST(
     data: {
       clientId,
       fileName,
-      fileSize: BigInt(fileSize),
       fileType: resolvedFileType,
-      storagePath: key,
       category: resolvedCategory,
       uploadedBy: currentUser.id,
       uploadedByName: currentUser.name || currentUser.email,
     },
     select: { id: true },
   })
+
+  // Register in StoredFile
+  await prisma.storedFile.create({ data: {
+    entityType: 'CLIENT_FILE', entityId: record.id, fileRole: 'ORIGINAL',
+    storagePath: key, fileName, fileSize: BigInt(fileSize),
+  } })
 
   const { getClientFileQueue } = await import('@/lib/queue')
   const q = getClientFileQueue()

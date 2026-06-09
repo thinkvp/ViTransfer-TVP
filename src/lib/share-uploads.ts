@@ -10,7 +10,6 @@ export interface ShareUploadProjectContext {
   authMode: string
   allowClientUploadFiles: boolean
   maxClientUploadAllocationMB: number
-  storagePath: string | null
   title: string | null
   companyName: string | null
   clientName: string | null
@@ -27,8 +26,7 @@ export interface ShareUploadAccessContext {
 }
 
 export function resolveProjectStoragePath(project: ShareUploadProjectContext): string {
-  return project.storagePath
-    || buildProjectStorageRoot(project.clientName || project.companyName || 'Client', project.title || 'Untitled')
+  return buildProjectStorageRoot(project.clientName || project.companyName || 'Client', project.title || 'Untitled')
 }
 
 export async function resolveShareUploadAccess(
@@ -42,9 +40,7 @@ export async function resolveShareUploadAccess(
       sharePassword: true,
       authMode: true,
       allowClientUploadFiles: true,
-      maxClientUploadAllocationMB: true,
-      storagePath: true,
-      title: true,
+      maxClientUploadAllocationMB: true, title: true,
       companyName: true,
       client: { select: { name: true } },
     },
@@ -71,7 +67,6 @@ export async function resolveShareUploadAccess(
       authMode: project.authMode,
       allowClientUploadFiles: project.allowClientUploadFiles,
       maxClientUploadAllocationMB: project.maxClientUploadAllocationMB,
-      storagePath: project.storagePath,
       title: project.title,
       companyName: project.companyName,
       clientName: project.client?.name || null,

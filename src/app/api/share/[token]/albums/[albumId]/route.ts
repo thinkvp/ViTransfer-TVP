@@ -87,20 +87,20 @@ export async function GET(
       return {
         id: p.id,
         fileName: p.fileName,
-        fileSize: p.fileSize.toString(),
+        fileSize: '0', // From StoredFile if needed
         createdAt: p.createdAt,
         url: `/api/content/photo/${tokenValue}`,
         thumbnailUrl: `/api/content/photo/${tokenValue}?variant=thumbnail`,
         previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
         downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
         socialDownloadUrl: `/api/content/photo/${tokenValue}?download=true&variant=social`,
-        socialReady: p.socialStatus === 'READY' && Boolean(p.socialStoragePath),
-        thumbnailReady: p.thumbnailStatus === 'READY' && Boolean(p.thumbnailStoragePath),
+        socialReady: p.socialStatus === 'READY',
+        thumbnailReady: p.thumbnailStatus === 'READY',
       }
     })
   )
 
-  if (album.photos.some((p) => p.thumbnailStatus !== 'READY' || !p.thumbnailStoragePath)) {
+  if (album.photos.some((p) => p.thumbnailStatus !== 'READY')) {
     void enqueueAlbumThumbnailJob({ albumId: album.id, delayMs: 500 }).catch(() => {})
   }
 

@@ -8,6 +8,7 @@ import { logSecurityEvent } from '@/lib/video-access'
 import archiver from 'archiver'
 import { PassThrough, Readable } from 'stream'
 import { failTrackedDownloadNow, registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
+import { getStoredFilePath } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -109,7 +110,9 @@ export async function GET(
     // Add files to archive
     for (const asset of assets) {
       try {
-        const fileStream = await downloadFile(asset.storagePath)
+        const assetPath = await getStoredFilePath('VIDEO_ASSET', asset.id, 'ORIGINAL')
+        if (!assetPath) continue
+        const fileStream = await downloadFile(assetPath)
         archive.append(fileStream, { name: asset.fileName })
       } catch (error) {
         console.error(`Error adding file ${asset.fileName} to archive:`, error)

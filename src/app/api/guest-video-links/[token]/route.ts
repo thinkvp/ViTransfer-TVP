@@ -7,6 +7,7 @@ import { getClientIpAddress } from '@/lib/utils'
 import { getRedis } from '@/lib/redis'
 import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
+import { getStoredFilePath } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -58,13 +59,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           versionLabel: true,
           status: true,
           approved: true,
-          preview480Path: true,
-          preview720Path: true,
-          preview1080Path: true,
-          thumbnailPath: true,
           timelinePreviewsReady: true,
-          timelinePreviewVttPath: true,
-          timelinePreviewSpritesPath: true,
         },
       },
     },
@@ -92,6 +87,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const sessionId = `guest-video-link:${link.token}`
+
+  // Resolve preview existence from StoredFile (legacy path columns have been dropped)
+  const thumbnailPath = await getStoredFilePath('VIDEO', link.video.id, 'THUMBNAIL').catch(() => null)
+  const hasThumbnail = !!thumbnailPath
 
   // Best-effort internal user detection: skip analytics/notifications when an
   // internal user is testing the link from the same IP they last logged in from.
@@ -157,25 +156,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   // Build tokenized URLs (mirrors /share/* behavior but for a single video and public access).
+  // Preview existence is resolved at content-delivery time via StoredFile.
   const wantTimeline = Boolean(link.project.timelinePreviewsEnabled) && Boolean(link.video.timelinePreviewsReady)
 
   const [token480, token720, token1080, thumbToken, vttToken, spriteToken] = await Promise.all([
-    link.video.preview480Path
-      ? generateVideoAccessToken(link.video.id, link.project.id, '480p', request, sessionId).catch(() => '')
-      : Promise.resolve(''),
-    link.video.preview720Path
-      ? generateVideoAccessToken(link.video.id, link.project.id, '720p', request, sessionId).catch(() => '')
-      : Promise.resolve(''),
-    link.video.preview1080Path
-      ? generateVideoAccessToken(link.video.id, link.project.id, '1080p', request, sessionId).catch(() => '')
-      : Promise.resolve(''),
-    link.video.thumbnailPath
-      ? generateVideoAccessToken(link.video.id, link.project.id, 'thumbnail', request, sessionId).catch(() => '')
-      : Promise.resolve(''),
-    wantTimeline && Boolean(link.video.timelinePreviewVttPath)
+    generateVideoAccessToken(link.video.id, link.project.id, '480p', request, sessionId).catch(() => ''),
+    generateVideoAccessToken(link.video.id, link.project.id, '720p', request, sessionId).catch(() => ''),
+    generateVideoAccessToken(link.video.id, link.project.id, '1080p', request, sessionId).catch(() => ''),
+    generateVideoAccessToken(link.video.id, link.project.id, 'thumbnail', request, sessionId).catch(() => ''),
+    wantTimeline
       ? generateVideoAccessToken(link.video.id, link.project.id, 'timeline-vtt', request, sessionId).catch(() => '')
       : Promise.resolve(''),
-    wantTimeline && Boolean(link.video.timelinePreviewSpritesPath)
+    wantTimeline
       ? generateVideoAccessToken(link.video.id, link.project.id, 'timeline-sprite', request, sessionId).catch(() => '')
       : Promise.resolve(''),
   ])
@@ -195,7 +187,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       version: link.video.version,
       versionLabel: link.video.versionLabel,
       approved: link.video.approved,
-      hasThumbnail: Boolean(link.video.thumbnailPath),
+      hasThumbnail,
       timelinePreviewsReady: link.video.timelinePreviewsReady,
       streamUrl480p: token480 ? `/api/content/${token480}` : '',
       streamUrl720p: token720 ? `/api/content/${token720}` : '',

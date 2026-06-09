@@ -150,7 +150,7 @@ export async function POST(
       )
     }
 
-    // Get all requested assets
+    // Get all requested assets with their StoredFile records
     const assets = await prisma.videoAsset.findMany({
       where: {
         id: { in: assetIds },
@@ -162,6 +162,18 @@ export async function POST(
       return NextResponse.json({ error: 'No valid assets found' }, { status: 404 })
     }
 
+    // Batch-load StoredFile for all assets
+    const assetStoredFiles = await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO_ASSET', entityId: { in: assets.map(a => a.id) } },
+      select: { entityId: true, fileRole: true, storagePath: true, fileSize: true },
+    })
+    const storedByAsset = new Map<string, Map<string, { path: string; size: bigint | null }>>()
+    for (const sf of assetStoredFiles) {
+      let map = storedByAsset.get(sf.entityId)
+      if (!map) { map = new Map(); storedByAsset.set(sf.entityId, map) }
+      map.set(sf.fileRole, { path: sf.storagePath, size: sf.fileSize })
+    }
+
     // Resolve project and target version path components
     const clientName = project.client?.name || project.companyName || 'Client'
     const projectStoragePath =
@@ -169,8 +181,8 @@ export async function POST(
       buildProjectStorageRoot(clientName, project.title)
     const targetVideoFolderName = targetVideo.storageFolderName || targetVideo.name
     const targetVersionLabel = targetVideo.versionLabel || `v${targetVideo.version}`
-    const targetExistingAssets = await prisma.videoAsset.findMany({
-      where: { videoId: targetVideoId },
+    const targetExistingAssets = await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO_ASSET', entityId: { in: (await prisma.videoAsset.findMany({ where: { videoId: targetVideoId }, select: { id: true } })).map(a => a.id) } },
       select: { storagePath: true },
     })
     const reservedStorageNames = new Set(
@@ -182,6 +194,11 @@ export async function POST(
     // Physically copy each asset file to the target version's assets folder
     const copiedAssets = [] as Array<unknown>
     for (const asset of assets) {
+      const stored = storedByAsset.get(asset.id)
+      const originalStored = stored?.get('ORIGINAL')
+      const sourcePath = originalStored?.path
+      if (!sourcePath) continue // Skip assets without registered original path
+
       const uniqueStorageFileName = allocateUniqueStorageName(asset.fileName, reservedStorageNames)
       reservedStorageNames.add(uniqueStorageFileName)
 
@@ -197,9 +214,9 @@ export async function POST(
       const newStoragePath = targetLocalRelPath
 
       await copyLogicalFile(
-        asset.storagePath,
+        sourcePath,
         newStoragePath,
-        Number(asset.fileSize),
+        originalStored.size != null ? Number(originalStored.size) : 0,
         asset.fileType || 'application/octet-stream',
       )
 
@@ -209,17 +226,21 @@ export async function POST(
       const isImageAsset = normalizedType.startsWith('image/')
       let newPreviewPath: string | null = null
       let newPreviewStatus: string | null = null
-      let newPreviewError: string | null = null
-      let newPreviewGeneratedAt = null
-      let newPreviewFileSize = null
+      let newPreviewGeneratedAt: Date | null = null
+      let newPreviewFileSize: bigint | null = null
 
-      if (hasReadyPreview && asset.previewPath) {
-        if (isVideoAsset && asset.previewPath.toLowerCase().endsWith('.mp4')) {
+      const previewMp4 = stored?.get('PREVIEW_MP4')
+      const previewImage = stored?.get('PREVIEW_IMAGE')
+      const previewStored = previewMp4 || previewImage
+      const previewSourcePath = previewStored?.path
+
+      if (hasReadyPreview && previewSourcePath) {
+        if (isVideoAsset && previewMp4) {
           const sourceCompanionPreviewPath = buildVideoAssetPreviewStoragePath(
             projectStoragePath,
             sourceVideo.storageFolderName || sourceVideo.name,
             sourceVideo.versionLabel || `v${sourceVideo.version}`,
-            asset.storagePath,
+            sourcePath,
             '.jpg',
           )
           const targetCompanionPreviewPath = buildVideoAssetPreviewStoragePath(
@@ -238,9 +259,9 @@ export async function POST(
           )
 
           await copyLogicalFile(
-            asset.previewPath,
+            previewSourcePath,
             targetPlaybackPreviewPath,
-            asset.previewFileSize != null ? Number(asset.previewFileSize) : await getLogicalFileSize(asset.previewPath),
+            previewMp4.size != null ? Number(previewMp4.size) : await getLogicalFileSize(previewSourcePath),
             'video/mp4',
           )
           await copyLogicalFile(
@@ -253,8 +274,8 @@ export async function POST(
           newPreviewPath = targetPlaybackPreviewPath
           newPreviewStatus = 'READY'
           newPreviewGeneratedAt = asset.previewGeneratedAt
-          newPreviewFileSize = asset.previewFileSize
-        } else if (isImageAsset || asset.previewPath) {
+          newPreviewFileSize = previewMp4.size ?? null
+        } else if (isImageAsset || previewSourcePath) {
           const targetImagePreviewPath = buildVideoAssetPreviewStoragePath(
             projectStoragePath,
             targetVideoFolderName,
@@ -264,38 +285,60 @@ export async function POST(
           )
 
           await copyLogicalFile(
-            asset.previewPath,
+            previewSourcePath,
             targetImagePreviewPath,
-            asset.previewFileSize != null ? Number(asset.previewFileSize) : await getLogicalFileSize(asset.previewPath),
+            previewStored.size != null ? Number(previewStored.size) : await getLogicalFileSize(previewSourcePath),
             'image/jpeg',
           )
 
           newPreviewPath = targetImagePreviewPath
           newPreviewStatus = 'READY'
           newPreviewGeneratedAt = asset.previewGeneratedAt
-          newPreviewFileSize = asset.previewFileSize != null
-            ? asset.previewFileSize
-            : BigInt(await getLogicalFileSize(asset.previewPath))
+          newPreviewFileSize = previewStored.size != null
+            ? previewStored.size
+            : BigInt(await getLogicalFileSize(previewSourcePath))
         }
       }
 
-      // Create the new asset DB record pointing to the copied file
-      copiedAssets.push(await prisma.videoAsset.create({
+      // Create the new asset DB record — register original file via StoredFile
+      const newAsset = await prisma.videoAsset.create({
         data: {
           videoId: targetVideoId,
           fileName: asset.fileName,
-          fileSize: asset.fileSize,
           fileType: asset.fileType,
-          storagePath: newStoragePath,
           category: asset.category,
           uploadedByName: asset.uploadedByName,
-          previewPath: newPreviewPath,
           previewStatus: newPreviewStatus,
-          previewError: newPreviewError,
           previewGeneratedAt: newPreviewGeneratedAt,
-          previewFileSize: newPreviewFileSize,
         },
-      }))
+      })
+
+      // Register original and preview files in StoredFile
+      await prisma.storedFile.create({
+        data: {
+          entityType: 'VIDEO_ASSET',
+          entityId: newAsset.id,
+          fileRole: 'ORIGINAL',
+          storagePath: newStoragePath,
+          fileName: asset.fileName,
+          fileSize: originalStored.size ?? BigInt(0),
+        },
+      })
+      if (newPreviewPath) {
+        const previewRole = normalizedType.startsWith('video/') ? 'PREVIEW_MP4' as const : 'PREVIEW_IMAGE' as const
+        await prisma.storedFile.create({
+          data: {
+            entityType: 'VIDEO_ASSET',
+            entityId: newAsset.id,
+            fileRole: previewRole,
+            storagePath: newPreviewPath,
+            fileName: asset.fileName,
+            fileSize: newPreviewFileSize ?? BigInt(0),
+          },
+        })
+      }
+
+      copiedAssets.push(newAsset)
     }
 
     await Promise.allSettled([

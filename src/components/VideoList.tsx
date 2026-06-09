@@ -473,11 +473,11 @@ export default function VideoList({
                   title="Download video"
                   className="text-sm font-medium text-foreground hover:underline flex-1 min-w-0 truncate text-left disabled:opacity-50"
                 >
-                  {video.originalFileName}
+                  {(video as any).originalFileName || video.name}
                 </button>
               ) : (
-                <p className="text-sm text-muted-foreground flex-1 min-w-0 truncate" title={video.originalFileName}>
-                  {video.originalFileName}
+                <p className="text-sm text-muted-foreground flex-1 min-w-0 truncate" title={(video as any).originalFileName || video.name}>
+                  {(video as any).originalFileName || video.name}
                 </p>
               )}
 
@@ -584,7 +584,7 @@ export default function VideoList({
                 </div>
                 <div>
                   <p className="text-muted-foreground">Size</p>
-                  <p className="font-medium">{formatFileSize(Number(video.originalFileSize))}</p>
+                  <p className="font-medium">{formatFileSize(Number((video as any).originalFileSize || 0))}</p>
                 </div>
                 <div className="sm:hidden">
                   <p className="text-muted-foreground">Downloads</p>

@@ -33,6 +33,38 @@ import {
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildAlbumZipStoragePath, buildAlbumPhotoPreviewStoragePath, buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
+import { getAllStoredPaths, type EntityType, type FileRole } from '@/lib/stored-file'
+
+// ---------------------------------------------------------------------------
+// StoredFile-backed key collectors
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect FileEntry records from StoredFile for given entity types and file roles.
+ * Replaces per-entity-table queries used previously in collectKeysForCategory.
+ * Paginates through StoredFile to avoid loading all rows into memory.
+ */
+async function collectStoredKeys(
+  entityTypes: EntityType[],
+  fileRoles: FileRole[],
+): Promise<FileEntry[]> {
+  const entries: FileEntry[] = []
+  const etSet = new Set(entityTypes)
+  const frSet = new Set(fileRoles)
+
+  let cursor: string | undefined
+  do {
+    const page = await getAllStoredPaths({ cursor, take: 5000 })
+    for (const entry of page.items) {
+      if (!entry.storagePath || !etSet.has(entry.entityType) || !frSet.has(entry.fileRole)) continue
+      const key = normalizeKey(entry.storagePath)
+      if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
+    }
+    cursor = page.nextCursor
+  } while (cursor)
+
+  return entries
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -178,7 +210,8 @@ interface FileEntry {
 
 /** Accounting paths: S3 key `accounting/{rel}` → local `ACCOUNTING_STORAGE_ROOT/{rel}` */
 async function collectAccountingKeys(): Promise<FileEntry[]> {
-  const rows = await prisma.accountingAttachment.findMany({
+  const rows = await prisma.storedFile.findMany({
+    where: { entityType: 'ACCOUNTING_ATTACHMENT' as any },
     select: { storagePath: true },
   })
   const entries: FileEntry[] = []
@@ -196,27 +229,17 @@ async function collectAccountingKeys(): Promise<FileEntry[]> {
   return entries
 }
 
-/** Collect S3 keys for timeline sprites by listing the S3 prefix for each video, asset, and upload. */
+/** Collect S3 keys for timeline sprites from StoredFile registry. */
 async function collectTimelineSpriteKeys(client: ReturnType<typeof getS3Client>, bucket: string): Promise<FileEntry[]> {
-  const [videos, assets, uploads] = await Promise.all([
-    prisma.video.findMany({
-      select: { timelinePreviewSpritesPath: true },
-      where: { timelinePreviewSpritesPath: { not: null } },
-    }),
-    prisma.videoAsset.findMany({
-      select: { timelinePreviewSpritesPath: true },
-      where: { timelinePreviewSpritesPath: { not: null } },
-    }),
-    prisma.shareUploadFile.findMany({
-      select: { timelinePreviewSpritesPath: true },
-      where: { timelinePreviewSpritesPath: { not: null } },
-    }),
-  ])
-  const allPrefixes = [
-    ...videos.map(v => v.timelinePreviewSpritesPath),
-    ...assets.map(a => a.timelinePreviewSpritesPath),
-    ...uploads.map(u => u.timelinePreviewSpritesPath),
-  ]
+  const allPrefixes: string[] = []
+  let cursor: string | undefined
+  do {
+    const page = await getAllStoredPaths({ cursor, take: 5000 })
+    for (const e of page.items) {
+      if (e.fileRole === 'TIMELINE_SPRITES' && e.storagePath) allPrefixes.push(e.storagePath)
+    }
+    cursor = page.nextCursor
+  } while (cursor)
   const entries: FileEntry[] = []
   for (const spritesPath of allPrefixes) {
     const prefix = normalizeKey(spritesPath)
@@ -235,17 +258,14 @@ async function collectTimelineSpriteKeys(client: ReturnType<typeof getS3Client>,
 /** Collect album preview photo paths (derived from storagePath — low-res previews used in album viewer). */
 async function collectAlbumPhotoPreviewKeys(): Promise<FileEntry[]> {
   const photos = await prisma.albumPhoto.findMany({
-    select: {
-      storagePath: true,
-      album: {
+    select: { id: true, album: {
         select: {
           name: true,
           storageFolderName: true,
           project: {
-            select: {
-              storagePath: true,
-              title: true,
+            select: { title: true,
               companyName: true,
+              storagePath: true,
               client: { select: { name: true } },
             },
           },
@@ -253,9 +273,21 @@ async function collectAlbumPhotoPreviewKeys(): Promise<FileEntry[]> {
       },
     },
   })
+
+  // Batch-load StoredFile paths for all photos
+  const photoIds = photos.map(p => p.id)
+  const storedPaths = new Map<string, string>()
+  if (photoIds.length > 0) {
+    const stored = await prisma.storedFile.findMany({
+      where: { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds }, fileRole: 'ORIGINAL' },
+      select: { entityId: true, storagePath: true },
+    })
+    for (const s of stored) storedPaths.set(s.entityId, s.storagePath)
+  }
+
   const entries: FileEntry[] = []
   for (const photo of photos) {
-    const base = normalizeKey(photo.storagePath)
+    const base = storedPaths.get(photo.id)
     if (!base) continue
     const projectPath = photo.album.project.storagePath
       || buildProjectStorageRoot(photo.album.project.client?.name || photo.album.project.companyName || 'Client', photo.album.project.title)
@@ -307,179 +339,65 @@ async function collectKeysForCategory(
   bucket: string,
 ): Promise<FileEntry[]> {
   switch (category) {
-    case 'originalVideosBytes': {
-      const rows = await prisma.video.findMany({ select: { originalStoragePath: true } })
-      return rows.flatMap((r) => {
-        const key = normalizeKey(r.originalStoragePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-    }
+    case 'originalVideosBytes':
+      return collectStoredKeys(['VIDEO'], ['ORIGINAL'])
 
     case 'videoPreviewsBytes': {
-      const rows = await prisma.video.findMany({
-        select: {
-          preview480Path: true,
-          preview720Path: true,
-          preview1080Path: true,
-          thumbnailPath: true,
-          timelinePreviewVttPath: true,
-          timelinePreviewSpritesPath: true,
-        },
-      })
-      const assetRows = await prisma.videoAsset.findMany({
-        select: {
-          storagePath: true,
-          fileType: true,
-          previewPath: true,
-          video: {
-            select: {
-              storageFolderName: true,
-              name: true,
-              versionLabel: true,
-              project: {
-                select: {
-                  storagePath: true,
-                  title: true,
-                  companyName: true,
-                  client: { select: { name: true } },
-                },
-              },
-            },
-          },
-        },
-      })
-      const entries: FileEntry[] = []
-      for (const r of rows) {
-        for (const raw of [r.preview480Path, r.preview720Path, r.preview1080Path, r.thumbnailPath, r.timelinePreviewVttPath]) {
-          const key = normalizeKey(raw)
-          if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
-        }
-      }
-      for (const asset of assetRows) {
-        const key = normalizeKey(asset.previewPath)
-        if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
-
-        if (String(asset.fileType || '').toLowerCase().startsWith('video/')) {
-          const projectStoragePath = asset.video.project.storagePath
-            || buildProjectStorageRoot(asset.video.project.client?.name || asset.video.project.companyName || 'Client', asset.video.project.title)
-          const jpgPath = buildVideoAssetPreviewStoragePath(
-            projectStoragePath,
-            asset.video.storageFolderName || asset.video.name,
-            asset.video.versionLabel,
-            asset.storagePath,
-            '.jpg',
-          )
-          const jpgKey = normalizeKey(jpgPath)
-          if (jpgKey) entries.push({ key: jpgKey, localPath: path.join(STORAGE_ROOT, jpgKey) })
-        }
-      }
-      // Sprite sheets are stored as a directory prefix
+      const entries = await collectStoredKeys(
+        ['VIDEO', 'VIDEO_ASSET'],
+        ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'PREVIEW_IMAGE', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
+      )
+      // Sprite sheets are stored as a directory prefix; enumerate actual files from S3
       const spriteEntries = await collectTimelineSpriteKeys(client, bucket)
       return [...entries, ...spriteEntries]
     }
 
-    case 'videoAssetsBytes': {
-      const rows = await prisma.videoAsset.findMany({ select: { storagePath: true } })
-      return rows.flatMap((r) => {
-        const key = normalizeKey(r.storagePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-    }
+    case 'videoAssetsBytes':
+      return collectStoredKeys(['VIDEO_ASSET'], ['ORIGINAL'])
 
-    case 'commentAttachmentsBytes': {
-      const rows = await prisma.commentFile.findMany({ select: { storagePath: true } })
-      return rows.flatMap((r) => {
-        const key = normalizeKey(r.storagePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-    }
+    case 'commentAttachmentsBytes':
+      return collectStoredKeys(['COMMENT_FILE'], ['ORIGINAL'])
 
     case 'uploadsFilesBytes': {
-      const [files, folders] = await Promise.all([
-        prisma.shareUploadFile.findMany({ select: { storagePath: true } }),
-        prisma.shareUploadFolder.findMany({ select: { storagePath: true } }),
-      ])
-      const fileEntries = files.flatMap((row) => {
-        const key = normalizeKey(row.storagePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-      const markerEntries = folders.flatMap((row) => {
-        const folderKey = normalizeKey(row.storagePath)
-        if (!folderKey) return []
+      const entries = await collectStoredKeys(['SHARE_UPLOAD_FILE'], ['ORIGINAL'])
+      // Upload folder markers are not in StoredFile
+      const folders = await prisma.shareUploadFolder.findMany({ select: { storagePath: true } })
+      for (const folder of folders) {
+        const folderKey = normalizeKey(folder.storagePath)
+        if (!folderKey) continue
         const markerKey = normalizeKey(`${folderKey}/${UPLOAD_FOLDER_MARKER}`)
-        return markerKey ? [{ key: markerKey, localPath: path.join(STORAGE_ROOT, markerKey) }] : []
-      })
-      return [...fileEntries, ...markerEntries]
-    }
-
-    case 'originalPhotosBytes': {
-      const rows = await prisma.albumPhoto.findMany({ select: { storagePath: true } })
-      return rows.flatMap((r) => {
-        const key = normalizeKey(r.storagePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-    }
-
-    case 'photoZipBytes': {
-      // Social resized copies, album photo previews, and album ZIP archives
-      const photoRows = await prisma.albumPhoto.findMany({ select: { socialStoragePath: true, thumbnailStoragePath: true } })
-      const socialEntries: FileEntry[] = photoRows.flatMap((r) => {
-        const key = normalizeKey(r.socialStoragePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-      const thumbnailEntries: FileEntry[] = photoRows.flatMap((r) => {
-        const key = normalizeKey(r.thumbnailStoragePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-      const previewEntries = await collectAlbumPhotoPreviewKeys()
-      const zipEntries = await collectAlbumZipKeys()
-      return [...socialEntries, ...thumbnailEntries, ...previewEntries, ...zipEntries]
-    }
-
-    case 'communicationsBytes': {
-      const [emails, attachments] = await Promise.all([
-        prisma.projectEmail.findMany({ select: { rawStoragePath: true } }),
-        prisma.projectEmailAttachment.findMany({ select: { storagePath: true } }),
-      ])
-      const entries: FileEntry[] = []
-      for (const r of emails) {
-        const key = normalizeKey(r.rawStoragePath)
-        if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
-      }
-      for (const r of attachments) {
-        const key = normalizeKey(r.storagePath)
-        if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
+        if (markerKey) entries.push({ key: markerKey, localPath: path.join(STORAGE_ROOT, markerKey) })
       }
       return entries
     }
 
-    case 'projectFilesBytes': {
-      const rows = await prisma.projectFile.findMany({ select: { storagePath: true } })
-      return rows.flatMap((r) => {
-        const key = normalizeKey(r.storagePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
+    case 'originalPhotosBytes':
+      return collectStoredKeys(['ALBUM_PHOTO'], ['ORIGINAL'])
+
+    case 'photoZipBytes': {
+      const entries = await collectStoredKeys(
+        ['ALBUM_PHOTO', 'ALBUM'],
+        ['SOCIAL', 'THUMBNAIL', 'ZIP_FULL', 'ZIP_SOCIAL'],
+      )
+      const previewEntries = await collectAlbumPhotoPreviewKeys()
+      const zipEntries = await collectAlbumZipKeys()
+      return [...entries, ...previewEntries, ...zipEntries]
     }
 
-    case 'clientFilesBytes': {
-      const rows = await prisma.clientFile.findMany({ select: { storagePath: true } })
-      return rows.flatMap((r) => {
-        const key = normalizeKey(r.storagePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-    }
+    case 'communicationsBytes':
+      return collectStoredKeys(['PROJECT_EMAIL', 'PROJECT_EMAIL_ATTACHMENT'], ['RAW_EMAIL', 'ORIGINAL'])
 
-    case 'userFilesBytes': {
-      const rows = await prisma.userFile.findMany({ select: { storagePath: true } })
-      return rows.flatMap((r) => {
-        const key = normalizeKey(r.storagePath)
-        return key ? [{ key, localPath: path.join(STORAGE_ROOT, key) }] : []
-      })
-    }
+    case 'projectFilesBytes':
+      return collectStoredKeys(['PROJECT_FILE'], ['ORIGINAL'])
 
-    case 'accountingFilesBytes': {
+    case 'clientFilesBytes':
+      return collectStoredKeys(['CLIENT_FILE'], ['ORIGINAL'])
+
+    case 'userFilesBytes':
+      return collectStoredKeys(['USER_FILE'], ['ORIGINAL'])
+
+    case 'accountingFilesBytes':
       return collectAccountingKeys()
-    }
 
     default:
       return []

@@ -706,7 +706,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                                           name={u?.name}
                                           email={u?.email}
                                           displayColor={u?.displayColor}
-                                          avatarUrl={u?.avatarPath ? `/api/users/${u.id}/avatar` : undefined}
+                                          avatarUrl={`/api/users/${u.id}/avatar`}
                                         />
                                       )
                                     })}

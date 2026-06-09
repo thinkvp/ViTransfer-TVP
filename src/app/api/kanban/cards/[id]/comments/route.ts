@@ -32,7 +32,8 @@ function serializeComment(comment: any) {
       comment?.user?.displayColor ||
       comment?.displayColorSnapshot ||
       null,
-    avatarUrl: comment?.user?.avatarPath ? `/api/users/${comment.userId}/avatar` : null,
+    // Legacy avatarPath column dropped — always use the avatar API route
+    avatarUrl: comment?.userId ? `/api/users/${comment.userId}/avatar` : null,
     replies: Array.isArray(comment.replies) ? comment.replies.map(serializeComment) : [],
   }
 }
@@ -62,10 +63,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const comments = await prisma.kanbanCardComment.findMany({
     where: { cardId, parentId: null },
     include: {
-      user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
+      user: { select: { id: true, name: true, email: true, displayColor: true } },
       replies: {
         include: {
-          user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
+          user: { select: { id: true, name: true, email: true, displayColor: true } },
         },
         orderBy: { createdAt: 'asc' },
       },
@@ -134,10 +135,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       parentId,
     },
     include: {
-      user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
+      user: { select: { id: true, name: true, email: true, displayColor: true } },
       replies: {
         include: {
-          user: { select: { id: true, name: true, email: true, displayColor: true, avatarPath: true } },
+          user: { select: { id: true, name: true, email: true, displayColor: true } },
         },
         orderBy: { createdAt: 'asc' },
       },

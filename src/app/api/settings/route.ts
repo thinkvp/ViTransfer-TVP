@@ -14,6 +14,7 @@ import {
   normalizeUploadChunkSizeMB,
 } from '@/lib/transfer-tuning'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getStoredFilePath } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 
@@ -106,8 +107,16 @@ export async function GET(request: NextRequest) {
       && Boolean(process.env.S3_SECRET_ACCESS_KEY?.trim())
       && Boolean(process.env.S3_BUCKET?.trim())
 
+    // Resolve logo/favicon paths from StoredFile registry (legacy columns dropped)
+    const [companyLogoPath, companyFaviconPath] = await Promise.all([
+      getStoredFilePath('SETTINGS_BRANDING', 'default', 'COMPANY_LOGO'),
+      getStoredFilePath('SETTINGS_BRANDING', 'default', 'COMPANY_FAVICON'),
+    ])
+
     const response = NextResponse.json({
       ...decryptedSettings,
+      companyLogoPath: companyLogoPath || null,
+      companyFaviconPath: companyFaviconPath || null,
       security: securitySettings,
       smtpConfigured,
       s3Configured,

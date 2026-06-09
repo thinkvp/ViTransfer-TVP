@@ -71,69 +71,56 @@ export async function POST(
     }
 
     if (action === 'remove') {
-      // Find all videos that have timeline previews
-      const videosWithPreviews = await prisma.video.findMany({
-        where: {
-          projectId,
-          timelinePreviewsReady: true,
-        },
-        select: {
-          id: true,
-          timelinePreviewSpritesPath: true,
-        },
-      })
+      // Find all timeline sprite StoredFile records via StoredFile
+      const [videoSprites, assetSprites, uploadSprites] = await Promise.all([
+        prisma.storedFile.findMany({
+          where: { entityType: 'VIDEO', entityId: { in: (await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id) }, fileRole: 'TIMELINE_SPRITES' },
+          select: { storagePath: true },
+        }),
+        prisma.storedFile.findMany({
+          where: { entityType: 'VIDEO_ASSET', entityId: { in: (await prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } })).map(a => a.id) }, fileRole: 'TIMELINE_SPRITES' },
+          select: { storagePath: true },
+        }),
+        prisma.storedFile.findMany({
+          where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: (await prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } })).map(u => u.id) }, fileRole: 'TIMELINE_SPRITES' },
+          select: { storagePath: true },
+        }),
+      ])
 
-      // Delete sprite directories from storage
-      const deletions = videosWithPreviews
-        .filter(v => v.timelinePreviewSpritesPath)
-        .map(v => deleteDirectory(v.timelinePreviewSpritesPath!).catch(err => {
-          console.error(`[TIMELINE] Failed to delete sprites for video ${v.id}:`, err)
-        }))
+      const allSprites = [...videoSprites, ...assetSprites, ...uploadSprites]
+      await Promise.allSettled(allSprites.map(s => deleteDirectory(s.storagePath).catch(() => {})))
 
-      await Promise.allSettled(deletions)
+      // Also delete VTT files
+      const videoVttPaths = await prisma.storedFile.findMany({ where: { entityType: 'VIDEO', entityId: { in: (await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id) }, fileRole: 'TIMELINE_VTT' }, select: { storagePath: true } })
+      await Promise.allSettled(videoVttPaths.map(s => deleteDirectory(s.storagePath).catch(() => {})))
 
-      // Clear DB fields for all project videos, assets, and uploads
+      // Clear timelinePreviewsReady on VideoAsset and ShareUploadFile (NOT on Video — column dropped)
+      // Delete StoredFile TIMELINE_VTT/SPRITES records
+      const allActionEntityIds = [
+        ...(await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id),
+        ...(await prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } })).map(a => a.id),
+        ...(await prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } })).map(u => u.id),
+      ]
+
+      // Update VideoAsset/ShareUploadFile (still have timelinePreviewsReady)
       await Promise.all([
-        prisma.video.updateMany({
-          where: { projectId },
-          data: {
-            timelinePreviewsReady: false,
-            timelinePreviewVttPath: null,
-            timelinePreviewSpritesPath: null,
-          },
-        }),
-        prisma.videoAsset.updateMany({
-          where: { video: { projectId }, timelinePreviewsReady: true },
-          data: { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null },
-        }),
-        prisma.shareUploadFile.updateMany({
-          where: { projectId, timelinePreviewsReady: true },
-          data: { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null },
-        }),
+        prisma.videoAsset.updateMany({ where: { video: { projectId } }, data: { timelinePreviewsReady: false } }),
+        prisma.shareUploadFile.updateMany({ where: { projectId }, data: { timelinePreviewsReady: false } }),
       ])
 
-      // Also delete asset and upload sprite directories
-      const [assetSprites, uploadSprites] = await Promise.all([
-        prisma.videoAsset.findMany({ where: { video: { projectId }, timelinePreviewSpritesPath: { not: null } }, select: { timelinePreviewSpritesPath: true } }),
-        prisma.shareUploadFile.findMany({ where: { projectId, timelinePreviewSpritesPath: { not: null } }, select: { timelinePreviewSpritesPath: true } }),
-      ])
-      await Promise.allSettled([
-        ...assetSprites.map(a => deleteDirectory(a.timelinePreviewSpritesPath!).catch(() => {})),
-        ...uploadSprites.map(u => deleteDirectory(u.timelinePreviewSpritesPath!).catch(() => {})),
-      ])
+      // Delete StoredFile records for timeline roles
+      await prisma.storedFile.deleteMany({ where: { entityType: 'VIDEO', entityId: { in: (await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id) }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] } } })
+      await prisma.storedFile.deleteMany({ where: { entityType: 'VIDEO_ASSET', entityId: { in: (await prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } })).map(a => a.id) }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] } } })
+      await prisma.storedFile.deleteMany({ where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: (await prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } })).map(u => u.id) }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] } } })
 
-      return NextResponse.json({
-        success: true,
-        action: 'remove',
-        count: videosWithPreviews.length,
-      })
+      return NextResponse.json({ success: true, action: 'remove', count: allSprites.length })
     }
 
     // action === 'generate'
     const [readyVideos, eligibleAssets, eligibleUploads] = await Promise.all([
       prisma.video.findMany({
-        where: { projectId, status: 'READY', timelinePreviewsReady: false },
-        select: { id: true, originalStoragePath: true, name: true, versionLabel: true },
+        where: { projectId, status: 'READY' },
+        select: { id: true, name: true, versionLabel: true },
       }),
       prisma.videoAsset.findMany({
         where: {
@@ -141,7 +128,7 @@ export async function POST(
           timelinePreviewsReady: false,
           fileType: { startsWith: 'video/', mode: 'insensitive' },
         },
-        select: { id: true, videoId: true, storagePath: true, fileName: true, mediaDurationSeconds: true, mediaWidth: true, mediaHeight: true, video: { select: { id: true, name: true, projectId: true } } },
+        select: { id: true, videoId: true, fileName: true, mediaDurationSeconds: true, mediaWidth: true, mediaHeight: true, video: { select: { id: true, name: true, projectId: true } } },
       }),
       prisma.shareUploadFile.findMany({
         where: {
@@ -149,9 +136,20 @@ export async function POST(
           timelinePreviewsReady: false,
           fileType: { startsWith: 'video/', mode: 'insensitive' },
         },
-        select: { id: true, storagePath: true, fileName: true, mediaDurationSeconds: true, mediaWidth: true, mediaHeight: true, projectId: true },
+        select: { id: true, fileName: true, mediaDurationSeconds: true, mediaWidth: true, mediaHeight: true, projectId: true },
       }),
     ])
+
+    // Batch-load StoredFile ORIGINAL paths for videos
+    const videoIds = readyVideos.map(v => v.id)
+    const videoOrigPaths = new Map<string, string>()
+    if (videoIds.length > 0) {
+      const origRecords = await prisma.storedFile.findMany({
+        where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: 'ORIGINAL' },
+        select: { entityId: true, storagePath: true },
+      })
+      for (const r of origRecords) videoOrigPaths.set(r.entityId, r.storagePath)
+    }
 
     const totalCount = readyVideos.length + eligibleAssets.length + eligibleUploads.length
     if (totalCount === 0) {
@@ -167,9 +165,11 @@ export async function POST(
     let queuedUploads = 0
 
     for (const video of readyVideos) {
+      const origPath = videoOrigPaths.get(video.id)
+      if (!origPath) continue
       await prisma.video.update({ where: { id: video.id }, data: { processingPhase: 'timeline', processingProgress: 0 } })
       try {
-        await videoQueue.add('process-video', { videoId: video.id, originalStoragePath: video.originalStoragePath, projectId, timelineOnly: true })
+        await videoQueue.add('process-video', { videoId: video.id, originalStoragePath: origPath, projectId, timelineOnly: true })
         queuedVideos++
       } catch (error) {
         await prisma.video.update({ where: { id: video.id }, data: { processingPhase: null, processingProgress: 0 } }).catch(() => {})
@@ -182,7 +182,7 @@ export async function POST(
       try {
         await assetTimelineQueue.add('process-asset-timeline', {
           assetId: asset.id, videoId: asset.videoId, projectId,
-          storagePath: asset.storagePath,
+          storagePath: '', // Worker resolves from StoredFile
           durationSeconds: asset.mediaDurationSeconds ?? 0,
           width: asset.mediaWidth ?? 0, height: asset.mediaHeight ?? 0,
         })
@@ -198,7 +198,7 @@ export async function POST(
       try {
         await uploadTimelineQueue.add('process-upload-timeline', {
           uploadFileId: upload.id, projectId,
-          storagePath: upload.storagePath,
+          storagePath: '', // Worker resolves from StoredFile
           durationSeconds: upload.mediaDurationSeconds ?? 0,
           width: upload.mediaWidth ?? 0, height: upload.mediaHeight ?? 0,
         })

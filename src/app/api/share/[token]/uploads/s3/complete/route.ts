@@ -97,9 +97,7 @@ export async function POST(
       projectId: access.project.id,
       folderRelativePath: folderPath,
       fileName: storedFileName || fileName,
-      fileSize: BigInt(fileSize),
       fileType,
-      storagePath: key,
       mediaDurationSeconds: mediaMetadata?.durationSeconds ?? null,
       mediaWidth: mediaMetadata?.width ?? null,
       mediaHeight: mediaMetadata?.height ?? null,
@@ -110,9 +108,20 @@ export async function POST(
       id: true,
       folderRelativePath: true,
       fileName: true,
-      fileSize: true,
       fileType: true,
       createdAt: true,
+    },
+  })
+
+  // Register in StoredFile
+  await prisma.storedFile.create({
+    data: {
+      entityType: 'SHARE_UPLOAD_FILE',
+      entityId: createdFile.id,
+      fileRole: 'ORIGINAL',
+      storagePath: key,
+      fileName: storedFileName || fileName,
+      fileSize: BigInt(fileSize),
     },
   })
 
@@ -171,7 +180,7 @@ export async function POST(
     success: true,
     file: {
       ...createdFile,
-      fileSize: Number(createdFile.fileSize),
+      fileSize: fileSize,
     },
   })
 }

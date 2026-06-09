@@ -3,16 +3,9 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import {
-  buildAlbumPhotoThumbnailStoragePath,
-  buildProjectStorageRoot,
-  buildProjectUploadVideoThumbnailStoragePath,
-  buildVideoAssetPreviewStoragePath,
-  buildVideoPreviewStoragePath,
-  buildVideoThumbnailStoragePath,
-  buildVideoTimelineStorageRoot,
-} from '@/lib/project-storage-paths'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
+import { getStoredFilePath, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import type { FileRole } from '@/lib/stored-file'
 import {
   enqueueShareUploadPreview,
   getAlbumPhotoSocialQueue,
@@ -22,90 +15,26 @@ import {
   getVideoQueue,
 } from '@/lib/queue'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
-import {
-  recalculateAndStoreProjectDiskBytes,
-  recalculateAndStoreProjectPreviewBytes,
-  recalculateAndStoreProjectTotalBytes,
-} from '@/lib/project-total-bytes'
+import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { cancelProjectJobs } from '@/lib/cancel-project-jobs'
 
 export const runtime = 'nodejs'
-
-async function getProjectReprocessPreviewsStatus(projectId: string) {
-  const [queuedOrProcessingVideos, pendingUploadPreviews, pendingVideoAssetPreviews, pendingPhotoSocial, pendingPhotoThumbnails] = await Promise.all([
-    prisma.video.count({
-      where: {
-        projectId,
-        status: { in: ['QUEUED', 'PROCESSING'] },
-      },
-    }),
-    prisma.shareUploadFile.count({
-      where: {
-        projectId,
-        previewStatus: { in: ['PENDING', 'PROCESSING'] },
-      },
-    }),
-    prisma.videoAsset.count({
-      where: {
-        video: { projectId },
-        previewStatus: { in: ['PENDING', 'PROCESSING'] },
-      },
-    }),
-    prisma.albumPhoto.count({
-      where: {
-        album: { projectId },
-        socialStatus: { in: ['PENDING', 'PROCESSING'] },
-      },
-    }),
-    prisma.albumPhoto.count({
-      where: {
-        album: { projectId },
-        thumbnailStatus: { in: ['PENDING', 'PROCESSING'] },
-      },
-    }),
-  ])
-
-  const counts = {
-    queuedOrProcessingVideos,
-    pendingUploadPreviews,
-    pendingVideoAssetPreviews,
-    pendingPhotoSocial,
-    pendingPhotoThumbnails,
-  }
-
-  const remainingJobs = Object.values(counts).reduce((sum, value) => sum + value, 0)
-  return {
-    inProgress: remainingJobs > 0,
-    remainingJobs,
-    counts,
-  }
-}
-
-function resolveProjectStoragePath(project: {
-  storagePath: string | null
-  title: string
-  companyName: string | null
-  client?: { name: string | null } | null
-}): string {
-  return project.storagePath || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title)
-}
 
 function isPreviewableFileType(fileType: string | null | undefined): boolean {
   const normalized = String(fileType || '').toLowerCase()
   return normalized.startsWith('image/') || normalized.startsWith('video/')
 }
 
-function hasCustomVideoThumbnail(thumbnailPath: string | null | undefined, videoAssetStoragePaths: Set<string>): boolean {
-  if (!thumbnailPath) return false
-  // The old '/videos/assets/' check never matched — actual path is '/videos/{folder}/{version}/assets/'.
-  // Use an exact storagePath lookup, mirroring what video-processor-helpers.ts does.
-  return videoAssetStoragePaths.has(thumbnailPath)
-}
-
-function addPathCandidate(target: Set<string>, candidate: string | null | undefined) {
-  const value = String(candidate || '').trim()
-  if (!value) return
-  target.add(value)
+async function getProjectReprocessPreviewsStatus(projectId: string) {
+  const [queuedOrProcessingVideos, pendingUploadPreviews, pendingVideoAssetPreviews, pendingPhotoSocial, pendingPhotoThumbnails] = await Promise.all([
+    prisma.video.count({ where: { projectId, status: { in: ['QUEUED', 'PROCESSING'] } } }),
+    prisma.shareUploadFile.count({ where: { projectId, previewStatus: { in: ['PENDING', 'PROCESSING'] } } }),
+    prisma.videoAsset.count({ where: { video: { projectId }, previewStatus: { in: ['PENDING', 'PROCESSING'] } } }),
+    prisma.albumPhoto.count({ where: { album: { projectId }, socialStatus: { in: ['PENDING', 'PROCESSING'] } } }),
+    prisma.albumPhoto.count({ where: { album: { projectId }, thumbnailStatus: { in: ['PENDING', 'PROCESSING'] } } }),
+  ])
+  const counts = { queuedOrProcessingVideos, pendingUploadPreviews, pendingVideoAssetPreviews, pendingPhotoSocial, pendingPhotoThumbnails }
+  return { inProgress: Object.values(counts).reduce((s, v) => s + v, 0) > 0, remainingJobs: Object.values(counts).reduce((s, v) => s + v, 0), counts }
 }
 
 export async function POST(
@@ -114,412 +43,147 @@ export async function POST(
 ) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
-
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
-
   const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
   if (forbiddenAction) return forbiddenAction
-
-  const rateLimitResult = await rateLimit(request, {
-    windowMs: 60 * 1000,
-    maxRequests: 5,
-    message: 'Too many preview reprocess requests. Please slow down.',
-  }, 'project-reprocess-previews')
+  const rateLimitResult = await rateLimit(request, { windowMs: 60 * 1000, maxRequests: 5, message: 'Too many preview reprocess requests. Please slow down.' }, 'project-reprocess-previews')
   if (rateLimitResult) return rateLimitResult
 
   try {
     const { id: projectId } = await params
-
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: {
-        id: true,
-        status: true,
-        title: true,
-        storagePath: true,
-        companyName: true,
-        client: { select: { name: true } },
-      },
-    })
-
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
-
-    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
-
-    if (project.status === 'CLOSED') {
-      return NextResponse.json(
-        { error: 'Closed projects cannot queue preview regeneration jobs.' },
-        { status: 409 },
-      )
-    }
-
-    const projectStoragePath = resolveProjectStoragePath(project)
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true, status: true } })
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    if (project.status === 'CLOSED') return NextResponse.json({ error: 'Closed projects cannot queue preview regeneration jobs.' }, { status: 409 })
 
     const { cancelled: cancelledJobs } = await cancelProjectJobs(projectId)
 
+    // Query entities — paths come from StoredFile
     const [videos, uploadFiles, videoAssets, albumPhotos] = await Promise.all([
-      prisma.video.findMany({
-        where: {
-          projectId,
-          status: { in: ['READY', 'ERROR'] },
-        },
-        select: {
-          id: true,
-          name: true,
-          storageFolderName: true,
-          versionLabel: true,
-          originalStoragePath: true,
-          status: true,
-          preview480Path: true,
-          preview720Path: true,
-          preview1080Path: true,
-          thumbnailPath: true,
-          timelinePreviewVttPath: true,
-          timelinePreviewSpritesPath: true,
-        },
-      }),
-      prisma.shareUploadFile.findMany({
-        where: { projectId },
-        select: {
-          id: true,
-          storagePath: true,
-          fileType: true,
-          fileName: true,
-          mediaDurationSeconds: true,
-          previewPath: true,
-          timelinePreviewVttPath: true,
-          timelinePreviewSpritesPath: true,
-        },
-      }),
-      prisma.videoAsset.findMany({
-        where: { video: { projectId } },
-        select: {
-          id: true,
-          videoId: true,
-          storagePath: true,
-          fileType: true,
-          fileName: true,
-          previewPath: true,
-          timelinePreviewVttPath: true,
-          timelinePreviewSpritesPath: true,
-          video: {
-            select: {
-              projectId: true,
-              name: true,
-              storageFolderName: true,
-              versionLabel: true,
-            },
-          },
-        },
-      }),
-      prisma.albumPhoto.findMany({
-        where: {
-          album: { projectId },
-          status: 'READY',
-        },
-        select: {
-          id: true,
-          albumId: true,
-          storagePath: true,
-          socialStoragePath: true,
-          thumbnailStoragePath: true,
-        },
-      }),
+      prisma.video.findMany({ where: { projectId, status: { in: ['READY', 'ERROR'] } }, select: { id: true, status: true } }),
+      prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true, fileType: true, fileName: true, mediaDurationSeconds: true } }),
+      prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true, videoId: true, fileType: true, fileName: true } }),
+      prisma.albumPhoto.findMany({ where: { album: { projectId }, status: 'READY' }, select: { id: true, albumId: true } }),
     ])
 
-    const filePathsToDelete = new Set<string>()
+    const videoIds = videos.map(v => v.id)
+    const uploadFileIds = uploadFiles.map(f => f.id)
+    const videoAssetIds = videoAssets.map(a => a.id)
+    const albumPhotoIds = albumPhotos.map(p => p.id)
+
+    // Build StoredFile role groups for deletion
+    const roleGroups: Array<{ entityType: string; entityIds: string[]; fileRoles: FileRole[] }> = []
+    if (videoIds.length) roleGroups.push({ entityType: 'VIDEO', entityIds: videoIds, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+    if (uploadFileIds.length) roleGroups.push({ entityType: 'SHARE_UPLOAD_FILE', entityIds: uploadFileIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+    if (videoAssetIds.length) roleGroups.push({ entityType: 'VIDEO_ASSET', entityIds: videoAssetIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+    if (albumPhotoIds.length) roleGroups.push({ entityType: 'ALBUM_PHOTO', entityIds: albumPhotoIds, fileRoles: ['SOCIAL', 'THUMBNAIL'] })
+
+    // Fetch paths to delete
+    const storedFilesToDelete = await prisma.storedFile.findMany({
+      where: { OR: roleGroups.map(g => ({ entityType: g.entityType as any, entityId: { in: g.entityIds }, fileRole: { in: g.fileRoles } })) },
+      select: { storagePath: true, fileRole: true, entityId: true },
+    })
+    const filePathsToDelete = new Set(storedFilesToDelete.map(f => f.storagePath))
     const directoryPathsToDelete = new Set<string>()
 
-    // Build a set of all video asset storage paths so we can detect when a video's thumbnailPath
-    // points to one of them (custom thumbnail set via "Set as video thumbnail").
-    const videoAssetStoragePathSet = new Set<string>(
-      videoAssets.map(a => a.storagePath).filter(Boolean) as string[]
-    )
-
-    for (const video of videos) {
-      const videoFolderName = video.storageFolderName || video.name
-      addPathCandidate(filePathsToDelete, video.preview480Path)
-      addPathCandidate(filePathsToDelete, video.preview720Path)
-      addPathCandidate(filePathsToDelete, video.preview1080Path)
-      addPathCandidate(filePathsToDelete, buildVideoPreviewStoragePath(projectStoragePath, videoFolderName, video.versionLabel, '480p'))
-      addPathCandidate(filePathsToDelete, buildVideoPreviewStoragePath(projectStoragePath, videoFolderName, video.versionLabel, '720p'))
-      addPathCandidate(filePathsToDelete, buildVideoPreviewStoragePath(projectStoragePath, videoFolderName, video.versionLabel, '1080p'))
-
-      if (!hasCustomVideoThumbnail(video.thumbnailPath, videoAssetStoragePathSet)) {
-        addPathCandidate(filePathsToDelete, video.thumbnailPath)
-        addPathCandidate(filePathsToDelete, buildVideoThumbnailStoragePath(projectStoragePath, videoFolderName, video.versionLabel))
-      }
-
-      addPathCandidate(filePathsToDelete, video.timelinePreviewVttPath)
-      addPathCandidate(filePathsToDelete, `${buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, video.versionLabel)}/index.vtt`)
-      addPathCandidate(directoryPathsToDelete, video.timelinePreviewSpritesPath)
-      addPathCandidate(directoryPathsToDelete, buildVideoTimelineStorageRoot(projectStoragePath, videoFolderName, video.versionLabel))
-    }
-
-    const previewableUploadFiles = uploadFiles.filter((file) => isPreviewableFileType(file.fileType))
-    for (const file of previewableUploadFiles) {
-      addPathCandidate(filePathsToDelete, file.previewPath)
-      addPathCandidate(filePathsToDelete, buildProjectUploadVideoThumbnailStoragePath(projectStoragePath, file.storagePath))
-      // Also delete timeline sprites for video-type uploads
-      addPathCandidate(filePathsToDelete, (file as any).timelinePreviewVttPath)
-      addPathCandidate(directoryPathsToDelete, (file as any).timelinePreviewSpritesPath)
-    }
-
-    const previewableVideoAssets = videoAssets.filter((asset) => isPreviewableFileType(asset.fileType))
-    for (const asset of previewableVideoAssets) {
-      const videoFolderName = asset.video.storageFolderName || asset.video.name
-      addPathCandidate(filePathsToDelete, asset.previewPath)
-      addPathCandidate(filePathsToDelete, buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, asset.video.versionLabel, asset.storagePath, '.jpg'))
-      addPathCandidate(filePathsToDelete, buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, asset.video.versionLabel, asset.storagePath, '.mp4'))
-      // Also delete timeline sprites for video-type assets
-      addPathCandidate(filePathsToDelete, (asset as any).timelinePreviewVttPath)
-      addPathCandidate(directoryPathsToDelete, (asset as any).timelinePreviewSpritesPath)
-    }
-
-    for (const photo of albumPhotos) {
-      addPathCandidate(filePathsToDelete, photo.socialStoragePath)
-      addPathCandidate(filePathsToDelete, `${photo.storagePath}-social.jpg`)
-      addPathCandidate(filePathsToDelete, photo.thumbnailStoragePath)
-      addPathCandidate(filePathsToDelete, buildAlbumPhotoThumbnailStoragePath(projectStoragePath, photo.storagePath))
-    }
+    // Also delete timeline sprite directories
+    const spriteDirs = storedFilesToDelete.filter(f => f.fileRole === 'TIMELINE_SPRITES')
+    spriteDirs.forEach(f => directoryPathsToDelete.add(f.storagePath))
 
     await Promise.allSettled([
-      ...[...filePathsToDelete].map((filePath) => deleteFile(filePath)),
-      ...[...directoryPathsToDelete].map((dirPath) => deleteDirectory(dirPath)),
+      ...[...filePathsToDelete].map(p => deleteFile(p).catch(() => {})),
+      ...[...directoryPathsToDelete].map(p => deleteDirectory(p).catch(() => {})),
     ])
 
+    // Delete StoredFile records
+    for (const group of roleGroups) {
+      if (group.entityIds.length) {
+        await deleteStoredFilesByCriteria({ entityType: group.entityType as any, entityIds: group.entityIds, fileRoles: group.fileRoles })
+      }
+    }
+
+    // Queue video reprocessing
     const videoQueue = getVideoQueue()
     let queuedVideoJobs = 0
     for (const video of videos) {
-      const preserveCustomThumbnail = hasCustomVideoThumbnail(video.thumbnailPath, videoAssetStoragePathSet)
-      await prisma.video.update({
-        where: { id: video.id },
-        data: {
-          status: 'QUEUED',
-          processingProgress: 0,
-          processingPhase: null,
-          processingError: null,
-          preview480Path: null,
-          preview720Path: null,
-          preview1080Path: null,
-          thumbnailPath: preserveCustomThumbnail ? video.thumbnailPath : null,
-          timelinePreviewsReady: false,
-          timelinePreviewVttPath: null,
-          timelinePreviewSpritesPath: null,
-        },
-      })
-
-      await videoQueue.add('process-video', {
-        videoId: video.id,
-        originalStoragePath: video.originalStoragePath,
-        projectId,
-        ...(preserveCustomThumbnail ? { regenerateThumbnail: false } : {}),
-      })
-      queuedVideoJobs += 1
+      const originalPath = await getStoredFilePath('VIDEO', video.id, 'ORIGINAL')
+      await prisma.video.update({ where: { id: video.id }, data: { status: 'QUEUED', processingProgress: 0, processingPhase: null, processingError: null } })
+      await videoQueue.add('process-video', { videoId: video.id, originalStoragePath: originalPath || '', projectId })
+      queuedVideoJobs++
     }
 
+    // Queue share upload reprocessing
+    const previewableUploadFiles = uploadFiles.filter(f => isPreviewableFileType(f.fileType))
     const shareUploadPreviewQueue = getShareUploadPreviewQueue()
-    const assetTimelineQueue = getAssetTimelineQueue()
     const uploadTimelineQueue = getUploadTimelineQueue()
-    let queuedUploadPreviewJobs = 0
-    let queuedUploadTimelineJobs = 0
+    const assetTimelineQueue = getAssetTimelineQueue()
+    let queuedUploadPreviewJobs = 0, queuedUploadTimelineJobs = 0
     for (const file of previewableUploadFiles) {
       const isVideo = String(file.fileType || '').toLowerCase().startsWith('video/')
-      await prisma.shareUploadFile.update({
-        where: { id: file.id },
-        data: {
-          previewStatus: null,
-          previewPath: null,
-          previewError: null,
-          previewGeneratedAt: null,
-          previewFileSize: null,
-          previewAttempts: 0,
-          previewQueuedAt: null,
-          ...(isVideo ? { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null } : {}),
-        },
-      })
-
+      const originalPath = await getStoredFilePath('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL') || ''
+      await prisma.shareUploadFile.update({ where: { id: file.id }, data: { previewStatus: 'PENDING', previewError: null, previewGeneratedAt: null, previewAttempts: 0, previewQueuedAt: null, ...(isVideo ? { timelinePreviewsReady: false } : {}) } })
       await shareUploadPreviewQueue.remove(`share-preview:shareUploadFile:${file.id}`).catch(() => {})
-      await enqueueShareUploadPreview({
-        type: 'shareUploadFile',
-        recordId: file.id,
-        storagePath: file.storagePath,
-        fileType: file.fileType,
-        fileName: file.fileName,
-        durationSeconds: file.mediaDurationSeconds,
-      })
-      queuedUploadPreviewJobs += 1
-
-      // Also enqueue timeline sprite generation for video-type uploads
-      // (processor probes metadata when duration/width/height are 0)
-      if (isVideo) {
-        await uploadTimelineQueue.add('process-upload-timeline', {
-          uploadFileId: file.id,
-          projectId,
-          storagePath: file.storagePath,
-          durationSeconds: typeof file.mediaDurationSeconds === 'number' ? file.mediaDurationSeconds : 0,
-          width: 0,
-          height: 0,
-        })
-        queuedUploadTimelineJobs += 1
-      }
+      await enqueueShareUploadPreview({ type: 'shareUploadFile', recordId: file.id, storagePath: originalPath, fileType: file.fileType, fileName: file.fileName, durationSeconds: file.mediaDurationSeconds })
+      queuedUploadPreviewJobs++
+      if (isVideo) { await uploadTimelineQueue.add('process-upload-timeline', { uploadFileId: file.id, projectId, storagePath: originalPath, durationSeconds: typeof file.mediaDurationSeconds === 'number' ? file.mediaDurationSeconds : 0, width: 0, height: 0 }); queuedUploadTimelineJobs++ }
     }
 
-    let queuedVideoAssetPreviewJobs = 0
-    let queuedAssetTimelineJobs = 0
+    // Queue video asset reprocessing
+    const previewableVideoAssets = videoAssets.filter(a => isPreviewableFileType(a.fileType))
+    let queuedVideoAssetPreviewJobs = 0, queuedAssetTimelineJobs = 0
     for (const asset of previewableVideoAssets) {
       const isVideo = String(asset.fileType || '').toLowerCase().startsWith('video/')
-      await prisma.videoAsset.update({
-        where: { id: asset.id },
-        data: {
-          previewStatus: null,
-          previewPath: null,
-          previewError: null,
-          previewGeneratedAt: null,
-          previewFileSize: null,
-          previewAttempts: 0,
-          previewQueuedAt: null,
-          ...(isVideo ? { timelinePreviewsReady: false, timelinePreviewVttPath: null, timelinePreviewSpritesPath: null } : {}),
-        },
-      })
-
+      const originalPath = await getStoredFilePath('VIDEO_ASSET', asset.id, 'ORIGINAL') || ''
+      await prisma.videoAsset.update({ where: { id: asset.id }, data: { previewStatus: 'PENDING', previewError: null, previewGeneratedAt: null, previewAttempts: 0, previewQueuedAt: null, ...(isVideo ? { timelinePreviewsReady: false } : {}) } })
       await shareUploadPreviewQueue.remove(`share-preview:videoAsset:${asset.id}`).catch(() => {})
-      await enqueueShareUploadPreview({
-        type: 'videoAsset',
-        recordId: asset.id,
-        storagePath: asset.storagePath,
-        fileType: asset.fileType,
-        fileName: asset.fileName,
-      })
-      queuedVideoAssetPreviewJobs += 1
-
-      // Also enqueue timeline sprite generation for video-type assets
-      if (isVideo) {
-        await assetTimelineQueue.add('process-asset-timeline', {
-          assetId: asset.id,
-          videoId: asset.videoId,
-          projectId,
-          storagePath: asset.storagePath,
-          durationSeconds: 0,
-          width: 0,
-          height: 0,
-        })
-        queuedAssetTimelineJobs += 1
-      }
+      await enqueueShareUploadPreview({ type: 'videoAsset', recordId: asset.id, storagePath: originalPath, fileType: asset.fileType, fileName: asset.fileName })
+      queuedVideoAssetPreviewJobs++
+      if (isVideo) { await assetTimelineQueue.add('process-asset-timeline', { assetId: asset.id, videoId: asset.videoId, projectId, storagePath: originalPath, durationSeconds: 0, width: 0, height: 0 }); queuedAssetTimelineJobs++ }
     }
 
-    const albumPhotoIds = albumPhotos.map((photo) => photo.id)
+    // Queue album photo reprocessing
     if (albumPhotoIds.length > 0) {
-      await prisma.albumPhoto.updateMany({
-        where: { id: { in: albumPhotoIds } },
-        data: {
-          socialStoragePath: null,
-          socialStatus: 'PENDING',
-          socialError: null,
-          socialGeneratedAt: null,
-          socialFileSize: BigInt(0),
-          thumbnailStoragePath: null,
-          thumbnailStatus: 'PENDING',
-          thumbnailError: null,
-          thumbnailGeneratedAt: null,
-          thumbnailFileSize: BigInt(0),
-        },
-      })
+      await prisma.albumPhoto.updateMany({ where: { id: { in: albumPhotoIds } }, data: { socialStatus: 'PENDING', socialError: null, socialGeneratedAt: null, thumbnailStatus: 'PENDING', thumbnailError: null, thumbnailGeneratedAt: null } })
     }
-
     const albumPhotoSocialQueue = getAlbumPhotoSocialQueue()
     let queuedAlbumPhotoSocialJobs = 0
     for (const photo of albumPhotos) {
       await albumPhotoSocialQueue.remove(`album-photo-social-${photo.id}`).catch(() => {})
-      await albumPhotoSocialQueue.add(
-        'process-album-photo-social',
-        { photoId: photo.id },
-        { jobId: `album-photo-social-${photo.id}` },
-      )
-      queuedAlbumPhotoSocialJobs += 1
+      await albumPhotoSocialQueue.add('process-album-photo-social', { photoId: photo.id }, { jobId: `album-photo-social-${photo.id}` })
+      queuedAlbumPhotoSocialJobs++
     }
-
-    const albumIds = [...new Set(albumPhotos.map((photo) => photo.albumId))]
+    const albumIds = [...new Set(albumPhotos.map(p => p.albumId))]
     let queuedAlbumThumbnailJobs = 0
     for (const albumId of albumIds) {
       const jobId = await enqueueAlbumThumbnailJob({ albumId })
-      if (jobId) {
-        queuedAlbumThumbnailJobs += 1
-      }
+      if (jobId) queuedAlbumThumbnailJobs++
     }
 
-    await Promise.allSettled([
-      recalculateAndStoreProjectPreviewBytes(projectId),
-      recalculateAndStoreProjectDiskBytes(projectId),
-      recalculateAndStoreProjectTotalBytes(projectId),
-    ])
+    await Promise.allSettled([recalculateAndStoreProjectPreviewBytes(projectId), recalculateAndStoreProjectDiskBytes(projectId), recalculateAndStoreProjectTotalBytes(projectId)])
 
-    return NextResponse.json({
-      success: true,
-      cancelledJobs,
-      deletedFilesAttempted: filePathsToDelete.size,
-      deletedDirectoriesAttempted: directoryPathsToDelete.size,
-      queuedVideoJobs,
-      queuedUploadPreviewJobs,
-      queuedUploadTimelineJobs,
-      queuedVideoAssetPreviewJobs,
-      queuedAssetTimelineJobs,
-      queuedAlbumPhotoSocialJobs,
-      queuedAlbumThumbnailJobs,
-    })
+    return NextResponse.json({ success: true, cancelledJobs, deletedFilesAttempted: filePathsToDelete.size, deletedDirectoriesAttempted: directoryPathsToDelete.size, queuedVideoJobs, queuedUploadPreviewJobs, queuedUploadTimelineJobs, queuedVideoAssetPreviewJobs, queuedAssetTimelineJobs, queuedAlbumPhotoSocialJobs, queuedAlbumThumbnailJobs })
   } catch (error) {
     console.error('Error reprocessing project previews:', error)
-    return NextResponse.json(
-      { error: 'Failed to reprocess project previews' },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Failed to reprocess project previews' }, { status: 500 })
   }
 }
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
-
   const forbiddenMenu = requireMenuAccess(authResult, 'projects')
   if (forbiddenMenu) return forbiddenMenu
-
   const forbiddenAction = requireActionAccess(authResult, 'changeProjectSettings')
   if (forbiddenAction) return forbiddenAction
-
   try {
     const { id: projectId } = await params
-
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: {
-        id: true,
-        status: true,
-      },
-    })
-
-    if (!project) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
-
-    if (!isVisibleProjectStatusForUser(authResult, project.status)) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 })
-    }
-
-    const status = await getProjectReprocessPreviewsStatus(projectId)
-    return NextResponse.json(status)
+    const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true, status: true } })
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    if (!isVisibleProjectStatusForUser(authResult, project.status)) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    return NextResponse.json(await getProjectReprocessPreviewsStatus(projectId))
   } catch (error) {
     console.error('Error checking project preview reprocess status:', error)
-    return NextResponse.json(
-      { error: 'Failed to check preview reprocess status' },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: 'Failed to check preview reprocess status' }, { status: 500 })
   }
 }

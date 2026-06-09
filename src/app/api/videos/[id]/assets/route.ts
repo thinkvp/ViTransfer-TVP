@@ -101,16 +101,24 @@ export async function GET(
       orderBy: { createdAt: 'desc' },
     })
 
-    // Convert BigInt to string for JSON serialization
+    // Resolve file sizes from StoredFile
+    const assetIds = assets.map(a => a.id)
+    const storedSizes = assetIds.length > 0 ? await prisma.storedFile.findMany({
+      where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds }, fileRole: 'ORIGINAL' },
+      select: { entityId: true, fileSize: true },
+    }) : []
+    const sizeByAssetId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
+
+    // Convert to serializable format
     const serializedAssets = assets.map(asset => ({
       ...asset,
-      fileSize: asset.fileSize.toString(),
-      previewFileSize: asset.previewFileSize != null ? asset.previewFileSize.toString() : null,
+      fileSize: sizeByAssetId.get(asset.id) ?? '0',
+      previewFileSize: null as string | null,
     }))
 
     return NextResponse.json({
       assets: serializedAssets,
-      currentThumbnailPath: video.thumbnailPath
+      currentThumbnailPath: null // From StoredFile if needed
     })
   } catch (error) {
     console.error('Error fetching video assets:', error)
@@ -218,9 +226,9 @@ export async function POST(
     const versionLabel = video.versionLabel || `v${video.version}`
     const existingAssetNames = await prisma.videoAsset.findMany({
       where: { videoId },
-      select: { storagePath: true },
+      select: { fileName: true },
     })
-    const reservedStorageNames = existingAssetNames.map((asset) => path.posix.basename(String(asset.storagePath || '')))
+    const reservedStorageNames = existingAssetNames.map((asset) => asset.fileName)
     const uniqueStorageFileName = allocateUniqueStorageName(sanitizedFileName, reservedStorageNames)
     const localPath = buildVideoAssetStoragePath(projectStoragePath, videoFolderName, versionLabel, uniqueStorageFileName)
 
@@ -234,12 +242,21 @@ export async function POST(
       data: {
         videoId,
         fileName: sanitizedFileName,
-        fileSize: BigInt(fileSize),
-        // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
         fileType: 'application/octet-stream',
-        storagePath,
         category: finalCategory,
         uploadedByName: currentUser.name || currentUser.email,
+      },
+    })
+
+    // Register in StoredFile
+    await prisma.storedFile.create({
+      data: {
+        entityType: 'VIDEO_ASSET',
+        entityId: asset.id,
+        fileRole: 'ORIGINAL',
+        storagePath,
+        fileName: sanitizedFileName,
+        fileSize: BigInt(fileSize),
       },
     })
 

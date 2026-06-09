@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getStoredFilePath } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -56,17 +57,29 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     select: {
       id: true,
       fileName: true,
-      fileSize: true,
       createdAt: true,
       projectEmailId: true,
     },
   })
 
+  // Resolve file sizes from StoredFile
+  const ids = files.map(f => f.id)
+  const sizeMap = new Map<string, number>()
+  if (ids.length > 0) {
+    const stored = await prisma.storedFile.findMany({
+      where: { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: ids }, fileRole: 'ORIGINAL' },
+      select: { entityId: true, fileSize: true },
+    })
+    for (const s of stored) {
+      if (s.fileSize != null) sizeMap.set(s.entityId, Number(s.fileSize))
+    }
+  }
+
   return NextResponse.json({
     files: files.map((file) => ({
       id: file.id,
       fileName: file.fileName,
-      fileSize: file.fileSize.toString(),
+      fileSize: String(sizeMap.get(file.id) ?? 0),
       createdAt: file.createdAt,
       downloadUrl: `/api/projects/${projectId}/emails/${file.projectEmailId}/attachments/${file.id}`,
     })),

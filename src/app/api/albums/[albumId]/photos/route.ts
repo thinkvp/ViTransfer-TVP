@@ -74,9 +74,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       id: true,
       albumId: true,
       fileName: true,
-      fileSize: true,
       fileType: true,
-      storagePath: true,
       status: true,
       error: true,
       createdAt: true,
@@ -84,10 +82,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     },
   })
 
+  const photoIds = photos.map(p => p.id)
+  const storedSizes = photoIds.length > 0 ? await prisma.storedFile.findMany({
+    where: { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds }, fileRole: 'ORIGINAL' },
+    select: { entityId: true, fileSize: true },
+  }) : []
+  const sizeByPhotoId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
+
   return NextResponse.json({
     photos: photos.map((p) => ({
       ...p,
-      fileSize: p.fileSize.toString(),
+      fileSize: sizeByPhotoId.get(p.id) ?? '0',
     })),
   })
 }
@@ -196,13 +201,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     data: {
       albumId: album.id,
       fileName: uniqueName,
-      fileSize: BigInt(fileSize),
       fileType: 'application/octet-stream',
-      storagePath,
-      thumbnailStoragePath,
       status: 'UPLOADING',
       uploadedBy: currentUser.id,
       uploadedByName: currentUser.name || currentUser.email,
+    },
+  })
+
+  // Register in StoredFile
+  await prisma.storedFile.create({
+    data: {
+      entityType: 'ALBUM_PHOTO',
+      entityId: photo.id,
+      fileRole: 'ORIGINAL',
+      storagePath,
+      fileName: uniqueName,
+      fileSize: BigInt(fileSize),
     },
   })
 

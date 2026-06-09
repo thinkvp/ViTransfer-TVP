@@ -496,6 +496,9 @@ export default function QuoteDetailPage() {
             unitPriceCents: it.unitPriceCents,
             taxRatePercent: it.taxRatePercent,
             taxRateName: it.taxRateName,
+            labelId: it.labelId || undefined,
+            labelName: it.labelName || undefined,
+            labelColor: it.labelColor || undefined,
           })),
         }),
       })

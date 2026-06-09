@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getStoredFilePathForProject } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
@@ -51,20 +52,27 @@ export async function GET(
       }
     }
 
-    // Choose safest available file based on role/approval
+    // Choose safest available file based on role/approval — paths from StoredFile registry
     let filePath: string | null = null
     if (accessCheck.isAdmin) {
-      filePath = video.originalStoragePath || video.preview1080Path || video.preview720Path || null
+      filePath = await getStoredFilePathForProject('VIDEO', video.id, 'ORIGINAL', video.project.id)
+        || await getStoredFilePathForProject('VIDEO', video.id, 'PREVIEW_1080', video.project.id)
+        || await getStoredFilePathForProject('VIDEO', video.id, 'PREVIEW_720', video.project.id)
+        || null
     } else {
-      filePath = video.originalStoragePath || null
+      filePath = await getStoredFilePathForProject('VIDEO', video.id, 'ORIGINAL', video.project.id) || null
     }
 
     if (!filePath) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
-    // Use the original filename from the database, guard against missing values
-    const originalFilename = video.originalFileName || 'video.mp4'
+    // Use the original filename from StoredFile registry
+    const storedFile = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: video.id, fileRole: 'ORIGINAL' } },
+      select: { fileName: true },
+    })
+    const originalFilename = storedFile?.fileName || 'video.mp4'
     const safeFilename = sanitizeFilenameForHeader(originalFilename)
 
     const fullPath = getFilePath(filePath)

@@ -2,6 +2,7 @@ import { prisma } from '../lib/db'
 import { deleteFile, deleteDirectory } from '../lib/storage'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '../lib/session-invalidation'
 import { cancelProjectJobs } from '../lib/cancel-project-jobs'
+import { findStoredFilesToDelete, deleteStoredFilesByCriteria } from '../lib/stored-file'
 
 export async function processAutoCloseApprovedProjects(): Promise<{ closedCount: number }> {
   const settings = await prisma.settings.findUnique({
@@ -77,34 +78,41 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
   if (settings?.autoDeletePreviewsOnClose) {
     for (const projectId of ids) {
       try {
+        // Get all video IDs for this project
         const videos = await prisma.video.findMany({
           where: { projectId },
-          select: {
-            id: true,
-            preview480Path: true,
-            preview720Path: true,
-            preview1080Path: true,
-          },
+          select: { id: true },
+        })
+        const videoIds = videos.map(v => v.id)
+
+        // Find all preview, thumbnail, and timeline files via StoredFile registry
+        const previewFilesToDelete = await findStoredFilesToDelete({
+          entityType: 'VIDEO',
+          entityIds: videoIds,
+          fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
         })
 
-        for (const video of videos) {
-          const previewPaths = [video.preview480Path, video.preview720Path, video.preview1080Path].filter(Boolean) as string[]
-          const updateData: Record<string, null | boolean> = {}
-
-          if (previewPaths.length > 0) {
-            await Promise.allSettled(previewPaths.map(p => deleteFile(p)))
-            updateData.preview480Path = null
-            updateData.preview720Path = null
-            updateData.preview1080Path = null
-          }
-
-          if (Object.keys(updateData).length > 0) {
-            await prisma.video.update({
-              where: { id: video.id },
-              data: updateData,
-            })
-          }
+        // Delete the physical files from storage
+        if (previewFilesToDelete.length > 0) {
+          await Promise.allSettled(previewFilesToDelete.map(f => {
+            // TIMELINE_SPRITES is a directory — delete the whole prefix
+            if (f.fileRole === 'TIMELINE_SPRITES') {
+              return deleteDirectory(f.storagePath)
+            }
+            return deleteFile(f.storagePath)
+          }))
         }
+
+        // Clean up StoredFile rows for the deleted files
+        if (videoIds.length > 0) {
+          await deleteStoredFilesByCriteria({
+            entityType: 'VIDEO',
+            entityIds: videoIds,
+            fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
+          })
+        }
+
+        // StoredFile handles preview cleanup — legacy columns dropped
 
         console.log(`[AUTO-CLOSE] Deleted previews for project ${projectId}`)
       } catch (err) {

@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { deleteStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs from 'fs'
 import { createReadStream } from 'fs'
@@ -49,7 +50,6 @@ export async function GET(
       id: true,
       fileName: true,
       fileType: true,
-      storagePath: true,
     },
   })
 
@@ -57,19 +57,20 @@ export async function GET(
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
+  // Get storage path from StoredFile
+  const { getStoredFilePath } = await import('@/lib/stored-file')
+  const storagePath = await getStoredFilePath('USER_FILE', fileId, 'ORIGINAL')
+  if (!storagePath) return NextResponse.json({ error: 'File not found' }, { status: 404 })
+
   const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
   const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
 
-  // S3 mode: redirect to a presigned download URL
   if (isS3Mode()) {
-    const presignedUrl = await s3GetPresignedDownloadUrl(file.storagePath, 300, file.fileName, contentType)
-    return NextResponse.redirect(presignedUrl, {
-      status: 302,
-      headers: { 'Cache-Control': 'no-store' },
-    })
+    const presignedUrl = await s3GetPresignedDownloadUrl(storagePath, 300, file.fileName, contentType)
+    return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
   }
 
-  const fullPath = getFilePath(file.storagePath)
+  const fullPath = getFilePath(storagePath)
   const stat = await fs.promises.stat(fullPath)
   if (!stat.isFile()) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
@@ -136,7 +137,6 @@ export async function DELETE(
     },
     select: {
       id: true,
-      storagePath: true,
     },
   })
 
@@ -144,12 +144,14 @@ export async function DELETE(
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
 
+  const storedPath = await getStoredFilePath('USER_FILE', fileId, 'ORIGINAL')
   await prisma.userFile.delete({ where: { id: fileId } })
   try {
-    await deleteFile(file.storagePath)
+    if (storedPath) await deleteFile(storedPath)
   } catch {
     // Ignore storage delete errors; DB is source of truth.
   }
+  await deleteStoredFile('USER_FILE', fileId, 'ORIGINAL').catch(() => {})
 
   return NextResponse.json({ ok: true })
 }

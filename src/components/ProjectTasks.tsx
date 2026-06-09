@@ -344,7 +344,7 @@ export function ProjectTasks({
                         name={m.user.name}
                         email={m.user.email}
                         displayColor={m.user.displayColor}
-                        avatarUrl={m.user.avatarPath ? `/api/users/${m.userId}/avatar` : null}
+                        avatarUrl={`/api/users/${m.userId}/avatar`}
                         className="h-5 w-5 text-[8px] ring-2 ring-card"
                         title={m.user.name || m.user.email}
                       />
@@ -366,7 +366,7 @@ export function ProjectTasks({
                             name={m.user.name}
                             email={m.user.email}
                             displayColor={m.user.displayColor}
-                            avatarUrl={m.user.avatarPath ? `/api/users/${m.userId}/avatar` : null}
+                            avatarUrl={`/api/users/${m.userId}/avatar`}
                             className="h-5 w-5 text-[8px] ring-2 ring-card"
                             title={m.user.name || m.user.email}
                           />

@@ -81,9 +81,7 @@ export async function GET(request: NextRequest) {
         updatedAt: true,
         totalBytes: true,
         previewBytes: true,
-        diskBytes: true,
-        storagePath: true,
-        watermarkEnabled: true,
+        diskBytes: true, watermarkEnabled: true,
         sharePassword: true,
         authMode: true,
         hideFeedback: true,
@@ -108,7 +106,7 @@ export async function GET(request: NextRequest) {
                 id: true,
                 email: true,
                 name: true,
-                displayColor: true,                avatarPath: true,              },
+                displayColor: true,                },
             },
           },
         },
@@ -344,7 +342,7 @@ export async function POST(request: NextRequest) {
 
     const siblingProjects = await prisma.project.findMany({
       where: { clientId: client.id },
-      select: { storagePath: true, title: true },
+      select: { title: true, storagePath: true },
     })
     const projectFolderName = allocateUniqueStorageName(
       title,

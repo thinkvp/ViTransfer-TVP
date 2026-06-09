@@ -82,24 +82,34 @@ export async function POST(request: NextRequest) {
 
     const existing = await prisma.settings.findUnique({
       where: { id: 'default' },
-      select: { companyLogoPath: true },
+      select: { id: true },
     })
 
     await uploadFile(storagePath, buffer, buffer.length, contentType)
 
-    if (existing?.companyLogoPath && existing.companyLogoPath !== storagePath) {
-      await deleteFile(existing.companyLogoPath).catch(() => {})
+    // Delete old logo from StoredFile if it exists
+    const oldLogo = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO' } },
+      select: { storagePath: true },
+    })
+    if (oldLogo?.storagePath && oldLogo.storagePath !== storagePath) {
+      await deleteFile(oldLogo.storagePath).catch(() => {})
     }
+
+    // Upsert StoredFile record
+    await prisma.storedFile.upsert({
+      where: { entityType_entityId_fileRole: { entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO' } },
+      create: { entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO', storagePath, status: 'READY' },
+      update: { storagePath, status: 'READY' },
+    })
 
     const updateData: Prisma.SettingsUpdateInput = {
       companyLogoMode: 'UPLOAD',
-      companyLogoPath: storagePath,
       companyLogoUrl: null,
     }
     const createData: Prisma.SettingsCreateInput = {
       id: 'default',
       companyLogoMode: 'UPLOAD',
-      companyLogoPath: storagePath,
       companyLogoUrl: null,
     }
 

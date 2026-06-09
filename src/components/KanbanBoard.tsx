@@ -62,7 +62,6 @@ export type KanbanUser = {
   name: string | null
   email?: string | null
   displayColor: string | null
-  avatarPath?: string | null
 }
 
 export type KanbanProject = {
@@ -210,7 +209,6 @@ export default function KanbanBoard({
             name: u.name,
             email: u.email ?? null,
             displayColor: u.displayColor ?? null,
-            avatarPath: u.avatarPath ?? null,
           }))
         )
       }
@@ -874,7 +872,7 @@ function KanbanCardView({
                     name={m.user.name}
                     email={m.user.email}
                     displayColor={m.user.displayColor}
-                    avatarUrl={m.user.avatarPath ? `/api/users/${m.userId}/avatar` : null}
+                    avatarUrl={`/api/users/${m.userId}/avatar`}
                     className="h-6 w-6 text-[9px] ring-2 ring-card"
                     title={m.user.name || m.user.email || undefined}
                   />
@@ -1402,7 +1400,7 @@ export function CardDialog({
                           name={u.name}
                           email={u.email}
                           displayColor={u.displayColor}
-                          avatarUrl={u.avatarPath ? `/api/users/${u.id}/avatar` : null}
+                          avatarUrl={`/api/users/${u.id}/avatar`}
                           className="h-6 w-6 text-[9px]"
                         />
                         <span className="text-sm truncate flex-1">{u.name || u.email}</span>
@@ -1449,7 +1447,7 @@ export function CardDialog({
                             name={u.name}
                             email={u.email}
                             displayColor={u.displayColor}
-                            avatarUrl={u.avatarPath ? `/api/users/${u.id}/avatar` : null}
+                            avatarUrl={`/api/users/${u.id}/avatar`}
                             className="h-5 w-5 text-[8px]"
                           />
                           <span className="truncate">{u.name || u.email}</span>
@@ -1500,7 +1498,6 @@ type HistoryEntry = {
     id: string
     name: string | null
     displayColor: string | null
-    avatarPath: string | null
   } | null
 }
 
@@ -1627,7 +1624,7 @@ function TaskHistory({ cardId }: { cardId: string }) {
               name={actor?.name ?? entry.actorNameSnapshot}
               email={null}
               displayColor={actor?.displayColor ?? null}
-              avatarUrl={actor?.avatarPath ? `/api/users/${actor.id}/avatar` : null}
+              avatarUrl={actor ? `/api/users/${actor.id}/avatar` : null}
               className="h-6 w-6 text-[9px] flex-shrink-0 mt-0.5"
             />
             <div className="min-w-0 flex-1">
@@ -2152,7 +2149,7 @@ function ArchivedView({
                   name={m.user.name}
                   email={m.user.email}
                   displayColor={m.user.displayColor}
-                  avatarUrl={m.user.avatarPath ? `/api/users/${m.userId}/avatar` : null}
+                  avatarUrl={`/api/users/${m.userId}/avatar`}
                   className="h-6 w-6 text-[9px] ring-2 ring-card"
                   title={m.user.name || m.user.email || undefined}
                 />

@@ -47,7 +47,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     where: { cardId: id },
     include: {
       actor: {
-        select: { id: true, name: true, displayColor: true, avatarPath: true },
+        select: { id: true, name: true, displayColor: true },
       },
     },
     orderBy: { createdAt: 'asc' },

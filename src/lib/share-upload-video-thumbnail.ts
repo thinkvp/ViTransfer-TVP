@@ -274,14 +274,20 @@ export async function ensureShareUploadPreview(params: {
 }
 
 async function resolveShareUploadProjectStoragePath(storagePath: string): Promise<string | null> {
-  const record = await prisma.shareUploadFile.findFirst({
-    where: { storagePath },
+  // Find via StoredFile (legacy storagePath column dropped)
+  const stored = await prisma.storedFile.findFirst({
+    where: { entityType: 'SHARE_UPLOAD_FILE', storagePath },
+    select: { entityId: true },
+  }).catch(() => null)
+
+  if (!stored) return null
+  const record = await prisma.shareUploadFile.findUnique({
+    where: { id: stored.entityId },
     select: {
       project: {
-        select: {
-          storagePath: true,
-          title: true,
+        select: { title: true,
           companyName: true,
+          storagePath: true,
           client: { select: { name: true } },
         },
       },
