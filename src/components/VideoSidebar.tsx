@@ -207,6 +207,8 @@ interface VideoSidebarProps {
   albumPhotoMetaByPhotoId?: Record<string, { socialDownloadUrl: string; socialReady: boolean }>
   /** Share slug for API calls (album photo meta). */
   shareSlug?: string
+  /** Bearer token for share API auth (album photo meta). */
+  shareToken?: string | null
   /** Whether the current user can delete uploads. */
   canDeleteUploads?: boolean
   /** Delete an upload file by ID. */
@@ -258,6 +260,7 @@ export default function VideoSidebar({
   albumSocialEnabledByAlbumId = {},
   albumPhotoMetaByPhotoId = {},
   shareSlug,
+  shareToken,
   canDeleteUploads = false,
   onDeleteUploadFile,
   onDeleteUploadFolder,
@@ -544,6 +547,7 @@ export default function VideoSidebar({
     try {
       const res = await apiFetch(`/api/share/${encodeURIComponent(slug)}/albums/${encodeURIComponent(albumId)}`, {
         cache: 'no-store',
+        headers: shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined,
       })
       if (!res.ok) return
 
@@ -566,7 +570,7 @@ export default function VideoSidebar({
     } catch {
       // ignore
     }
-  }, [albumMetaLoadedByAlbumId])
+  }, [albumMetaLoadedByAlbumId, shareToken])
 
   // Preload album photo meta for sidebar context menu
   useEffect(() => {

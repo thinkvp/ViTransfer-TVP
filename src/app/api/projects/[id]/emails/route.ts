@@ -7,6 +7,7 @@ import { getSafeguardLimits } from '@/lib/settings'
 import { validateEmlFilename } from '@/lib/eml-validation'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildProjectEmailRawStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { registerStoredFile } from '@/lib/stored-file'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -243,10 +244,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })
 
   // Register in StoredFile
-  await prisma.storedFile.create({ data: {
+  await registerStoredFile({
     entityType: 'PROJECT_EMAIL', entityId: record.id, fileRole: 'RAW_EMAIL',
     storagePath, fileName: sanitizedFileName, fileSize: BigInt(fileSize),
-  } })
+  })
 
   await recalculateAndStoreProjectTotalBytes(projectId)
 

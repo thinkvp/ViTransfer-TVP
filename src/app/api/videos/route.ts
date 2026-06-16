@@ -7,6 +7,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { isS3Mode } from '@/lib/s3-storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoOriginalStoragePath } from '@/lib/project-storage-paths'
+import { registerStoredFile } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 
@@ -168,10 +169,10 @@ export async function POST(request: NextRequest) {
     })
 
     // Register in StoredFile
-    await prisma.storedFile.create({ data: {
+    await registerStoredFile({
       entityType: 'VIDEO', entityId: video.id, fileRole: 'ORIGINAL',
       storagePath: originalStoragePath, fileName: sanitizedOriginalFileName, fileSize: BigInt(originalFileSize),
-    } })
+    })
 
     await recalculateAndStoreProjectTotalBytes(projectId)
 

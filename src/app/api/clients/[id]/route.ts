@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteDirectory, moveDirectory } from '@/lib/storage'
 import { isS3Mode } from '@/lib/s3-storage'
+import { getStoredFileRecords } from '@/lib/stored-file'
 import {
   buildClientStorageRoot,
   replaceStoredStoragePathPrefix,
@@ -104,8 +105,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const clientFileIds = (client as any).files.map((f: any) => f.id)
   const sizeMap = new Map<string, number>()
   if (clientFileIds.length > 0) {
-    const stored = await prisma.storedFile.findMany({
-      where: { entityType: 'CLIENT_FILE', entityId: { in: clientFileIds }, fileRole: 'ORIGINAL' },
+    const stored = await getStoredFileRecords('CLIENT_FILE', clientFileIds, {
+      fileRoles: ['ORIGINAL'],
       select: { entityId: true, fileSize: true },
     })
     for (const s of stored) {

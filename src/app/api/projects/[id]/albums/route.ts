@@ -4,6 +4,7 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { allocateUniqueStorageName } from '@/lib/project-storage-paths'
+import { getStoredFileRecords } from '@/lib/stored-file'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -78,8 +79,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   // Legacy fullZipFileSize/socialZipFileSize columns dropped — read from StoredFile
   const albumIds = albums.map(a => a.id)
-  const albumZipFiles = albumIds.length > 0 ? await prisma.storedFile.findMany({
-    where: { entityType: 'ALBUM', entityId: { in: albumIds }, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
+  const albumZipFiles = albumIds.length > 0 ? await getStoredFileRecords('ALBUM', albumIds, {
+    fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'],
     select: { entityId: true, fileRole: true, fileSize: true },
   }) : []
   const zipSizeByAlbum = new Map<string, Map<string, bigint | null>>()

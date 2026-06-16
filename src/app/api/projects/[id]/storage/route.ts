@@ -7,6 +7,7 @@ import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot, buildProjectUploadsRoot } from '@/lib/project-storage-paths'
 import { computeProjectPreviewBytes } from '@/lib/project-total-bytes'
+import { getStoredFileAggregate, getStoredFileRecords } from '@/lib/stored-file'
 import * as path from 'path'
 import { readdir, statfs } from 'fs/promises'
 import * as fs from 'fs'
@@ -161,17 +162,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           client: { select: { name: true } },
         },
       }),
-      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO', entityId: { in: videoIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'COMMENT_FILE', entityId: { in: commentFileIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: shareUploadFileIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_FILE', entityId: { in: projectFileIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL', entityId: { in: projectEmailIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: projectEmailAttachmentIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoIds } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoIds }, fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM', entityId: { in: albumIds } }, _sum: { fileSize: true } }),
+      getStoredFileAggregate({ entityType: 'VIDEO', entityId: { in: videoIds } }),
+      getStoredFileAggregate({ entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: 'ORIGINAL' }),
+      getStoredFileAggregate({ entityType: 'VIDEO_ASSET', entityId: { in: assetIds } }),
+      getStoredFileAggregate({ entityType: 'COMMENT_FILE', entityId: { in: commentFileIds } }),
+      getStoredFileAggregate({ entityType: 'SHARE_UPLOAD_FILE', entityId: { in: shareUploadFileIds } }),
+      getStoredFileAggregate({ entityType: 'PROJECT_FILE', entityId: { in: projectFileIds } }),
+      getStoredFileAggregate({ entityType: 'PROJECT_EMAIL', entityId: { in: projectEmailIds } }),
+      getStoredFileAggregate({ entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: projectEmailAttachmentIds } }),
+      getStoredFileAggregate({ entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoIds } }),
+      getStoredFileAggregate({ entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoIds }, fileRole: 'ORIGINAL' }),
+      getStoredFileAggregate({ entityType: 'ALBUM', entityId: { in: albumIds } }),
     ])
 
     const videosBytes = asNumberBigInt(videoAgg._sum.fileSize)
@@ -282,16 +283,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const videoAssetStoragePaths = new Set<string>()
       // Disk bytes via StoredFile — batch-load all paths for this project's entities
       const [videoStored, assetStored, photoStored] = await Promise.all([
-        prisma.storedFile.findMany({
-          where: { entityType: 'VIDEO', entityId: { in: videoEntries.map(v => v.id) } },
+        getStoredFileRecords('VIDEO', videoEntries.map(v => v.id), {
           select: { storagePath: true, fileRole: true, entityId: true },
         }),
-        prisma.storedFile.findMany({
-          where: { entityType: 'VIDEO_ASSET', entityId: { in: videoAssetEntries.map(a => a.id) } },
+        getStoredFileRecords('VIDEO_ASSET', videoAssetEntries.map(a => a.id), {
           select: { storagePath: true },
         }),
-        prisma.storedFile.findMany({
-          where: { entityType: 'ALBUM_PHOTO', entityId: { in: albumPhotoEntries.map(p => p.id) } },
+        getStoredFileRecords('ALBUM_PHOTO', albumPhotoEntries.map(p => p.id), {
           select: { storagePath: true, fileRole: true },
         }),
       ])

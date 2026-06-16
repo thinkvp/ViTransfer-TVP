@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteDirectory, deleteFile, moveDirectory, moveFile } from '@/lib/storage'
-import { renameStoredPaths } from '@/lib/stored-file'
+import { renameStoredPaths, getStoredFileRecords, countStoredFilesByPath, deleteStoredFilesByCriteria, getStoredFileAggregate } from '@/lib/stored-file'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -283,18 +283,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     // Best-effort: delete physical files via StoredFile
     for (const photo of album.photos) {
       try {
-        const storedFiles = await prisma.storedFile.findMany({
-          where: { entityType: 'ALBUM_PHOTO', entityId: photo.id },
+        const storedFiles = await getStoredFileRecords('ALBUM_PHOTO', [photo.id], {
           select: { storagePath: true },
         })
         for (const sf of storedFiles) {
-          const sharedCount = await prisma.storedFile.count({
-            where: {
-              storagePath: sf.storagePath,
-              entityType: 'ALBUM_PHOTO',
-              entityId: { not: photo.id },
-            },
-          })
+          const sharedCount = await countStoredFilesByPath(sf.storagePath, { excludeEntityType: 'ALBUM_PHOTO', excludeEntityId: photo.id })
           if (sharedCount === 0) {
             await deleteFile(sf.storagePath)
           }
@@ -312,25 +305,26 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     // Clean up StoredFile rows for all deleted photos and the album
     const photoIds = album.photos.map(p => p.id)
-    await prisma.storedFile.deleteMany({
-      where: {
-        OR: [
-          { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds } },
-          { entityType: 'ALBUM', entityId: albumId },
-        ],
-      },
+    await deleteStoredFilesByCriteria({
+      entityType: 'ALBUM_PHOTO',
+      entityIds: photoIds,
+    }).catch(() => {})
+    await deleteStoredFilesByCriteria({
+      entityType: 'ALBUM',
+      entityIds: [albumId],
     }).catch(() => {})
 
     // Compute total bytes from StoredFile for adjustment
     const photoSizeAgg = photoIds.length > 0
-      ? await prisma.storedFile.aggregate({
-          where: { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds } },
-          _sum: { fileSize: true },
+      ? await getStoredFileAggregate({
+          entityType: 'ALBUM_PHOTO',
+          entityId: { in: photoIds },
         })
       : { _sum: { fileSize: BigInt(0) } }
-    const albumZipAgg = await prisma.storedFile.aggregate({
-      where: { entityType: 'ALBUM', entityId: albumId, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
-      _sum: { fileSize: true },
+    const albumZipAgg = await getStoredFileAggregate({
+      entityType: 'ALBUM',
+      entityId: albumId,
+      fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] },
     })
     const photosDelta = BigInt(photoSizeAgg._sum.fileSize ?? 0)
     const zipDelta = BigInt(albumZipAgg._sum.fileSize ?? 0)

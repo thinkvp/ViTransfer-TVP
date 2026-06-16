@@ -14,6 +14,8 @@ import {
   normalizeUploadChunkSizeMB,
 } from '@/lib/transfer-tuning'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+// SETTINGS_BRANDING has no project association — getStoredFilePathForProject() would return null.
+// eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 

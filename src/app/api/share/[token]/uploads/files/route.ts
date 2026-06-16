@@ -13,6 +13,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
+import { registerStoredFile } from '@/lib/stored-file'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
 import { enqueueShareUploadPreview, getUploadTimelineQueue } from '@/lib/queue'
 
@@ -137,15 +138,13 @@ export async function POST(
   })
 
   // Register original file in StoredFile
-  await prisma.storedFile.create({
-    data: {
-      entityType: 'SHARE_UPLOAD_FILE',
-      entityId: createdFile.id,
-      fileRole: 'ORIGINAL',
-      storagePath,
-      fileName: storageFileName,
-      fileSize: BigInt(fileSize),
-    },
+  await registerStoredFile({
+    entityType: 'SHARE_UPLOAD_FILE',
+    entityId: createdFile.id,
+    fileRole: 'ORIGINAL',
+    storagePath,
+    fileName: storageFileName,
+    fileSize: BigInt(fileSize),
   })
 
   if (normalizedFolderPath) {

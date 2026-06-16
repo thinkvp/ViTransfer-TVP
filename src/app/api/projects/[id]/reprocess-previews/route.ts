@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import type { VideoStatus } from '@prisma/client'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
-import { getStoredFilePath, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { getStoredFilePathForProject, deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
 import type { FileRole } from '@/lib/stored-file'
 import {
   enqueueShareUploadPreview,
@@ -17,8 +18,13 @@ import {
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { cancelProjectJobs } from '@/lib/cancel-project-jobs'
+import { z } from 'zod'
 
 export const runtime = 'nodejs'
+
+const reprocessPreviewsSchema = z.object({
+  videoIds: z.array(z.string().min(1)).max(50).optional(),
+})
 
 function isPreviewableFileType(fileType: string | null | undefined): boolean {
   const normalized = String(fileType || '').toLowerCase()
@@ -52,6 +58,13 @@ export async function POST(
 
   try {
     const { id: projectId } = await params
+    const body = await request.json().catch(() => ({}))
+    const parsed = reprocessPreviewsSchema.safeParse(body)
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
+    }
+    const { videoIds: scopedVideoIds } = parsed.data
+
     const project = await prisma.project.findUnique({ where: { id: projectId }, select: { id: true, status: true } })
     if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     if (!isVisibleProjectStatusForUser(authResult, project.status)) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
@@ -59,11 +72,21 @@ export async function POST(
 
     const { cancelled: cancelledJobs } = await cancelProjectJobs(projectId)
 
+    const isScoped = Array.isArray(scopedVideoIds) && scopedVideoIds.length > 0
+
     // Query entities — paths come from StoredFile
+    const reprocessStatuses: VideoStatus[] = ['READY', 'ERROR']
+    const videoWhere = isScoped
+      ? { projectId, id: { in: scopedVideoIds }, status: { in: reprocessStatuses } }
+      : { projectId, status: { in: reprocessStatuses } }
+    const videoAssetWhere = isScoped
+      ? { video: { projectId, id: { in: scopedVideoIds } } }
+      : { video: { projectId } }
+
     const [videos, uploadFiles, videoAssets, albumPhotos] = await Promise.all([
-      prisma.video.findMany({ where: { projectId, status: { in: ['READY', 'ERROR'] } }, select: { id: true, status: true } }),
+      prisma.video.findMany({ where: videoWhere, select: { id: true, status: true } }),
       prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true, fileType: true, fileName: true, mediaDurationSeconds: true } }),
-      prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true, videoId: true, fileType: true, fileName: true } }),
+      prisma.videoAsset.findMany({ where: videoAssetWhere, select: { id: true, videoId: true, fileType: true, fileName: true } }),
       prisma.albumPhoto.findMany({ where: { album: { projectId }, status: 'READY' }, select: { id: true, albumId: true } }),
     ])
 
@@ -72,18 +95,37 @@ export async function POST(
     const videoAssetIds = videoAssets.map(a => a.id)
     const albumPhotoIds = albumPhotos.map(p => p.id)
 
+    // Check for custom thumbnails (asset-based) to avoid deleting them
+    let customThumbnailVideoIds: Set<string> = new Set()
+    if (videoIds.length > 0) {
+      const assetThumbnailStored = await getStoredFileRecords('VIDEO_ASSET', videoIds, { fileRoles: ['THUMBNAIL'], select: { entityId: true } })
+      customThumbnailVideoIds = new Set(assetThumbnailStored.map(s => s.entityId))
+    }
+
     // Build StoredFile role groups for deletion
     const roleGroups: Array<{ entityType: string; entityIds: string[]; fileRoles: FileRole[] }> = []
-    if (videoIds.length) roleGroups.push({ entityType: 'VIDEO', entityIds: videoIds, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+    // For videos: exclude THUMBNAIL role for videos that have custom (asset-based) thumbnails
+    if (videoIds.length) {
+      const videoIdsWithoutCustomThumb = videoIds.filter(id => !customThumbnailVideoIds.has(id))
+      const videoIdsWithCustomThumb = videoIds.filter(id => customThumbnailVideoIds.has(id))
+      if (videoIdsWithoutCustomThumb.length) {
+        roleGroups.push({ entityType: 'VIDEO', entityIds: videoIdsWithoutCustomThumb, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+      }
+      if (videoIdsWithCustomThumb.length) {
+        roleGroups.push({ entityType: 'VIDEO', entityIds: videoIdsWithCustomThumb, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+      }
+    }
     if (uploadFileIds.length) roleGroups.push({ entityType: 'SHARE_UPLOAD_FILE', entityIds: uploadFileIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
     if (videoAssetIds.length) roleGroups.push({ entityType: 'VIDEO_ASSET', entityIds: videoAssetIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
     if (albumPhotoIds.length) roleGroups.push({ entityType: 'ALBUM_PHOTO', entityIds: albumPhotoIds, fileRoles: ['SOCIAL', 'THUMBNAIL'] })
 
-    // Fetch paths to delete
-    const storedFilesToDelete = await prisma.storedFile.findMany({
-      where: { OR: roleGroups.map(g => ({ entityType: g.entityType as any, entityId: { in: g.entityIds }, fileRole: { in: g.fileRoles } })) },
-      select: { storagePath: true, fileRole: true, entityId: true },
-    })
+    // Fetch paths to delete — one query per entity type group
+    const storedResults = await Promise.all(roleGroups.map(g =>
+      g.entityIds.length > 0
+        ? getStoredFileRecords(g.entityType as any, g.entityIds, { fileRoles: g.fileRoles, select: { storagePath: true, fileRole: true, entityId: true } })
+        : []
+    ))
+    const storedFilesToDelete = storedResults.flat()
     const filePathsToDelete = new Set(storedFilesToDelete.map(f => f.storagePath))
     const directoryPathsToDelete = new Set<string>()
 
@@ -107,7 +149,7 @@ export async function POST(
     const videoQueue = getVideoQueue()
     let queuedVideoJobs = 0
     for (const video of videos) {
-      const originalPath = await getStoredFilePath('VIDEO', video.id, 'ORIGINAL')
+      const originalPath = await getStoredFilePathForProject('VIDEO', video.id, 'ORIGINAL', projectId)
       await prisma.video.update({ where: { id: video.id }, data: { status: 'QUEUED', processingProgress: 0, processingPhase: null, processingError: null } })
       await videoQueue.add('process-video', { videoId: video.id, originalStoragePath: originalPath || '', projectId })
       queuedVideoJobs++
@@ -121,7 +163,7 @@ export async function POST(
     let queuedUploadPreviewJobs = 0, queuedUploadTimelineJobs = 0
     for (const file of previewableUploadFiles) {
       const isVideo = String(file.fileType || '').toLowerCase().startsWith('video/')
-      const originalPath = await getStoredFilePath('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL') || ''
+      const originalPath = await getStoredFilePathForProject('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL', projectId) || ''
       await prisma.shareUploadFile.update({ where: { id: file.id }, data: { previewStatus: 'PENDING', previewError: null, previewGeneratedAt: null, previewAttempts: 0, previewQueuedAt: null, ...(isVideo ? { timelinePreviewsReady: false } : {}) } })
       await shareUploadPreviewQueue.remove(`share-preview:shareUploadFile:${file.id}`).catch(() => {})
       await enqueueShareUploadPreview({ type: 'shareUploadFile', recordId: file.id, storagePath: originalPath, fileType: file.fileType, fileName: file.fileName, durationSeconds: file.mediaDurationSeconds })
@@ -134,7 +176,7 @@ export async function POST(
     let queuedVideoAssetPreviewJobs = 0, queuedAssetTimelineJobs = 0
     for (const asset of previewableVideoAssets) {
       const isVideo = String(asset.fileType || '').toLowerCase().startsWith('video/')
-      const originalPath = await getStoredFilePath('VIDEO_ASSET', asset.id, 'ORIGINAL') || ''
+      const originalPath = await getStoredFilePathForProject('VIDEO_ASSET', asset.id, 'ORIGINAL', projectId) || ''
       await prisma.videoAsset.update({ where: { id: asset.id }, data: { previewStatus: 'PENDING', previewError: null, previewGeneratedAt: null, previewAttempts: 0, previewQueuedAt: null, ...(isVideo ? { timelinePreviewsReady: false } : {}) } })
       await shareUploadPreviewQueue.remove(`share-preview:videoAsset:${asset.id}`).catch(() => {})
       await enqueueShareUploadPreview({ type: 'videoAsset', recordId: asset.id, storagePath: originalPath, fileType: asset.fileType, fileName: asset.fileName })

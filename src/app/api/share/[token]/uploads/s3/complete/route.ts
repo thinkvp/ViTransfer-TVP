@@ -13,6 +13,7 @@ import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storag
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
 import { enqueueShareUploadPreview, getUploadTimelineQueue } from '@/lib/queue'
+import { registerStoredFile } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -114,15 +115,13 @@ export async function POST(
   })
 
   // Register in StoredFile
-  await prisma.storedFile.create({
-    data: {
-      entityType: 'SHARE_UPLOAD_FILE',
-      entityId: createdFile.id,
-      fileRole: 'ORIGINAL',
-      storagePath: key,
-      fileName: storedFileName || fileName,
-      fileSize: BigInt(fileSize),
-    },
+  await registerStoredFile({
+    entityType: 'SHARE_UPLOAD_FILE',
+    entityId: createdFile.id,
+    fileRole: 'ORIGINAL',
+    storagePath: key,
+    fileName: storedFileName || fileName,
+    fileSize: BigInt(fileSize),
   })
 
   if (folderPath) {

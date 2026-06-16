@@ -4,6 +4,8 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile, uploadFile } from '@/lib/storage'
 import { getImageDimensions } from '@/lib/image-dimensions'
+// SETTINGS_BRANDING has no project association — getStoredFilePathForProject() would return null.
+// eslint-disable-next-line no-restricted-imports
 import { registerStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import type { Prisma } from '@prisma/client'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'

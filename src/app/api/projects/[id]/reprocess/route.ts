@@ -8,7 +8,7 @@ import {
   getVideoQueue,
 } from '@/lib/queue'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
-import { getStoredFilePath, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
 import type { FileRole } from '@/lib/stored-file'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -22,6 +22,7 @@ import {
   recalculateAndStoreProjectPreviewBytes,
   recalculateAndStoreProjectTotalBytes,
 } from '@/lib/project-total-bytes'
+import { cancelProjectJobs } from '@/lib/cancel-project-jobs'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -98,6 +99,9 @@ export async function POST(
       )
     }
 
+    // Cancel existing jobs for this project before re-queuing
+    await cancelProjectJobs(project.id)
+
     // Filter videos: only READY or ERROR status
     let videosToReprocess = project.videos.filter(
       video => video.status === 'READY' || video.status === 'ERROR'
@@ -121,8 +125,7 @@ export async function POST(
 
     // Batch-load StoredFile records for all videos to reprocess
     const reprocessVideoIds = videosToReprocess.map(v => v.id)
-    const videoStoredFiles = await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO', entityId: { in: reprocessVideoIds } },
+    const videoStoredFiles = await getStoredFileRecords('VIDEO', reprocessVideoIds, {
       select: { entityId: true, fileRole: true, storagePath: true },
     })
 
@@ -134,10 +137,7 @@ export async function POST(
     }
 
     // Check for custom thumbnails (asset-based) via StoredFile
-    const assetThumbnailStored = await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO_ASSET', entityId: { in: videoIds }, fileRole: 'THUMBNAIL' },
-      select: { entityId: true },
-    })
+    const assetThumbnailStored = await getStoredFileRecords('VIDEO_ASSET', reprocessVideoIds, { fileRoles: ['THUMBNAIL'], select: { entityId: true } })
     const customThumbnailVideoIds = new Set(assetThumbnailStored.map(s => s.entityId))
 
     for (const video of videosToReprocess) {
@@ -171,14 +171,31 @@ export async function POST(
         if (!hasCustomThumbnail) rolesToDelete.push('THUMBNAIL')
       }
 
-      // Delete files from storage
+      // Timeline files (always delete when doing full or targeted preview reprocessing)
+      if (!thumbnailOnlyMode) {
+        if (stored.has('TIMELINE_VTT')) rolesToDelete.push('TIMELINE_VTT')
+        if (stored.has('TIMELINE_SPRITES')) rolesToDelete.push('TIMELINE_SPRITES')
+      }
+
+      // Delete files from storage (sprite directories need deleteDirectory)
       const pathsToDelete = rolesToDelete
         .map(role => stored.get(role))
         .filter((p): p is string => !!p)
 
-      await Promise.allSettled(
-        pathsToDelete.map(fp => deleteFile(fp))
-      )
+      const filePaths: string[] = []
+      const dirPaths: string[] = []
+      for (const p of pathsToDelete) {
+        if (p.endsWith('_sprites')) {
+          dirPaths.push(p)
+        } else {
+          filePaths.push(p)
+        }
+      }
+
+      await Promise.allSettled([
+        ...filePaths.map(fp => deleteFile(fp)),
+        ...dirPaths.map(dp => deleteDirectory(dp)),
+      ])
 
       // Delete StoredFile records
       if (rolesToDelete.length > 0) {
@@ -196,6 +213,7 @@ export async function POST(
           status: 'QUEUED',
           processingProgress: 0,
           processingPhase: null,
+          processingError: null,
         },
       })
 
@@ -258,8 +276,7 @@ export async function POST(
 
     // Batch-load StoredFile records for all assets
     const assetIds = previewableAssets.map(a => a.id)
-    const assetStoredFiles = await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } },
+    const assetStoredFiles = await getStoredFileRecords('VIDEO_ASSET', assetIds, {
       select: { entityId: true, fileRole: true, storagePath: true },
     })
 

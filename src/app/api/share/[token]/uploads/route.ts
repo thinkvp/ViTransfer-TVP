@@ -12,7 +12,7 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import { getShareUploadPreviewStoragePath } from '@/lib/share-upload-video-thumbnail'
-import { getStoredFilePathForProject, deleteStoredFile } from '@/lib/stored-file'
+import { getStoredFilePathForProject, deleteStoredFile, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -357,8 +357,9 @@ export async function DELETE(
 
   // Clean up StoredFile rows for deleted files
   if (fileIdsToDelete.length > 0) {
-    await prisma.storedFile.deleteMany({
-      where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: fileIdsToDelete } },
+    await deleteStoredFilesByCriteria({
+      entityType: 'SHARE_UPLOAD_FILE',
+      entityIds: fileIdsToDelete,
     }).catch(() => {})
   }
 

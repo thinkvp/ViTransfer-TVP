@@ -24,6 +24,7 @@ interface VideoListProps {
   canDelete?: boolean
   canApprove?: boolean
   canManageAllowApproval?: boolean
+  watermarkEnabled?: boolean
 }
 
 export default function VideoList({
@@ -33,6 +34,7 @@ export default function VideoList({
   canDelete,
   canApprove,
   canManageAllowApproval,
+  watermarkEnabled = true,
 }: VideoListProps) {
   const effectiveCanDelete = canDelete ?? isAdmin
   const effectiveCanApprove = canApprove ?? isAdmin
@@ -244,28 +246,32 @@ export default function VideoList({
       return
     }
 
-    // Show reprocessing modal since version label affects watermark
+    // Only show reprocessing modal if watermarks are enabled, since version label affects watermark text
+    if (!watermarkEnabled) {
+      // Watermarks disabled — save the label directly without prompting for reprocess
+      await saveVersionLabel(videoId, editValue.trim(), false)
+      return
+    }
+
     setPendingVideoUpdate({ videoId, newLabel: editValue.trim() })
     setShowReprocessModal(true)
   }
 
-  const saveVersionLabel = async (shouldReprocess: boolean) => {
-    if (!pendingVideoUpdate) return
-
-    setSavingId(pendingVideoUpdate.videoId)
+  const saveVersionLabel = async (videoId: string, newLabel: string, shouldReprocess: boolean) => {
+    setSavingId(videoId)
     try {
-      const result = await apiPatch<any>(`/api/videos/${pendingVideoUpdate.videoId}`, { versionLabel: pendingVideoUpdate.newLabel })
+      const result = await apiPatch<any>(`/api/videos/${videoId}`, { versionLabel: newLabel })
 
       // S3 mode: server returns 202 asking user to confirm the background rename
       if (result?.requiresJobConfirmation) {
         setShowReprocessModal(false)
-        setVersionRenameConfirm({ videoId: pendingVideoUpdate.videoId, newLabel: pendingVideoUpdate.newLabel, shouldReprocess })
+        setVersionRenameConfirm({ videoId, newLabel, shouldReprocess })
         return
       }
 
       // Reprocess if requested
       if (shouldReprocess) {
-        await reprocessVideo(pendingVideoUpdate.videoId)
+        await reprocessVideo(videoId)
       }
 
       setEditingId(null)
@@ -286,7 +292,7 @@ export default function VideoList({
       const video = videos.find(v => v.id === videoId)
       if (!video) return
 
-      await apiPost(`/api/projects/${video.projectId}/reprocess`, { videoIds: [videoId] })
+      await apiPost(`/api/projects/${video.projectId}/reprocess-previews`, { videoIds: [videoId] })
 
     } catch (err) {
       // Don't throw - we still want to save the label
@@ -709,8 +715,14 @@ export default function VideoList({
           setPendingVideoUpdate(null)
           setSavingId(null)
         }}
-        onSaveWithoutReprocess={() => saveVersionLabel(false)}
-        onSaveAndReprocess={() => saveVersionLabel(true)}
+        onSaveWithoutReprocess={() => {
+          if (!pendingVideoUpdate) return
+          saveVersionLabel(pendingVideoUpdate.videoId, pendingVideoUpdate.newLabel, false)
+        }}
+        onSaveAndReprocess={() => {
+          if (!pendingVideoUpdate) return
+          saveVersionLabel(pendingVideoUpdate.videoId, pendingVideoUpdate.newLabel, true)
+        }}
         saving={savingId !== null}
         reprocessing={reprocessing}
         title="Version Label Changed"

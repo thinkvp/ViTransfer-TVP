@@ -7,6 +7,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { uploadFile, deleteFile } from '@/lib/storage'
+import { registerStoredFile, getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -172,15 +173,13 @@ export async function POST(
     })
 
     // Register in StoredFile
-    await prisma.storedFile.create({
-      data: {
-        entityType: 'COMMENT_FILE',
-        entityId: commentFile.id,
-        fileRole: 'ORIGINAL',
-        storagePath,
-        fileName,
-        fileSize: BigInt(fileSize),
-      },
+    await registerStoredFile({
+      entityType: 'COMMENT_FILE',
+      entityId: commentFile.id,
+      fileRole: 'ORIGINAL',
+      storagePath,
+      fileName,
+      fileSize: BigInt(fileSize),
     })
 
     await recalculateAndStoreProjectTotalBytes(comment.projectId)
@@ -278,16 +277,16 @@ export async function DELETE(
 
     // Delete physical files via StoredFile
     if (fileIds.length > 0) {
-      const paths = await prisma.storedFile.findMany({
-        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+      const paths = await getStoredFileRecords('COMMENT_FILE', fileIds, {
         select: { storagePath: true },
       })
       for (const { storagePath } of paths) {
         try { await deleteFile(storagePath) } catch {}
       }
       // Clean up StoredFile rows
-      await prisma.storedFile.deleteMany({
-        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+      await deleteStoredFilesByCriteria({
+        entityType: 'COMMENT_FILE',
+        entityIds: fileIds,
       }).catch(() => {})
     }
 

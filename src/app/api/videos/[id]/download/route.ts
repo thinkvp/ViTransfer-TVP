@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import { getStoredFilePathForProject } from '@/lib/stored-file'
+import { getStoredFilePathForProject, getStoredFileRecords } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
@@ -68,10 +68,8 @@ export async function GET(
     }
 
     // Use the original filename from StoredFile registry
-    const storedFile = await prisma.storedFile.findUnique({
-      where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: video.id, fileRole: 'ORIGINAL' } },
-      select: { fileName: true },
-    })
+    const records = await getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['ORIGINAL'], select: { fileName: true } })
+    const storedFile = records[0] || null
     const originalFilename = storedFile?.fileName || 'video.mp4'
     const safeFilename = sanitizeFilenameForHeader(originalFilename)
 

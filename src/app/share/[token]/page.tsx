@@ -2977,6 +2977,7 @@ export default function SharePage() {
         onSelectedFileIdsChange={setSelectedFileIds}
         activeFilesFolderName={requestedFilesFolderName}
         shareSlug={token}
+        shareToken={shareToken}
         onOpenVideoVersion={(file, folderName) => {
           if (file.type !== 'video' || !file.videoId) return
           if (folderName) {

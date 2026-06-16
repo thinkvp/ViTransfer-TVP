@@ -5,6 +5,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+// USER_FILE has no project association — getStoredFilePathForProject() would return null.
+// eslint-disable-next-line no-restricted-imports
 import { deleteStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs from 'fs'

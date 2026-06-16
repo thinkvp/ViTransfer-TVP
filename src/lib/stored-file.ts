@@ -385,7 +385,7 @@ export async function renameStoredPaths(
   const prefixLen = oldPrefix.length
   const result = await prisma.$executeRaw`
     UPDATE "StoredFile"
-    SET "storagePath" = ${newPrefix} || SUBSTRING("storagePath" FROM ${prefixLen + 1})
+    SET "storagePath" = ${newPrefix} || SUBSTRING("storagePath" FROM ${prefixLen + 1}::integer)
     WHERE "entityType" = ${entityType}::"EntityType"
       AND "entityId" = ANY(${entityIds})
       AND "storagePath" LIKE ${oldPrefix + '%'}
@@ -427,17 +427,18 @@ export async function findStoredFilesToDelete(params: {
 export async function deleteStoredFilesByCriteria(params: {
   entityType: EntityType
   entityIds: string[]
-  fileRoles: FileRole[]
+  fileRoles?: FileRole[]
 }) {
-  if (params.entityIds.length === 0 || params.fileRoles.length === 0) return 0
+  if (params.entityIds.length === 0) return 0
 
-  const result = await prisma.storedFile.deleteMany({
-    where: {
-      entityType: params.entityType,
-      entityId: { in: params.entityIds },
-      fileRole: { in: params.fileRoles },
-    },
-  })
+  const where: any = {
+    entityType: params.entityType,
+    entityId: { in: params.entityIds },
+  }
+  if (params.fileRoles?.length) {
+    where.fileRole = { in: params.fileRoles }
+  }
+  const result = await prisma.storedFile.deleteMany({ where })
   return result.count
 }
 
@@ -494,6 +495,123 @@ export async function batchResolveFileSizes(
   }
 
   return sizeMap
+}
+
+// ---------------------------------------------------------------------------
+// Update helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Update the storage path for a specific entity+role.
+ * Used when files are moved/renamed (e.g. accounting attachment file relocations).
+ */
+export async function updateStoredFilePath(
+  entityType: EntityType,
+  entityId: string,
+  fileRole: FileRole,
+  newStoragePath: string,
+) {
+  return prisma.storedFile.update({
+    where: { entityType_entityId_fileRole: { entityType, entityId, fileRole } },
+    data: { storagePath: newStoragePath },
+  })
+}
+
+/**
+ * Check if a StoredFile record exists for the given entity+role.
+ * Returns boolean — cheaper than fetching the full row.
+ */
+export async function storedFileExists(
+  entityType: EntityType,
+  entityId: string,
+  fileRole: FileRole,
+): Promise<boolean> {
+  const count = await prisma.storedFile.count({
+    where: { entityType, entityId, fileRole },
+  })
+  return count > 0
+}
+
+/**
+ * Count StoredFile rows whose storagePath starts with a given prefix.
+ * Used to detect if a file is referenced by multiple entities (shared files).
+ */
+export async function countStoredFilesByPrefix(
+  storagePathPrefix: string,
+  options?: { excludeEntityType?: EntityType; excludeEntityId?: string },
+): Promise<number> {
+  const where: any = { storagePath: { startsWith: storagePathPrefix } }
+  if (options?.excludeEntityType || options?.excludeEntityId) {
+    const not: any = {}
+    if (options.excludeEntityType) not.entityType = options.excludeEntityType
+    if (options.excludeEntityId) not.entityId = options.excludeEntityId
+    where.NOT = not
+  }
+  return prisma.storedFile.count({ where })
+}
+
+/**
+ * Count StoredFile rows with an exact storagePath match,
+ * optionally excluding a specific entity.
+ * Used to detect if a file is shared across entities.
+ */
+export async function countStoredFilesByPath(
+  storagePath: string,
+  options?: { excludeEntityType?: EntityType; excludeEntityId?: string; excludeEntityIds?: string[] },
+): Promise<number> {
+  const where: any = { storagePath }
+  const not: any = {}
+  if (options?.excludeEntityType) not.entityType = options.excludeEntityType
+  if (options?.excludeEntityId) not.entityId = options.excludeEntityId
+  if (options?.excludeEntityIds?.length) not.entityId = { notIn: options.excludeEntityIds }
+  if (Object.keys(not).length > 0) where.NOT = not
+  return prisma.storedFile.count({ where })
+}
+
+/**
+ * Get StoredFile records for a set of entities, with configurable select.
+ * Used by API routes that need file metadata (fileSize, fileName, etc.)
+ * for multiple entities at once.
+ *
+ * SECURITY: No authorization check — callers must verify entity ownership first.
+ */
+export async function getStoredFileRecords(
+  entityType: EntityType,
+  entityIds: string[],
+  options?: {
+    fileRoles?: FileRole[]
+    select?: Record<string, boolean>
+  },
+) {
+  if (entityIds.length === 0) return []
+  const where: any = { entityType, entityId: { in: entityIds } }
+  if (options?.fileRoles?.length) {
+    where.fileRole = { in: options.fileRoles }
+  }
+  return prisma.storedFile.findMany({
+    where,
+    select: options?.select ?? { entityId: true, fileRole: true, storagePath: true, fileName: true, fileSize: true },
+  }) as any as Record<string, any>[]
+}
+
+/**
+ * Run an aggregate query on the StoredFile table.
+ * Used by storage overview and project storage stats endpoints
+ * that need fine-grained control over filtering.
+ *
+ * SECURITY: No authorization check — callers must verify project access first.
+ */
+export async function getStoredFileAggregate(
+  where: {
+    entityType?: EntityType | { in: EntityType[] }
+    entityId?: string | { in: string[] }
+    fileRole?: FileRole | { in: FileRole[] }
+  },
+) {
+  return prisma.storedFile.aggregate({
+    where: where as any,
+    _sum: { fileSize: true },
+  })
 }
 
 // ---------------------------------------------------------------------------

@@ -7,7 +7,7 @@ import { getTransferTuningSettings } from '@/lib/settings'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { getStoredFilePath, deleteStoredFile } from '@/lib/stored-file'
+import { getStoredFilePathForProject, deleteStoredFile } from '@/lib/stored-file'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 
@@ -82,7 +82,7 @@ export async function GET(
   }
 
   // Resolve storage path from StoredFile registry
-  const storagePath = await getStoredFilePath('PROJECT_FILE', file.id, 'ORIGINAL')
+  const storagePath = await getStoredFilePathForProject('PROJECT_FILE', file.id, 'ORIGINAL', projectId)
   if (!storagePath) {
     return NextResponse.json({ error: 'File not found' }, { status: 404 })
   }
@@ -178,7 +178,7 @@ export async function DELETE(
   }
 
   // Resolve storage path from StoredFile before deleting
-  const storagePath = await getStoredFilePath('PROJECT_FILE', file.id, 'ORIGINAL')
+  const storagePath = await getStoredFilePathForProject('PROJECT_FILE', file.id, 'ORIGINAL', projectId)
 
   await prisma.projectFile.delete({ where: { id: fileId } })
   if (storagePath) {

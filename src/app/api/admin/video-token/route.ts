@@ -4,6 +4,7 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireAnyActionAccess } from '@/lib/rbac-api'
+import { getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -93,8 +94,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Resolve available file roles from StoredFile registry
-    const storedFiles = await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO', entityId: videoId },
+    const storedFiles = await getStoredFileRecords('VIDEO', [videoId], {
       select: { fileRole: true },
     })
     const storedRoles = new Set(storedFiles.map(f => f.fileRole))

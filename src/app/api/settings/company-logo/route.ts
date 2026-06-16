@@ -8,6 +8,9 @@ import { invalidateSettingsCaches } from '@/lib/settings'
 import { getImageDimensions } from '@/lib/image-dimensions'
 import type { Prisma } from '@prisma/client'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+// SETTINGS_BRANDING has no project association — getStoredFilePathForProject() would return null.
+// eslint-disable-next-line no-restricted-imports
+import { getStoredFilePath, registerStoredFile } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -88,19 +91,14 @@ export async function POST(request: NextRequest) {
     await uploadFile(storagePath, buffer, buffer.length, contentType)
 
     // Delete old logo from StoredFile if it exists
-    const oldLogo = await prisma.storedFile.findUnique({
-      where: { entityType_entityId_fileRole: { entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO' } },
-      select: { storagePath: true },
-    })
-    if (oldLogo?.storagePath && oldLogo.storagePath !== storagePath) {
-      await deleteFile(oldLogo.storagePath).catch(() => {})
+    const oldLogoPath = await getStoredFilePath('SETTINGS_BRANDING', 'default', 'COMPANY_LOGO')
+    if (oldLogoPath && oldLogoPath !== storagePath) {
+      await deleteFile(oldLogoPath).catch(() => {})
     }
 
     // Upsert StoredFile record
-    await prisma.storedFile.upsert({
-      where: { entityType_entityId_fileRole: { entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO' } },
-      create: { entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO', storagePath, status: 'READY' },
-      update: { storagePath, status: 'READY' },
+    await registerStoredFile({
+      entityType: 'SETTINGS_BRANDING', entityId: 'default', fileRole: 'COMPANY_LOGO', storagePath, status: 'READY',
     })
 
     const updateData: Prisma.SettingsUpdateInput = {

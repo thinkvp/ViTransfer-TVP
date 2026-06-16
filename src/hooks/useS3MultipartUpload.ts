@@ -7,11 +7,11 @@
  * bypassing the server for file data entirely (only auth/presign goes through server).
  *
  * Flow:
- * 1. POST /api/uploads/s3/presign  → get uploadId + presigned part URLs
+ * 1. POST /api/upload-s3/presign  → get uploadId + presigned part URLs
  * 2. PUT each part directly to R2 using the presigned URLs (parallel up to concurrency limit)
- * 3. POST /api/uploads/s3/complete → finalize upload, trigger processing
+ * 3. POST /api/upload-s3/complete → finalize upload, trigger processing
  *
- * On error / cancel: POST /api/uploads/s3/abort → clean up R2 parts
+ * On error / cancel: POST /api/upload-s3/abort → clean up R2 parts
  */
 
 import { useCallback, useRef } from 'react'
@@ -151,7 +151,7 @@ export function useS3MultipartUpload() {
     ;(async () => {
       try {
         // Step 1: Get presigned part URLs from our server
-        const presignResponse = await apiFetch('/api/uploads/s3/presign', {
+        const presignResponse = await apiFetch('/api/upload-s3/presign', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -211,7 +211,7 @@ export function useS3MultipartUpload() {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
         // Step 3: Tell our server to finalize the multipart upload
-        const completeResponse = await apiFetch('/api/uploads/s3/complete', {
+        const completeResponse = await apiFetch('/api/upload-s3/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -233,7 +233,7 @@ export function useS3MultipartUpload() {
         if (error instanceof DOMException && error.name === 'AbortError') {
           // Clean up the partial upload on R2 (best-effort)
           if (uploadId && key) {
-            apiFetch('/api/uploads/s3/abort', {
+            apiFetch('/api/upload-s3/abort', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -254,7 +254,7 @@ export function useS3MultipartUpload() {
 
         // Clean up partial upload (best-effort)
         if (uploadId && key) {
-          apiFetch('/api/uploads/s3/abort', {
+          apiFetch('/api/upload-s3/abort', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

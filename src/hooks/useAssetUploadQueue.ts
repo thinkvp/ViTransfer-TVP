@@ -170,7 +170,7 @@ export function useAssetUploadQueue({
 
         try {
           // Step 1: Presign
-          const presignRes = await apiFetch('/api/uploads/s3/presign', {
+          const presignRes = await apiFetch('/api/upload-s3/presign', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -273,7 +273,7 @@ export function useAssetUploadQueue({
           if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
           // Step 3: Complete
-          const completeRes = await apiFetch('/api/uploads/s3/complete', {
+          const completeRes = await apiFetch('/api/upload-s3/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ assetId, uploadId: s3UploadId, key: s3Key, parts: completedParts }),
@@ -294,7 +294,7 @@ export function useAssetUploadQueue({
           if (err instanceof DOMException && err.name === 'AbortError') {
             // Cancelled — clean up R2 partial upload
             if (s3UploadId && s3Key) {
-              apiFetch('/api/uploads/s3/abort', {
+              apiFetch('/api/upload-s3/abort', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ assetId, uploadId: s3UploadId, key: s3Key }),

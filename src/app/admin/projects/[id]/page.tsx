@@ -860,6 +860,7 @@ export default function ProjectPage() {
                   sortMode={sortMode}
                   maxRevisions={project.maxRevisions}
                   enableRevisions={project.enableRevisions}
+                  watermarkEnabled={project.watermarkEnabled}
                 />
               </div>
             )}

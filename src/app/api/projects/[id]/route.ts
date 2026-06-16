@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { deleteFile, deleteDirectory, moveDirectory } from '@/lib/storage'
-import { getStoredFilePath, getStoredPathsForEntities, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { getStoredPathsForEntities, deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
 import type { FileRole } from '@/lib/stored-file'
 import { requireApiAuth } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
@@ -323,18 +323,8 @@ export async function GET(
       diskBytes: (project as any).diskBytes == null ? null : asNumberBigInt((project as any).diskBytes),
       videos: await Promise.all(project.videos.map(async (video: any) => {
         const [origFile, previews] = await Promise.all([
-          prisma.storedFile.findUnique({
-            where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: video.id, fileRole: 'ORIGINAL' } },
-            select: { fileSize: true, fileName: true },
-          }),
-          prisma.storedFile.findMany({
-            where: {
-              entityType: 'VIDEO',
-              entityId: video.id,
-              fileRole: { in: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'] },
-            },
-            select: { fileRole: true },
-          }),
+          getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['ORIGINAL'], select: { fileSize: true, fileName: true } }).then(r => r[0] ?? null),
+          getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'], select: { fileRole: true } }),
         ])
         const previewSet = new Set(previews.map(p => p.fileRole))
         return {
@@ -1191,15 +1181,11 @@ export async function PATCH(
           const assetPreviewRoles: FileRole[] = ['PREVIEW_IMAGE', 'PREVIEW_MP4']
 
           // Get paths to delete from storage
-          const allStoredFiles = await prisma.storedFile.findMany({
-            where: {
-              OR: [
-                { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: { in: videoPreviewRoles } },
-                { entityType: 'VIDEO_ASSET', entityId: { in: videoAssetIds }, fileRole: { in: assetPreviewRoles } },
-              ],
-            },
-            select: { storagePath: true },
-          })
+          const [videoStored, assetStored] = await Promise.all([
+            videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: videoPreviewRoles, select: { storagePath: true } }) : [],
+            videoAssetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', videoAssetIds, { fileRoles: assetPreviewRoles, select: { storagePath: true } }) : [],
+          ])
+          const allStoredFiles = [...videoStored, ...assetStored]
 
           // Delete files from storage
           await Promise.allSettled(
@@ -1223,10 +1209,7 @@ export async function PATCH(
           }
 
           // Also clean up timeline sprite directories (StoredFile only tracks the base path)
-          const timelineSpriteFiles = await prisma.storedFile.findMany({
-            where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: 'TIMELINE_SPRITES' },
-            select: { storagePath: true },
-          })
+          const timelineSpriteFiles = await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['TIMELINE_SPRITES'], select: { storagePath: true } })
           await Promise.allSettled(
             timelineSpriteFiles.map(f => deleteDirectory(f.storagePath).catch(() => {}))
           )
@@ -1260,8 +1243,7 @@ export async function PATCH(
           const videoIds = videosToEvaluate.map(v => v.id)
 
           // Batch-load StoredFile records for all videos
-          const videoStoredFiles = await prisma.storedFile.findMany({
-            where: { entityType: 'VIDEO', entityId: { in: videoIds } },
+          const videoStoredFiles = await getStoredFileRecords('VIDEO', videoIds, {
             select: { entityId: true, fileRole: true, storagePath: true },
           })
 
@@ -1359,10 +1341,7 @@ export async function PATCH(
         let queuedShareUploadPreviewJobs = 0
         if (shareUploadFilesNeedingPreviews.length > 0) {
           const suIds = shareUploadFilesNeedingPreviews.map(f => f.id)
-          const suStored = await prisma.storedFile.findMany({
-            where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: suIds }, fileRole: { in: ['PREVIEW_IMAGE', 'PREVIEW_MP4'] } },
-            select: { entityId: true, fileRole: true },
-          })
+          const suStored = await getStoredFileRecords('SHARE_UPLOAD_FILE', suIds, { fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4'], select: { entityId: true, fileRole: true } })
           const suHasPreview = new Set(suStored.map(s => s.entityId))
 
           for (const file of shareUploadFilesNeedingPreviews) {
@@ -1401,10 +1380,7 @@ export async function PATCH(
         let queuedVideoAssetPreviewJobs = 0
         if (videoAssetsNeedingPreviews.length > 0) {
           const vaIds = videoAssetsNeedingPreviews.map(a => a.id)
-          const vaStored = await prisma.storedFile.findMany({
-            where: { entityType: 'VIDEO_ASSET', entityId: { in: vaIds }, fileRole: { in: ['PREVIEW_IMAGE', 'PREVIEW_MP4'] } },
-            select: { entityId: true, fileRole: true },
-          })
+          const vaStored = await getStoredFileRecords('VIDEO_ASSET', vaIds, { fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4'], select: { entityId: true, fileRole: true } })
           const vaPreviewMap = new Map<string, Set<string>>()
           for (const s of vaStored) {
             let set = vaPreviewMap.get(s.entityId)
@@ -1460,10 +1436,7 @@ export async function PATCH(
         if (albums.length > 0) {
           // Check which albums already have ZIP StoredFile records
           const albumIds = albums.map(a => a.id)
-          const existingZips = await prisma.storedFile.findMany({
-            where: { entityType: 'ALBUM', entityId: { in: albumIds }, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
-            select: { entityId: true },
-          })
+          const existingZips = await getStoredFileRecords('ALBUM', albumIds, { fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'], select: { entityId: true } })
           const hasZip = new Set(existingZips.map(z => z.entityId))
           const albumsToRequeue = albums.filter(a => !hasZip.has(a.id))
 
@@ -1640,15 +1613,11 @@ export async function DELETE(
     const allEntityIds = [...videoIds, ...assetIds]
 
     if (allEntityIds.length > 0) {
-      const storedFiles = await prisma.storedFile.findMany({
-        where: {
-          OR: [
-            { entityType: 'VIDEO', entityId: { in: videoIds } },
-            { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } },
-          ],
-        },
-        select: { storagePath: true, entityType: true, entityId: true, fileRole: true },
-      })
+      const [videoStored, assetStored] = await Promise.all([
+        videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { select: { storagePath: true, entityType: true, entityId: true, fileRole: true } }) : [],
+        assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { select: { storagePath: true, entityType: true, entityId: true, fileRole: true } }) : [],
+      ])
+      const storedFiles = [...videoStored, ...assetStored]
 
       // Delete files from storage
       await Promise.allSettled(
@@ -1657,13 +1626,15 @@ export async function DELETE(
 
       // Delete StoredFile DB records
       if (videoIds.length > 0) {
-        await prisma.storedFile.deleteMany({
-          where: { entityType: 'VIDEO', entityId: { in: videoIds } },
+        await deleteStoredFilesByCriteria({
+          entityType: 'VIDEO',
+          entityIds: videoIds,
         })
       }
       if (assetIds.length > 0) {
-        await prisma.storedFile.deleteMany({
-          where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } },
+        await deleteStoredFilesByCriteria({
+          entityType: 'VIDEO_ASSET',
+          entityIds: assetIds,
         })
       }
     }

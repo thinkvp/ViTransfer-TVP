@@ -32,6 +32,7 @@ interface AdminVideoManagerProps {
   sortMode?: 'status' | 'alphabetical'
   maxRevisions?: number
   enableRevisions?: boolean
+  watermarkEnabled?: boolean
 }
 
 export default function AdminVideoManager({
@@ -46,7 +47,8 @@ export default function AdminVideoManager({
   onRefresh,
   sortMode = 'alphabetical',
   maxRevisions,
-  enableRevisions
+  enableRevisions,
+  watermarkEnabled = true,
 }: AdminVideoManagerProps) {
   const router = useRouter()
 
@@ -209,7 +211,7 @@ export default function AdminVideoManager({
                     const videoIds = groupVideos.map((v: any) => v.id)
                     setReprocessingGroups((prev) => new Set(prev).add(groupName))
                     try {
-                      await apiPost(`/api/projects/${projectId}/reprocess`, { videoIds })
+                      await apiPost(`/api/projects/${projectId}/reprocess-previews`, { videoIds })
                       toast.success(`Queued ${videoIds.length} video(s) for reprocessing`)
                       onRefresh?.()
                     } catch (err: any) {
@@ -398,6 +400,7 @@ export default function AdminVideoManager({
                     canDelete={canFullControl}
                     canApprove={canFullControl}
                     canManageAllowApproval={canFullControl}
+                    watermarkEnabled={watermarkEnabled}
                   />
                 </div>
               </CardContent>

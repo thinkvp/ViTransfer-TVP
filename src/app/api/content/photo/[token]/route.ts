@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import { getStoredFilePath } from '@/lib/stored-file'
+import { getStoredFilePathForProject } from '@/lib/stored-file'
 import { getAuthContext } from '@/lib/auth'
 import { getSecuritySettings } from '@/lib/video-access'
 import { verifyAlbumPhotoAccessToken } from '@/lib/photo-access'
@@ -65,9 +65,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   // Get paths from StoredFile
-  const origPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL')
-  const socialPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'SOCIAL')
-  const thumbPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'THUMBNAIL')
+  const origPath = await getStoredFilePathForProject('ALBUM_PHOTO', photo.id, 'ORIGINAL', verified.projectId)
+  const socialPath = await getStoredFilePathForProject('ALBUM_PHOTO', photo.id, 'SOCIAL', verified.projectId)
+  const thumbPath = await getStoredFilePathForProject('ALBUM_PHOTO', photo.id, 'THUMBNAIL', verified.projectId)
 
   let storagePath = origPath
   if (variant === 'social') {

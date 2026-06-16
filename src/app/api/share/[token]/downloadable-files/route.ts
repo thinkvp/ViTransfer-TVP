@@ -6,7 +6,7 @@ import { getAlbumZipFileName } from '@/lib/album-photo-zip'
 import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { generateVideoAccessToken } from '@/lib/video-access'
-import { batchResolveFileSizes } from '@/lib/stored-file'
+import { batchResolveFileSizes, getStoredFileRecords, storedFileExists } from '@/lib/stored-file'
 import type { DownloadableFile, DownloadableGroup, DownloadableFilesResult } from '@/lib/downloadable-files'
 
 export const runtime = 'nodejs'
@@ -222,12 +222,9 @@ export async function GET(
 
   // Resolve timeline availability from StoredFile for all videos
   const videoIds = readyVideos.map(v => v.id)
-  const videoStoredFiles = videoIds.length > 0 ? await prisma.storedFile.findMany({
-    where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES', 'ORIGINAL'] } },
-    select: { entityId: true, fileRole: true, fileSize: true, fileName: true, storagePath: true },
-  }) : []
+  const videoStoredFiles = videoIds.length > 0 ? await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['TIMELINE_VTT', 'TIMELINE_SPRITES', 'ORIGINAL'], select: { entityId: true, fileRole: true, fileSize: true, fileName: true, storagePath: true } }) : []
   const videoNameMap = new Map<string, string>()
-  const videoTimelineStored: Array<{ entityId: string; fileRole: string }> = []
+  const videoTimelineStored: Record<string, any>[] = []
   for (const s of videoStoredFiles) {
     if (s.fileRole === 'ORIGINAL') {
       if (s.fileName) videoNameMap.set(s.entityId, s.fileName)
@@ -293,10 +290,7 @@ export async function GET(
     if (approvedVideo && approvedVideo.assets.length > 0) {
       // Resolve asset timeline availability from StoredFile
       const assetIds = approvedVideo.assets.map((a: any) => a.id)
-      const assetTimelineStored = await prisma.storedFile.findMany({
-        where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] } },
-        select: { entityId: true, fileRole: true },
-      })
+      const assetTimelineStored = await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['TIMELINE_VTT', 'TIMELINE_SPRITES'], select: { entityId: true, fileRole: true } })
       const assetHasTimeline = new Set<string>()
       for (const s of assetTimelineStored) {
         if (s.fileRole === 'TIMELINE_VTT') {
@@ -366,10 +360,7 @@ export async function GET(
     const zips: DownloadableFile[] = []
 
     // ZIP sizes from StoredFile
-    const zipStored = await prisma.storedFile.findMany({
-      where: { entityType: 'ALBUM', entityId: album.id, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
-      select: { fileRole: true, fileSize: true },
-    })
+    const zipStored = await getStoredFileRecords('ALBUM', [album.id], { fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'], select: { fileRole: true, fileSize: true } })
     const fullZipSize = zipStored.find(z => z.fileRole === 'ZIP_FULL')?.fileSize
     const socialZipSize = zipStored.find(z => z.fileRole === 'ZIP_SOCIAL')?.fileSize
 
@@ -409,10 +400,7 @@ export async function GET(
 
         // Legacy thumbnailStoragePath column dropped — check StoredFile for THUMBNAIL role
         if (photo.thumbnailStatus !== 'READY' ||
-            !(await prisma.storedFile.findUnique({
-              where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'THUMBNAIL' } },
-              select: { id: true },
-            }))) {
+            !(await storedFileExists('ALBUM_PHOTO', photo.id, 'THUMBNAIL'))) {
           albumsNeedingThumbnailBackfill.add(album.id)
         }
 

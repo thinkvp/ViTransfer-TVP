@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { getStoredFilePath } from '@/lib/stored-file'
+import { getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -83,8 +83,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const ids = files.map(f => f.id)
   const sizeMap = new Map<string, number>()
   if (ids.length > 0) {
-    const stored = await prisma.storedFile.findMany({
-      where: { entityType: 'COMMENT_FILE', entityId: { in: ids }, fileRole: 'ORIGINAL' },
+    const stored = await getStoredFileRecords('COMMENT_FILE', ids, {
+      fileRoles: ['ORIGINAL'],
       select: { entityId: true, fileSize: true },
     })
     for (const s of stored) {

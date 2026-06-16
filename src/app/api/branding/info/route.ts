@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
+// SETTINGS_BRANDING has no project association — getStoredFilePathForProject() would return null.
+// eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 

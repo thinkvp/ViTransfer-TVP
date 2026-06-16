@@ -9,6 +9,7 @@ import { downloadFile, getFilePath, uploadFile } from '@/lib/storage'
 import {
   buildVideoAssetPreviewStoragePath,
 } from '@/lib/project-storage-paths'
+import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
 import {
   allocateUniqueStorageName,
   buildVideoAssetStoragePath,
@@ -163,8 +164,7 @@ export async function POST(
     }
 
     // Batch-load StoredFile for all assets
-    const assetStoredFiles = await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO_ASSET', entityId: { in: assets.map(a => a.id) } },
+    const assetStoredFiles = await getStoredFileRecords('VIDEO_ASSET', assets.map(a => a.id), {
       select: { entityId: true, fileRole: true, storagePath: true, fileSize: true },
     })
     const storedByAsset = new Map<string, Map<string, { path: string; size: bigint | null }>>()
@@ -181,10 +181,8 @@ export async function POST(
       buildProjectStorageRoot(clientName, project.title)
     const targetVideoFolderName = targetVideo.storageFolderName || targetVideo.name
     const targetVersionLabel = targetVideo.versionLabel || `v${targetVideo.version}`
-    const targetExistingAssets = await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO_ASSET', entityId: { in: (await prisma.videoAsset.findMany({ where: { videoId: targetVideoId }, select: { id: true } })).map(a => a.id) } },
-      select: { storagePath: true },
-    })
+    const targetExistingAssetIds = (await prisma.videoAsset.findMany({ where: { videoId: targetVideoId }, select: { id: true } })).map(a => a.id)
+    const targetExistingAssets = targetExistingAssetIds.length > 0 ? await getStoredFileRecords('VIDEO_ASSET', targetExistingAssetIds, { select: { storagePath: true } }) : []
     const reservedStorageNames = new Set(
       targetExistingAssets
         .map((asset) => path.posix.basename(String(asset.storagePath || '')))
@@ -314,27 +312,15 @@ export async function POST(
       })
 
       // Register original and preview files in StoredFile
-      await prisma.storedFile.create({
-        data: {
-          entityType: 'VIDEO_ASSET',
-          entityId: newAsset.id,
-          fileRole: 'ORIGINAL',
-          storagePath: newStoragePath,
-          fileName: asset.fileName,
-          fileSize: originalStored.size ?? BigInt(0),
-        },
+      await registerStoredFile({
+        entityType: 'VIDEO_ASSET', entityId: newAsset.id, fileRole: 'ORIGINAL',
+        storagePath: newStoragePath, fileName: asset.fileName, fileSize: originalStored.size ?? BigInt(0),
       })
       if (newPreviewPath) {
         const previewRole = normalizedType.startsWith('video/') ? 'PREVIEW_MP4' as const : 'PREVIEW_IMAGE' as const
-        await prisma.storedFile.create({
-          data: {
-            entityType: 'VIDEO_ASSET',
-            entityId: newAsset.id,
-            fileRole: previewRole,
-            storagePath: newPreviewPath,
-            fileName: asset.fileName,
-            fileSize: newPreviewFileSize ?? BigInt(0),
-          },
+        await registerStoredFile({
+          entityType: 'VIDEO_ASSET', entityId: newAsset.id, fileRole: previewRole,
+          storagePath: newPreviewPath, fileName: asset.fileName, fileSize: newPreviewFileSize ?? BigInt(0),
         })
       }
 

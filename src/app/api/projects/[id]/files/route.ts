@@ -7,9 +7,8 @@ import { getUserPermissions } from '@/lib/rbac-api'
 import { canDoAction } from '@/lib/rbac'
 import { validateAssetFile } from '@/lib/file-validation'
 import { getSafeguardLimits } from '@/lib/settings'
+import { getStoredFileRecords } from '@/lib/stored-file'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { buildProjectFilesStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
-import { registerStoredFile } from '@/lib/stored-file'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -98,10 +97,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const projectFileIds = files.map((f) => f.id)
   const sizeMap = new Map<string, number>()
   if (projectFileIds.length > 0) {
-    const stored = await prisma.storedFile.findMany({
-      where: { entityType: 'PROJECT_FILE', entityId: { in: projectFileIds }, fileRole: 'ORIGINAL' },
-      select: { entityId: true, fileSize: true, storagePath: true },
-    })
+    const stored = await getStoredFileRecords('PROJECT_FILE', projectFileIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true, storagePath: true } })
     const needsS3Fallback: Array<{ entityId: string; storagePath: string }> = []
     for (const s of stored) {
       if (s.fileSize != null) {
@@ -183,17 +179,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     )
   }
 
-  const timestamp = Date.now()
   const sanitizedFileName =
     fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._&-]/g, '_').substring(0, 255)
-  const storagePath = buildProjectFilesStoragePath(
-    project.storagePath || buildProjectStorageRoot(project.client?.name || project.companyName || 'Client', project.title),
-    sanitizedFileName,
-    timestamp,
-  )
 
   const category = fileValidation.detectedCategory || 'other'
 
+  // Create only the entity record here — StoredFile is created after the TUS
+  // upload completes in onUploadFinish. This prevents orphan StoredFile rows
+  // when an upload fails after the pre-upload reservation.
   const record = await prisma.projectFile.create({
     data: {
       projectId,
@@ -204,17 +197,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       uploadedByName: currentUser.name || currentUser.email,
     },
     select: { id: true },
-  })
-
-  // Register in StoredFile registry
-  await registerStoredFile({
-    entityType: 'PROJECT_FILE',
-    entityId: record.id,
-    fileRole: 'ORIGINAL',
-    storagePath,
-    fileName: sanitizedFileName,
-    fileSize: BigInt(fileSize),
-    status: 'READY',
   })
 
   await recalculateAndStoreProjectTotalBytes(projectId)

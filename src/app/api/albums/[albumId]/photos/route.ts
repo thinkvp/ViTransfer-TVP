@@ -7,6 +7,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildAlbumPhotoStoragePath, buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { z } from 'zod'
+import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -83,10 +84,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   })
 
   const photoIds = photos.map(p => p.id)
-  const storedSizes = photoIds.length > 0 ? await prisma.storedFile.findMany({
-    where: { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds }, fileRole: 'ORIGINAL' },
-    select: { entityId: true, fileSize: true },
-  }) : []
+  const storedSizes = photoIds.length > 0 ? await getStoredFileRecords('ALBUM_PHOTO', photoIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true } }) : []
   const sizeByPhotoId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
 
   return NextResponse.json({
@@ -209,15 +207,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })
 
   // Register in StoredFile
-  await prisma.storedFile.create({
-    data: {
-      entityType: 'ALBUM_PHOTO',
-      entityId: photo.id,
-      fileRole: 'ORIGINAL',
-      storagePath,
-      fileName: uniqueName,
-      fileSize: BigInt(fileSize),
-    },
+  await registerStoredFile({
+    entityType: 'ALBUM_PHOTO',
+    entityId: photo.id,
+    fileRole: 'ORIGINAL',
+    storagePath,
+    fileName: uniqueName,
+    fileSize: BigInt(fileSize),
   })
 
   await adjustProjectTotalBytes(album.projectId, BigInt(fileSize))

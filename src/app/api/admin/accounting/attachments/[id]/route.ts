@@ -3,7 +3,9 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeFilenameForHeader } from '@/lib/storage'
-import { deleteStoredFile } from '@/lib/stored-file'
+// ACCOUNTING_ATTACHMENT has no project association — getStoredFilePathForProject would return null.
+// eslint-disable-next-line no-restricted-imports
+import { deleteStoredFile, getStoredFilePath, getStoredFileRecords } from '@/lib/stored-file'
 import { deleteAccountingFile, resolveAccountingFilePath, adjustAccountingFilesBytes, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs from 'fs'
@@ -32,11 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
   // Get storage path from StoredFile
-  const storedFile = await prisma.storedFile.findUnique({
-    where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: id, fileRole: 'ORIGINAL' as any } },
-    select: { storagePath: true },
-  })
-  const storagePath = storedFile?.storagePath
+  const storagePath = await getStoredFilePath('ACCOUNTING_ATTACHMENT' as any, id, 'ORIGINAL' as any)
   if (!storagePath) return NextResponse.json({ error: 'Attachment file not found' }, { status: 404 })
 
   const ext = storagePath.split('.').pop()?.toLowerCase() ?? ''
@@ -99,10 +97,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!attachment) return NextResponse.json({ error: 'Attachment not found' }, { status: 404 })
 
   // Get path and size from StoredFile
-  const stored = await prisma.storedFile.findUnique({
-    where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: id, fileRole: 'ORIGINAL' as any } },
-    select: { storagePath: true, fileSize: true },
-  })
+  const records = await getStoredFileRecords('ACCOUNTING_ATTACHMENT' as any, [id], { select: { storagePath: true, fileSize: true } })
+  const stored = (records[0] as any) || null
 
   if (stored?.storagePath) {
     await deleteAccountingFile(stored.storagePath).catch(() => {})

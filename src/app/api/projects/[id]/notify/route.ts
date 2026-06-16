@@ -14,7 +14,7 @@ import crypto from 'crypto'
 import { getRedis } from '@/lib/redis'
 import { getPeriodString, normalizeNotificationDataTimecode, sendNotificationsWithRetry } from '@/worker/notification-helpers'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import { getStoredFilePath } from '@/lib/stored-file'
+import { getStoredFileRecords } from '@/lib/stored-file'
 import fs from 'fs'
 export const runtime = 'nodejs'
 
@@ -159,12 +159,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         }
 
         // Resolve file sizes and storage paths from StoredFile
-        const storedFiles = await prisma.storedFile.findMany({
-          where: { entityType: 'PROJECT_FILE', entityId: { in: files.map(f => f.id) }, fileRole: 'ORIGINAL' },
+        const storedFiles = await getStoredFileRecords('PROJECT_FILE', files.map(f => f.id), {
+          fileRoles: ['ORIGINAL'],
           select: { entityId: true, fileSize: true, storagePath: true },
-        })
-        const sizeByFileId = new Map(storedFiles.map(s => [s.entityId, s.fileSize ? Number(s.fileSize) : 0]))
-        const pathByFileId = new Map(storedFiles.filter(s => s.storagePath).map(s => [s.entityId, s.storagePath!]))
+        }) as unknown as Array<{ entityId: string; fileSize: bigint | null; storagePath: string | null }>
+        const sizeByFileId = new Map(storedFiles.map(s => [s.entityId, s.fileSize ? Number(s.fileSize) : 0] as const))
+        const pathByFileId = new Map(storedFiles.filter(s => s.storagePath).map(s => [s.entityId, s.storagePath!] as const))
 
         const sizes = files.map((f) => sizeByFileId.get(f.id) ?? 0)
         const totalBytes = sizes.reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0)

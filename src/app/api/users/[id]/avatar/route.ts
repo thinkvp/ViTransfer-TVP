@@ -5,6 +5,8 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile, getFilePath, uploadFile } from '@/lib/storage'
 import { isS3Mode, s3GetPresignedStreamUrl, s3FileExists } from '@/lib/s3-storage'
+// USER_AVATAR has no project association — getStoredFilePathForProject() would return null.
+// eslint-disable-next-line no-restricted-imports
 import { registerStoredFile, deleteStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import { createReadStream, statSync } from 'fs'
 import sharp from 'sharp'

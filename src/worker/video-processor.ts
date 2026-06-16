@@ -234,14 +234,14 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     if (regenerateTimelinePreviews !== false && finalSettings.timelinePreviewsEnabled && timelineResult?.ready) {
       const updated = await updateVideoRecord(
         videoId,
-        { },
+        { timelinePreviewsReady: true },
         { context: 'persisting timeline preview ready flag', ignoreMissing: true }
       )
       if (!updated) return
     } else if (regenerateTimelinePreviews !== false) {
       const updated = await updateVideoRecord(
         videoId,
-        { },
+        { timelinePreviewsReady: false },
         { context: 'clearing timeline preview ready flag', ignoreMissing: true }
       )
       if (!updated) return
@@ -487,6 +487,7 @@ async function processTimelineOnly(
       const updated = await updateVideoRecord(
         videoId,
         {
+          timelinePreviewsReady: true,
           processingPhase: null,
           processingProgress: 0,
         },

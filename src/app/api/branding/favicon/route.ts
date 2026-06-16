@@ -3,6 +3,8 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath } from '@/lib/storage'
 import { isS3Mode, s3DownloadFile, s3FileExists } from '@/lib/s3-storage'
+// SETTINGS_BRANDING has no project association — getStoredFilePathForProject() would return null.
+// eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath } from '@/lib/stored-file'
 import fs from 'fs'
 import { createReadStream } from 'fs'

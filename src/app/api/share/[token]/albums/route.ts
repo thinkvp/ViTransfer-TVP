@@ -4,6 +4,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
+import { storedFileExists, getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -86,10 +87,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         try {
           // Legacy thumbnailStoragePath column dropped — check StoredFile for THUMBNAIL role
           const thumbExists = firstPhoto?.thumbnailStatus === 'READY' &&
-            !!(await prisma.storedFile.findUnique({
-              where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: firstPhotoId, fileRole: 'THUMBNAIL' } },
-              select: { id: true },
-            }))
+            (await storedFileExists('ALBUM_PHOTO', firstPhotoId, 'THUMBNAIL'))
           if (!thumbExists) {
             albumsNeedingThumbnailBackfill.add(a.id)
           }
@@ -107,8 +105,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       }
 
       // Legacy fullZipFileSize/socialZipFileSize columns dropped — read from StoredFile
-      const albumZipFiles = await prisma.storedFile.findMany({
-        where: { entityType: 'ALBUM', entityId: a.id, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
+      const albumZipFiles = await getStoredFileRecords('ALBUM', [a.id], {
+        fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'],
         select: { fileRole: true, fileSize: true },
       })
       const zipSizeMap = new Map(albumZipFiles.map(f => [f.fileRole, f.fileSize]))

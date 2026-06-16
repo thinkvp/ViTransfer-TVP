@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { getShareContext } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
+import { getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -87,8 +88,7 @@ export async function GET(
     }
 
     // Resolve available file roles from StoredFile registry
-    const storedFiles = await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO', entityId: videoId },
+    const storedFiles = await getStoredFileRecords('VIDEO', [videoId], {
       select: { fileRole: true },
     })
     storedRoles = new Set(storedFiles.map(f => f.fileRole))

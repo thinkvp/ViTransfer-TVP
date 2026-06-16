@@ -6,6 +6,7 @@ import { accountFromDb, expenseFromDb, bankTransactionFromDb, journalEntryFromDb
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 import { listSalesInvoiceIncomeEntries } from '@/lib/accounting/sales-income-allocation'
 import { deleteAccountingFile } from '@/lib/accounting/file-storage'
+import { getStoredFileRecords } from '@/lib/stored-file'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 
 export const runtime = 'nodejs'
@@ -341,10 +342,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     // Get attachment paths from StoredFile
     const attachmentIds = expense.accountingAttachments.map(a => a.id)
     const attachmentStored = attachmentIds.length > 0
-      ? await prisma.storedFile.findMany({
-          where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
-          select: { storagePath: true },
-        })
+      ? await getStoredFileRecords('ACCOUNTING_ATTACHMENT', attachmentIds, { select: { storagePath: true } })
       : []
     const attachmentPaths = attachmentStored.map(s => s.storagePath)
     await prisma.$transaction(async (tx) => {
@@ -405,20 +403,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   // Delete attachment files after the DB transaction (best-effort) — paths from StoredFile
   const txnAttachmentIds = txn.accountingAttachments.map(a => a.id)
   const txnAttachmentStored = txnAttachmentIds.length > 0
-    ? await prisma.storedFile.findMany({
-        where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: txnAttachmentIds } },
-        select: { storagePath: true },
-      })
+    ? await getStoredFileRecords('ACCOUNTING_ATTACHMENT', txnAttachmentIds, { select: { storagePath: true } })
     : []
   const txnFilesToDelete = txnAttachmentStored.map(s => s.storagePath)
   await Promise.all(txnFilesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
   if (txn.matchType === 'EXPENSE' && txn.expense) {
     const expAttachmentIds = (txn.expense.accountingAttachments ?? []).map(a => a.id)
     const expStored = expAttachmentIds.length > 0
-      ? await prisma.storedFile.findMany({
-          where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: expAttachmentIds } },
-          select: { storagePath: true },
-        })
+      ? await getStoredFileRecords('ACCOUNTING_ATTACHMENT', expAttachmentIds, { select: { storagePath: true } })
       : []
     const expFiles = expStored.map(s => s.storagePath)
     await Promise.all(expFiles.map(p => deleteAccountingFile(p).catch(() => {})))

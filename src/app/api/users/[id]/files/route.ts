@@ -4,7 +4,7 @@ import { getCurrentUserFromRequest, requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { validateAssetFile } from '@/lib/file-validation'
-import { getStoredFilePath } from '@/lib/stored-file'
+import { getStoredFileRecords } from '@/lib/stored-file'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -60,8 +60,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const ids = files.map(f => f.id)
   const sizeMap = new Map<string, number>()
   if (ids.length > 0) {
-    const stored = await prisma.storedFile.findMany({
-      where: { entityType: 'USER_FILE', entityId: { in: ids }, fileRole: 'ORIGINAL' },
+    const stored = await getStoredFileRecords('USER_FILE', ids, {
+      fileRoles: ['ORIGINAL'],
       select: { entityId: true, fileSize: true, storagePath: true },
     })
     for (const s of stored) {
@@ -117,13 +117,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: fileValidation.error || 'Invalid file' }, { status: 400 })
   }
 
-  const timestamp = Date.now()
   const sanitizedFileName =
     fileValidation.sanitizedFilename || fileName.replace(/[^a-zA-Z0-9 ._&-]/g, '_').substring(0, 255)
-  const storagePath = `users/${userId}/files/userfile-${timestamp}-${sanitizedFileName}`
 
   const category = fileValidation.detectedCategory || 'other'
 
+  // Create only the entity record here — StoredFile is created after the TUS
+  // upload completes in onUploadFinish. This prevents orphan StoredFile rows
+  // when an upload fails after the pre-upload reservation.
   const record = await prisma.userFile.create({
     data: {
       userId,
@@ -134,18 +135,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       uploadedByName: currentUser.name || currentUser.email,
     },
     select: { id: true },
-  })
-
-  // Register in StoredFile
-  await prisma.storedFile.create({
-    data: {
-      entityType: 'USER_FILE',
-      entityId: record.id,
-      fileRole: 'ORIGINAL',
-      storagePath,
-      fileName: sanitizedFileName,
-      fileSize: BigInt(fileSize),
-    },
   })
 
   return NextResponse.json({ userFileId: record.id })

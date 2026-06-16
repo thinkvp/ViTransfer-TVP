@@ -5,6 +5,9 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { moveAccountingFile } from '@/lib/accounting/file-storage'
+// ACCOUNTING_ATTACHMENT has no project association.
+// eslint-disable-next-line no-restricted-imports
+import { getStoredFilePath, updateStoredFilePath } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -111,17 +114,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (data.matchType === 'EXPENSE' && matchedExpenseAccountId) {
     // Move all AccountingAttachment files via StoredFile
     for (const a of txn.accountingAttachments) {
-      const stored = await prisma.storedFile.findUnique({
-        where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: a.id, fileRole: 'ORIGINAL' as any } },
-        select: { storagePath: true },
-      })
-      if (!stored) continue
+      const storagePath = await getStoredFilePath('ACCOUNTING_ATTACHMENT' as any, a.id, 'ORIGINAL' as any)
+      if (!storagePath) continue
+      const stored = { storagePath }
       const newPath = await moveAccountingFile(stored.storagePath, updated.date, matchedExpenseAccountId, a.originalName)
       if (newPath !== stored.storagePath) {
-        await prisma.storedFile.update({
-          where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: a.id, fileRole: 'ORIGINAL' as any } },
-          data: { storagePath: newPath },
-        })
+        await updateStoredFilePath('ACCOUNTING_ATTACHMENT' as any, a.id, 'ORIGINAL' as any, newPath)
       }
     }
   }

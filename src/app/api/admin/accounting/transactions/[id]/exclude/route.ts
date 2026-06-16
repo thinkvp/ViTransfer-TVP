@@ -4,6 +4,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { deleteAccountingFile } from '@/lib/accounting/file-storage'
+import { getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,10 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // Delete files via StoredFile
   const attachmentIds = txn.accountingAttachments.map(a => a.id)
   if (attachmentIds.length > 0) {
-    const paths = await prisma.storedFile.findMany({
-      where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
-      select: { storagePath: true },
-    })
+    const paths = await getStoredFileRecords('ACCOUNTING_ATTACHMENT' as any, attachmentIds, { select: { storagePath: true } })
     await Promise.all(paths.map(p => deleteAccountingFile(p.storagePath).catch(() => {})))
   }
 

@@ -6,6 +6,7 @@ import { getImageDimensions } from '@/lib/image-dimensions'
 import { processImageBuffer } from '@/lib/image-processing'
 import { buildBasPeriodFilePath, writeAccountingFile, adjustAccountingFilesBytes } from '@/lib/accounting/file-storage'
 import { accountingAttachmentFromDb } from '@/lib/accounting/db-mappers'
+import { registerStoredFile } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -80,10 +81,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       },
     })
     // Register in StoredFile
-    await prisma.storedFile.create({ data: {
+    await registerStoredFile({
       entityType: 'ACCOUNTING_ATTACHMENT', entityId: attachment.id, fileRole: 'ORIGINAL',
-      storagePath: storagePath.relativePath, fileName: rawName.slice(0, 500), fileSize: BigInt(finalBuffer.length),
-    } })
+      storagePath: storagePath.relativePath, fileName: rawName.slice(0, 500), fileSize: finalBuffer.length,
+    })
     void adjustAccountingFilesBytes(finalBuffer.length)
     created.push(accountingAttachmentFromDb(attachment))
   }

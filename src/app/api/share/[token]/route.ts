@@ -10,6 +10,7 @@ import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
 import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import crypto from 'crypto'
+import { getStoredFileRecords } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 
@@ -164,14 +165,7 @@ export async function GET(
 
     // Resolve preview availability and original file sizes from StoredFile
     const videoIds = project.videos.map((v: any) => v.id)
-    const storedPreviews = videoIds.length > 0 ? await prisma.storedFile.findMany({
-      where: {
-        entityType: 'VIDEO',
-        entityId: { in: videoIds },
-        fileRole: { in: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'] },
-      },
-      select: { entityId: true, fileRole: true, fileSize: true, fileName: true },
-    }) : []
+    const storedPreviews = videoIds.length > 0 ? await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'], select: { entityId: true, fileRole: true, fileSize: true, fileName: true } }) : []
 
     const previewMap = new Map<string, Set<string>>()
     const sizeMap = new Map<string, number>()

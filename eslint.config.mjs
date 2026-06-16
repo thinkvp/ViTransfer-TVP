@@ -12,7 +12,7 @@ const config = [
   {
     files: ['src/app/api/**/*.ts', 'src/app/api/**/*.tsx', 'src/pages/api/**/*.ts'],
     rules: {
-      'no-restricted-imports': ['warn', {
+      'no-restricted-imports': ['error', {
         paths: [{
           name: '@/lib/stored-file',
           importNames: ['getAllStoredPaths'],
@@ -27,7 +27,7 @@ const config = [
             'projectId and verifies entity ownership.',
         }],
       }],
-      'no-restricted-syntax': ['warn', {
+      'no-restricted-syntax': ['error', {
         selector: 'MemberExpression[object.name="prisma"][property.name="storedFile"]',
         message:
           'Direct prisma.storedFile access. Prefer getStoredFilePathForProject() or getStoredFilePath().',

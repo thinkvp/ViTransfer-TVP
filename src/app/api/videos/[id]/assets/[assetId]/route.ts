@@ -4,7 +4,9 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest, requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, sanitizeFilenameForHeader } from '@/lib/storage'
-import { getStoredFilePath, deleteStoredFilesForEntity } from '@/lib/stored-file'
+// Video routes verify project access separately; getStoredFilePathForProject requires projectId plumbing.
+// eslint-disable-next-line no-restricted-imports
+import { deleteStoredFilesForEntity, getStoredFilePath, countStoredFilesByPath, registerStoredFile } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
@@ -238,13 +240,7 @@ export async function DELETE(
 
     // Only delete the physical file if no other assets reference the same storage path
     const assetOrigPath = await getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL')
-    const sharedCount = assetOrigPath ? await prisma.storedFile.count({
-      where: {
-        storagePath: assetOrigPath,
-        entityType: 'VIDEO_ASSET',
-        entityId: { not: assetId },
-      },
-    }) : 0
+    const sharedCount = assetOrigPath ? await countStoredFilesByPath(assetOrigPath, { excludeEntityType: 'VIDEO_ASSET', excludeEntityId: assetId }) : 0
 
     if (sharedCount === 0 && assetOrigPath) {
       await deleteFile(assetOrigPath)
@@ -261,10 +257,10 @@ export async function DELETE(
       )
 
       // Register thumbnail in StoredFile
-      await prisma.storedFile.create({ data: {
+      await registerStoredFile({
         entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL',
         storagePath: systemThumbnailPath, fileName: 'thumbnail.jpg',
-      } })
+      })
     }
 
     // Delete database record

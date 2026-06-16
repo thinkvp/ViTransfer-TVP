@@ -168,7 +168,7 @@ export function useAlbumPhotoUploadQueue({
           let s3Key: string | null = null
 
           try {
-            const presignRes = await apiFetch('/api/uploads/s3/presign', {
+            const presignRes = await apiFetch('/api/upload-s3/presign', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -271,7 +271,7 @@ export function useAlbumPhotoUploadQueue({
 
             if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
-            const completeRes = await apiFetch('/api/uploads/s3/complete', {
+            const completeRes = await apiFetch('/api/upload-s3/complete', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ photoId, uploadId: s3UploadId, key: s3Key, parts: completedParts }),
@@ -295,7 +295,7 @@ export function useAlbumPhotoUploadQueue({
           } catch (err: any) {
             if (err instanceof DOMException && err.name === 'AbortError') {
               if (s3UploadId && s3Key) {
-                apiFetch('/api/uploads/s3/abort', {
+                apiFetch('/api/upload-s3/abort', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ photoId, uploadId: s3UploadId, key: s3Key }),

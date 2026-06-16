@@ -12,6 +12,7 @@ import { isS3Mode, s3CompleteMultipartUpload, type CompletedPart } from '@/lib/s
 import { requireApiAuth, getCurrentUserFromRequest } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { registerStoredFile } from '@/lib/stored-file'
 import { prisma } from '@/lib/db'
 
 export const runtime = 'nodejs'
@@ -110,10 +111,10 @@ export async function POST(
   })
 
   // Register in StoredFile
-  await prisma.storedFile.create({ data: {
+  await registerStoredFile({
     entityType: 'CLIENT_FILE', entityId: record.id, fileRole: 'ORIGINAL',
     storagePath: key, fileName, fileSize: BigInt(fileSize),
-  } })
+  })
 
   const { getClientFileQueue } = await import('@/lib/queue')
   const q = getClientFileQueue()

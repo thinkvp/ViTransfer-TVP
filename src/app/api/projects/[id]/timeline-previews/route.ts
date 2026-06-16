@@ -6,6 +6,7 @@ import { deleteDirectory } from '@/lib/storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
+import { getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -71,47 +72,42 @@ export async function POST(
     }
 
     if (action === 'remove') {
-      // Find all timeline sprite StoredFile records via StoredFile
+      // Pre-fetch entity IDs
+      const [videoEntities, assetEntities, uploadEntities] = await Promise.all([
+        prisma.video.findMany({ where: { projectId }, select: { id: true } }),
+        prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } }),
+        prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }),
+      ])
+      const vIds = videoEntities.map(v => v.id)
+      const aIds = assetEntities.map(a => a.id)
+      const uIds = uploadEntities.map(u => u.id)
+
+      // Find all timeline sprite StoredFile records
       const [videoSprites, assetSprites, uploadSprites] = await Promise.all([
-        prisma.storedFile.findMany({
-          where: { entityType: 'VIDEO', entityId: { in: (await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id) }, fileRole: 'TIMELINE_SPRITES' },
-          select: { storagePath: true },
-        }),
-        prisma.storedFile.findMany({
-          where: { entityType: 'VIDEO_ASSET', entityId: { in: (await prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } })).map(a => a.id) }, fileRole: 'TIMELINE_SPRITES' },
-          select: { storagePath: true },
-        }),
-        prisma.storedFile.findMany({
-          where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: (await prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } })).map(u => u.id) }, fileRole: 'TIMELINE_SPRITES' },
-          select: { storagePath: true },
-        }),
+        vIds.length > 0 ? getStoredFileRecords('VIDEO', vIds, { fileRoles: ['TIMELINE_SPRITES'], select: { storagePath: true } }) : [],
+        aIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', aIds, { fileRoles: ['TIMELINE_SPRITES'], select: { storagePath: true } }) : [],
+        uIds.length > 0 ? getStoredFileRecords('SHARE_UPLOAD_FILE', uIds, { fileRoles: ['TIMELINE_SPRITES'], select: { storagePath: true } }) : [],
       ])
 
       const allSprites = [...videoSprites, ...assetSprites, ...uploadSprites]
       await Promise.allSettled(allSprites.map(s => deleteDirectory(s.storagePath).catch(() => {})))
 
       // Also delete VTT files
-      const videoVttPaths = await prisma.storedFile.findMany({ where: { entityType: 'VIDEO', entityId: { in: (await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id) }, fileRole: 'TIMELINE_VTT' }, select: { storagePath: true } })
+      const videoVttPaths = vIds.length > 0 ? await getStoredFileRecords('VIDEO', vIds, { fileRoles: ['TIMELINE_VTT'], select: { storagePath: true } }) : []
       await Promise.allSettled(videoVttPaths.map(s => deleteDirectory(s.storagePath).catch(() => {})))
 
-      // Clear timelinePreviewsReady on VideoAsset and ShareUploadFile (NOT on Video — column dropped)
-      // Delete StoredFile TIMELINE_VTT/SPRITES records
-      const allActionEntityIds = [
-        ...(await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id),
-        ...(await prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } })).map(a => a.id),
-        ...(await prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } })).map(u => u.id),
-      ]
-
-      // Update VideoAsset/ShareUploadFile (still have timelinePreviewsReady)
+      // Clear timelinePreviewsReady on VideoAsset, ShareUploadFile, and Video
+      // Update VideoAsset/ShareUploadFile/Video timelinePreviewsReady flags
       await Promise.all([
+        prisma.video.updateMany({ where: { projectId }, data: { timelinePreviewsReady: false } }),
         prisma.videoAsset.updateMany({ where: { video: { projectId } }, data: { timelinePreviewsReady: false } }),
         prisma.shareUploadFile.updateMany({ where: { projectId }, data: { timelinePreviewsReady: false } }),
       ])
 
-      // Delete StoredFile records for timeline roles
-      await prisma.storedFile.deleteMany({ where: { entityType: 'VIDEO', entityId: { in: (await prisma.video.findMany({ where: { projectId }, select: { id: true } })).map(v => v.id) }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] } } })
-      await prisma.storedFile.deleteMany({ where: { entityType: 'VIDEO_ASSET', entityId: { in: (await prisma.videoAsset.findMany({ where: { video: { projectId } }, select: { id: true } })).map(a => a.id) }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] } } })
-      await prisma.storedFile.deleteMany({ where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: (await prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true } })).map(u => u.id) }, fileRole: { in: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] } } })
+      // Delete StoredFile records for timeline roles (reuse previously fetched IDs)
+      await deleteStoredFilesByCriteria({ entityType: 'VIDEO', entityIds: vIds, fileRoles: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+      await deleteStoredFilesByCriteria({ entityType: 'VIDEO_ASSET', entityIds: aIds, fileRoles: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+      await deleteStoredFilesByCriteria({ entityType: 'SHARE_UPLOAD_FILE', entityIds: uIds, fileRoles: ['TIMELINE_VTT', 'TIMELINE_SPRITES'] })
 
       return NextResponse.json({ success: true, action: 'remove', count: allSprites.length })
     }
@@ -144,10 +140,7 @@ export async function POST(
     const videoIds = readyVideos.map(v => v.id)
     const videoOrigPaths = new Map<string, string>()
     if (videoIds.length > 0) {
-      const origRecords = await prisma.storedFile.findMany({
-        where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: 'ORIGINAL' },
-        select: { entityId: true, storagePath: true },
-      })
+      const origRecords = await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, storagePath: true } })
       for (const r of origRecords) videoOrigPaths.set(r.entityId, r.storagePath)
     }
 

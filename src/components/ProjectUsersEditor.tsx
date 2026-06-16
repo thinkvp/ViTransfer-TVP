@@ -232,7 +232,7 @@ export function ProjectUsersEditor({
               <div className="flex items-start justify-between gap-2 p-3">
                 <div className="flex-1 space-y-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} avatarUrl={u.avatarPath ? `/api/users/${u.id}/avatar` : undefined} />
+                    <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} avatarUrl={`/api/users/${u.id}/avatar`} />
                     <span className="text-sm font-medium truncate">{u.name || u.email}</span>
                     {u.appRole?.isSystemAdmin === true && (
                       <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
@@ -321,7 +321,7 @@ export function ProjectUsersEditor({
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 min-w-0">
-                            <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} avatarUrl={u.avatarPath ? `/api/users/${u.id}/avatar` : undefined} />
+                            <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} avatarUrl={`/api/users/${u.id}/avatar`} />
                             <div className="font-medium truncate">{u.name || u.email}</div>
                             {u.appRole?.isSystemAdmin === true && (
                               <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">

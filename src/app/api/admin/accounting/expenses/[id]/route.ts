@@ -5,6 +5,9 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { expenseFromDb } from '@/lib/accounting/db-mappers'
 import { deleteAccountingFile, moveAccountingFile } from '@/lib/accounting/file-storage'
+// ACCOUNTING_ATTACHMENT has no project association — getStoredFilePathForProject would return null.
+// eslint-disable-next-line no-restricted-imports
+import { getStoredFilePath, getStoredFileRecords, updateStoredFilePath } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -138,11 +141,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     for (const attachment of existing.accountingAttachments) {
       try {
         // Get current path from StoredFile
-        const currentStored = await prisma.storedFile.findUnique({
-          where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: attachment.id, fileRole: 'ORIGINAL' as any } },
-          select: { storagePath: true },
-        })
-        if (!currentStored) continue
+        const currentStoragePath = await getStoredFilePath('ACCOUNTING_ATTACHMENT' as any, attachment.id, 'ORIGINAL' as any)
+        if (!currentStoragePath) continue
+        const currentStored = { storagePath: currentStoragePath }
         const newPath = await moveAccountingFile(
           currentStored.storagePath,
           existing.date as string,
@@ -150,10 +151,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           attachment.originalName,
         )
         if (newPath !== currentStored.storagePath) {
-          await prisma.storedFile.update({
-            where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: attachment.id, fileRole: 'ORIGINAL' as any } },
-            data: { storagePath: newPath },
-          })
+          await updateStoredFilePath('ACCOUNTING_ATTACHMENT' as any, attachment.id, 'ORIGINAL' as any, newPath)
         }
       } catch {
         // Non-fatal — file may already be in right place or missing
@@ -213,10 +211,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   // Delete attachment files via StoredFile
   const attachmentIds = existing.accountingAttachments.map(a => a.id)
   if (attachmentIds.length > 0) {
-    const paths = await prisma.storedFile.findMany({
-      where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
-      select: { storagePath: true },
-    })
+    const paths = await getStoredFileRecords('ACCOUNTING_ATTACHMENT' as any, attachmentIds, { select: { storagePath: true } })
     await Promise.all(paths.map(p => deleteAccountingFile(p.storagePath).catch(() => {})))
   }
 

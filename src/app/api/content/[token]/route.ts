@@ -5,7 +5,9 @@ import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
-import { getStoredFilePath } from '@/lib/stored-file'
+// Token-based auth; entity types (VIDEO_ASSET, SHARE_UPLOAD_FILE) resolved via tokens, not projectId.
+// eslint-disable-next-line no-restricted-imports
+import { getStoredFilePath, getStoredFileRecords } from '@/lib/stored-file'
 import {
   buildProjectStorageRoot,
   buildVideoAssetPreviewStoragePath,
@@ -207,8 +209,7 @@ export async function GET(
     let storedPaths: Map<string, string> = new Map()
     let storedFileNames: Map<string, string> = new Map()
     if (!isUploadEntity && video) {
-      const files = await prisma.storedFile.findMany({
-        where: { entityType: 'VIDEO', entityId: video.id },
+      const files = await getStoredFileRecords('VIDEO', [video.id], {
         select: { fileRole: true, storagePath: true, fileName: true },
       })
       storedPaths = new Map(files.map(f => [f.fileRole, f.storagePath]))
@@ -254,8 +255,7 @@ export async function GET(
       const normalizedAssetType = typeof asset.fileType === 'string' ? asset.fileType.toLowerCase() : ''
 
       // Batch all asset StoredFile lookups into one query
-      const assetFiles = await prisma.storedFile.findMany({
-        where: { entityType: 'VIDEO_ASSET', entityId: assetId },
+      const assetFiles = await getStoredFileRecords('VIDEO_ASSET', [assetId], {
         select: { fileRole: true, storagePath: true },
       })
       const assetPaths = new Map(assetFiles.map(f => [f.fileRole, f.storagePath]))

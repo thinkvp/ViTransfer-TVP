@@ -7,7 +7,7 @@ import { getClientIpAddress } from '@/lib/utils'
 import { getRedis } from '@/lib/redis'
 import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
-import { getStoredFilePath } from '@/lib/stored-file'
+import { getStoredFilePathForProject } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const sessionId = `guest-video-link:${link.token}`
 
   // Resolve preview existence from StoredFile (legacy path columns have been dropped)
-  const thumbnailPath = await getStoredFilePath('VIDEO', link.video.id, 'THUMBNAIL').catch(() => null)
+  const thumbnailPath = await getStoredFilePathForProject('VIDEO', link.video.id, 'THUMBNAIL', link.project.id).catch(() => null)
   const hasThumbnail = !!thumbnailPath
 
   // Best-effort internal user detection: skip analytics/notifications when an

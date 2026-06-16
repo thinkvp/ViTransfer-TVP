@@ -8,6 +8,7 @@ import { getRedis } from '@/lib/redis'
 import { getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoThumbnailQueue, getFolderRenameQueue } from '@/lib/queue'
 import { getAlbumZipJobId, type AlbumZipVariant } from '@/lib/album-photo-zip'
 import { getAlbumThumbnailQueueJobId } from '@/lib/album-photo-thumbnail'
+import { getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -572,10 +573,7 @@ async function buildAlbumZipJobs({
 
     // Check StoredFile for ZIP sizes (legacy album columns dropped)
     const albumIds = recentlyUpdatedAlbums.map(a => a.id)
-    const albumZipSizes = albumIds.length > 0 ? await prisma.storedFile.findMany({
-      where: { entityType: 'ALBUM', entityId: { in: albumIds }, fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] } },
-      select: { entityId: true, fileRole: true, fileSize: true },
-    }) : []
+    const albumZipSizes = albumIds.length > 0 ? await getStoredFileRecords('ALBUM', albumIds, { fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'], select: { entityId: true, fileRole: true, fileSize: true } }) : []
     const zipSizeByAlbum = new Map<string, { full: bigint; social: bigint }>()
     for (const az of albumZipSizes) {
       let entry = zipSizeByAlbum.get(az.entityId)

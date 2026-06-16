@@ -8,6 +8,7 @@ import { validateAssetFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
+import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -103,10 +104,7 @@ export async function GET(
 
     // Resolve file sizes from StoredFile
     const assetIds = assets.map(a => a.id)
-    const storedSizes = assetIds.length > 0 ? await prisma.storedFile.findMany({
-      where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds }, fileRole: 'ORIGINAL' },
-      select: { entityId: true, fileSize: true },
-    }) : []
+    const storedSizes = assetIds.length > 0 ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true } }) : []
     const sizeByAssetId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
 
     // Convert to serializable format
@@ -249,15 +247,9 @@ export async function POST(
     })
 
     // Register in StoredFile
-    await prisma.storedFile.create({
-      data: {
-        entityType: 'VIDEO_ASSET',
-        entityId: asset.id,
-        fileRole: 'ORIGINAL',
-        storagePath,
-        fileName: sanitizedFileName,
-        fileSize: BigInt(fileSize),
-      },
+    await registerStoredFile({
+      entityType: 'VIDEO_ASSET', entityId: asset.id, fileRole: 'ORIGINAL',
+      storagePath, fileName: sanitizedFileName, fileSize: BigInt(fileSize),
     })
 
     await recalculateAndStoreProjectTotalBytes(video.projectId)

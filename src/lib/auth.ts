@@ -21,6 +21,7 @@ export interface AuthUser {
   appRoleName?: string
   appRoleIsSystemAdmin?: boolean
   permissions?: RolePermissions
+  displayColor?: string | null
 }
 
 type TokenKind = 'admin_access' | 'admin_refresh' | 'share'
@@ -347,6 +348,7 @@ async function fetchUserById(userId: string): Promise<AuthUser | null> {
       name: true,
       active: true,
       appRoleId: true,
+      displayColor: true,
       appRole: {
         select: {
           id: true,
@@ -373,6 +375,7 @@ async function fetchUserById(userId: string): Promise<AuthUser | null> {
     permissions: user.appRole?.isSystemAdmin
       ? adminAllPermissions()
       : normalizeRolePermissions(user.appRole?.permissions),
+    displayColor: user.displayColor,
   }
 }
 

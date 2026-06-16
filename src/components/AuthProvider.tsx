@@ -11,7 +11,7 @@ interface User {
   name: string | null
   username?: string | null
   phone?: string | null
-  avatarPath?: string | null
+  displayColor?: string | null
   role: string
   appRoleName?: string | null
   isSystemAdmin?: boolean

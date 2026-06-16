@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, User, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2, Car } from 'lucide-react'
+import { LogOut, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2, Car } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import NotificationsBell from '@/components/NotificationsBell'
@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { AvatarUploadCrop } from '@/components/AvatarUploadCrop'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { PasswordRequirements } from '@/components/PasswordRequirements'
 
 const SALES_SUBMENU = [
@@ -546,9 +547,15 @@ export default function AdminHeader() {
               onClick={handleOpenProfile}
               aria-label="My Profile"
               title="My Profile"
-              className="p-2 w-9 sm:w-10"
+              className="p-1 w-9 sm:w-10 h-9 sm:h-10 rounded-full overflow-hidden"
             >
-              <User className="h-4 w-4 sm:h-5 sm:w-5" />
+              <InitialsAvatar
+                name={user.name}
+                email={user.email}
+                displayColor={user.displayColor}
+                avatarUrl={`/api/users/${user.id}/avatar`}
+                className="h-full w-full ring-0 text-[10px]"
+              />
             </Button>
             {user.isSystemAdmin && <ClientActivityEye />}
             {canSeeMenu(permissions, 'projects') && <RunningJobsBell />}

@@ -5,6 +5,7 @@ import { resolveShareUploadAccess } from '@/lib/share-uploads'
 import { generateShareUploadAccessToken } from '@/lib/share-upload-access'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
 import { enqueueShareUploadPreview } from '@/lib/queue'
+import { getStoredFilePathForProject, getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -62,10 +63,8 @@ export async function POST(
   }
 
   // Get paths and sizes from StoredFile
-  const origStored = await prisma.storedFile.findUnique({
-    where: { entityType_entityId_fileRole: { entityType: 'SHARE_UPLOAD_FILE', entityId: file.id, fileRole: 'ORIGINAL' } },
-    select: { storagePath: true, fileSize: true },
-  })
+  const origPath = await getStoredFilePathForProject('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL', file.projectId)
+  const origStored = origPath ? { storagePath: origPath, fileSize: null } : null
 
   const downloadToken = await generateShareUploadAccessToken({
     projectId: file.projectId,
@@ -86,10 +85,8 @@ export async function POST(
 
   if (isPreviewable) {
     // Check StoredFile for preview existence
-    const previewStored = await prisma.storedFile.findFirst({
-      where: { entityType: 'SHARE_UPLOAD_FILE', entityId: file.id, fileRole: { in: ['PREVIEW_IMAGE', 'PREVIEW_MP4'] } },
-      select: { storagePath: true, fileSize: true },
-    })
+    const records = await getStoredFileRecords('SHARE_UPLOAD_FILE', [file.id], { fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4'], select: { storagePath: true, fileSize: true } })
+    const previewStored = records[0] || null
     if (file.previewStatus === 'READY' && previewStored) {
       const thumbnailToken = await generateShareUploadAccessToken({
         projectId: file.projectId,

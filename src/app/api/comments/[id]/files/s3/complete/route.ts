@@ -13,6 +13,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { rateLimit } from '@/lib/rate-limit'
+import { registerStoredFile } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -139,15 +140,13 @@ export async function POST(
     })
 
     // Register in StoredFile
-    await prisma.storedFile.create({
-      data: {
-        entityType: 'COMMENT_FILE',
-        entityId: commentFile.id,
-        fileRole: 'ORIGINAL',
-        storagePath: key,
-        fileName,
-        fileSize: BigInt(fileSize),
-      },
+    await registerStoredFile({
+      entityType: 'COMMENT_FILE',
+      entityId: commentFile.id,
+      fileRole: 'ORIGINAL',
+      storagePath: key,
+      fileName,
+      fileSize: BigInt(fileSize),
     })
 
     await recalculateAndStoreProjectTotalBytes(comment.projectId)

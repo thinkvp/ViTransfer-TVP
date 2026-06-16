@@ -397,7 +397,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         const abortS3 = () => {
           abortController.abort()
           if (uploadId && key) {
-            apiFetch('/api/uploads/s3/abort', {
+            apiFetch('/api/upload-s3/abort', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ videoId: currentJob.videoId, uploadId, key }),
@@ -407,7 +407,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
         try {
           // Step 1: Presign
-          const presignRes = await apiFetch('/api/uploads/s3/presign', {
+          const presignRes = await apiFetch('/api/upload-s3/presign', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -517,7 +517,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
           // Step 3: Complete
-          const completeRes = await apiFetch('/api/uploads/s3/complete', {
+          const completeRes = await apiFetch('/api/upload-s3/complete', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ videoId: currentJob.videoId, uploadId, key, parts: completedParts }),

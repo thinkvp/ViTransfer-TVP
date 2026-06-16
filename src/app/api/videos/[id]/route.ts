@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteDirectory, deleteFile, moveDirectory, pruneEmptyParentDirectories, getFilePath } from '@/lib/storage'
-import { getStoredFilePath, renameStoredPaths, deleteStoredFilesForEntity } from '@/lib/stored-file'
+// eslint-disable-next-line no-restricted-imports
+import { renameStoredPaths, deleteStoredFilesForEntity, getStoredFilePath, countStoredFilesByPath, deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
 import { requireApiUser } from '@/lib/auth'
 import { getAutoApproveProject } from '@/lib/settings'
 import { getSecuritySettings } from '@/lib/video-access'
@@ -441,11 +442,10 @@ export async function PATCH(
           } else {
             // Local mode: plan an inline directory move + path rebase.
             // Paths from StoredFile registry (legacy columns dropped)
-            const storedPaths = await prisma.storedFile.findMany({
-              where: { entityType: 'VIDEO', entityId: id },
+            const storedPaths = await getStoredFileRecords('VIDEO', [id], {
               select: { fileRole: true, storagePath: true },
-            })
-            const pathMap = new Map(storedPaths.map(f => [f.fileRole, f.storagePath]))
+            }) as unknown as Array<{ fileRole: string; storagePath: string | null }>
+            const pathMap = new Map(storedPaths.map(f => [f.fileRole, f.storagePath] as const))
             versionLabelRenamePlan = {
               oldMainPrefix,
               newMainPrefix,
@@ -690,6 +690,10 @@ export async function DELETE(
     const versionLabel = video.versionLabel || `v${video.version}`
     const previewRoot = buildVideoVersionPreviewsRoot(projectStoragePath, videoFolderName, versionLabel)
 
+    // Collect comment file IDs before any deletion so we can clean up
+    // StoredFile rows even if the pre-deletion file removal fails.
+    let commentFileIdsToDelete: string[] = []
+
     // Delete all associated files from storage
     try {
       // Delete comment attachment files for this video/version (best-effort).
@@ -707,42 +711,28 @@ export async function DELETE(
         },
       })
 
-      const commentFileIdsToDelete = commentFiles.map((f) => f.id)
+      commentFileIdsToDelete = commentFiles.map((f) => f.id)
       // Delete comment file physical files via StoredFile
       if (commentFileIdsToDelete.length > 0) {
-        const cfPaths = await prisma.storedFile.findMany({
-          where: { entityType: 'COMMENT_FILE', entityId: { in: commentFileIdsToDelete } },
+        const cfPaths = await getStoredFileRecords('COMMENT_FILE', commentFileIdsToDelete, {
           select: { storagePath: true, entityId: true },
         })
         for (const cf of cfPaths) {
-          try {
-            const sharedCount = await prisma.storedFile.count({
-              where: {
-                storagePath: cf.storagePath,
-                entityType: 'COMMENT_FILE',
-                entityId: { notIn: commentFileIdsToDelete },
-              },
-            })
-            if (sharedCount === 0) {
-              await deleteFile(cf.storagePath)
-            }
-          } catch {
-            // Ignore per-file errors
-          }
+          // Comment file paths are unique per upload (timestamped) — never shared.
+          try { await deleteFile(cf.storagePath) } catch {}
         }
+        // Delete the StoredFile records
+        await deleteStoredFilesByCriteria({
+          entityType: 'COMMENT_FILE',
+          entityIds: commentFileIdsToDelete,
+        })
       }
 
       // Delete asset files via StoredFile
       for (const asset of video.assets) {
         const assetPath = await getStoredFilePath('VIDEO_ASSET', asset.id, 'ORIGINAL')
         if (assetPath) {
-          const sharedCount = await prisma.storedFile.count({
-            where: {
-              storagePath: assetPath,
-              entityType: 'VIDEO_ASSET',
-              entityId: { not: asset.id },
-            },
-          })
+          const sharedCount = await countStoredFilesByPath(assetPath, { excludeEntityType: 'VIDEO_ASSET', excludeEntityId: asset.id })
           if (sharedCount === 0) {
             await deleteFile(assetPath)
           }
@@ -764,20 +754,8 @@ export async function DELETE(
       // not referenced by any other video or asset.
       const thumbPath = await getStoredFilePath('VIDEO', id, 'THUMBNAIL')
       if (thumbPath && !thumbPath.startsWith(`${previewRoot}/`)) {
-        const thumbnailSharedAssets = await prisma.storedFile.count({
-          where: {
-            storagePath: thumbPath,
-            entityType: 'VIDEO_ASSET',
-            entityId: { not: id },
-          },
-        })
-        const thumbnailSharedVideos = await prisma.storedFile.count({
-          where: {
-            storagePath: thumbPath,
-            entityType: 'VIDEO',
-            entityId: { not: id },
-          },
-        })
+        const thumbnailSharedAssets = await countStoredFilesByPath(thumbPath, { excludeEntityType: 'VIDEO_ASSET', excludeEntityId: id })
+        const thumbnailSharedVideos = await countStoredFilesByPath(thumbPath, { excludeEntityType: 'VIDEO', excludeEntityId: id })
 
         // Only delete if no other assets or videos reference this thumbnail path
         if (thumbnailSharedAssets === 0 && thumbnailSharedVideos === 0) {
@@ -798,6 +776,16 @@ export async function DELETE(
     await deleteStoredFilesForEntity('VIDEO', id).catch(() => {})
     for (const asset of video.assets) {
       await deleteStoredFilesForEntity('VIDEO_ASSET', asset.id).catch(() => {})
+    }
+    // Safety net: ensure COMMENT_FILE StoredFile rows are cleaned up even if
+    // the pre-deletion pass above failed.  At this point the Comment/CommentFile
+    // rows are already cascade-deleted, so any remaining StoredFile rows would
+    // be orphans pointing to non-existent entities.
+    if (commentFileIdsToDelete.length > 0) {
+      await deleteStoredFilesByCriteria({
+        entityType: 'COMMENT_FILE',
+        entityIds: commentFileIdsToDelete,
+      }).catch(() => {})
     }
 
     // Update the stored project data totals

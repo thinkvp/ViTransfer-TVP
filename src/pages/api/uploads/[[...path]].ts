@@ -6,6 +6,7 @@ import path from 'path'
 import fs from 'fs'
 import { Readable } from 'stream'
 import type { NextApiRequest, NextApiResponse } from 'next'
+import { registerStoredFile } from '@/lib/stored-file'
 
 // Store TUS temp files inside STORAGE_ROOT so that the final "copy" to the
 // destination path is an atomic fs.rename (zero cost) rather than a full
@@ -420,7 +421,8 @@ async function handleClientFileUploadFinish(
   maxUploadSizeBytes: number
 ) {
   const clientFile = await prisma.clientFile.findUnique({
-    where: { id: clientFileId }
+    where: { id: clientFileId },
+    include: { client: { select: { name: true } } },
   })
 
   if (!clientFile) {
@@ -432,9 +434,28 @@ async function handleClientFileUploadFinish(
 
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
+  // Compute storage path from entity data — StoredFile is created here (post-upload)
+  // rather than in the pre-upload POST route, so there's no orphan row on failure.
+  const { buildClientFilesStoragePath } = await import('@/lib/project-storage-paths')
+  const storagePath = buildClientFilesStoragePath(
+    clientFile.client.name,
+    clientFile.fileName,
+    clientFile.createdAt.getTime(),
+  )
+
   const { moveUploadedFile } = await import('@/lib/storage')
-  const cfPath = await (await import('@/lib/stored-file')).getStoredFilePath('CLIENT_FILE', clientFileId, 'ORIGINAL')
-  await moveUploadedFile(tusFilePath, cfPath || '', fileSize)
+  await moveUploadedFile(tusFilePath, storagePath, fileSize)
+
+  // Create StoredFile registry record AFTER successful file move
+  await registerStoredFile({
+    entityType: 'CLIENT_FILE',
+    entityId: clientFileId,
+    fileRole: 'ORIGINAL',
+    storagePath,
+    fileName: clientFile.fileName,
+    fileSize: BigInt(fileSize),
+    status: 'READY',
+  })
 
   // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'
@@ -451,7 +472,7 @@ async function handleClientFileUploadFinish(
   const q = getClientFileQueue()
   await q.add('process-client-file', {
     clientFileId: clientFile.id,
-    storagePath: cfPath || '',
+    storagePath,
     expectedCategory: clientFile.category ?? undefined,
   })
 
@@ -480,9 +501,23 @@ async function handleUserFileUploadFinish(
 
   await validateAssetFile(tusFilePath, upload.metadata?.filename as string)
 
+  // Compute storage path from entity data — StoredFile is created here (post-upload)
+  // rather than in the pre-upload POST route, so there's no orphan row on failure.
+  const storagePath = `users/${userFile.userId}/files/userfile-${userFile.createdAt.getTime()}-${userFile.fileName}`
+
   const { moveUploadedFile } = await import('@/lib/storage')
-  const ufPath = await (await import('@/lib/stored-file')).getStoredFilePath('USER_FILE', userFileId, 'ORIGINAL')
-  await moveUploadedFile(tusFilePath, ufPath || '', fileSize)
+  await moveUploadedFile(tusFilePath, storagePath, fileSize)
+
+  // Create StoredFile registry record AFTER successful file move
+  await registerStoredFile({
+    entityType: 'USER_FILE',
+    entityId: userFileId,
+    fileRole: 'ORIGINAL',
+    storagePath,
+    fileName: userFile.fileName,
+    fileSize: BigInt(fileSize),
+    status: 'READY',
+  })
 
   const actualFileType = 'application/octet-stream'
 
@@ -497,7 +532,7 @@ async function handleUserFileUploadFinish(
   const q = getUserFileQueue()
   await q.add('process-user-file', {
     userFileId: userFile.id,
-    storagePath: ufPath || '',
+    storagePath,
     expectedCategory: userFile.category ?? undefined,
   })
 
@@ -515,7 +550,16 @@ async function handleProjectFileUploadFinish(
 ) {
   const projectFile = await prisma.projectFile.findUnique({
     where: { id: projectFileId },
-    select: { id: true, category: true },
+    include: {
+      project: {
+        select: {
+          storagePath: true,
+          title: true,
+          companyName: true,
+          client: { select: { name: true } },
+        },
+      },
+    },
   })
 
   if (!projectFile) {
@@ -523,13 +567,19 @@ async function handleProjectFileUploadFinish(
     return {}
   }
 
-  // Resolve storage path from StoredFile registry
-  const { getStoredFilePath } = await import('@/lib/stored-file')
-  const storagePath = await getStoredFilePath('PROJECT_FILE', projectFileId, 'ORIGINAL')
-  if (!storagePath) {
-    console.error(`[UPLOAD] No storage path for project file: ${projectFileId}`)
-    return {}
-  }
+  // Compute storage path from entity data — StoredFile is created here (post-upload)
+  // rather than in the pre-upload POST route, so there's no orphan row on failure.
+  const { buildProjectFilesStoragePath, buildProjectStorageRoot } = await import('@/lib/project-storage-paths')
+  const projectStoragePath = projectFile.project.storagePath
+    || buildProjectStorageRoot(
+        projectFile.project.client?.name || projectFile.project.companyName || 'Client',
+        projectFile.project.title,
+      )
+  const storagePath = buildProjectFilesStoragePath(
+    projectStoragePath,
+    projectFile.fileName,
+    projectFile.createdAt.getTime(),
+  )
 
   const fileSize = await verifyUploadedFile(tusFilePath, upload.size, maxUploadSizeBytes)
 
@@ -537,6 +587,17 @@ async function handleProjectFileUploadFinish(
 
   const { moveUploadedFile } = await import('@/lib/storage')
   await moveUploadedFile(tusFilePath, storagePath, fileSize)
+
+  // Create StoredFile registry record AFTER successful file move
+  await registerStoredFile({
+    entityType: 'PROJECT_FILE',
+    entityId: projectFileId,
+    fileRole: 'ORIGINAL',
+    storagePath,
+    fileName: projectFile.fileName,
+    fileSize: BigInt(fileSize),
+    status: 'READY',
+  })
 
   // Do not trust client-supplied MIME; worker will set verified type after magic-byte validation
   const actualFileType = 'application/octet-stream'

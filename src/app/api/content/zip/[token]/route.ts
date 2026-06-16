@@ -8,6 +8,8 @@ import { logSecurityEvent } from '@/lib/video-access'
 import archiver from 'archiver'
 import { PassThrough, Readable } from 'stream'
 import { failTrackedDownloadNow, registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
+// Token-based auth; asset paths resolved via download token verification, not projectId.
+// eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'

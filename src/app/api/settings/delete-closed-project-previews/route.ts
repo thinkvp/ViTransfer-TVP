@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile } from '@/lib/storage'
 import type { FileRole } from '@/lib/stored-file'
+import { getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -60,14 +61,8 @@ export async function POST(request: NextRequest) {
     // Get all preview/timeline StoredFile paths for these entities
     const previewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'THUMBNAIL']
     const [videoStored, assetStored] = await Promise.all([
-      videoIds.length > 0 ? prisma.storedFile.findMany({
-        where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: { in: previewRoles } },
-        select: { storagePath: true, fileRole: true },
-      }) : [],
-      assetIds.length > 0 ? prisma.storedFile.findMany({
-        where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds }, fileRole: { in: ['PREVIEW_IMAGE', 'PREVIEW_MP4'] } },
-        select: { storagePath: true },
-      }) : [],
+      videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: previewRoles, select: { storagePath: true, fileRole: true } }) : [],
+      assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4'], select: { storagePath: true } }) : [],
     ])
 
     const allStored = [...videoStored, ...assetStored]
@@ -87,13 +82,13 @@ export async function POST(request: NextRequest) {
 
     // Delete StoredFile records
     if (videoIds.length > 0) {
-      await prisma.storedFile.deleteMany({
-        where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: { in: previewRoles } },
+      await deleteStoredFilesByCriteria({
+        entityType: 'VIDEO', entityIds: videoIds, fileRoles: previewRoles,
       })
     }
     if (assetIds.length > 0) {
-      await prisma.storedFile.deleteMany({
-        where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds }, fileRole: { in: ['PREVIEW_IMAGE', 'PREVIEW_MP4'] } },
+      await deleteStoredFilesByCriteria({
+        entityType: 'VIDEO_ASSET', entityIds: assetIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4'],
       })
     }
 

@@ -10,6 +10,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { deleteFile } from '@/lib/storage'
+import { getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 // Prevent static generation for this route
@@ -377,16 +378,16 @@ export async function DELETE(
     // Best-effort: remove attachment objects/files from StoredFile
     const fileIds = commentFiles.map(f => f.id)
     if (fileIds.length > 0) {
-      const paths = await prisma.storedFile.findMany({
-        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+      const paths = await getStoredFileRecords('COMMENT_FILE', fileIds, {
         select: { storagePath: true },
       })
       for (const { storagePath } of paths) {
         try { await deleteFile(storagePath) } catch {}
       }
       // Clean up StoredFile rows
-      await prisma.storedFile.deleteMany({
-        where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } },
+      await deleteStoredFilesByCriteria({
+        entityType: 'COMMENT_FILE',
+        entityIds: fileIds,
       }).catch(() => {})
     }
 

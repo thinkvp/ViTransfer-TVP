@@ -7,7 +7,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { deleteDirectory, deleteFile, pruneEmptyParentDirectories } from '@/lib/storage'
 import { sanitizeEmailHtml } from '@/lib/security/email-html-sanitization'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { getStoredFilePath } from '@/lib/stored-file'
+import { getStoredFilePathForProject, getStoredFileRecords } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 const MAX_EMAIL_HTML_FOR_CID_REWRITE_CHARS = 250_000
@@ -120,10 +120,7 @@ export async function GET(
   const attachmentIds = email.attachments.map(a => a.id)
   const attachSizeMap = new Map<string, number>()
   if (attachmentIds.length > 0) {
-    const stored = await prisma.storedFile.findMany({
-      where: { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: attachmentIds }, fileRole: 'ORIGINAL' },
-      select: { entityId: true, fileSize: true },
-    })
+    const stored = await getStoredFileRecords('PROJECT_EMAIL_ATTACHMENT', attachmentIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true } })
     for (const s of stored) {
       if (s.fileSize != null) attachSizeMap.set(s.entityId, Number(s.fileSize))
     }
@@ -211,16 +208,11 @@ export async function DELETE(
   if (!email) return NextResponse.json({ error: 'Email not found' }, { status: 404 })
 
   // Get paths from StoredFile
-  const emailStored = await prisma.storedFile.findFirst({
-    where: { entityType: 'PROJECT_EMAIL', entityId: emailId, fileRole: 'RAW_EMAIL' },
-    select: { storagePath: true },
-  })
+  const emailRecords = await getStoredFileRecords('PROJECT_EMAIL', [emailId], { fileRoles: ['RAW_EMAIL'], select: { storagePath: true } })
+  const emailStored = emailRecords[0] || null
   const attachmentIds = email.attachments.map(a => a.id)
   const attachmentStored = attachmentIds.length > 0
-    ? await prisma.storedFile.findMany({
-        where: { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: attachmentIds } },
-        select: { storagePath: true },
-      })
+    ? await getStoredFileRecords('PROJECT_EMAIL_ATTACHMENT', attachmentIds, { select: { storagePath: true } })
     : []
 
   const rawStoragePath = emailStored?.storagePath ?? ''

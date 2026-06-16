@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import * as path from 'path'
 import { statfs } from 'fs/promises'
+import { getStoredFileAggregate } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -50,18 +51,18 @@ export async function GET(request: NextRequest) {
       accountingTotal,
     ] = await Promise.all([
       // All file sizes now come from StoredFile registry
-      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO', fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'VIDEO_ASSET' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'COMMENT_FILE' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'SHARE_UPLOAD_FILE' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_FILE' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'PROJECT_EMAIL_ATTACHMENT' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', fileRole: 'ORIGINAL' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM', fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL', 'SOCIAL', 'THUMBNAIL'] } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'ALBUM_PHOTO', fileRole: { in: ['SOCIAL', 'THUMBNAIL'] } }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'CLIENT_FILE' }, _sum: { fileSize: true } }),
-      prisma.storedFile.aggregate({ where: { entityType: 'USER_FILE' } as any, _sum: { fileSize: true } }),
+      getStoredFileAggregate({ entityType: 'VIDEO', fileRole: 'ORIGINAL' }),
+      getStoredFileAggregate({ entityType: 'VIDEO_ASSET' }),
+      getStoredFileAggregate({ entityType: 'COMMENT_FILE' }),
+      getStoredFileAggregate({ entityType: 'SHARE_UPLOAD_FILE' }),
+      getStoredFileAggregate({ entityType: 'PROJECT_FILE' }),
+      getStoredFileAggregate({ entityType: 'PROJECT_EMAIL' }),
+      getStoredFileAggregate({ entityType: 'PROJECT_EMAIL_ATTACHMENT' }),
+      getStoredFileAggregate({ entityType: 'ALBUM_PHOTO', fileRole: 'ORIGINAL' }),
+      getStoredFileAggregate({ entityType: 'ALBUM', fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL', 'SOCIAL', 'THUMBNAIL'] } }),
+      getStoredFileAggregate({ entityType: 'ALBUM_PHOTO', fileRole: { in: ['SOCIAL', 'THUMBNAIL'] } }),
+      getStoredFileAggregate({ entityType: 'CLIENT_FILE' }),
+      getStoredFileAggregate({ entityType: 'USER_FILE' } as any),
       prisma.project.aggregate({ _sum: { totalBytes: true, previewBytes: true } }),
       isS3Provider
         ? Promise.resolve({ _sum: { totalBytes: 0, diskBytes: 0 } } as any)
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
             _sum: { totalBytes: true, diskBytes: true },
           }),
       // Accounting files total from StoredFile
-      prisma.storedFile.aggregate({ where: { entityType: 'ACCOUNTING_ATTACHMENT' } as any, _sum: { fileSize: true } }),
+      getStoredFileAggregate({ entityType: 'ACCOUNTING_ATTACHMENT' } as any),
     ])
 
     const originalVideosBytes = asNumber(videoAgg._sum.fileSize)

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteFile } from '@/lib/storage'
-import { deleteStoredFilesForEntity } from '@/lib/stored-file'
+import { deleteStoredFilesForEntity, getStoredFileRecords, countStoredFilesByPath } from '@/lib/stored-file'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
@@ -66,8 +66,7 @@ export async function DELETE(
     if (!photo) return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
 
     // Get StoredFile records for sizes and paths
-    const storedFiles = await prisma.storedFile.findMany({
-      where: { entityType: 'ALBUM_PHOTO', entityId: photoId },
+    const storedFiles = await getStoredFileRecords('ALBUM_PHOTO', [photoId], {
       select: { fileRole: true, storagePath: true, fileSize: true },
     })
     const storedByRole = new Map(storedFiles.map(s => [s.fileRole, s]))
@@ -106,13 +105,7 @@ export async function DELETE(
 
     try {
       const origPath = origStored?.storagePath
-      const sharedCount = origPath ? await prisma.storedFile.count({
-        where: {
-          storagePath: origPath,
-          entityType: 'ALBUM_PHOTO',
-          entityId: { not: photo.id },
-        },
-      }) : 0
+      const sharedCount = origPath ? await countStoredFilesByPath(origPath, { excludeEntityType: 'ALBUM_PHOTO', excludeEntityId: photo.id }) : 0
 
       if (sharedCount === 0 && origPath) {
         await deleteFile(origPath)

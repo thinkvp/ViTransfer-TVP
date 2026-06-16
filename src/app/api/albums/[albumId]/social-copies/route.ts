@@ -6,7 +6,9 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { getAlbumZipStoragePath, getAlbumZipJobId } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { deleteFile, getFilePath } from '@/lib/storage'
-import { deleteStoredFile } from '@/lib/stored-file'
+// ALBUM_PHOTO paths used for derivative computation — project context not needed here.
+// eslint-disable-next-line no-restricted-imports
+import { deleteStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import fs from 'fs'
@@ -157,11 +159,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
       for (const photo of photosToProcess) {
         // Get original path from StoredFile for social derivative path
-        const origPath = await prisma.storedFile.findUnique({
-          where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'ORIGINAL' } },
-          select: { storagePath: true },
-        })
-        const socialPath = origPath?.storagePath ? `${origPath.storagePath}-social.jpg` : ''
+        const origPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL')
+        const socialPath = origPath ? `${origPath}-social.jpg` : ''
 
         await prisma.albumPhoto.update({
           where: { id: photo.id },
