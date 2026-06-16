@@ -350,7 +350,7 @@ async function handleVideoUploadFinish(
 
   await vq.add('process-video', {
     videoId: video.id,
-    originalStoragePath: origPath || '',
+    storagePath: origPath || '',
     projectId: video.projectId,
     ...(skipPreviews ? { thumbnailOnly: true } : {}),
   })

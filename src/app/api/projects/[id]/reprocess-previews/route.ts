@@ -151,7 +151,7 @@ export async function POST(
     for (const video of videos) {
       const originalPath = await getStoredFilePathForProject('VIDEO', video.id, 'ORIGINAL', projectId)
       await prisma.video.update({ where: { id: video.id }, data: { status: 'QUEUED', processingProgress: 0, processingPhase: null, processingError: null } })
-      await videoQueue.add('process-video', { videoId: video.id, originalStoragePath: originalPath || '', projectId })
+      await videoQueue.add('process-video', { videoId: video.id, storagePath: originalPath || '', projectId })
       queuedVideoJobs++
     }
 

@@ -65,7 +65,7 @@ function makeDownloadProgressCallback(videoId: string) {
 export async function processVideo(job: Job<VideoProcessingJob>) {
   const {
     videoId,
-    originalStoragePath,
+    storagePath,
     projectId,
     timelineOnly,
     thumbnailOnly,
@@ -82,15 +82,15 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
   // Timeline-only mode: skip transcode/thumbnail, just generate sprites.
   // The video stays in READY status — no interruption to viewing.
   if (timelineOnly) {
-    return processTimelineOnly(videoId, originalStoragePath, projectId)
+    return processTimelineOnly(videoId, storagePath, projectId)
   }
 
   if (thumbnailOnly) {
-    return processThumbnailOnly(videoId, originalStoragePath, projectId)
+    return processThumbnailOnly(videoId, storagePath, projectId)
   }
 
   if (previewOnly) {
-    return processPreviewOnly(videoId, originalStoragePath, projectId, requestedPreviewResolutions)
+    return processPreviewOnly(videoId, storagePath, projectId, requestedPreviewResolutions)
   }
 
   console.log(`[WORKER] Processing video ${videoId}`)
@@ -129,7 +129,7 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     }
     const videoInfo = await downloadAndValidateVideo(
       videoId,
-      originalStoragePath,
+      storagePath,
       tempFiles,
       isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
     )
@@ -277,7 +277,7 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
 
 async function processPreviewOnly(
   videoId: string,
-  originalStoragePath: string,
+  storagePath: string,
   projectId: string,
   requestedPreviewResolutions: Array<'480p' | '720p' | '1080p'>
 ) {
@@ -302,7 +302,7 @@ async function processPreviewOnly(
     }
     const videoInfo = await downloadAndValidateVideo(
       videoId,
-      originalStoragePath,
+      storagePath,
       tempFiles,
       isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
     )
@@ -398,7 +398,7 @@ async function processPreviewOnly(
 
 async function processThumbnailOnly(
   videoId: string,
-  originalStoragePath: string,
+  storagePath: string,
   projectId: string,
 ) {
   console.log(`[WORKER] Thumbnail-only generation for video ${videoId}`)
@@ -422,7 +422,7 @@ async function processThumbnailOnly(
     }
     const videoInfo = await downloadAndValidateVideo(
       videoId,
-      originalStoragePath,
+      storagePath,
       tempFiles,
       isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
     )
@@ -464,7 +464,7 @@ async function processThumbnailOnly(
  */
 async function processTimelineOnly(
   videoId: string,
-  originalStoragePath: string,
+  storagePath: string,
   projectId: string
 ) {
   console.log(`[WORKER] Timeline-only generation for video ${videoId}`)
@@ -473,7 +473,7 @@ async function processTimelineOnly(
 
   incrementActiveVideoJobs()
   try {
-    const videoInfo = await downloadAndValidateVideo(videoId, originalStoragePath, tempFiles)
+    const videoInfo = await downloadAndValidateVideo(videoId, storagePath, tempFiles)
 
     const timelineResult = await processTimelinePreviews(
       videoId,

@@ -162,7 +162,7 @@ export async function POST(
       if (!origPath) continue
       await prisma.video.update({ where: { id: video.id }, data: { processingPhase: 'timeline', processingProgress: 0 } })
       try {
-        await videoQueue.add('process-video', { videoId: video.id, originalStoragePath: origPath, projectId, timelineOnly: true })
+        await videoQueue.add('process-video', { videoId: video.id, storagePath: origPath, projectId, timelineOnly: true })
         queuedVideos++
       } catch (error) {
         await prisma.video.update({ where: { id: video.id }, data: { processingPhase: null, processingProgress: 0 } }).catch(() => {})

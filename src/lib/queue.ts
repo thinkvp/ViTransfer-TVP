@@ -19,7 +19,8 @@ let uploadTimelineQueueInstance: Queue<UploadTimelineJob> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
-  originalStoragePath: string
+  /** Storage path of the original video file (resolved from StoredFile before enqueuing). */
+  storagePath: string
   projectId: string
   /** When true, skip transcode/thumbnail and only generate timeline preview sprites. */
   timelineOnly?: boolean

@@ -224,7 +224,7 @@ export async function POST(
       // Re-queue video for processing
       await videoQueue.add('process-video', {
         videoId: video.id,
-        originalStoragePath: originalPath,
+        storagePath: originalPath,
         projectId: project.id,
         ...(thumbnailOnlyMode ? { thumbnailOnly: true } : {}),
         ...(targetedPreviewGeneration ? { requestedPreviewResolutions: previewResolutions } : {}),

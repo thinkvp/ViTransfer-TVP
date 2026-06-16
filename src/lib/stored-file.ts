@@ -354,9 +354,18 @@ export async function resolveEntityProjectId(
       })
       return cmf?.comment?.projectId ?? null
     }
+    case 'PROJECT_EMAIL_ATTACHMENT': {
+      const pea = await prisma.projectEmailAttachment.findUnique({
+        where: { id: entityId },
+        select: { projectEmail: { select: { projectId: true } } },
+      })
+      return pea?.projectEmail?.projectId ?? null
+    }
     // Non-project-scoped types — no project association exists
     case 'USER_FILE':
+    case 'USER_AVATAR':
     case 'SETTINGS_BRANDING':
+    case 'ACCOUNTING_ATTACHMENT':
       return null
     default:
       return null
@@ -478,8 +487,8 @@ export async function batchResolveFileSizes(
   }
 
   if (needsS3Fallback.length > 0) {
-    const { isS3Mode, s3GetFileSize } = await import('@/lib/s3-storage')
     if (isS3Mode()) {
+      const { s3GetFileSize } = await import('@/lib/s3-storage')
       const s3Sizes = await Promise.all(
         needsS3Fallback.map(async (f) => {
           try {
@@ -620,15 +629,19 @@ export async function getStoredFileAggregate(
 
 /**
  * Backfill the StoredFile table from all legacy path columns.
- * Safe to call multiple times — uses ON CONFLICT DO NOTHING.
  *
- * This is the same SQL as migration 20260608000002_add_stored_file_registry,
- * packaged for runtime use (e.g. from a developer tools action or post-deploy script).
+ * **DEPRECATED.** All legacy path/size columns have been dropped.
+ * The migration `20260608000002_add_stored_file_registry` ran the backfill
+ * while columns still existed. This function is now a no-op.
  */
 export async function backfillStoredFiles(): Promise<{ inserted: number }> {
-  let inserted = 0
+  console.warn('[stored-file] backfillStoredFiles() is a no-op — legacy columns have been dropped.')
+  return { inserted: 0 }
+}
 
-  const chunks: Array<() => Promise<number>> = [
+// ── Dead backfill chunks kept for historical reference only ──────────────
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const _DEAD_BACKFILL_CHUNKS: Array<() => Promise<number>> = [
     // Video — 7 roles
     () => prisma.$executeRaw`
       INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
@@ -844,10 +857,4 @@ export async function backfillStoredFiles(): Promise<{ inserted: number }> {
       ON CONFLICT DO NOTHING`,
   ]
 
-  for (const chunk of chunks) {
-    const count = await chunk()
-    inserted += count
-  }
-
-  return { inserted }
-}
+// ── End of dead backfill chunks ──────────────────────────────────────────

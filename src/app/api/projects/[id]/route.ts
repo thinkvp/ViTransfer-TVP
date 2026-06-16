@@ -1287,7 +1287,7 @@ export async function PATCH(
             if (missingPreviewResolutions.length > 0) {
               await videoQueue.add('process-video', {
                 videoId: video.id,
-                originalStoragePath: originalPath,
+                storagePath: originalPath,
                 projectId: project.id,
                 requestedPreviewResolutions: missingPreviewResolutions,
                 regenerateThumbnail,
@@ -1296,21 +1296,21 @@ export async function PATCH(
             } else if (regenerateThumbnail && !regenerateTimelinePreviews) {
               await videoQueue.add('process-video', {
                 videoId: video.id,
-                originalStoragePath: originalPath,
+                storagePath: originalPath,
                 projectId: project.id,
                 thumbnailOnly: true,
               })
             } else if (!regenerateThumbnail && regenerateTimelinePreviews) {
               await videoQueue.add('process-video', {
                 videoId: video.id,
-                originalStoragePath: originalPath,
+                storagePath: originalPath,
                 projectId: project.id,
                 timelineOnly: true,
               })
             } else {
               await videoQueue.add('process-video', {
                 videoId: video.id,
-                originalStoragePath: originalPath,
+                storagePath: originalPath,
                 projectId: project.id,
                 regenerateThumbnail: true,
                 regenerateTimelinePreviews: true,

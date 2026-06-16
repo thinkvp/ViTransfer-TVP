@@ -128,7 +128,7 @@ async function handleVideoComplete(videoId: string, key: string) {
 
   await vq.add('process-video', {
     videoId: video.id,
-    originalStoragePath: key,
+    storagePath: key,
     projectId: video.projectId,
     ...(skipPreviews ? { thumbnailOnly: true } : {}),
   })
