@@ -23,9 +23,6 @@ const DEFAULT_TUNING: TransferTuning = {
   downloadChunkSizeBytes: DEFAULT_DOWNLOAD_CHUNK_SIZE_MB * BYTES_PER_MB,
 }
 
-let cachedTuning: TransferTuning | null = null
-let tuningRequest: Promise<TransferTuning> | null = null
-
 function normalizeClientPayload(payload: any): TransferTuning {
   const uploadChunkSizeMB = normalizeUploadChunkSizeMB(payload?.uploadChunkSizeMB)
   const downloadChunkSizeMB = normalizeDownloadChunkSizeMB(payload?.downloadChunkSizeMB)
@@ -38,11 +35,15 @@ function normalizeClientPayload(payload: any): TransferTuning {
   }
 }
 
-async function fetchTransferTuning(): Promise<TransferTuning> {
+// Module-level cache so concurrent consumers share one fetch + result.
+let cachedTuning: TransferTuning | null = null
+let fetchPromise: Promise<TransferTuning> | null = null
+
+async function loadTransferTuning(): Promise<TransferTuning> {
   if (cachedTuning) return cachedTuning
 
-  if (!tuningRequest) {
-    tuningRequest = fetch('/api/meta/transfer-tuning', {
+  if (!fetchPromise) {
+    fetchPromise = fetch('/api/meta/transfer-tuning', {
       method: 'GET',
       cache: 'no-store',
       credentials: 'same-origin',
@@ -59,20 +60,20 @@ async function fetchTransferTuning(): Promise<TransferTuning> {
         return value
       })
       .finally(() => {
-        tuningRequest = null
+        fetchPromise = null
       })
   }
 
-  return tuningRequest
+  return fetchPromise
 }
 
 export function useTransferTuning(): TransferTuning {
-  const [tuning, setTuning] = useState<TransferTuning>(cachedTuning || DEFAULT_TUNING)
+  const [tuning, setTuning] = useState<TransferTuning>(cachedTuning ?? DEFAULT_TUNING)
 
   useEffect(() => {
     let active = true
 
-    void fetchTransferTuning().then((value) => {
+    void loadTransferTuning().then((value) => {
       if (active) setTuning(value)
     })
 

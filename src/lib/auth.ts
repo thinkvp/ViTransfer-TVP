@@ -468,6 +468,28 @@ export async function requireApiAnyAction(request: NextRequest, actions: Paramet
   return user
 }
 
+/**
+ * Authenticate + enforce menu visibility + enforce action permission in a single call.
+ * Eliminates the repeated 3-block auth boilerplate used in most admin API routes.
+ *
+ * Usage:
+ *   const auth = await requireApiMenuAction(request, 'projects', 'uploadVideosOnProjects')
+ *   if (auth instanceof Response) return auth
+ */
+export async function requireApiMenuAction(
+  request: NextRequest,
+  menu: Parameters<typeof requireMenuAccess>[1],
+  action: Parameters<typeof requireActionAccess>[1],
+): Promise<AuthUser | Response> {
+  const user = await requireApiUser(request)
+  if (user instanceof Response) return user
+  const menuErr = requireMenuAccess(user, menu)
+  if (menuErr) return menuErr
+  const actionErr = requireActionAccess(user, action)
+  if (actionErr) return actionErr
+  return user
+}
+
 export async function requireApiAuth(request: NextRequest): Promise<AuthUser | Response> {
   const user = await getCurrentUserFromRequest(request)
   if (!user) {

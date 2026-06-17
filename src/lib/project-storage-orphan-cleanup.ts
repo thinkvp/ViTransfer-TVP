@@ -6,7 +6,6 @@ import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath, buildVideoT
 import {
   getFilePath,
   getRawStoragePath,
-  PROJECT_REDIRECTS_INDEX_FILENAME,
   STORAGE_ROOT,
 } from '@/lib/storage'
 import { getAllStoredPaths } from '@/lib/stored-file'
@@ -87,20 +86,11 @@ function normalizeRelativeStoragePath(relPath: string): string {
   return relPath.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '')
 }
 
-function isProtectedMetadataFile(relPath: string): boolean {
-  const normalized = normalizeRelativeStoragePath(relPath)
-  return (
-    normalized === `projects/${PROJECT_REDIRECTS_INDEX_FILENAME}` ||
-    path.posix.basename(normalized) === '.vitransfer_project_redirect'
-  )
-}
-
 function isIgnoredStoragePath(relPath: string): boolean {
   const normalized = normalizeRelativeStoragePath(relPath)
   return (
     normalized === '.tus-tmp'
     || normalized.startsWith('.tus-tmp/')
-    || isProtectedMetadataFile(normalized)
     // Accounting files live under a separate prefix/volume and are scanned
     // independently by scanAccountingOrphans — exclude them here to prevent
     // the main S3 scan from treating all accounting files as orphans.
@@ -307,8 +297,6 @@ async function walkProjectFiles(
       continue
     }
 
-    if (isProtectedMetadataFile(entryRel)) continue
-
     try {
       const fileStat = await fs.promises.stat(entryAbs)
       if (!fileStat.isFile()) continue
@@ -422,8 +410,7 @@ async function scanS3ForOrphans(
   for (const s3Object of s3Objects) {
     stats.scannedFiles++
 
-    // Skip protected metadata files
-    if (isProtectedMetadataFile(s3Object.key)) continue
+    // Skip ignored storage paths
     if (isIgnoredStoragePath(s3Object.key)) continue
 
     // Check if this S3 key is referenced in the database

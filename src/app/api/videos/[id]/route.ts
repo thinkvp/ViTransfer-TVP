@@ -1,4 +1,3 @@
-import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
@@ -16,6 +15,8 @@ import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
   buildVideoAssetPreviewStoragePath,
+  buildProjectAllVideosRoot,
+  buildProjectAllVideoPreviewsRoot,
   buildProjectStorageRoot,
   buildVideoAssetsStorageRoot,
   buildVideoStorageRoot,
@@ -794,8 +795,8 @@ export async function DELETE(
       recalculateAndStoreProjectPreviewBytes(projectId),
     ])
 
-    const pruneStopAt = path.posix.join(projectStoragePath, 'videos')
-    const previewPruneStopAt = path.posix.join(projectStoragePath, '.previews', 'videos')
+    const pruneStopAt = buildProjectAllVideosRoot(projectStoragePath)
+    const previewPruneStopAt = buildProjectAllVideoPreviewsRoot(projectStoragePath)
 
     try {
       await pruneEmptyParentDirectories(

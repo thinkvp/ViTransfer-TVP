@@ -5,6 +5,7 @@ import { validateRequest, loginSchema } from '@/lib/validation'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { checkBodySize } from '@/lib/api-guard'
 import crypto from 'crypto'
 export const runtime = 'nodejs'
 
@@ -33,6 +34,10 @@ export const dynamic = 'force-dynamic'
  * - 6 attempts allows for typos while preventing automated attacks
  */
 export async function POST(request: NextRequest) {
+  // Reject oversized request bodies before JSON parsing
+  const bodySizeErr = checkBodySize(request)
+  if (bodySizeErr) return bodySizeErr
+
   try {
     const body = await request.json()
     

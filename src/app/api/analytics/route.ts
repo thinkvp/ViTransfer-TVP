@@ -42,6 +42,8 @@ export async function GET(request: NextRequest) {
       return response
     }
 
+    // Analytics view does not enforce project assignment — non-admin users
+    // with the analytics menu can see stats for all projects in allowed statuses.
     const projects = await prisma.project.findMany({
       where: {
         status: { in: allowedStatuses as any },

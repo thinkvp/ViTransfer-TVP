@@ -4,7 +4,7 @@ import { FolderRenameJobPayload } from '../lib/queue'
 import { prisma } from '../lib/db'
 import { isS3Mode, s3MoveDirectoryWithProgress, s3MoveFile } from '../lib/s3-storage'
 import { getAlbumZipFileName } from '../lib/album-photo-zip'
-import { renameStoredPaths, type EntityType } from '../lib/stored-file'
+import { renameStoredPaths, updateStoredFilePath, type EntityType } from '../lib/stored-file'
 
 // ---------------------------------------------------------------------------
 // StoredFile path rebase helper — mirrors the legacy raw-SQL UPDATEs but
@@ -299,7 +299,7 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
       }
       await renameStoredPaths('ALBUM', [renameJob.entityId], renameJob.oldPrefix, renameJob.newPrefix)
 
-      // Rename the zip files inside the (now-moved) zips/ subdirectory.
+            // Rename the zip files inside the (now-moved) zips/ subdirectory.
       // The zip filename encodes the album display name, so a prefix copy alone is not enough.
       if (renameJob.oldEntityName) {
         const album = await prisma.album.findUnique({
@@ -318,6 +318,11 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
                 console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: ${variant} zip rename failed (non-fatal):`, zipMoveError)
               }
             }
+            // Update StoredFile to reflect the new filename (oldEntityName → new name embedded in path).
+            // The prefix-based renameStoredPaths already ran above, but it only changes the directory
+            // portion — the filename (which includes the album display name) needs to be updated too.
+            const fileRole = variant === 'social' ? 'ZIP_SOCIAL' as const : 'ZIP_FULL' as const
+            await updateStoredFilePath('ALBUM', renameJob.entityId, fileRole, newZipPath)
           }
         }
       }

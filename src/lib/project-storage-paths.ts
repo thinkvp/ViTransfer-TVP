@@ -1,22 +1,61 @@
+/**
+ * Project Storage Paths — CENTRAL SOURCE OF TRUTH
+ *
+ * Every storage path in the system MUST be constructed via a function in this file.
+ * Never build paths inline with path.posix.join() — use these builders.
+ *
+ * === SANITIZATION ===
+ *
+ * Folder segments use sanitizeFilePathSegment()  (from @/lib/storage-sanitize)
+ * File names     use sanitizeFileName()          (from @/lib/storage-sanitize)
+ *
+ * === PATH STRUCTURE OVERVIEW ===
+ *
+ *   clients/{clientName}/
+ *     projects/{projectTitle}/
+ *       files/projectfile-{ts}-{name}           ← ProjectFile
+ *       uploads/{folderPath}/{fileName}          ← Share uploads
+ *       .previews/                               ← All derived preview assets
+ *         uploads/{folder}/{id}/timeline-previews/
+ *         videos/{videoFolder}/{version}/
+ *           preview-{res}.mp4
+ *           thumbnail.jpg
+ *           timeline-previews/
+ *           assets/{assetId}/timeline-previews/
+ *       videos/{videoFolder}/{version}/
+ *         {originalFile}                         ← Video original
+ *         assets/{fileName}                      ← VideoAsset
+ *       albums/{albumFolder}/
+ *         {photoFile}                            ← AlbumPhoto original
+ *         zips/{AlbumName} Full Res.zip
+ *       comments/{commentId}/{name}_{ts}.{ext}
+ *       communication/
+ *         raw/email-{ts}-{name}
+ *         emails/{id}/att-{ts}-{idx}-{name}
+ *
+ *   files/clientfile-{ts}-{name}                 ← ClientFile (under clients/{name})
+ *
+ * === ACCOUNTING (separate volume) ===
+ *   See src/lib/accounting/file-storage.ts
+ *   accounting/FY{year}-{year}/{AccountName}/filename.ext
+ *
+ * === IMPORTANT ===
+ *
+ * All I/O (uploadFile, deleteFile, createReadStream) goes through src/lib/storage.ts,
+ * which handles path validation and any physical-layer redirects transparently.
+ * DO NOT bypass storage.ts with raw fs operations on these paths.
+ */
+
 import path from 'path'
-import { sanitizeFilename } from '@/lib/file-validation'
+import { sanitizeFileName, sanitizeFilePathSegment } from '@/lib/storage-sanitize'
 
 export type AlbumZipVariant = 'full' | 'social'
 
-function trimStorageSegment(value: string): string {
-  return value.trim().replace(/\s+/g, ' ')
-}
-
-export function sanitizeStorageName(name: string): string {
-  const sanitized = trimStorageSegment(name)
-    .replace(/[<>:"/\\|?*]+/g, '_')
-    .replace(/[\x00-\x1F]+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/[.\s]+$/g, '')
-    .replace(/^[.\s]+/g, '')
-
-  return sanitized || 'Untitled'
-}
+/**
+ * @deprecated Use sanitizeFilePathSegment() from @/lib/storage-sanitize instead.
+ * Kept for backward compatibility.
+ */
+export const sanitizeStorageName = sanitizeFilePathSegment
 
 function sanitizeAlbumZipName(albumName: string): string {
   const sanitized = albumName
@@ -74,6 +113,22 @@ export function buildProjectPreviewsRoot(projectStoragePath: string): string {
   return path.posix.join(projectStoragePath, '.previews')
 }
 
+/**
+ * Root directory for all videos under a project (not for a specific video).
+ * Used as a prune-stop boundary when deleting individual videos.
+ */
+export function buildProjectAllVideosRoot(projectStoragePath: string): string {
+  return path.posix.join(projectStoragePath, 'videos')
+}
+
+/**
+ * Root directory for all video previews under a project.
+ * Used as a prune-stop boundary when deleting individual video previews.
+ */
+export function buildProjectAllVideoPreviewsRoot(projectStoragePath: string): string {
+  return path.posix.join(projectStoragePath, '.previews', 'videos')
+}
+
 export function normalizeProjectUploadRelativePath(relativePath: string): string {
   const trimmed = String(relativePath || '').trim()
   if (!trimmed) return ''
@@ -111,7 +166,7 @@ export function buildProjectUploadFileStoragePath(
   fileName: string,
 ): string {
   const normalizedFolderPath = buildProjectUploadFolderStoragePath(projectStoragePath, folderRelativePath)
-  const safeFileName = sanitizeFilename(fileName)
+  const safeFileName = sanitizeFileName(fileName)
   return path.posix.join(normalizedFolderPath, safeFileName)
 }
 
@@ -119,7 +174,7 @@ export function buildProjectUploadVideoThumbnailStoragePath(projectStoragePath: 
   const normalized = String(uploadFileStoragePath || '').replace(/\\/g, '/')
   const relativePath = path.posix.relative(projectStoragePath, normalized).replace(/\\/g, '/')
   const parsed = path.posix.parse(relativePath)
-  const baseName = sanitizeFilename(parsed.base || `${parsed.name || 'video'}.bin`)
+  const baseName = sanitizeFileName(parsed.base || `${parsed.name || 'video'}.bin`)
   const thumbnailFileName = `${baseName}.jpg`
   return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), parsed.dir, thumbnailFileName)
 }
@@ -136,12 +191,12 @@ export function buildVideoAssetPreviewStoragePath(
   const relativePath = path.posix.relative(assetsRoot, normalized).replace(/\\/g, '/')
   const parsed = path.posix.parse(relativePath)
   const safeExtension = previewExtension.startsWith('.') ? previewExtension : `.${previewExtension}`
-  const fileName = `${sanitizeFilename(parsed.name || 'asset')}${safeExtension}`
+  const fileName = `${sanitizeFileName(parsed.name || 'asset')}${safeExtension}`
   return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'assets', parsed.dir, fileName)
 }
 
 export function allocateUniqueUploadFileName(fileName: string, existingNames: Iterable<string>): string {
-  const safeFileName = sanitizeFilename(fileName)
+  const safeFileName = sanitizeFileName(fileName)
   const parsed = path.posix.parse(safeFileName)
   const baseName = parsed.name || 'file'
   const extension = parsed.ext || ''
@@ -194,7 +249,7 @@ export function buildVideoOriginalStoragePath(
   versionLabel: string,
   originalFileName: string,
 ): string {
-  const safeOriginalFileName = sanitizeFilename(originalFileName)
+  const safeOriginalFileName = sanitizeFileName(originalFileName)
   return path.posix.join(
     buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel),
     safeOriginalFileName,
@@ -313,4 +368,30 @@ export function getStoragePathBasename(storagePath: string | null | undefined): 
   const normalized = storagePath.replace(/\\/g, '/').replace(/\/+$/, '')
   const base = path.posix.basename(normalized)
   return base && base !== '.' ? base : null
+}
+
+/**
+ * Resolve a project's storage path from its DB record.
+ *
+ * Prefer this over reading project.storagePath directly — it guarantees a
+ * valid path even when storagePath is null or stale, by falling back to
+ * buildProjectStorageRoot() with the project's current client + title.
+ *
+ * @example
+ *   const projectRoot = resolveProjectStoragePath(video.project)
+ *   const previewPath = buildVideoPreviewStoragePath(projectRoot, folder, version, '720p')
+ */
+export function resolveProjectStoragePath(project: {
+  storagePath?: string | null
+  title: string
+  client?: { name?: string | null } | null
+  companyName?: string | null
+}): string {
+  return (
+    project.storagePath ||
+    buildProjectStorageRoot(
+      project.client?.name || project.companyName || 'Client',
+      project.title,
+    )
+  )
 }

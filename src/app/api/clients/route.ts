@@ -4,6 +4,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { validateAssetFile } from '@/lib/file-validation'
+import { checkBodySize } from '@/lib/api-guard'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -174,6 +175,10 @@ export async function POST(request: NextRequest) {
     'admin-clients-create'
   )
   if (rateLimitResult) return rateLimitResult
+
+  // Reject oversized request bodies before JSON parsing
+  const bodySizeErr = checkBodySize(request)
+  if (bodySizeErr) return bodySizeErr
 
   try {
     const body = await request.json()

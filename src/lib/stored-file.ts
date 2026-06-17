@@ -640,7 +640,6 @@ export async function backfillStoredFiles(): Promise<{ inserted: number }> {
 }
 
 // ── Dead backfill chunks kept for historical reference only ──────────────
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const _DEAD_BACKFILL_CHUNKS: Array<() => Promise<number>> = [
     // Video — 7 roles
     () => prisma.$executeRaw`

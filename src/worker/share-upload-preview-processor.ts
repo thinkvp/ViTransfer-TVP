@@ -194,10 +194,28 @@ async function updateRecordSuccess(
     } })
 
     const isMp4 = previewPath.toLowerCase().endsWith('.mp4')
-    await registerStoredFile({
-      entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: isMp4 ? 'PREVIEW_MP4' : 'PREVIEW_IMAGE',
-      storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
-    })
+    if (isMp4) {
+      // Register the playback MP4
+      await registerStoredFile({
+        entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_MP4',
+        storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
+      })
+
+      // Also register the companion JPG thumbnail that was uploaded alongside the MP4.
+      // The JPG path is derived by swapping .mp4 → .jpg on the same preview path.
+      // This companion file is uploaded but was never registered in StoredFile — it would
+      // be missed on asset deletion, leaving an orphaned file on storage.
+      const companionJpgPath = previewPath.replace(/\.mp4$/i, '.jpg')
+      await registerStoredFile({
+        entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
+        storagePath: companionJpgPath, fileSize: null, status: 'READY', generatedAt: new Date(),
+      })
+    } else {
+      await registerStoredFile({
+        entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
+        storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
+      })
+    }
   }
 }
 

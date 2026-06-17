@@ -193,29 +193,49 @@ export async function GET(request: NextRequest) {
 
     const recentCompletionCutoff = new Date(Date.now() - 30 * 60 * 1000)
 
-    const completedProcessingVideos = await prisma.video.findMany({
-      where: {
-        status: 'READY',
-        processingPhase: null,
-        processingProgress: 100,
-        updatedAt: { gte: recentCompletionCutoff },
-        project: {
-          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-          ...(isSystemAdmin
-            ? {}
-            : { assignedUsers: { some: { userId: authResult.id } } }),
+    // -----------------------------------------------------------------------
+    // Run remaining queries in parallel.  Each promise has its own .catch()
+    // so one failing builder doesn't break the whole response.
+    // -----------------------------------------------------------------------
+    const [
+      completedProcessingVideos,
+      erroredProcessingVideos,
+      albumZipJobs,
+      albumThumbnailJobs,
+      folderRenameJobs,
+      videoAssetPreviewJobs,
+      albumSocialJobs,
+    ] = await Promise.all([
+      prisma.video.findMany({
+        where: {
+          status: 'READY', processingPhase: null, processingProgress: 100,
+          updatedAt: { gte: recentCompletionCutoff },
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
+          },
         },
-      },
-      select: {
-        id: true,
-        name: true,
-        versionLabel: true,
-        projectId: true,
-        updatedAt: true,
-        project: { select: { title: true } },
-      },
-      orderBy: { updatedAt: 'desc' },
-    })
+        select: { id: true, name: true, versionLabel: true, projectId: true, updatedAt: true, project: { select: { title: true } } },
+        orderBy: { updatedAt: 'desc' },
+      }).catch((err) => { console.error('[running-jobs] completed-processing query failed:', err); return [] }),
+      prisma.video.findMany({
+        where: {
+          status: 'ERROR',
+          updatedAt: { gte: recentCompletionCutoff },
+          project: {
+            status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+            ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
+          },
+        },
+        select: { id: true, name: true, versionLabel: true, projectId: true, updatedAt: true, project: { select: { title: true } } },
+        orderBy: { updatedAt: 'desc' },
+      }).catch((err) => { console.error('[running-jobs] errored-processing query failed:', err); return [] }),
+      buildAlbumZipJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-zip builder failed:', err); return { active: [], completed: [] } }),
+      buildAlbumThumbnailJobs().catch((err) => { console.error('[running-jobs] album-thumbnail builder failed:', err); return { active: [], completed: [] } }),
+      buildFolderRenameJobs().catch((err) => { console.error('[running-jobs] folder-rename builder failed:', err); return { active: [], completed: [] } }),
+      buildVideoAssetPreviewJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] video-asset-preview builder failed:', err); return { active: [], completed: [] } }),
+      buildAlbumSocialJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-social builder failed:', err); return { active: [], completed: [] } }),
+    ])
 
     const completedProcessingJobs = completedProcessingVideos.map((video) => ({
       id: video.id,
@@ -226,39 +246,6 @@ export async function GET(request: NextRequest) {
       completedAt: video.updatedAt.getTime(),
     }))
 
-    // -----------------------------------------------------------------------
-    // Album ZIP generation jobs (queried from BullMQ)
-    // -----------------------------------------------------------------------
-    const albumZipJobs = await buildAlbumZipJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => {
-      console.error('[running-jobs] album-zip builder failed:', err)
-      return { active: [], completed: [] }
-    })
-
-    // -----------------------------------------------------------------------
-    // Errored video processing jobs (persist until resolved/deleted)
-    // -----------------------------------------------------------------------
-    const erroredProcessingVideos = await prisma.video.findMany({
-      where: {
-        status: 'ERROR',
-        updatedAt: { gte: recentCompletionCutoff },
-        project: {
-          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-          ...(isSystemAdmin
-            ? {}
-            : { assignedUsers: { some: { userId: authResult.id } } }),
-        },
-      },
-      select: {
-        id: true,
-        name: true,
-        versionLabel: true,
-        projectId: true,
-        updatedAt: true,
-        project: { select: { title: true } },
-      },
-      orderBy: { updatedAt: 'desc' },
-    })
-
     const erroredProcessingJobs = erroredProcessingVideos.map((video) => ({
       id: video.id,
       type: 'processing' as const,
@@ -268,32 +255,6 @@ export async function GET(request: NextRequest) {
       completedAt: video.updatedAt.getTime(),
       error: true,
     }))
-
-    // Build each job category independently so one failure doesn't kill the entire response.
-    const albumThumbnailJobs = await buildAlbumThumbnailJobs().catch((err) => {
-      console.error('[running-jobs] album-thumbnail builder failed:', err)
-      return { active: [], completed: [] }
-    })
-    const folderRenameJobs = await buildFolderRenameJobs().catch((err) => {
-      console.error('[running-jobs] folder-rename builder failed:', err)
-      return { active: [], completed: [] }
-    })
-    const videoAssetPreviewJobs = await buildVideoAssetPreviewJobs({
-      isSystemAdmin,
-      userId: authResult.id,
-      allowedStatuses,
-    }).catch((err) => {
-      console.error('[running-jobs] video-asset-preview builder failed:', err)
-      return { active: [], completed: [] }
-    })
-    const albumSocialJobs = await buildAlbumSocialJobs({
-      isSystemAdmin,
-      userId: authResult.id,
-      allowedStatuses,
-    }).catch((err) => {
-      console.error('[running-jobs] album-social builder failed:', err)
-      return { active: [], completed: [] }
-    })
 
     return NextResponse.json({
       jobs,

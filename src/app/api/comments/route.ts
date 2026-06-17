@@ -8,6 +8,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { batchResolveFileSizes } from '@/lib/stored-file'
 import { getSafeguardLimits } from '@/lib/settings'
+import { checkBodySize } from '@/lib/api-guard'
 import {
 
   validateCommentPermissions,
@@ -212,6 +213,10 @@ export async function POST(request: NextRequest) {
   if (rateLimitResult) {
     return rateLimitResult
   }
+
+  // Reject oversized request bodies before JSON parsing
+  const bodySizeErr = checkBodySize(request)
+  if (bodySizeErr) return bodySizeErr
 
   try {
     const body = await request.json()

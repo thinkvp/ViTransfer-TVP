@@ -44,8 +44,8 @@ export async function finalizeAlbumPhotoUpload(photoId: string): Promise<{ ok: t
     },
   })
 
-  // Register derived paths in StoredFile
-  await Promise.all([
+  // Register derived paths in StoredFile (independent — don't let one failure block the other)
+  const results = await Promise.allSettled([
     registerStoredFile({
       entityType: 'ALBUM_PHOTO', entityId: photoId, fileRole: 'SOCIAL',
       storagePath: socialStoragePath, status: 'PENDING',
@@ -55,6 +55,11 @@ export async function finalizeAlbumPhotoUpload(photoId: string): Promise<{ ok: t
       storagePath: thumbnailStoragePath, status: 'PENDING',
     }),
   ])
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('[ALBUM PHOTO FINALIZE] Failed to register derived path in StoredFile:', result.reason)
+    }
+  }
 
   await prisma.album.update({
     where: { id: photo.albumId },

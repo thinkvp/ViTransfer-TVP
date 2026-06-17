@@ -104,11 +104,14 @@ export default function ClientActivityEye() {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [activities, setActivities] = useState<ClientActivityRow[]>([])
+  const pollInFlightRef = useRef(false)
 
   useEffect(() => {
     let active = true
 
     async function poll() {
+      if (pollInFlightRef.current) return
+      pollInFlightRef.current = true
       try {
         const res = await apiFetch('/api/client-activity')
         if (!res.ok) return
@@ -120,6 +123,7 @@ export default function ClientActivityEye() {
           setActivities([])
         }
       } finally {
+        pollInFlightRef.current = false
         if (active) {
           setLoading(false)
         }

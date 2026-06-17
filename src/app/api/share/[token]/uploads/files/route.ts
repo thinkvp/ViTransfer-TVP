@@ -111,6 +111,7 @@ export async function POST(
     projectStoragePath,
     folderRelativePath: normalizedFolderPath,
   })
+  // eslint-disable-next-line no-restricted-syntax -- appending filename to DB-resolved folder path
   const storagePath = path.posix.join(folderStoragePath, storageFileName)
 
   const buffer = Buffer.from(await file.arrayBuffer())

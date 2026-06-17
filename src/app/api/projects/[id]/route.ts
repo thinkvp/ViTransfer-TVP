@@ -18,6 +18,7 @@ import {
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 import { cancelProjectJobs, cancelProjectPreviewResolutionJobs } from '@/lib/cancel-project-jobs'
+import { asNumberBigInt } from '@/lib/utils'
 import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
@@ -30,19 +31,6 @@ export const runtime = 'nodejs'
 
 const VALID_PREVIEW_RESOLUTIONS = ['480p', '720p', '1080p'] as const
 type PreviewResolution = typeof VALID_PREVIEW_RESOLUTIONS[number]
-
-function asNumberBigInt(v: unknown): number {
-  if (typeof v === 'bigint') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  return 0
-}
 
 function parsePreviewResolutions(raw: string | null | undefined): PreviewResolution[] {
   if (!raw) return ['720p']

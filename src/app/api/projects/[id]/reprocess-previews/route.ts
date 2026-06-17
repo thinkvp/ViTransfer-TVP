@@ -85,9 +85,9 @@ export async function POST(
 
     const [videos, uploadFiles, videoAssets, albumPhotos] = await Promise.all([
       prisma.video.findMany({ where: videoWhere, select: { id: true, status: true } }),
-      prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true, fileType: true, fileName: true, mediaDurationSeconds: true } }),
+      isScoped ? Promise.resolve([] as any[]) : prisma.shareUploadFile.findMany({ where: { projectId }, select: { id: true, fileType: true, fileName: true, mediaDurationSeconds: true } }),
       prisma.videoAsset.findMany({ where: videoAssetWhere, select: { id: true, videoId: true, fileType: true, fileName: true } }),
-      prisma.albumPhoto.findMany({ where: { album: { projectId }, status: 'READY' }, select: { id: true, albumId: true } }),
+      isScoped ? Promise.resolve([] as any[]) : prisma.albumPhoto.findMany({ where: { album: { projectId }, status: 'READY' }, select: { id: true, albumId: true } }),
     ])
 
     const videoIds = videos.map(v => v.id)
@@ -119,10 +119,11 @@ export async function POST(
     if (videoAssetIds.length) roleGroups.push({ entityType: 'VIDEO_ASSET', entityIds: videoAssetIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
     if (albumPhotoIds.length) roleGroups.push({ entityType: 'ALBUM_PHOTO', entityIds: albumPhotoIds, fileRoles: ['SOCIAL', 'THUMBNAIL'] })
 
-    // Fetch paths to delete — one query per entity type group
+    // Fetch paths to delete — one query per entity type group.
+    // Include entityType so we can trace failures back to the owning entity.
     const storedResults = await Promise.all(roleGroups.map(g =>
       g.entityIds.length > 0
-        ? getStoredFileRecords(g.entityType as any, g.entityIds, { fileRoles: g.fileRoles, select: { storagePath: true, fileRole: true, entityId: true } })
+        ? getStoredFileRecords(g.entityType as any, g.entityIds, { fileRoles: g.fileRoles, select: { storagePath: true, fileRole: true, entityId: true, entityType: true } })
         : []
     ))
     const storedFilesToDelete = storedResults.flat()
@@ -133,15 +134,53 @@ export async function POST(
     const spriteDirs = storedFilesToDelete.filter(f => f.fileRole === 'TIMELINE_SPRITES')
     spriteDirs.forEach(f => directoryPathsToDelete.add(f.storagePath))
 
-    await Promise.allSettled([
-      ...[...filePathsToDelete].map(p => deleteFile(p).catch(() => {})),
-      ...[...directoryPathsToDelete].map(p => deleteDirectory(p).catch(() => {})),
-    ])
+    // Build a map from storagePath → { entityType, entityId } so we can
+    // skip StoredFile deletion for any entity whose file deletion failed.
+    const pathToEntity = new Map<string, { entityType: string; entityId: string }>()
+    for (const sf of storedFilesToDelete) {
+      const et = (sf as any).entityType as string | undefined
+      if (et) pathToEntity.set(sf.storagePath, { entityType: et, entityId: sf.entityId })
+    }
 
-    // Delete StoredFile records
+    // Delete files from storage — track failures so we don't orphan StoredFile records
+    const failedPaths = new Set<string>()
+    const filePathArray = [...filePathsToDelete]
+    const fileResults = await Promise.allSettled(
+      filePathArray.map(p => deleteFile(p))
+    )
+    for (let i = 0; i < fileResults.length; i++) {
+      const result = fileResults[i]
+      if (result.status === 'rejected') {
+        failedPaths.add(filePathArray[i])
+        console.warn(`[reprocess-previews] Failed to delete file, keeping StoredFile record: ${filePathArray[i]} — ${result.reason}`)
+      }
+    }
+    const dirPathArray = [...directoryPathsToDelete]
+    const dirResults = await Promise.allSettled(
+      dirPathArray.map(p => deleteDirectory(p))
+    )
+    for (let i = 0; i < dirResults.length; i++) {
+      const result = dirResults[i]
+      if (result.status === 'rejected') {
+        failedPaths.add(dirPathArray[i])
+        console.warn(`[reprocess-previews] Failed to delete directory, keeping StoredFile records: ${dirPathArray[i]} — ${result.reason}`)
+      }
+    }
+
+    // Collect (entityType, entityId) pairs whose file/dir deletions failed
+    const failedEntityKeys = new Set<string>()
+    for (const fp of failedPaths) {
+      const ent = pathToEntity.get(fp)
+      if (ent) failedEntityKeys.add(`${ent.entityType}:${ent.entityId}`)
+    }
+
+    // Delete StoredFile records — skip entities with failed file deletions
+    // so the record survives and can be retried on next reprocess.
     for (const group of roleGroups) {
-      if (group.entityIds.length) {
-        await deleteStoredFilesByCriteria({ entityType: group.entityType as any, entityIds: group.entityIds, fileRoles: group.fileRoles })
+      if (!group.entityIds.length) continue
+      const survivingIds = group.entityIds.filter(id => !failedEntityKeys.has(`${group.entityType}:${id}`))
+      if (survivingIds.length) {
+        await deleteStoredFilesByCriteria({ entityType: group.entityType as any, entityIds: survivingIds, fileRoles: group.fileRoles })
       }
     }
 

@@ -2,9 +2,8 @@
  * Centralized DOMPurify hook configuration
  *
  * Single source of truth for all global DOMPurify hooks.
- * Prevents duplicate hook registrations across modules (validation.ts,
- * html-sanitization.ts, email-html-sanitization.ts) which could cause
- * conflicting or redundant behavior.
+ * DOMPurify.addHook() is idempotent — calling it multiple times with the
+ * same hook name is safe and only registers once per instance.
  *
  * SECURITY: DOMPurify hooks are global per instance. This module must be
  * imported before any sanitization call to ensure hooks are registered.
@@ -13,10 +12,9 @@
 
 import DOMPurify from 'isomorphic-dompurify'
 
-let hooksRegistered = false
-
 /**
- * Ensure the shared DOMPurify hooks are registered exactly once.
+ * Ensure the shared DOMPurify hooks are registered.
+ * Safe to call multiple times — DOMPurify deduplicates by hook name.
  *
  * Hook policy:
  * - External HTTP/HTTPS links (<a>): enforce target="_blank" and
@@ -25,9 +23,6 @@ let hooksRegistered = false
  * - Malformed target="_blank" on non-external links: add noopener noreferrer
  */
 export function ensureDomPurifyHooksRegistered(): void {
-  if (hooksRegistered) return
-  hooksRegistered = true
-
   DOMPurify.addHook('afterSanitizeAttributes', (node: any) => {
     if (!node?.tagName) return
 

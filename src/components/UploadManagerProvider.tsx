@@ -710,10 +710,18 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   const [dropdownOpen, setDropdownOpen] = useState(false)
 
+  // Prevent overlapping poll requests — if the endpoint is slow a new
+  // interval tick could fire before the previous request completes,
+  // stacking concurrent requests and pushing us toward rate limits.
+  const pollInFlightRef = useRef(false)
+
   useEffect(() => {
     let active = true
 
     async function poll() {
+      if (pollInFlightRef.current) return // skip when a request is already in-flight
+      pollInFlightRef.current = true
+
       try {
         const res = await apiFetch('/api/running-jobs')
         if (res.ok && active) {
@@ -1025,6 +1033,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
         if (active) {
           setPollError(err?.message || 'Failed to fetch running jobs')
         }
+      } finally {
+        pollInFlightRef.current = false
       }
     }
 

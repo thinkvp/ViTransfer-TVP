@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
-import { getUserPermissions, requireActionAccess } from '@/lib/rbac-api'
+import { requireActionAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
+import { resolveVisibleProjectWhere } from '@/lib/project-visibility'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -23,23 +24,17 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   try {
-    const permissions = getUserPermissions(authResult)
-    const allowedStatuses = permissions.projectVisibility.statuses
+    const { where, statuses } = resolveVisibleProjectWhere(authResult)
 
-    if (!Array.isArray(allowedStatuses) || allowedStatuses.length === 0) {
+    if (!where || statuses.length === 0) {
       const response = NextResponse.json({ projects: [] })
       response.headers.set('Cache-Control', 'no-store')
       response.headers.set('Pragma', 'no-cache')
       return response
     }
 
-    const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
-
     const projects = await prisma.project.findMany({
-      where: {
-        status: { in: allowedStatuses as any },
-        ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
-      },
+      where,
       select: {
         id: true,
         slug: true,

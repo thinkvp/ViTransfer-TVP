@@ -88,47 +88,15 @@ export function validateMimeType(mimeType: string): boolean {
 }
 
 
+import { sanitizeFileName } from '@/lib/storage-sanitize'
+
 /**
- * Sanitize filename to prevent path traversal and other attacks
+ * Sanitize filename to prevent path traversal and other attacks.
+ *
+ * @deprecated Import sanitizeFileName from @/lib/storage-sanitize instead.
+ * Kept for backward compatibility.
  */
-export function sanitizeFilename(filename: string): string {
-  if (!filename || typeof filename !== 'string') {
-    return 'upload.bin'
-  }
-  
-  // Remove any path components (/, \, :)
-  let safe = filename.split(/[/\\:]+/).pop() || 'upload'
-  
-  // Remove null bytes
-  safe = safe.replace(/\x00/g, '')
-  
-  // Remove control characters
-  safe = safe.replace(/[\x00-\x1F\x7F]/g, '')
-  
-  // Remove leading/trailing dots and spaces (iterative to avoid ReDoS)
-  while (safe.length > 0 && (safe[0] === '.' || safe[0] === ' ')) safe = safe.slice(1)
-  while (safe.length > 0 && (safe[safe.length - 1] === '.' || safe[safe.length - 1] === ' ')) safe = safe.slice(0, -1)
-  
-  // Prevent directory traversal
-  safe = safe.replace(/\.\./g, '')
-  
-  // Limit length while preserving extension
-  if (safe.length > 255) {
-    const ext = safe.slice(safe.lastIndexOf('.'))
-    const name = safe.slice(0, 255 - ext.length)
-    safe = name + ext
-  }
-  
-  // Ensure not empty and not just dots
-  if (!safe || safe === '.' || safe === '..') {
-    safe = 'upload.bin'
-  }
-  
-  // Additional safety: only allow alphanumeric, space, dash, underscore, dot, ampersand
-  safe = safe.replace(/[^a-zA-Z0-9 ._&-]/g, '_')
-  
-  return safe
-}
+export const sanitizeFilename = sanitizeFileName
 
 /**
  * Check if filename is suspicious

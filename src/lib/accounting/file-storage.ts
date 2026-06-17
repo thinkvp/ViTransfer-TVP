@@ -57,22 +57,20 @@ export async function getFyStartMonth(): Promise<number> {
   return settings?.fiscalYearStartMonth ?? 7
 }
 
+import { sanitizeFilePathSegment } from '@/lib/storage-sanitize'
+
 /* ------------------------------------------------------------------ */
 /*  Account path helpers                                               */
 /* ------------------------------------------------------------------ */
 
 /**
- * Sanitise a single folder segment — keep it filesystem-safe while preserving
- * readability (spaces, ampersands, etc. are fine).
+ * Sanitise a single folder segment for accounting paths.
+ * Wraps the shared sanitizeFilePathSegment with accounting-specific
+ * adjustments: 100-char limit and 'Uncategorised' fallback.
  */
 function sanitiseFolderName(name: string): string {
-  return name
-    .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') // illegal chars on Windows/POSIX
-    .replace(/\.+$/, '')                      // trailing dots (Windows)
-    .replace(/\s+/g, ' ')                     // collapse whitespace
-    .slice(0, 100)                            // reasonable limit
-    || 'Uncategorised'
+  const segment = sanitizeFilePathSegment(name)
+  return segment.slice(0, 100) || 'Uncategorised'
 }
 
 /**

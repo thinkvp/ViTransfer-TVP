@@ -7,6 +7,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { isS3Mode } from '@/lib/s3-storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoOriginalStoragePath } from '@/lib/project-storage-paths'
+import { checkBodySize } from '@/lib/api-guard'
 import { registerStoredFile } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
@@ -37,6 +38,10 @@ export async function POST(request: NextRequest) {
     message: 'Too many video uploads. Please try again later.'
   }, 'upload-video')
   if (rateLimitResult) return rateLimitResult
+
+  // Reject oversized request bodies before JSON parsing
+  const bodySizeErr = checkBodySize(request)
+  if (bodySizeErr) return bodySizeErr
 
   try {
     const body = await request.json()

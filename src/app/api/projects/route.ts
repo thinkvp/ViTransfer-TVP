@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { generateUniqueSlug } from '@/lib/utils'
+import { generateUniqueSlug, asNumberBigInt } from '@/lib/utils'
 import { requireApiAuth } from '@/lib/auth'
 import { encrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
@@ -14,25 +14,10 @@ import { sendPushNotification } from '@/lib/push-notifications'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
 
-
-
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
 
-function asNumberBigInt(v: unknown): number {
-  if (typeof v === 'bigint') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  return 0
-}
-
-// GET /api/projects - List all projects
+// GET /api/projects - List all projects (supports optional cursor-based pagination)
 export async function GET(request: NextRequest) {
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
@@ -52,6 +37,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const url = new URL(request.url)
     const isS3Provider = (process.env.STORAGE_PROVIDER || 'local').toLowerCase() === 's3'
     const permissions = getUserPermissions(authResult)
     const allowedStatuses = permissions.projectVisibility.statuses
@@ -64,12 +50,23 @@ export async function GET(request: NextRequest) {
       return response
     }
 
+    // ── Optional cursor-based pagination ──────────────────────────────
+    // Clients that pass ?limit=N get paginated results with a nextCursor.
+    // Clients that omit `limit` get the full list (backward-compatible).
+    const rawLimit = url.searchParams.get('limit')
+    const cursor = url.searchParams.get('cursor') || undefined
+    const take = rawLimit ? Math.min(Number(rawLimit) || 50, 200) : undefined
+
+    const baseWhere = {
+      status: { in: allowedStatuses as any },
+      ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
+    }
+
     // Optimized query: only fetch essential fields + minimal video data for list view
     const projects = await prisma.project.findMany({
-      where: {
-        status: { in: allowedStatuses as any },
-        ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
-      },
+      where: baseWhere,
+      ...(take ? { take: take + 1 } : {}),
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       select: {
         id: true,
         title: true,
@@ -138,6 +135,17 @@ export async function GET(request: NextRequest) {
       },
     })
 
+    // ── Pagination: detect hasMore and strip the extra fetch ──────────
+    let hasMore = false
+    let nextCursor: string | null = null
+    if (take && projects.length > take) {
+      hasMore = true
+      projects.pop()
+    }
+    if (hasMore && projects.length > 0) {
+      nextCursor = projects[projects.length - 1]!.id
+    }
+
     const projectIds = projects.map((p) => p.id)
     const photoCountByProjectId = new Map<string, number>()
 
@@ -181,7 +189,10 @@ export async function GET(request: NextRequest) {
           .filter((u: any) => u?.id) || [],
     }))
 
-    const response = NextResponse.json({ projects: projectsWithPhotoCounts })
+    const response = NextResponse.json({
+      projects: projectsWithPhotoCounts,
+      ...(take ? { hasMore, nextCursor } : {}),
+    })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response

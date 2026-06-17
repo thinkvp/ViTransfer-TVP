@@ -102,10 +102,17 @@ export async function GET(
       orderBy: { createdAt: 'desc' },
     })
 
-    // Resolve file sizes from StoredFile
+        // Resolve file sizes from StoredFile
     const assetIds = assets.map(a => a.id)
     const storedSizes = assetIds.length > 0 ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true } }) : []
     const sizeByAssetId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
+
+    // Resolve current thumbnail path from StoredFile
+    const thumbnailRecord = await prisma.storedFile.findUnique({
+      where: { entityType_entityId_fileRole: { entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL' } },
+      select: { storagePath: true },
+    })
+    const currentThumbnailPath = thumbnailRecord?.storagePath ?? null
 
     // Convert to serializable format
     const serializedAssets = assets.map(asset => ({
@@ -116,7 +123,7 @@ export async function GET(
 
     return NextResponse.json({
       assets: serializedAssets,
-      currentThumbnailPath: null // From StoredFile if needed
+      currentThumbnailPath,
     })
   } catch (error) {
     console.error('Error fetching video assets:', error)

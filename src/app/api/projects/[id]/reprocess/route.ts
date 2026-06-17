@@ -192,13 +192,21 @@ export async function POST(
         }
       }
 
-      await Promise.allSettled([
+      // Delete files — track failures so we don't orphan StoredFile records
+      let anyDeleteFailed = false
+      const results = await Promise.allSettled([
         ...filePaths.map(fp => deleteFile(fp)),
         ...dirPaths.map(dp => deleteDirectory(dp)),
       ])
+      for (const r of results) {
+        if (r.status === 'rejected') {
+          anyDeleteFailed = true
+          console.warn(`[reprocess] Failed to delete file/dir for video ${video.id}: ${r.reason}`)
+        }
+      }
 
-      // Delete StoredFile records
-      if (rolesToDelete.length > 0) {
+      // Only delete StoredFile records if all file deletions succeeded
+      if (!anyDeleteFailed && rolesToDelete.length > 0) {
         await deleteStoredFilesByCriteria({
           entityType: 'VIDEO',
           entityIds: [video.id],
@@ -292,6 +300,8 @@ export async function POST(
     const assetDirPathsToDelete: string[] = []
     const assetRolesToDelete: FileRole[] = ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES']
 
+    // Build a map from path → assetId for failure tracking
+    const pathToAssetId = new Map<string, string>()
     for (const asset of previewableAssets) {
       const stored = storedByAsset.get(asset.id)
       if (!stored) continue
@@ -301,22 +311,41 @@ export async function POST(
       const timelineVtt = stored.get('TIMELINE_VTT')
       const timelineSprites = stored.get('TIMELINE_SPRITES')
 
-      if (previewImage) assetFilePathsToDelete.push(previewImage)
-      if (previewMp4) assetFilePathsToDelete.push(previewMp4)
-      if (timelineVtt) assetFilePathsToDelete.push(timelineVtt)
-      if (timelineSprites) assetDirPathsToDelete.push(timelineSprites)
+      if (previewImage) { assetFilePathsToDelete.push(previewImage); pathToAssetId.set(previewImage, asset.id) }
+      if (previewMp4) { assetFilePathsToDelete.push(previewMp4); pathToAssetId.set(previewMp4, asset.id) }
+      if (timelineVtt) { assetFilePathsToDelete.push(timelineVtt); pathToAssetId.set(timelineVtt, asset.id) }
+      if (timelineSprites) { assetDirPathsToDelete.push(timelineSprites); pathToAssetId.set(timelineSprites, asset.id) }
     }
 
-    await Promise.allSettled([
-      ...assetFilePathsToDelete.map((fp) => deleteFile(fp)),
-      ...assetDirPathsToDelete.map((dp) => deleteDirectory(dp)),
-    ])
+    // Delete files — track which assets had failures
+    const failedAssetIds = new Set<string>()
+    const fileResults = await Promise.allSettled(
+      assetFilePathsToDelete.map((fp) => deleteFile(fp))
+    )
+    for (let i = 0; i < fileResults.length; i++) {
+      if (fileResults[i].status === 'rejected') {
+        const aid = pathToAssetId.get(assetFilePathsToDelete[i])
+        if (aid) failedAssetIds.add(aid)
+        console.warn(`[reprocess] Failed to delete asset file: ${assetFilePathsToDelete[i]} — ${(fileResults[i] as any).reason}`)
+      }
+    }
+    const dirResults = await Promise.allSettled(
+      assetDirPathsToDelete.map((dp) => deleteDirectory(dp))
+    )
+    for (let i = 0; i < dirResults.length; i++) {
+      if (dirResults[i].status === 'rejected') {
+        const aid = pathToAssetId.get(assetDirPathsToDelete[i])
+        if (aid) failedAssetIds.add(aid)
+        console.warn(`[reprocess] Failed to delete asset directory: ${assetDirPathsToDelete[i]} — ${(dirResults[i] as any).reason}`)
+      }
+    }
 
-    // Delete StoredFile records for all reprocessed assets
-    if (assetIds.length > 0) {
+    // Only delete StoredFile records for assets whose files were all deleted
+    const survivingAssetIds = assetIds.filter(id => !failedAssetIds.has(id))
+    if (survivingAssetIds.length > 0) {
       await deleteStoredFilesByCriteria({
         entityType: 'VIDEO_ASSET',
-        entityIds: assetIds,
+        entityIds: survivingAssetIds,
         fileRoles: assetRolesToDelete,
       })
     }

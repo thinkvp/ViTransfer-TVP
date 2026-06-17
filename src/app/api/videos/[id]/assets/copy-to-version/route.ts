@@ -316,12 +316,20 @@ export async function POST(
         entityType: 'VIDEO_ASSET', entityId: newAsset.id, fileRole: 'ORIGINAL',
         storagePath: newStoragePath, fileName: asset.fileName, fileSize: originalStored.size ?? BigInt(0),
       })
-      if (newPreviewPath) {
+            if (newPreviewPath) {
         const previewRole = normalizedType.startsWith('video/') ? 'PREVIEW_MP4' as const : 'PREVIEW_IMAGE' as const
         await registerStoredFile({
           entityType: 'VIDEO_ASSET', entityId: newAsset.id, fileRole: previewRole,
           storagePath: newPreviewPath, fileName: asset.fileName, fileSize: newPreviewFileSize ?? BigInt(0),
         })
+        // Also register the companion JPG thumbnail for video assets
+        if (previewRole === 'PREVIEW_MP4') {
+          const companionJpgPath = newPreviewPath.replace(/\.mp4$/i, '.jpg')
+          await registerStoredFile({
+            entityType: 'VIDEO_ASSET', entityId: newAsset.id, fileRole: 'PREVIEW_IMAGE',
+            storagePath: companionJpgPath, fileName: null, fileSize: null,
+          })
+        }
       }
 
       copiedAssets.push(newAsset)

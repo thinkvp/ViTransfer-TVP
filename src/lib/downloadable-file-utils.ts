@@ -8,6 +8,22 @@ export type DownloadableFileKind =
   | 'document'
   | 'other'
 
+// ── Single source of truth for extension → kind mapping ──
+const EXT_IMAGE   = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif']
+const EXT_VIDEO   = ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'mxf']
+const EXT_AUDIO   = ['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a']
+const EXT_ARCHIVE = ['zip', 'rar', '7z', 'tar', 'gz']
+const EXT_DOC     = ['pdf', 'txt', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx']
+
+function extKind(ext: string): DownloadableFileKind | null {
+  if (EXT_IMAGE.includes(ext))   return 'image'
+  if (EXT_VIDEO.includes(ext))   return 'video'
+  if (EXT_AUDIO.includes(ext))   return 'audio'
+  if (EXT_ARCHIVE.includes(ext)) return 'archive'
+  if (EXT_DOC.includes(ext))     return 'document'
+  return null
+}
+
 export function getDownloadableFileKey(file: DownloadableFile): string {
   if (file.uploadFileId) return file.uploadFileId
   if (file.photoId) return file.photoId
@@ -23,7 +39,7 @@ export function getFileExtension(fileName: string): string {
 
 export function isImageFileName(fileName: string): boolean {
   const ext = getFileExtension(fileName)
-  return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif'].includes(ext)
+  return EXT_IMAGE.includes(ext)
 }
 
 export function getDownloadableFileKind(file: DownloadableFile): DownloadableFileKind {
@@ -32,12 +48,5 @@ export function getDownloadableFileKind(file: DownloadableFile): DownloadableFil
   if (file.type === 'album-zip') return 'archive'
 
   const ext = getFileExtension(file.fileName)
-
-  if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif'].includes(ext)) return 'image'
-  if (['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'mxf'].includes(ext)) return 'video'
-  if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'm4a'].includes(ext)) return 'audio'
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return 'archive'
-  if (['pdf', 'txt', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx'].includes(ext)) return 'document'
-
-  return 'other'
+  return extKind(ext) ?? 'other'
 }

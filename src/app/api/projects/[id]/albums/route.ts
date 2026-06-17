@@ -5,23 +5,11 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { allocateUniqueStorageName } from '@/lib/project-storage-paths'
 import { getStoredFileRecords } from '@/lib/stored-file'
+import { asNumberBigInt } from '@/lib/utils'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-function asNumberBigInt(v: unknown): number {
-  if (typeof v === 'bigint') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
-  if (typeof v === 'string') {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  return 0
-}
 
 const createAlbumSchema = z.object({
   name: z.string().min(1).max(200),

@@ -7,18 +7,6 @@ import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
-// Legacy project-path redirect support:
-// Storage paths in DB are often under projects/{projectId}/...
-// Physical storage lives under projects/YYYY-MM/{projectId}/...
-// We resolve legacy paths via a central redirect index file under projects/.
-export const PROJECT_REDIRECTS_INDEX_FILENAME = '.vitransfer_projects_redirects.json'
-
-type ProjectRedirectIndex = Record<string, string>
-
-let redirectIndexCache: ProjectRedirectIndex | null = null
-let redirectIndexCacheMtimeMs: number | null = null
-const projectLayoutEnsureCache = new Map<string, Promise<void>>()
-
 /**
  * Validate and sanitize file paths to prevent path traversal attacks
  * Defense-in-depth validation against multiple attack vectors
@@ -28,23 +16,11 @@ const projectLayoutEnsureCache = new Map<string, Promise<void>>()
  * @throws Error if path traversal is detected
  */
 function validatePath(filePath: string): string {
-  const { fullPath, posixNormalized } = validatePathBase(filePath)
-
-  // Project redirect support:
-  // If the requested path is under projects/{projectId}/... and it doesn't exist,
-  // resolve via the central redirect index.
-  const redirected = resolveRedirectedProjectPath(posixNormalized, fullPath)
-  if (redirected) return redirected
-
-    return fullPath
+  return validatePathBase(filePath).fullPath
 }
 
 function validatePathForWrite(filePath: string): string {
-  const { fullPath, posixNormalized } = validatePathBase(filePath)
-  const redirected = resolveRedirectedProjectPath(posixNormalized, fullPath, { forWrite: true })
-  if (redirected) return redirected
-
-  return fullPath
+  return validatePathBase(filePath).fullPath
 }
 
 function validatePathBase(filePath: string): { fullPath: string; posixNormalized: string } {
@@ -102,321 +78,6 @@ function validatePathBase(filePath: string): { fullPath: string; posixNormalized
   return { fullPath, posixNormalized }
 }
 
-function isLegacyProjectPath(posixNormalized: string): { projectId: string; remainder: string } | null {
-  // Legacy logical path form: projects/{projectId}/... or projects/{projectId}
-  // (New physical layout may be projects/YYYY-MM/{projectId}/...)
-  const parts = posixNormalized.split('/').filter(Boolean)
-  if (parts.length < 2) return null
-  if (parts[0] !== 'projects') return null
-  // Do not treat YYYY-MM folders as project ids.
-  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(parts[1])) return null
-  const projectId = parts[1]
-  const remainder = parts.slice(2).join('/')
-  return { projectId, remainder }
-}
-
-function getRedirectIndexAbs(): string {
-  return path.join(STORAGE_ROOT, 'projects', PROJECT_REDIRECTS_INDEX_FILENAME)
-}
-
-function validateRedirectTargetPosix(raw: string): string | null {
-  let decoded = String(raw || '').trim()
-  if (!decoded) return null
-
-  try {
-    decoded = decodeURIComponent(decoded)
-    decoded = decodeURIComponent(decoded)
-  } catch {
-    // keep raw
-  }
-
-  decoded = decoded.replace(/\\/g, '/')
-  if (decoded.startsWith('/') || decoded.startsWith('\\')) return null
-  if (/^[a-zA-Z]:/.test(decoded) || decoded.includes(':')) return null
-
-  const normalized = path.posix.normalize(decoded)
-  if (
-    normalized === '.' ||
-    normalized === '..' ||
-    normalized.startsWith('../') ||
-    normalized.includes('/../')
-  ) {
-    return null
-  }
-
-  return normalized
-}
-
-function readProjectRedirectTargetFromIndexPosix(projectId: string): string | null {
-  try {
-    const indexAbs = getRedirectIndexAbs()
-    if (!fs.existsSync(indexAbs)) {
-      if (redirectIndexCache == null || redirectIndexCacheMtimeMs !== -1) {
-        redirectIndexCache = {}
-        redirectIndexCacheMtimeMs = -1
-      }
-      return null
-    }
-
-    const st = fs.statSync(indexAbs)
-    if (!st.isFile()) return null
-
-    if (redirectIndexCache && redirectIndexCacheMtimeMs === st.mtimeMs) {
-      const target = redirectIndexCache[projectId]
-      return target ? validateRedirectTargetPosix(target) : null
-    }
-
-    const raw = fs.readFileSync(indexAbs, 'utf8')
-    const parsed = JSON.parse(raw || '{}') as unknown
-    const map: ProjectRedirectIndex =
-      parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as ProjectRedirectIndex)
-        : {}
-
-    redirectIndexCache = map
-    redirectIndexCacheMtimeMs = st.mtimeMs
-
-    const target = map[projectId]
-    return target ? validateRedirectTargetPosix(target) : null
-  } catch {
-    return null
-  }
-}
-
-async function writeRedirectIndex(nextIndex: ProjectRedirectIndex): Promise<void> {
-  const indexAbs = getRedirectIndexAbs()
-  const dirAbs = path.dirname(indexAbs)
-  await fs.promises.mkdir(dirAbs, { recursive: true })
-
-  const tmpAbs = `${indexAbs}.tmp-${process.pid}-${Date.now()}`
-  await fs.promises.writeFile(tmpAbs, JSON.stringify(nextIndex, null, 2), 'utf8')
-
-  try {
-    await fs.promises.rename(tmpAbs, indexAbs)
-  } catch (e: any) {
-    // Windows can't rename over existing; retry by removing then renaming.
-    const code = String(e?.code || '')
-    if (code === 'EEXIST' || code === 'EPERM') {
-      await fs.promises.rm(indexAbs, { force: true })
-      await fs.promises.rename(tmpAbs, indexAbs)
-    } else {
-      try {
-        await fs.promises.rm(tmpAbs, { force: true })
-      } catch {
-        // ignore
-      }
-      throw e
-    }
-  }
-
-  // Refresh cache (avoid a re-read per validatePath call).
-  try {
-    const st = await fs.promises.stat(indexAbs)
-    redirectIndexCache = nextIndex
-    redirectIndexCacheMtimeMs = st.mtimeMs
-  } catch {
-    redirectIndexCache = nextIndex
-    redirectIndexCacheMtimeMs = null
-  }
-}
-
-export async function setProjectRedirect(
-  projectId: string,
-  targetRel: string,
-  opts?: { dryRun?: boolean }
-): Promise<boolean> {
-  const pid = String(projectId || '').trim()
-  if (!pid) return false
-
-  const normalized = validateRedirectTargetPosix(targetRel)
-  if (!normalized) return false
-
-  // Keep the mapping tightly scoped to the YYYY-MM physical layout.
-  const expectedPrefix = `projects/`
-  if (!normalized.startsWith(expectedPrefix)) return false
-  if (!normalized.endsWith(`/${pid}`) && normalized !== `projects/${pid}`) {
-    // The physical layout should end with /{projectId}; be strict.
-    return false
-  }
-
-  const dryRun = opts?.dryRun === true
-
-  // Ensure cache is at least initialized.
-  readProjectRedirectTargetFromIndexPosix(pid)
-  const live = redirectIndexCache ?? {}
-
-  if (live[pid] === normalized) return false
-
-  const next: ProjectRedirectIndex = { ...live, [pid]: normalized }
-  if (!dryRun) {
-    await writeRedirectIndex(next)
-  }
-
-  return true
-}
-
-export async function removeProjectRedirect(
-  projectId: string,
-  opts?: { dryRun?: boolean }
-): Promise<boolean> {
-  const pid = String(projectId || '').trim()
-  if (!pid) return false
-
-  const dryRun = opts?.dryRun === true
-
-  readProjectRedirectTargetFromIndexPosix(pid)
-  const live = redirectIndexCache ?? {}
-  if (!Object.prototype.hasOwnProperty.call(live, pid)) return false
-
-  const next: ProjectRedirectIndex = { ...live }
-  delete next[pid]
-  if (!dryRun) {
-    await writeRedirectIndex(next)
-  }
-  return true
-}
-
-function isValidYearMonth(v: string): boolean {
-  return /^\d{4}-(0[1-9]|1[0-2])$/.test(v)
-}
-
-function toYearMonthUTC(dateLike: Date): string {
-  const yyyy = dateLike.getUTCFullYear()
-  const mm = String(dateLike.getUTCMonth() + 1).padStart(2, '0')
-  return `${yyyy}-${mm}`
-}
-
-function findYearMonthProjectPathPosix(projectId: string): string | null {
-  try {
-    const projectsRootAbs = path.join(STORAGE_ROOT, 'projects')
-    if (!fs.existsSync(projectsRootAbs)) return null
-
-    const matches = fs.readdirSync(projectsRootAbs, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && isValidYearMonth(entry.name))
-      .map((entry) => entry.name)
-      .filter((ym) => {
-        const candidateAbs = path.join(projectsRootAbs, ym, projectId)
-        return fs.existsSync(candidateAbs) && fs.statSync(candidateAbs).isDirectory()
-      })
-      .sort()
-
-    if (matches.length === 0) return null
-    return `projects/${matches[0]}/${projectId}`
-  } catch {
-    return null
-  }
-}
-
-export async function ensureProjectStorageLayout(
-  projectId: string,
-  opts?: { createdAt?: Date | string | null }
-): Promise<void> {
-  const pid = String(projectId || '').trim()
-  if (!pid || pid === 'closed' || pid.startsWith('.')) return
-
-  const cached = projectLayoutEnsureCache.get(pid)
-  if (cached) {
-    await cached
-    return
-  }
-
-  const pending = (async () => {
-        const existingTarget =
-      readProjectRedirectTargetFromIndexPosix(pid) ||
-      findYearMonthProjectPathPosix(pid)
-
-    if (existingTarget) {
-      await fs.promises.mkdir(path.join(STORAGE_ROOT, existingTarget), { recursive: true })
-      await setProjectRedirect(pid, existingTarget).catch(() => {})
-      return
-    }
-
-    try {
-      let createdAt: Date | null = null
-      if (opts?.createdAt) {
-        const candidate = opts.createdAt instanceof Date ? opts.createdAt : new Date(opts.createdAt)
-        if (!Number.isNaN(candidate.getTime())) {
-          createdAt = candidate
-        }
-      }
-
-      if (!createdAt) {
-        const { prisma } = await import('@/lib/db')
-        const project = await prisma.project.findUnique({
-          where: { id: pid },
-          select: { createdAt: true },
-        })
-        createdAt = project?.createdAt ?? null
-      }
-
-      if (!createdAt) return
-
-      const targetRel = `projects/${toYearMonthUTC(createdAt)}/${pid}`
-      await fs.promises.mkdir(path.join(STORAGE_ROOT, targetRel), { recursive: true })
-      await setProjectRedirect(pid, targetRel).catch(() => {})
-    } catch {
-      // Best-effort bootstrap only. Legacy paths continue to work if this fails.
-    }
-  })()
-
-  projectLayoutEnsureCache.set(pid, pending)
-  try {
-    await pending
-  } finally {
-    if (projectLayoutEnsureCache.get(pid) === pending) {
-      projectLayoutEnsureCache.delete(pid)
-    }
-  }
-}
-
-async function ensureProjectStorageLayoutForPath(filePath: string): Promise<void> {
-  const { posixNormalized } = validatePathBase(filePath)
-  const info = isLegacyProjectPath(posixNormalized)
-  if (!info) return
-
-  await ensureProjectStorageLayout(info.projectId)
-}
-
-function resolveRedirectedProjectPath(
-  posixNormalized: string,
-  baseFullPath: string,
-  opts?: { forWrite?: boolean }
-): string | null {
-  const info = isLegacyProjectPath(posixNormalized)
-  if (!info) return null
-
-    // Prefer the central redirect index.
-  const targetPosix =
-    readProjectRedirectTargetFromIndexPosix(info.projectId) ||
-    findYearMonthProjectPathPosix(info.projectId)
-  if (!targetPosix) return null
-
-  const redirectedPosix = info.remainder ? path.posix.join(targetPosix, info.remainder) : targetPosix
-
-  const redirectedAbs = path.join(STORAGE_ROOT, redirectedPosix)
-  const realRedirected = path.resolve(redirectedAbs)
-  const realRoot = path.resolve(STORAGE_ROOT)
-  if (!realRedirected.startsWith(realRoot + path.sep) && realRedirected !== realRoot) {
-    return null
-  }
-
-  if (opts?.forWrite) {
-    return redirectedAbs
-  }
-
-  // Prefer the canonical YYYY-MM target when it already contains the requested file.
-  if (redirectedAbs !== baseFullPath && fs.existsSync(redirectedAbs)) {
-    return redirectedAbs
-  }
-
-  // For legacy projects that have not been migrated yet, keep reading the legacy-root child
-  // if that is the only copy that exists.
-  const isProjectRoot = posixNormalized === `projects/${info.projectId}`
-  if (!isProjectRoot && fs.existsSync(baseFullPath)) return null
-
-  return redirectedAbs
-}
-
 export async function initStorage() {
   if (isS3Mode()) {
     console.log('[STORAGE] S3 mode active — using Cloudflare R2 for file storage.')
@@ -437,7 +98,6 @@ export async function uploadFile(
     return
   }
 
-  await ensureProjectStorageLayoutForPath(filePath)
   const fullPath = validatePathForWrite(filePath)
   const dir = path.dirname(fullPath)
 
@@ -499,7 +159,6 @@ export async function moveUploadedFile(
     return
   }
 
-  await ensureProjectStorageLayoutForPath(destLogicalPath)
   const destFullPath = validatePathForWrite(destLogicalPath)
   const destDir = path.dirname(destFullPath)
 
@@ -551,15 +210,9 @@ export async function deleteFile(filePath: string): Promise<void> {
     return
   }
 
-  const base = validatePathBase(filePath)
-  const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })
-  const candidates = redirected && redirected !== base.fullPath
-    ? [redirected, base.fullPath]
-    : [validatePath(filePath)]
+  const fullPath = validatePath(filePath)
 
-  for (const fullPath of candidates) {
-    if (!fs.existsSync(fullPath)) continue
-
+  if (fs.existsSync(fullPath)) {
     const stats = await fs.promises.stat(fullPath)
     if (stats.isFile()) {
       await fs.promises.unlink(fullPath)
@@ -573,18 +226,10 @@ export async function deleteDirectory(dirPath: string): Promise<void> {
     return
   }
 
-  const base = validatePathBase(dirPath)
-  const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath)
-  const fullPath = redirected || base.fullPath
+  const fullPath = validatePath(dirPath)
 
   if (fs.existsSync(fullPath)) {
     await fs.promises.rm(fullPath, { recursive: true, force: true })
-  }
-
-  // If the caller targeted the legacy stub folder, also remove it.
-  const legacyInfo = isLegacyProjectPath(base.posixNormalized)
-  if (legacyInfo && redirected && base.fullPath !== fullPath && fs.existsSync(base.fullPath)) {
-    await fs.promises.rm(base.fullPath, { recursive: true, force: true })
   }
 }
 
@@ -650,19 +295,8 @@ export async function pruneEmptyParentDirectories(dirPath: string, stopAt?: stri
 
   while (current && current !== '.' && current !== stopAtNormalized) {
     const base = validatePathBase(current)
-    const redirected = resolveRedirectedProjectPath(base.posixNormalized, base.fullPath, { forWrite: true })
-    const candidates = redirected && redirected !== base.fullPath
-      ? [redirected, base.fullPath]
-      : [base.fullPath]
 
-    let removedAny = false
-    for (const fullPath of candidates) {
-      if (await removeDirectoryIfEmpty(fullPath)) {
-        removedAny = true
-      }
-    }
-
-    if (!removedAny) {
+    if (!await removeDirectoryIfEmpty(base.fullPath)) {
       break
     }
 
@@ -750,8 +384,8 @@ export function getFilePath(filePath: string): string {
   return validatePath(filePath)
 }
 
-// Returns the absolute path inside STORAGE_ROOT without applying project-archive redirects.
-// Intended for internal server maintenance tasks (moves/redirect stub management).
+// Returns the absolute path inside STORAGE_ROOT without validation redirects.
+// Intended for internal server maintenance tasks (moves, path manipulation).
 export function getRawStoragePath(filePath: string): string {
   return validatePathBase(filePath).fullPath
 }

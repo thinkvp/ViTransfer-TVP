@@ -59,8 +59,6 @@ const ALBUM_ZIP_SOCIAL_RE = /albums\/(?:[^/]+\/)?([^/]+)\/zips\/(.+) Social Size
 /** Files to skip entirely */
 const SKIP_PATTERNS = [
   /\.vitransfer_folder$/,
-  /\.vitransfer_project_redirect$/,
-  /\.vitransfer_projects_redirects\.json$/,
   /\/\.tus-tmp\//,
 ]
 

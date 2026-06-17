@@ -168,6 +168,9 @@ export function useAssetUploadQueue({
         let s3UploadId: string | null = null
         let s3Key: string | null = null
 
+                let parts: Array<{ partNumber: number; url: string }> = []
+        let partSize = 0
+
         try {
           // Step 1: Presign
           const presignRes = await apiFetch('/api/upload-s3/presign', {
@@ -184,12 +187,57 @@ export function useAssetUploadQueue({
 
           if (!presignRes.ok) {
             const errBody = await presignRes.json().catch(() => ({ error: 'Presign failed' }))
-            throw new Error(errBody.error ?? 'Presign failed')
+            // If presign fails with a 404 and we were trying to resume an existing
+            // asset record (e.g. the asset was deleted server-side but localStorage
+            // still has the stale assetId), clear the stale metadata, create a fresh
+            // asset record, and retry the upload.
+            if (presignRes.status === 404 && canResumeExisting) {
+              clearUploadMetadata(upload.file)
+              clearTUSFingerprint(upload.file)
+              const retryResponse = await apiPost(`/api/videos/${videoId}/assets`, {
+                fileName: upload.file.name,
+                fileSize: upload.file.size,
+                category: upload.category || null,
+              })
+              assetId = retryResponse.assetId
+              assetIdsMap.current.set(uploadId, assetId)
+              createdAssetRecord = true
+              storeUploadMetadata(upload.file, {
+                videoId,
+                assetId,
+                category: upload.category,
+              })
+              // Retry presign with the fresh assetId
+              const retryPresignRes = await apiFetch('/api/upload-s3/presign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  assetId,
+                  fileSize: upload.file.size,
+                  fileName: upload.file.name,
+                  contentType: upload.file.type || 'application/octet-stream',
+                }),
+                signal,
+              })
+              if (!retryPresignRes.ok) {
+                const retryErrBody = await retryPresignRes.json().catch(() => ({ error: 'Presign failed' }))
+                throw new Error(retryErrBody.error ?? 'Presign failed')
+              }
+              const presignData = await retryPresignRes.json()
+              s3UploadId = presignData.uploadId
+              s3Key = presignData.key
+              parts = presignData.parts
+              partSize = presignData.partSize
+            } else {
+              throw new Error(errBody.error ?? 'Presign failed')
+            }
+          } else {
+            const presignData = await presignRes.json()
+            s3UploadId = presignData.uploadId
+            s3Key = presignData.key
+            parts = presignData.parts
+            partSize = presignData.partSize
           }
-
-          const { uploadId: uid, key: k, parts, partSize } = await presignRes.json()
-          s3UploadId = uid
-          s3Key = k
 
           if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
 

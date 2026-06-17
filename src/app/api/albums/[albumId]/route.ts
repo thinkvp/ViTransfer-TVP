@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { deleteDirectory, deleteFile, moveDirectory, moveFile } from '@/lib/storage'
-import { renameStoredPaths, getStoredFileRecords, countStoredFilesByPath, deleteStoredFilesByCriteria, getStoredFileAggregate } from '@/lib/stored-file'
+import { renameStoredPaths, updateStoredFilePath, getStoredFileRecords, countStoredFilesByPath, deleteStoredFilesByCriteria, getStoredFileAggregate } from '@/lib/stored-file'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -173,7 +173,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       await moveDirectory(albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
       await moveDirectory(albumRenamePlan.oldAlbumPreviewsRoot, albumRenamePlan.newAlbumPreviewsRoot)
 
-      // Rename the zip files inside the (now-moved) zips/ subdirectory.
+            // Rename the zip files inside the (now-moved) zips/ subdirectory.
       // The zip filename encodes the album display name, so a folder move alone is not enough.
       const projectStoragePath = album.project.storagePath
         || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
@@ -185,6 +185,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
             console.warn(`[album-rename] Failed to rename ${variant} zip (non-fatal):`, err)
           })
         }
+        // Update StoredFile to reflect the new filename (old name → new name embedded in path).
+        const fileRole = variant === 'social' ? 'ZIP_SOCIAL' as const : 'ZIP_FULL' as const
+        await updateStoredFilePath('ALBUM', albumId, fileRole, newZipPath).catch((err) => {
+          console.warn(`[album-rename] Failed to update StoredFile for ${variant} zip (non-fatal):`, err)
+        })
       }
     }
   }

@@ -7,6 +7,7 @@ import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { normalizeHexDisplayColor } from '@/lib/display-color'
 import { logSecurityEvent } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
+import { checkBodySize } from '@/lib/api-guard'
 export const runtime = 'nodejs'
 
 
@@ -60,21 +61,29 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    const lastLoginByUserIdEntries = await Promise.all(
-      users.map(async (user) => {
-        const lastLogin = await prisma.securityEvent.findFirst({
-          where: {
-            type: { in: ['ADMIN_PASSWORD_LOGIN_SUCCESS', 'PASSKEY_LOGIN_SUCCESS'] },
-            details: { path: ['userId'], equals: user.id },
-          },
-          orderBy: { createdAt: 'desc' },
-          select: { createdAt: true },
-        })
-        return [user.id, lastLogin?.createdAt ?? null] as const
-      })
-    )
+    // Resolve last-login timestamps with a single grouped query instead of
+    // N+1 findFirst calls per user. Uses DISTINCT ON for per-user latest row.
+    const userIds = users.map((u) => u.id)
+    let lastLoginByUserId: Record<string, Date | null> = {}
 
-    const lastLoginByUserId = Object.fromEntries(lastLoginByUserIdEntries)
+    if (userIds.length > 0) {
+      const rows = await prisma.$queryRawUnsafe<Array<{ userId: string; createdAt: Date }>>(
+        `SELECT DISTINCT ON ("details"->>'userId')
+           "details"->>'userId' as "userId",
+           "createdAt"
+         FROM "SecurityEvent"
+         WHERE "type" IN ('ADMIN_PASSWORD_LOGIN_SUCCESS', 'PASSKEY_LOGIN_SUCCESS')
+           AND "details"->>'userId' IN (${userIds.map((_, i) => `$${i + 1}`).join(',')})
+         ORDER BY "details"->>'userId', "createdAt" DESC`,
+        ...userIds,
+      )
+
+      for (const row of rows) {
+        if (row.userId && !lastLoginByUserId[row.userId]) {
+          lastLoginByUserId[row.userId] = row.createdAt
+        }
+      }
+    }
 
     const usersWithLastLogin = users.map((user) => ({
       ...user,
@@ -103,6 +112,10 @@ export async function POST(request: NextRequest) {
 
   const forbiddenAction = requireActionAccess(authResult, 'manageUsers')
   if (forbiddenAction) return forbiddenAction
+
+  // Reject oversized request bodies before JSON parsing
+  const bodySizeErr = checkBodySize(request)
+  if (bodySizeErr) return bodySizeErr
 
   // Rate limiting: 10 user creation requests per minute
   const rateLimitResult = await rateLimit(request, {

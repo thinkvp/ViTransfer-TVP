@@ -3,10 +3,10 @@ import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest, requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { getFilePath, deleteFile, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getFilePath, deleteFile, deleteDirectory, sanitizeFilenameForHeader } from '@/lib/storage'
 // Video routes verify project access separately; getStoredFilePathForProject requires projectId plumbing.
 // eslint-disable-next-line no-restricted-imports
-import { deleteStoredFilesForEntity, getStoredFilePath, countStoredFilesByPath, registerStoredFile } from '@/lib/stored-file'
+import { deleteStoredFilesForEntity, getStoredFilePath, countStoredFilesByPath, registerStoredFile, getStoredFileRecords } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
@@ -263,13 +263,46 @@ export async function DELETE(
       })
     }
 
+                                    // Fetch all stored file records for this asset so we can delete physical files
+    const storedRecords = await getStoredFileRecords('VIDEO_ASSET', [assetId], {
+      fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
+      select: { fileRole: true, storagePath: true },
+    })
+
+    // Delete physical preview/timeline files from storage.
+    // Attempt all deletions in parallel, logging any failures.
+    // The storage integrity scan will clean up orphaned files on its next non-dry-run pass.
+    const deleteResults = await Promise.allSettled(
+      storedRecords.map(async (record) => {
+        if (!record.storagePath) return
+        if (record.fileRole === 'TIMELINE_SPRITES') {
+          await deleteDirectory(record.storagePath)
+        } else {
+          await deleteFile(record.storagePath)
+        }
+      })
+    )
+    let hasFailures = false
+    for (let i = 0; i < deleteResults.length; i++) {
+      const result = deleteResults[i]
+      if (result.status === 'rejected') {
+        hasFailures = true
+        const path = storedRecords[i]?.storagePath || 'unknown'
+        console.warn(`[DELETE ASSET] Failed to delete file for asset ${assetId}: ${path} — ${result.reason}`)
+      }
+    }
+
     // Delete database record
     await prisma.videoAsset.delete({
       where: { id: assetId },
     })
 
-    // Clean up StoredFile rows for this asset
-    await deleteStoredFilesForEntity('VIDEO_ASSET', assetId).catch(() => {})
+        // Clean up StoredFile rows for this asset
+    try {
+      await deleteStoredFilesForEntity('VIDEO_ASSET', assetId)
+    } catch (err) {
+      console.warn(`[DELETE ASSET] Failed to delete StoredFile records for asset ${assetId}: ${err}`)
+    }
 
     // Update the stored project data total
     await recalculateAndStoreProjectTotalBytes(asset.video.projectId)

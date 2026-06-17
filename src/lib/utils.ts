@@ -351,6 +351,23 @@ export function getClientIpAddress(request: NextRequest): string {
 }
 
 /**
+ * Safely coerce a BigInt / number / string value to a finite number.
+ * Returns 0 for any unrepresentable or non-finite input.
+ */
+export function asNumberBigInt(v: unknown): number {
+  if (typeof v === 'bigint') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
+
+/**
  * Generate a consistent vibrant border color for a user based on their name
  * Returns border color class for left border on message bubbles
  * @param name - User's name for color generation

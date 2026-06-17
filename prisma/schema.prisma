@@ -297,7 +297,7 @@ model Project {
   // Note: Approval emails are always IMMEDIATE regardless of this setting
   clientNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
   clientNotificationTime     String? // "09:00" for daily
-  clientNotificationDay      Int? // unused, kept for migration safety
+  clientNotificationDay      Int? // Day-of-week index (1=Mon…7=Sun) for daily client notification schedule
   lastClientNotificationSent DateTime?
 
   createdBy   User   @relation(fields: [createdById], references: [id])
@@ -999,7 +999,7 @@ model Settings {
   // Default client notification settings for newly created projects
   defaultClientNotificationSchedule String  @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
   defaultClientNotificationTime     String? // "09:00" for daily
-  defaultClientNotificationDay      Int?    // unused, kept for consistency
+  defaultClientNotificationDay      Int?    // Day-of-week index (1=Mon…7=Sun) for daily notification default
 
   // Per-type client email toggles (global defaults, all enabled by default)
   clientEmailProjectApproved Boolean @default(true) // Client notified when entire project is approved

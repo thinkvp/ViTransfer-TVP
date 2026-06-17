@@ -156,6 +156,15 @@ async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string,
       newThumbnailFileSize = BigInt(outStats.size)
     }
 
+    // Register in StoredFile registry BEFORE marking the photo as READY,
+    // so a transient DB failure doesn't leave the file on S3 with no
+    // StoredFile record (which would cause the storage integrity scan to
+    // falsely report it as "missing").
+    await registerStoredFile({
+      entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'THUMBNAIL',
+      storagePath: thumbnailStoragePath, fileSize: newThumbnailFileSize, status: 'READY', generatedAt: new Date(),
+    })
+
     await prisma.albumPhoto.update({
       where: { id: photo.id },
       data: {
@@ -164,12 +173,6 @@ async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string,
         thumbnailGeneratedAt: new Date(),
       },
     })
-
-    // Register in StoredFile registry
-    registerStoredFile({
-      entityType: 'ALBUM_PHOTO', entityId: photo.id, fileRole: 'THUMBNAIL',
-      storagePath: thumbnailStoragePath, fileSize: newThumbnailFileSize, status: 'READY', generatedAt: new Date(),
-    }).catch((err) => console.error(`[WORKER] StoredFile thumbnail register failed for photo ${photo.id}:`, err))
 
     const delta = newThumbnailFileSize - prevThumbFileSize
     if (delta !== BigInt(0)) {
