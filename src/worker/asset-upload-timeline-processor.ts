@@ -6,7 +6,7 @@ import { generateTimelineSprite, getVideoMetadata } from '@/lib/ffmpeg'
 import { moveUploadedFile } from '@/lib/storage'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import { buildAssetTimelineStorageRoot, buildUploadTimelineStorageRoot } from '@/lib/project-storage-paths'
-import { getStoredFilePath } from '@/lib/stored-file'
+import { getStoredFilePath, registerStoredFile } from '@/lib/stored-file'
 import type { AssetTimelineJob, UploadTimelineJob } from '@/lib/queue'
 
 const DEBUG = process.env.DEBUG_FFMPEG === 'true'
@@ -166,18 +166,10 @@ export async function processAssetTimeline(job: { data: AssetTimelineJob }): Pro
     })
 
     if (result?.ready) {
-      // Register timeline paths in StoredFile
+      // Register timeline paths via the registry helper so projectId is populated.
       await Promise.all([
-        prisma.storedFile.upsert({
-          where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_VTT' } },
-          create: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_VTT', storagePath: result.vttPath, status: 'READY' },
-          update: { storagePath: result.vttPath, status: 'READY' },
-        }),
-        prisma.storedFile.upsert({
-          where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_SPRITES' } },
-          create: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_SPRITES', storagePath: result.spritesPath, status: 'READY' },
-          update: { storagePath: result.spritesPath, status: 'READY' },
-        }),
+        registerStoredFile({ entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_VTT', storagePath: result.vttPath, status: 'READY' }),
+        registerStoredFile({ entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'TIMELINE_SPRITES', storagePath: result.spritesPath, status: 'READY' }),
         prisma.videoAsset.update({ where: { id: assetId }, data: {
           timelinePreviewsReady: true,
           processingPhase: null, processingProgress: 100,
@@ -253,18 +245,10 @@ export async function processUploadTimeline(job: { data: UploadTimelineJob }): P
     })
 
     if (result?.ready) {
-      // Register timeline paths in StoredFile (legacy columns dropped)
+      // Register timeline paths via the registry helper so projectId is populated.
       await Promise.all([
-        prisma.storedFile.upsert({
-          where: { entityType_entityId_fileRole: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_VTT' } },
-          create: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_VTT', storagePath: result.vttPath, status: 'READY' },
-          update: { storagePath: result.vttPath, status: 'READY' },
-        }),
-        prisma.storedFile.upsert({
-          where: { entityType_entityId_fileRole: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_SPRITES' } },
-          create: { entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_SPRITES', storagePath: result.spritesPath, status: 'READY' },
-          update: { storagePath: result.spritesPath, status: 'READY' },
-        }),
+        registerStoredFile({ entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_VTT', storagePath: result.vttPath, status: 'READY' }),
+        registerStoredFile({ entityType: 'SHARE_UPLOAD_FILE', entityId: uploadFileId, fileRole: 'TIMELINE_SPRITES', storagePath: result.spritesPath, status: 'READY' }),
         prisma.shareUploadFile.update({ where: { id: uploadFileId }, data: {
           timelinePreviewsReady: true,
           processingPhase: null, processingProgress: 100,

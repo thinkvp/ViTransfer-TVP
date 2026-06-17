@@ -7,12 +7,12 @@ import {
   sanitizeStorageName,
 } from '@/lib/project-storage-paths'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { deleteFile, getFilePath, uploadFile } from '@/lib/storage'
+import { deleteFile, deleteDirectory, getFilePath, uploadFile } from '@/lib/storage'
 import { isS3Mode } from '@/lib/s3-storage'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import { getShareUploadPreviewStoragePath } from '@/lib/share-upload-video-thumbnail'
-import { getStoredFilePathForProject, deleteStoredFile, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { getStoredFilePathForProject, getStoredFileRecords, deleteStoredFilesForEntity, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -251,20 +251,30 @@ export async function DELETE(
       return NextResponse.json({ error: 'File not found' }, { status: 404 })
     }
 
-    // Get storage path from StoredFile
-    const fileStoragePath = await getStoredFilePathForProject('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL', access.project.id)
+    // Pull every registered file for this upload (original + preview/timeline derivatives)
+    // so we delete ALL of them, not just the ORIGINAL — otherwise preview/timeline rows
+    // and files were left behind as dangling rows / orphan files.
+    const storedRecords = await getStoredFileRecords('SHARE_UPLOAD_FILE', [file.id], {
+      select: { fileRole: true, storagePath: true },
+    }) as Array<{ fileRole: string; storagePath: string | null }>
 
     const projectStoragePath = resolveProjectStoragePath(access.project)
-    const thumbnailStoragePath = fileStoragePath ? getShareUploadPreviewStoragePath(projectStoragePath, fileStoragePath, file.fileType) : null
+    const originalPath = storedRecords.find(r => r.fileRole === 'ORIGINAL')?.storagePath ?? null
+    // Fallback thumbnail path in case the preview derivative was never registered.
+    const derivedThumb = originalPath ? getShareUploadPreviewStoragePath(projectStoragePath, originalPath, file.fileType) : null
 
-    if (fileStoragePath) {
-      await deleteFile(fileStoragePath).catch(() => undefined)
+    const physicalDeletes: Promise<unknown>[] = []
+    for (const rec of storedRecords) {
+      if (!rec.storagePath) continue
+      physicalDeletes.push(
+        (rec.fileRole === 'TIMELINE_SPRITES' ? deleteDirectory(rec.storagePath) : deleteFile(rec.storagePath)).catch(() => undefined),
+      )
     }
-    if (thumbnailStoragePath) {
-      await deleteFile(thumbnailStoragePath).catch(() => undefined)
-    }
+    if (derivedThumb) physicalDeletes.push(deleteFile(derivedThumb).catch(() => undefined))
+    await Promise.allSettled(physicalDeletes)
+
     await prisma.shareUploadFile.delete({ where: { id: file.id } })
-    await deleteStoredFile('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL').catch(() => {})
+    await deleteStoredFilesForEntity('SHARE_UPLOAD_FILE', file.id).catch(() => {})
     await recalculateAndStoreProjectTotalBytes(access.project.id)
     return NextResponse.json({ success: true })
   }

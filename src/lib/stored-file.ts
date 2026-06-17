@@ -6,10 +6,14 @@
  * ZIPs, branding assets — gets one row in the StoredFile table.
  *
  * This module provides:
- *   - registerStoredFile()   — upsert one file row (called by workers, upload handlers)
- *   - deleteStoredFile()     — remove a file row + optional storage deletion
- *   - backfillStoredFiles()  — runtime backfill from legacy path columns (safe to re-run)
- *   - query helpers          — find files by entity, entityType, fileRole, project, etc.
+ *   - registerStoredFile()        — upsert one file row (called by workers, upload handlers)
+ *   - deleteStoredFile()          — remove a file row + optional storage deletion
+ *   - deleteStoredFilesForProject() — one-shot cleanup of every file row for a project
+ *   - findDanglingStoredFiles()   — rows whose owning entity no longer exists (reconciliation)
+ *   - query helpers               — find files by entity, entityType, fileRole, project, etc.
+ *
+ * Every row carries a denormalized `projectId` (populated automatically from the owning
+ * entity) so project-scoped lifecycle operations don't have to enumerate all 14 entity types.
  */
 
 import { prisma } from './db'
@@ -19,6 +23,16 @@ import type { EntityType, FileRole } from '@prisma/client'
 
 // Re-export for convenience
 export type { EntityType, FileRole }
+
+/**
+ * Canonical map from a preview resolution label to its StoredFile role.
+ * Use this instead of re-declaring the mapping in reprocess / delete-previews routes.
+ */
+export const RESOLUTION_TO_FILE_ROLE: Record<string, FileRole> = {
+  '480p': 'PREVIEW_480',
+  '720p': 'PREVIEW_720',
+  '1080p': 'PREVIEW_1080',
+}
 
 // ---------------------------------------------------------------------------
 // Register / upsert
@@ -34,6 +48,35 @@ export interface RegisterStoredFileParams {
   status?: string | null
   generatedAt?: Date | null
   metadata?: Record<string, unknown> | null
+  /**
+   * Owning project. Leave undefined to have it auto-resolved from the entity via
+   * resolveEntityProjectId() (the common case — callers need not know it). Pass it
+   * explicitly (including `null` for non-project files) to skip the lookup on hot paths.
+   */
+  projectId?: string | null
+}
+
+/**
+ * Build the column data shared by the upsert create/update branches.
+ * `metadata: undefined` is intentional — on update it means "leave unchanged",
+ * on create it means "default to null".
+ */
+function buildStoredFileData(params: RegisterStoredFileParams, projectId: string | null) {
+  return {
+    projectId,
+    storagePath: params.storagePath,
+    fileName: params.fileName ?? null,
+    fileSize: params.fileSize != null ? BigInt(params.fileSize) : null,
+    status: params.status ?? null,
+    generatedAt: params.generatedAt ?? null,
+    metadata: params.metadata ? (params.metadata as any) : undefined,
+  }
+}
+
+/** Resolve projectId for a register call: explicit value wins, otherwise derive from the entity. */
+async function resolveProjectIdForParams(params: RegisterStoredFileParams): Promise<string | null> {
+  if (params.projectId !== undefined) return params.projectId
+  return resolveEntityProjectId(params.entityType, params.entityId)
 }
 
 /**
@@ -45,17 +88,8 @@ export interface RegisterStoredFileParams {
  * Called by workers, upload handlers, and reprocess flows.
  */
 export async function registerStoredFile(params: RegisterStoredFileParams) {
-  const data = {
-    entityType: params.entityType,
-    entityId: params.entityId,
-    fileRole: params.fileRole,
-    storagePath: params.storagePath,
-    fileName: params.fileName ?? null,
-    fileSize: params.fileSize != null ? BigInt(params.fileSize) : null,
-    status: params.status ?? null,
-    generatedAt: params.generatedAt ?? null,
-    metadata: params.metadata ? (params.metadata as any) : undefined,
-  }
+  const projectId = await resolveProjectIdForParams(params)
+  const data = buildStoredFileData(params, projectId)
 
   return prisma.storedFile.upsert({
     where: {
@@ -65,7 +99,12 @@ export async function registerStoredFile(params: RegisterStoredFileParams) {
         fileRole: params.fileRole,
       },
     },
-    create: data,
+    create: {
+      entityType: params.entityType,
+      entityId: params.entityId,
+      fileRole: params.fileRole,
+      ...data,
+    },
     update: data,
   })
 }
@@ -83,9 +122,26 @@ export async function registerStoredFiles(
 ) {
   if (files.length === 0) return []
 
+  // Resolve projectId once per unique entity (a video finalize registers ~6 roles for the
+  // same videoId) so we don't issue a resolveEntityProjectId() query per file.
+  const toResolve = new Map<string, { entityType: EntityType; entityId: string }>()
+  for (const f of files) {
+    if (f.projectId !== undefined) continue
+    toResolve.set(`${f.entityType}:${f.entityId}`, { entityType: f.entityType, entityId: f.entityId })
+  }
+  const resolvedByKey = new Map<string, string | null>()
+  await Promise.all(
+    [...toResolve].map(async ([key, { entityType, entityId }]) => {
+      resolvedByKey.set(key, await resolveEntityProjectId(entityType, entityId))
+    }),
+  )
+  const projectIdFor = (f: RegisterStoredFileParams): string | null =>
+    f.projectId !== undefined ? f.projectId : (resolvedByKey.get(`${f.entityType}:${f.entityId}`) ?? null)
+
   return prisma.$transaction(
-    files.map((f) =>
-      prisma.storedFile.upsert({
+    files.map((f) => {
+      const data = buildStoredFileData(f, projectIdFor(f))
+      return prisma.storedFile.upsert({
         where: {
           entityType_entityId_fileRole: {
             entityType: f.entityType,
@@ -97,23 +153,11 @@ export async function registerStoredFiles(
           entityType: f.entityType,
           entityId: f.entityId,
           fileRole: f.fileRole,
-          storagePath: f.storagePath,
-          fileName: f.fileName ?? null,
-          fileSize: f.fileSize != null ? BigInt(f.fileSize) : null,
-          status: f.status ?? null,
-          generatedAt: f.generatedAt ?? null,
-          metadata: f.metadata ? (f.metadata as any) : undefined,
+          ...data,
         },
-        update: {
-          storagePath: f.storagePath,
-          fileName: f.fileName ?? null,
-          fileSize: f.fileSize != null ? BigInt(f.fileSize) : null,
-          status: f.status ?? null,
-          generatedAt: f.generatedAt ?? null,
-          metadata: f.metadata ? (f.metadata as any) : undefined,
-        },
+        update: data,
       })
-    ),
+    }),
   )
 }
 
@@ -171,6 +215,26 @@ export async function deleteStoredFilesForEntity(
   return prisma.storedFile.deleteMany({
     where: { entityType, entityId },
   })
+}
+
+/**
+ * Delete every StoredFile row belonging to a project, regardless of entity type.
+ *
+ * This is the one-shot replacement for enumerating videos/assets/albums/photos/
+ * comments/files/etc. on project deletion — relies on the denormalized `projectId`
+ * populated at registration time. Does NOT touch storage (project deletion removes
+ * the whole project directory separately).
+ */
+export async function deleteStoredFilesForProject(projectId: string) {
+  const result = await prisma.storedFile.deleteMany({ where: { projectId } })
+  return result.count
+}
+
+/** Delete StoredFile rows by primary key. Used by reconciliation to prune dangling rows. */
+export async function deleteStoredFilesByIds(ids: string[]) {
+  if (ids.length === 0) return 0
+  const result = await prisma.storedFile.deleteMany({ where: { id: { in: ids } } })
+  return result.count
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +434,101 @@ export async function resolveEntityProjectId(
     default:
       return null
   }
+}
+
+// ---------------------------------------------------------------------------
+// Dangling-row reconciliation (rows whose owning entity no longer exists)
+// ---------------------------------------------------------------------------
+
+export interface DanglingStoredFile {
+  id: string
+  entityType: EntityType
+  entityId: string
+  fileRole: FileRole
+  storagePath: string
+}
+
+/**
+ * Return the subset of `ids` that still exist for a given entity type.
+ *
+ * Conservative by design: entity types whose ids can't be verified against a table
+ * (e.g. SETTINGS_BRANDING uses a synthetic 'default' id) return ALL ids, so they are
+ * never mistaken for dangling rows and deleted.
+ */
+async function existingEntityIds(entityType: EntityType, ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set()
+  const where = { id: { in: ids } }
+  const select = { id: true }
+  let rows: Array<{ id: string }>
+  switch (entityType) {
+    case 'VIDEO': rows = await prisma.video.findMany({ where, select }); break
+    case 'VIDEO_ASSET': rows = await prisma.videoAsset.findMany({ where, select }); break
+    case 'SHARE_UPLOAD_FILE': rows = await prisma.shareUploadFile.findMany({ where, select }); break
+    case 'ALBUM_PHOTO': rows = await prisma.albumPhoto.findMany({ where, select }); break
+    case 'ALBUM': rows = await prisma.album.findMany({ where, select }); break
+    case 'PROJECT_FILE': rows = await prisma.projectFile.findMany({ where, select }); break
+    case 'CLIENT_FILE': rows = await prisma.clientFile.findMany({ where, select }); break
+    case 'USER_FILE': rows = await prisma.userFile.findMany({ where, select }); break
+    case 'USER_AVATAR': rows = await prisma.user.findMany({ where, select }); break // entityId = userId
+    case 'PROJECT_EMAIL': rows = await prisma.projectEmail.findMany({ where, select }); break
+    case 'PROJECT_EMAIL_ATTACHMENT': rows = await prisma.projectEmailAttachment.findMany({ where, select }); break
+    case 'COMMENT_FILE': rows = await prisma.commentFile.findMany({ where, select }); break
+    case 'ACCOUNTING_ATTACHMENT': rows = await prisma.accountingAttachment.findMany({ where, select }); break
+    // Synthetic / unverifiable ids — treat all as existing so we never delete them.
+    case 'SETTINGS_BRANDING':
+    default:
+      return new Set(ids)
+  }
+  return new Set(rows.map(r => r.id))
+}
+
+/**
+ * Find StoredFile rows whose owning entity no longer exists ("dangling" rows).
+ *
+ * The third leg of storage reconciliation, alongside orphan files (file on disk, no
+ * row) and missing files (row, no file on disk). Dangling rows accumulate when an
+ * entity is deleted but its StoredFile rows weren't cleaned up. They are otherwise
+ * invisible — they masquerade as "missing files" and inflate storage totals.
+ *
+ * Paginates the table and batches existence checks per entity type.
+ */
+export async function findDanglingStoredFiles(options?: { pageSize?: number }): Promise<DanglingStoredFile[]> {
+  const pageSize = options?.pageSize ?? 5000
+  const dangling: DanglingStoredFile[] = []
+  let cursor: string | undefined
+
+  do {
+    const rows: DanglingStoredFile[] = await prisma.storedFile.findMany({
+      select: { id: true, entityType: true, entityId: true, fileRole: true, storagePath: true },
+      orderBy: { id: 'asc' },
+      take: pageSize + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    })
+    const hasMore = rows.length > pageSize
+    if (hasMore) rows.pop()
+
+    const idsByType = new Map<EntityType, Set<string>>()
+    for (const r of rows) {
+      let set = idsByType.get(r.entityType)
+      if (!set) { set = new Set(); idsByType.set(r.entityType, set) }
+      set.add(r.entityId)
+    }
+
+    const existsByType = new Map<EntityType, Set<string>>()
+    await Promise.all(
+      [...idsByType].map(async ([entityType, ids]) => {
+        existsByType.set(entityType, await existingEntityIds(entityType, [...ids]))
+      }),
+    )
+
+    for (const r of rows) {
+      if (!existsByType.get(r.entityType)?.has(r.entityId)) dangling.push(r)
+    }
+
+    cursor = hasMore ? rows[rows.length - 1]?.id : undefined
+  } while (cursor)
+
+  return dangling
 }
 
 // ---------------------------------------------------------------------------
@@ -578,6 +737,64 @@ export async function countStoredFilesByPath(
 }
 
 /**
+ * Determine which of the given videos have a *custom* thumbnail — i.e. their
+ * VIDEO/THUMBNAIL row points at one of the video's own VideoAsset files (set via
+ * "Set as video thumbnail") rather than at a generated thumbnail.jpg.
+ *
+ * Custom thumbnails are recorded by repointing the VIDEO/THUMBNAIL row at the
+ * asset's stored path — there is NO VIDEO_ASSET/THUMBNAIL row. Any flow that
+ * deletes thumbnails by role MUST consult this first, otherwise it will delete
+ * the asset's original file (which the THUMBNAIL shares) out from under it.
+ *
+ * Batched equivalent of videoHasCustomThumbnail() in the video-processor worker.
+ *
+ * SECURITY: No authorization check — callers must verify video ownership first.
+ */
+export async function getVideosWithCustomThumbnail(videoIds: string[]): Promise<Set<string>> {
+  const result = new Set<string>()
+  if (videoIds.length === 0) return result
+
+  // 1. Resolve each video's current THUMBNAIL path.
+  const thumbRows = await prisma.storedFile.findMany({
+    where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: 'THUMBNAIL' },
+    select: { entityId: true, storagePath: true },
+  })
+  const thumbPathByVideo = new Map<string, string>()
+  for (const r of thumbRows) {
+    if (r.storagePath) thumbPathByVideo.set(r.entityId, r.storagePath)
+  }
+  if (thumbPathByVideo.size === 0) return result
+
+  // 2. Map each of those videos' assets back to their owning video.
+  const assets = await prisma.videoAsset.findMany({
+    where: { videoId: { in: [...thumbPathByVideo.keys()] } },
+    select: { id: true, videoId: true },
+  })
+  if (assets.length === 0) return result
+  const videoByAsset = new Map<string, string>()
+  for (const a of assets) videoByAsset.set(a.id, a.videoId)
+
+  // 3. A video has a custom thumbnail if its THUMBNAIL path equals one of its
+  //    own assets' stored paths.
+  const assetStored = await prisma.storedFile.findMany({
+    where: { entityType: 'VIDEO_ASSET', entityId: { in: [...videoByAsset.keys()] } },
+    select: { entityId: true, storagePath: true },
+  })
+  const assetPathsByVideo = new Map<string, Set<string>>()
+  for (const s of assetStored) {
+    const vid = videoByAsset.get(s.entityId)
+    if (!vid || !s.storagePath) continue
+    let set = assetPathsByVideo.get(vid)
+    if (!set) { set = new Set(); assetPathsByVideo.set(vid, set) }
+    set.add(s.storagePath)
+  }
+  for (const [vid, thumbPath] of thumbPathByVideo) {
+    if (assetPathsByVideo.get(vid)?.has(thumbPath)) result.add(vid)
+  }
+  return result
+}
+
+/**
  * Get StoredFile records for a set of entities, with configurable select.
  * Used by API routes that need file metadata (fileSize, fileName, etc.)
  * for multiple entities at once.
@@ -622,238 +839,3 @@ export async function getStoredFileAggregate(
     _sum: { fileSize: true },
   })
 }
-
-// ---------------------------------------------------------------------------
-// One-shot backfill (safe to re-run — uses ON CONFLICT DO NOTHING)
-// ---------------------------------------------------------------------------
-
-/**
- * Backfill the StoredFile table from all legacy path columns.
- *
- * **DEPRECATED.** All legacy path/size columns have been dropped.
- * The migration `20260608000002_add_stored_file_registry` ran the backfill
- * while columns still existed. This function is now a no-op.
- */
-export async function backfillStoredFiles(): Promise<{ inserted: number }> {
-  console.warn('[stored-file] backfillStoredFiles() is a no-op — legacy columns have been dropped.')
-  return { inserted: 0 }
-}
-
-// ── Dead backfill chunks kept for historical reference only ──────────────
-const _DEAD_BACKFILL_CHUNKS: Array<() => Promise<number>> = [
-    // Video — 7 roles
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'VIDEO'::"EntityType", v."id", 'ORIGINAL'::"FileRole",
-        v."originalStoragePath", v."originalFileName", v."originalFileSize",
-        CASE v."status" WHEN 'READY' THEN 'READY' WHEN 'ERROR' THEN 'ERROR' ELSE 'PENDING' END
-      FROM "Video" v WHERE v."originalStoragePath" IS NOT NULL AND v."originalStoragePath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO'::"EntityType", v."id", 'PREVIEW_480'::"FileRole", v."preview480Path", 'READY'
-      FROM "Video" v WHERE v."preview480Path" IS NOT NULL AND v."preview480Path" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO'::"EntityType", v."id", 'PREVIEW_720'::"FileRole", v."preview720Path", 'READY'
-      FROM "Video" v WHERE v."preview720Path" IS NOT NULL AND v."preview720Path" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO'::"EntityType", v."id", 'PREVIEW_1080'::"FileRole", v."preview1080Path", 'READY'
-      FROM "Video" v WHERE v."preview1080Path" IS NOT NULL AND v."preview1080Path" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO'::"EntityType", v."id", 'THUMBNAIL'::"FileRole", v."thumbnailPath", 'READY'
-      FROM "Video" v WHERE v."thumbnailPath" IS NOT NULL AND v."thumbnailPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO'::"EntityType", v."id", 'TIMELINE_VTT'::"FileRole", v."timelinePreviewVttPath",
-        CASE WHEN v."timelinePreviewsReady" THEN 'READY' ELSE NULL END
-      FROM "Video" v WHERE v."timelinePreviewVttPath" IS NOT NULL AND v."timelinePreviewVttPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO'::"EntityType", v."id", 'TIMELINE_SPRITES'::"FileRole", v."timelinePreviewSpritesPath",
-        CASE WHEN v."timelinePreviewsReady" THEN 'READY' ELSE NULL END
-      FROM "Video" v WHERE v."timelinePreviewSpritesPath" IS NOT NULL AND v."timelinePreviewSpritesPath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // VideoAsset — 4 roles
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'VIDEO_ASSET'::"EntityType", a."id", 'ORIGINAL'::"FileRole",
-        a."storagePath", a."fileName", a."fileSize", 'READY'
-      FROM "VideoAsset" a WHERE a."storagePath" IS NOT NULL AND a."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileSize","status")
-      SELECT 'VIDEO_ASSET'::"EntityType", a."id", 'PREVIEW_IMAGE'::"FileRole",
-        a."previewPath", a."previewFileSize", a."previewStatus"
-      FROM "VideoAsset" a WHERE a."previewPath" IS NOT NULL AND a."previewPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO_ASSET'::"EntityType", a."id", 'TIMELINE_VTT'::"FileRole", a."timelinePreviewVttPath",
-        CASE WHEN a."timelinePreviewsReady" THEN 'READY' ELSE NULL END
-      FROM "VideoAsset" a WHERE a."timelinePreviewVttPath" IS NOT NULL AND a."timelinePreviewVttPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'VIDEO_ASSET'::"EntityType", a."id", 'TIMELINE_SPRITES'::"FileRole", a."timelinePreviewSpritesPath",
-        CASE WHEN a."timelinePreviewsReady" THEN 'READY' ELSE NULL END
-      FROM "VideoAsset" a WHERE a."timelinePreviewSpritesPath" IS NOT NULL AND a."timelinePreviewSpritesPath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // ShareUploadFile — 4 roles
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'SHARE_UPLOAD_FILE'::"EntityType", f."id", 'ORIGINAL'::"FileRole",
-        f."storagePath", f."fileName", f."fileSize", 'READY'
-      FROM "ShareUploadFile" f WHERE f."storagePath" IS NOT NULL AND f."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileSize","status")
-      SELECT 'SHARE_UPLOAD_FILE'::"EntityType", f."id", 'PREVIEW_IMAGE'::"FileRole",
-        f."previewPath", f."previewFileSize", f."previewStatus"
-      FROM "ShareUploadFile" f WHERE f."previewPath" IS NOT NULL AND f."previewPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'SHARE_UPLOAD_FILE'::"EntityType", f."id", 'TIMELINE_VTT'::"FileRole", f."timelinePreviewVttPath",
-        CASE WHEN f."timelinePreviewsReady" THEN 'READY' ELSE NULL END
-      FROM "ShareUploadFile" f WHERE f."timelinePreviewVttPath" IS NOT NULL AND f."timelinePreviewVttPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'SHARE_UPLOAD_FILE'::"EntityType", f."id", 'TIMELINE_SPRITES'::"FileRole", f."timelinePreviewSpritesPath",
-        CASE WHEN f."timelinePreviewsReady" THEN 'READY' ELSE NULL END
-      FROM "ShareUploadFile" f WHERE f."timelinePreviewSpritesPath" IS NOT NULL AND f."timelinePreviewSpritesPath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // AlbumPhoto — 3 roles
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'ALBUM_PHOTO'::"EntityType", p."id", 'ORIGINAL'::"FileRole",
-        p."storagePath", p."fileName", p."fileSize",
-        CASE p."status" WHEN 'READY' THEN 'READY' WHEN 'ERROR' THEN 'ERROR' ELSE 'PENDING' END
-      FROM "AlbumPhoto" p WHERE p."storagePath" IS NOT NULL AND p."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileSize","status")
-      SELECT 'ALBUM_PHOTO'::"EntityType", p."id", 'SOCIAL'::"FileRole",
-        p."socialStoragePath", p."socialFileSize",
-        CASE p."socialStatus" WHEN 'READY' THEN 'READY' WHEN 'ERROR' THEN 'ERROR' WHEN 'PROCESSING' THEN 'PROCESSING' ELSE 'PENDING' END
-      FROM "AlbumPhoto" p WHERE p."socialStoragePath" IS NOT NULL AND p."socialStoragePath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileSize","status")
-      SELECT 'ALBUM_PHOTO'::"EntityType", p."id", 'THUMBNAIL'::"FileRole",
-        p."thumbnailStoragePath", p."thumbnailFileSize",
-        CASE p."thumbnailStatus" WHEN 'READY' THEN 'READY' WHEN 'ERROR' THEN 'ERROR' WHEN 'PROCESSING' THEN 'PROCESSING' ELSE 'PENDING' END
-      FROM "AlbumPhoto" p WHERE p."thumbnailStoragePath" IS NOT NULL AND p."thumbnailStoragePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // Album ZIPs — 2 roles (derived from project storagePath + album name)
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'ALBUM'::"EntityType", a."id", 'ZIP_FULL'::"FileRole",
-        COALESCE(p."storagePath", '') || '/albums/' || COALESCE(a."storageFolderName", a."name") || '/zips/full/' || a."name" || '_Full_Res.zip',
-        a."name" || '_Full_Res.zip', a."fullZipFileSize", 'READY'
-      FROM "Album" a JOIN "Project" p ON p."id" = a."projectId"
-      WHERE a."fullZipFileSize" > 0 AND p."storagePath" IS NOT NULL
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'ALBUM'::"EntityType", a."id", 'ZIP_SOCIAL'::"FileRole",
-        COALESCE(p."storagePath", '') || '/albums/' || COALESCE(a."storageFolderName", a."name") || '/zips/social/' || a."name" || '_Social_Sized.zip',
-        a."name" || '_Social_Sized.zip', a."socialZipFileSize", 'READY'
-      FROM "Album" a JOIN "Project" p ON p."id" = a."projectId"
-      WHERE a."socialZipFileSize" > 0 AND p."storagePath" IS NOT NULL
-      ON CONFLICT DO NOTHING`,
-
-    // ProjectFile
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'PROJECT_FILE'::"EntityType", f."id", 'ORIGINAL'::"FileRole",
-        f."storagePath", f."fileName", f."fileSize", 'READY'
-      FROM "ProjectFile" f WHERE f."storagePath" IS NOT NULL AND f."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // ClientFile
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'CLIENT_FILE'::"EntityType", f."id", 'ORIGINAL'::"FileRole",
-        f."storagePath", f."fileName", f."fileSize", 'READY'
-      FROM "ClientFile" f WHERE f."storagePath" IS NOT NULL AND f."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // UserFile
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'USER_FILE'::"EntityType", f."id", 'ORIGINAL'::"FileRole",
-        f."storagePath", f."fileName", f."fileSize", 'READY'
-      FROM "UserFile" f WHERE f."storagePath" IS NOT NULL AND f."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // ProjectEmail
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'PROJECT_EMAIL'::"EntityType", e."id", 'RAW_EMAIL'::"FileRole",
-        e."rawStoragePath", e."rawFileName", e."rawFileSize", 'READY'
-      FROM "ProjectEmail" e WHERE e."rawStoragePath" IS NOT NULL AND e."rawStoragePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // ProjectEmailAttachment
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'PROJECT_EMAIL_ATTACHMENT'::"EntityType", a."id", 'ORIGINAL'::"FileRole",
-        a."storagePath", a."fileName", a."fileSize", 'READY'
-      FROM "ProjectEmailAttachment" a WHERE a."storagePath" IS NOT NULL AND a."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // CommentFile
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'COMMENT_FILE'::"EntityType", f."id", 'ORIGINAL'::"FileRole",
-        f."storagePath", f."fileName", f."fileSize", 'READY'
-      FROM "CommentFile" f WHERE f."storagePath" IS NOT NULL AND f."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // AccountingAttachment
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","fileName","fileSize","status")
-      SELECT 'ACCOUNTING_ATTACHMENT'::"EntityType", a."id", 'ORIGINAL'::"FileRole",
-        a."storagePath", a."originalName", a."fileSize", 'READY'
-      FROM "AccountingAttachment" a WHERE a."storagePath" IS NOT NULL AND a."storagePath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // User avatar
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'USER_AVATAR'::"EntityType", u."id", 'AVATAR'::"FileRole", u."avatarPath", 'READY'
-      FROM "User" u WHERE u."avatarPath" IS NOT NULL AND u."avatarPath" != ''
-      ON CONFLICT DO NOTHING`,
-
-    // Settings branding — 3 roles
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'SETTINGS_BRANDING'::"EntityType", s."id", 'COMPANY_LOGO'::"FileRole", s."companyLogoPath", 'READY'
-      FROM "Settings" s WHERE s."companyLogoPath" IS NOT NULL AND s."companyLogoPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'SETTINGS_BRANDING'::"EntityType", s."id", 'COMPANY_DARK_LOGO'::"FileRole", s."darkLogoPath", 'READY'
-      FROM "Settings" s WHERE s."darkLogoPath" IS NOT NULL AND s."darkLogoPath" != ''
-      ON CONFLICT DO NOTHING`,
-    () => prisma.$executeRaw`
-      INSERT INTO "StoredFile" ("entityType","entityId","fileRole","storagePath","status")
-      SELECT 'SETTINGS_BRANDING'::"EntityType", s."id", 'COMPANY_FAVICON'::"FileRole", s."companyFaviconPath", 'READY'
-      FROM "Settings" s WHERE s."companyFaviconPath" IS NOT NULL AND s."companyFaviconPath" != ''
-      ON CONFLICT DO NOTHING`,
-  ]
-
-// ── End of dead backfill chunks ──────────────────────────────────────────

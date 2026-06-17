@@ -7,7 +7,7 @@ import { getTransferTuningSettings } from '@/lib/settings'
 import { deleteFile, getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { getStoredFilePathForProject, deleteStoredFile } from '@/lib/stored-file'
+import { getStoredFilePathForProject } from '@/lib/stored-file'
 import fs from 'fs'
 import { createReadStream } from 'fs'
 
@@ -180,7 +180,13 @@ export async function DELETE(
   // Resolve storage path from StoredFile before deleting
   const storagePath = await getStoredFilePathForProject('PROJECT_FILE', file.id, 'ORIGINAL', projectId)
 
-  await prisma.projectFile.delete({ where: { id: fileId } })
+  // Delete the entity and its registry rows atomically so a crash/failure between the
+  // two can't leave a dangling StoredFile row pointing at a deleted project file.
+  await prisma.$transaction([
+    prisma.projectFile.delete({ where: { id: fileId } }),
+    prisma.storedFile.deleteMany({ where: { entityType: 'PROJECT_FILE', entityId: fileId } }),
+  ])
+
   if (storagePath) {
     try {
       await deleteFile(storagePath)
@@ -188,8 +194,6 @@ export async function DELETE(
       // Ignore storage delete errors; DB is source of truth.
     }
   }
-  // Clean up StoredFile record
-  await deleteStoredFile('PROJECT_FILE', fileId, 'ORIGINAL').catch(() => {})
 
   await recalculateAndStoreProjectTotalBytes(projectId)
 

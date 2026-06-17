@@ -5,7 +5,7 @@ import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
-import { getStoredFilePathForProject, deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
+import { getStoredFilePathForProject, deleteStoredFilesByCriteria, getStoredFileRecords, getVideosWithCustomThumbnail } from '@/lib/stored-file'
 import type { FileRole } from '@/lib/stored-file'
 import {
   enqueueShareUploadPreview,
@@ -95,12 +95,12 @@ export async function POST(
     const videoAssetIds = videoAssets.map(a => a.id)
     const albumPhotoIds = albumPhotos.map(p => p.id)
 
-    // Check for custom thumbnails (asset-based) to avoid deleting them
-    let customThumbnailVideoIds: Set<string> = new Set()
-    if (videoIds.length > 0) {
-      const assetThumbnailStored = await getStoredFileRecords('VIDEO_ASSET', videoIds, { fileRoles: ['THUMBNAIL'], select: { entityId: true } })
-      customThumbnailVideoIds = new Set(assetThumbnailStored.map(s => s.entityId))
-    }
+    // Videos whose THUMBNAIL points at one of their own asset files (custom thumbnail).
+    // Their THUMBNAIL must be preserved during reprocess, else we delete the shared
+    // asset original from storage (breaking its preview + lightbox).
+    const customThumbnailVideoIds = videoIds.length > 0
+      ? await getVideosWithCustomThumbnail(videoIds)
+      : new Set<string>()
 
     // Build StoredFile role groups for deletion
     const roleGroups: Array<{ entityType: string; entityIds: string[]; fileRoles: FileRole[] }> = []

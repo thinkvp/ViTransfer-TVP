@@ -28,6 +28,12 @@ type OrphanProjectFileCleanupResult = {
   missingFileSample?: {
     paths: string[]
   }
+  /** StoredFile rows whose owning entity no longer exists */
+  danglingRows?: number
+  danglingRowSample?: {
+    paths: string[]
+  }
+  danglingRowsDeleted?: number
   sample?: {
     orphanPaths: string[]
     projectIds: string[]
@@ -223,11 +229,6 @@ export function DeveloperToolsSection({
   const [pendingOrphanCleanup, setPendingOrphanCleanup] = useState(false)
   const [pendingBacklogPurge, setPendingBacklogPurge] = useState(false)
   const [pendingBullmqPurge, setPendingBullmqPurge] = useState(false)
-  const [pendingStoredFileBackfill, setPendingStoredFileBackfill] = useState(false)
-
-  const [storedFileBackfillLoading, setStoredFileBackfillLoading] = useState(false)
-  const [storedFileBackfillResult, setStoredFileBackfillResult] = useState<{ inserted: number } | null>(null)
-  const [storedFileBackfillError, setStoredFileBackfillError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -383,7 +384,11 @@ export function DeveloperToolsSection({
     const missingLabel = scanFailed
       ? 'Missing-file check skipped — storage listing failed'
       : `${orphanProjectFilesResult.missingFiles} missing file${orphanProjectFilesResult.missingFiles === 1 ? '' : 's'} in DB`
-    return { scannedLabel, orphanLabel, missingLabel, scanFailed }
+    const danglingCount = orphanProjectFilesResult.danglingRows ?? 0
+    const danglingLabel = orphanProjectFilesResult.dryRun
+      ? `${danglingCount} dangling registry row${danglingCount === 1 ? '' : 's'} (entity deleted)`
+      : `${orphanProjectFilesResult.danglingRowsDeleted ?? 0} dangling registry row${(orphanProjectFilesResult.danglingRowsDeleted ?? 0) === 1 ? '' : 's'} removed`
+    return { scannedLabel, orphanLabel, missingLabel, danglingLabel, scanFailed }
   }, [orphanProjectFilesResult])
 
   async function runOrphanProjectFilesCleanup(dryRun: boolean) {
@@ -400,20 +405,6 @@ export function DeveloperToolsSection({
     }
   }
 
-  async function runStoredFileBackfill() {
-    setStoredFileBackfillLoading(true)
-    setStoredFileBackfillError(null)
-    setStoredFileBackfillResult(null)
-
-    try {
-      const res = await apiPost('/api/settings/backfill-stored-files', {})
-      setStoredFileBackfillResult(res as { inserted: number })
-    } catch (e: any) {
-      setStoredFileBackfillError(e?.message || 'Failed to backfill StoredFile registry')
-    } finally {
-      setStoredFileBackfillLoading(false)
-    }
-  }
 
   function formatBacklogEntry(entry: NonNullable<NotificationBacklogResult['staleSample']>[number]) {
     const createdAt = new Date(entry.createdAt).toLocaleString()
@@ -766,6 +757,10 @@ export function DeveloperToolsSection({
                       {orphanProjectFilesSummary.missingLabel}
                       {!orphanProjectFilesSummary.scanFailed && orphanProjectFilesResult?.missingFiles === 0 ? ' — none found ✓' : ''}
                     </p>
+                    <p className="text-xs text-muted-foreground">
+                      {orphanProjectFilesSummary.danglingLabel}
+                      {orphanProjectFilesResult?.dryRun && (orphanProjectFilesResult?.danglingRows ?? 0) === 0 ? ' — none found ✓' : ''}
+                    </p>
                     {orphanProjectFilesResult?.deleted ? (
                       <p className="text-xs text-muted-foreground">
                         Deleted: {orphanProjectFilesResult.deleted.filesDeleted} orphan files
@@ -985,39 +980,6 @@ export function DeveloperToolsSection({
               </div>
             </div>
           </div>
-          <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
-                <Label>Backfill StoredFile registry</Label>
-                <p className="text-xs text-muted-foreground">
-                  Re-runs the StoredFile backfill from legacy path columns. Safe to run
-                  multiple times — uses ON CONFLICT DO NOTHING so only new rows are added.
-                  Run this after deploying to ensure all legacy file paths are registered.
-                </p>
-
-                {storedFileBackfillError ? (
-                  <p className="text-xs text-destructive">{storedFileBackfillError}</p>
-                ) : null}
-
-                {storedFileBackfillResult ? (
-                  <p className="text-xs text-muted-foreground">
-                    Backfill complete. {storedFileBackfillResult.inserted} new rows inserted.
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="flex-shrink-0">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={storedFileBackfillLoading}
-                  onClick={() => setPendingStoredFileBackfill(true)}
-                >
-                  {storedFileBackfillLoading ? 'Running\u2026' : 'Backfill now'}
-                </Button>
-              </div>
-            </div>
-          </div>
         </CardContent>
       )}
       </Card>
@@ -1054,14 +1016,6 @@ export function DeveloperToolsSection({
         description="Purge all stale completed and failed BullMQ jobs from Redis? Active and waiting jobs are not affected."
         confirmLabel="Purge Jobs"
         onConfirm={() => { setPendingBullmqPurge(false); void runBullmqPurge(false) }}
-      />
-      <ConfirmDialog
-        open={pendingStoredFileBackfill}
-        onOpenChange={(v) => { if (!v) setPendingStoredFileBackfill(false) }}
-        title="Backfill StoredFile Registry?"
-        description="Re-run the StoredFile backfill from legacy path columns? Safe to run multiple times — only new rows are inserted."
-        confirmLabel="Backfill"
-        onConfirm={() => { setPendingStoredFileBackfill(false); void runStoredFileBackfill() }}
       />
     </>
   )

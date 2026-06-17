@@ -4,42 +4,10 @@ import { useEffect, useState } from 'react'
 import { Comment } from '@prisma/client'
 import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download } from 'lucide-react'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
-import DOMPurify from 'dompurify'
 import { CommentFileDisplay } from './FileDisplay'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import VoiceNotePlayer from './VoiceNotePlayer'
-
-let domPurifyConfigured = false
-
-function configureDomPurify() {
-  if (domPurifyConfigured) return
-  domPurifyConfigured = true
-
-  DOMPurify.addHook('afterSanitizeAttributes', (node: any) => {
-    if (!node || node.tagName !== 'A') return
-
-    const href = (node.getAttribute?.('href') || '').toString()
-    const target = (node.getAttribute?.('target') || '').toString()
-
-    const isInternal = href.startsWith('/') || href.startsWith('#')
-    const isHttpLink = href.startsWith('http://') || href.startsWith('https://')
-
-    // For external http(s) links, force new tab + safe rel.
-    if (isHttpLink && !isInternal) {
-      node.setAttribute?.('target', '_blank')
-      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-      return
-    }
-
-    // For any other link, only allow target=_blank if rel is safe.
-    if (target === '_blank') {
-      node.setAttribute?.('rel', 'noopener noreferrer nofollow')
-    } else {
-      node.removeAttribute?.('target')
-      node.removeAttribute?.('rel')
-    }
-  })
-}
+import { sanitizeCommentHtml } from '@/lib/sanitize-comment-html'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
@@ -146,22 +114,6 @@ function VoiceNoteAttachment({
       {error ? <p className="text-xs text-destructive">{error}</p> : null}
     </div>
   )
-}
-
-/**
- * Sanitize HTML content for display
- * Defense in depth: Even though content is sanitized on backend,
- * we sanitize again on frontend for extra security
- */
-function sanitizeContent(content: string): string {
-  configureDomPurify()
-  return DOMPurify.sanitize(content, {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'a', 'p', 'br', 'ul', 'ol', 'li'],
-    ALLOWED_ATTR: ['href', 'target', 'rel'],
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):)/i, // Only allow https://, http://, mailto: URLs
-    ALLOW_DATA_ATTR: false,
-    FORCE_BODY: true, // Parse content as body to prevent context-breaking attacks
-  })
 }
 
 export default function MessageBubble({
@@ -303,7 +255,7 @@ export default function MessageBubble({
 
             <span
               className="whitespace-pre-wrap break-words"
-              dangerouslySetInnerHTML={{ __html: sanitizeContent(comment.content) }}
+              dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(comment.content) }}
             />
           </div>
 
@@ -407,7 +359,7 @@ export default function MessageBubble({
 
                         <div
                           className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground"
-                          dangerouslySetInnerHTML={{ __html: sanitizeContent(reply.content) }}
+                          dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(reply.content) }}
                         />
 
                         {/* Reply Attached Files */}

@@ -8,7 +8,7 @@ import {
   getRawStoragePath,
   STORAGE_ROOT,
 } from '@/lib/storage'
-import { getAllStoredPaths } from '@/lib/stored-file'
+import { getAllStoredPaths, findDanglingStoredFiles, deleteStoredFilesByIds } from '@/lib/stored-file'
 import { isS3Mode, s3DeleteFile, getS3Bucket, getS3Client } from '@/lib/s3-storage'
 import { ListObjectsV2Command } from '@aws-sdk/client-s3'
 import {
@@ -53,6 +53,12 @@ export type ProjectStorageOrphanCleanupResult = {
   missingFileSample?: {
     paths: string[]
   }
+  /** StoredFile rows whose owning entity no longer exists (row ≠ live entity) */
+  danglingRows: number
+  danglingRowSample?: {
+    paths: string[]
+  }
+  danglingRowsDeleted?: number
   sample?: {
     orphanPaths: string[]
     projectIds: string[]
@@ -665,6 +671,15 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   let roots: Array<{ absPath: string; relPath: string }> = []
   let missingResult: { count: number; sample: string[] } = { count: 0, sample: [] }
 
+  // Dangling rows: StoredFile rows whose owning entity no longer exists. Pure-DB check,
+  // independent of the storage backend — the third leg alongside orphan and missing files.
+  const danglingRows = await findDanglingStoredFiles()
+  const danglingSample = danglingRows.slice(0, 20).map((r) => r.storagePath)
+  let danglingRowsDeleted = 0
+  if (!dryRun && danglingRows.length > 0) {
+    danglingRowsDeleted = await deleteStoredFilesByIds(danglingRows.map((r) => r.id))
+  }
+
   // Scan storage based on configured provider
   if (isS3Mode()) {
     scannedStorageRoots = 2 // Main bucket namespace + accounting/ prefix namespace
@@ -759,6 +774,9 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
       orphanFileBytes,
       missingFiles: missingResult.count,
       missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
+      danglingRows: danglingRows.length,
+      danglingRowSample: danglingRows.length > 0 ? { paths: danglingSample } : undefined,
+      ...(dryRun ? {} : { danglingRowsDeleted }),
       sample: {
         orphanPaths: orphanFiles.slice(0, 20).map((file) => file.relPath),
         projectIds: sampleProjectIds,
@@ -793,6 +811,9 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
       orphanFileBytes,
       missingFiles: missingResult.count,
       missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
+      danglingRows: danglingRows.length,
+      danglingRowSample: danglingRows.length > 0 ? { paths: danglingSample } : undefined,
+      ...(dryRun ? {} : { danglingRowsDeleted }),
       sample: {
         orphanPaths: orphanFiles.slice(0, 20).map((file) => file.relPath),
         projectIds: sampleProjectIds,
@@ -834,6 +855,9 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     orphanFileBytes,
     missingFiles: missingResult.count,
     missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
+    danglingRows: danglingRows.length,
+    danglingRowSample: danglingRows.length > 0 ? { paths: danglingSample } : undefined,
+    danglingRowsDeleted,
     sample: {
       orphanPaths: orphanFiles.slice(0, 20).map((file) => file.relPath),
       projectIds: sampleProjectIds,

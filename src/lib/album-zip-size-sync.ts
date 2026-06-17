@@ -4,6 +4,7 @@ import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { registerStoredFile } from '@/lib/stored-file'
 import { isS3Mode, s3GetFileSize } from '@/lib/s3-storage'
 
 type AlbumZipAlbumRow = {
@@ -113,20 +114,13 @@ export async function syncAlbumZipSizes(params: { albumId: string; projectId: st
 
   if (deltaFull === BigInt(0) && deltaSocial === BigInt(0)) return
 
-  // Update StoredFile (legacy Album columns dropped)
+  // Update StoredFile through the registry helper so projectId is populated (legacy Album
+  // columns dropped). projectId is passed explicitly to skip the resolve lookup.
   await Promise.all([
-    prisma.storedFile.upsert({
-      where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_FULL' } },
-      create: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_FULL',
-        storagePath: getAlbumZipPaths(album).full, fileSize: actualFull, status: 'READY' },
-      update: { fileSize: actualFull },
-    }),
-    prisma.storedFile.upsert({
-      where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_SOCIAL' } },
-      create: { entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_SOCIAL',
-        storagePath: getAlbumZipPaths(album).social, fileSize: actualSocial, status: 'READY' },
-      update: { fileSize: actualSocial },
-    }),
+    registerStoredFile({ entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_FULL', projectId,
+      storagePath: getAlbumZipPaths(album).full, fileSize: actualFull, status: 'READY' }),
+    registerStoredFile({ entityType: 'ALBUM', entityId: albumId, fileRole: 'ZIP_SOCIAL', projectId,
+      storagePath: getAlbumZipPaths(album).social, fileSize: actualSocial, status: 'READY' }),
   ])
 
   await adjustProjectTotalBytes(projectId, deltaFull + deltaSocial)
@@ -167,12 +161,12 @@ export async function reconcileAllAlbumZipSizes(
     await Promise.all([
       prismaClient.storedFile.upsert({
         where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_FULL' } },
-        create: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_FULL', storagePath: zipPaths.full, fileSize: actualFull, status: 'READY' },
+        create: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_FULL', projectId: album.projectId, storagePath: zipPaths.full, fileSize: actualFull, status: 'READY' },
         update: { fileSize: actualFull },
       }),
       prismaClient.storedFile.upsert({
         where: { entityType_entityId_fileRole: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_SOCIAL' } },
-        create: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_SOCIAL', storagePath: zipPaths.social, fileSize: actualSocial, status: 'READY' },
+        create: { entityType: 'ALBUM', entityId: album.id, fileRole: 'ZIP_SOCIAL', projectId: album.projectId, storagePath: zipPaths.social, fileSize: actualSocial, status: 'READY' },
         update: { fileSize: actualSocial },
       }),
     ])

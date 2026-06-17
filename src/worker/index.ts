@@ -34,6 +34,7 @@ import { runQuickBooksDailyPull } from '@/lib/quickbooks/daily-pull-runner'
 import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
 import { reconcileAccountingFilesBytes } from '@/lib/accounting/file-storage'
 import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-cleanup'
+import { findDanglingStoredFiles, deleteStoredFilesByIds } from '@/lib/stored-file'
 import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
 import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
 import { processAccountingReminders } from '@/lib/accounting-reminders'
@@ -797,6 +798,15 @@ async function main() {
 
       if (job.name === 'orphan-project-files-scan') {
         try {
+          // Self-heal dangling StoredFile rows (owning entity already deleted) before the
+          // file scan. These are unambiguous garbage — pruning them daily keeps them from
+          // accumulating and from masquerading as "missing files" in the scan below.
+          const dangling = await findDanglingStoredFiles()
+          if (dangling.length > 0) {
+            const pruned = await deleteStoredFilesByIds(dangling.map((r) => r.id))
+            console.log(`[CONSISTENCY] Pruned ${pruned} dangling StoredFile row(s) (entity no longer exists)`)
+          }
+
           console.log('[CONSISTENCY] Running scheduled storage integrity scan (dry run)...')
           const result = await cleanupProjectStorageOrphans(true)
           const scanFailed = result.missingFiles < 0

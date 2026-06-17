@@ -2079,6 +2079,13 @@ model StoredFile {
   entityId    String     // owning record ID (Video.id, AlbumPhoto.id, etc.)
   fileRole    FileRole
 
+  // Denormalized owning project, when the entity is project-scoped. Lets project-wide
+  // lifecycle ops (delete, storage totals) run as one query instead of enumerating every
+  // entity type. NULL for non-project files (user/client/branding/accounting). Auto-populated
+  // by registerStoredFile() via resolveEntityProjectId(); stays correct because entity→project
+  // is immutable for these types.
+  projectId   String?
+
   storagePath String
   fileName    String?    // cached display name
   fileSize    BigInt?    // 0 = unknown
@@ -2092,6 +2099,7 @@ model StoredFile {
   @@unique([entityType, entityId, fileRole])
   @@index([entityType, entityId])
   @@index([storagePath])
+  @@index([projectId])
 }
 
 model UserProjectViewSettings {

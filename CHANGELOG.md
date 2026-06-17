@@ -5,6 +5,20 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Reprocessing a video with a custom thumbnail no longer destroys the source asset** — When an image asset is set as a video's playback thumbnail, the `VIDEO/THUMBNAIL` StoredFile is repointed to share the asset's original file. Three flows (project Reprocess, Reprocess Previews, and asset deletion) detected custom thumbnails with a stale query that looked for a non-existent `VIDEO_ASSET/THUMBNAIL` row, so detection always failed — reprocessing then deleted the `THUMBNAIL` role and, with it, the shared asset original from storage, breaking the asset's FILES-view thumbnail and lightbox. A new shared `getVideosWithCustomThumbnail()` helper (mirroring the worker's correct detection: the video's `THUMBNAIL` path matching one of its own assets' stored paths) now drives all three flows. Deleting the asset that is the live custom thumbnail now drops the pointer and regenerates a system thumbnail (matching the "remove custom thumbnail" behaviour) instead of leaving a dangling pointer. Note: assets whose original was already deleted by a prior reprocess must be re-uploaded.
+
+### Changed
+
+- **StoredFile is now the sole source of truth — legacy path columns removed** — Following the StoredFile registry introduced in 1.9.7, all reads/writes now go through `StoredFile`, and the legacy per-entity path/size columns (`Video.originalStoragePath`, `preview*Path`, `AlbumPhoto.storagePath`, `Settings.companyLogoPath`, etc.) have been dropped across 14 tables.
+
+### Migration safety
+
+- **Re-backfill before dropping legacy columns (no data loss on upgrade)** — The 1.9.7 release created and backfilled `StoredFile` once, but the app it shipped with still wrote new files only to the legacy columns, so every file uploaded since then existed only there. Two new migrations make the cutover seamless: `20260618000000_rebackfill_stored_files` re-runs the backfill (`ON CONFLICT DO NOTHING`, idempotent; re-applies the timeline-path fix and `projectId` backfill) to capture every file created since 1.9.7, and `20260618000001_drop_legacy_file_columns` then removes the legacy columns. The re-backfill is guarded per-table by `information_schema` checks, so it is a clean no-op on databases where the columns were already removed (e.g. a dev DB synced via `prisma db push`); the drop uses `DROP COLUMN IF EXISTS`. Both are safe to re-run.
+
 ## [1.9.7] - 2026-06-06
 
 ### Added

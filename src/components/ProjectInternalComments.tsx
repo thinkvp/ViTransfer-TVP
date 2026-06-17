@@ -19,6 +19,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { formatDateTime } from '@/lib/utils'
+import { sanitizeCommentHtml } from '@/lib/sanitize-comment-html'
 
 const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
 
@@ -126,7 +127,7 @@ function InternalCommentBubble(props: {
 
         <div
           className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground"
-          dangerouslySetInnerHTML={{ __html: comment.content }}
+          dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(comment.content) }}
         />
 
         {showReplyAction ? (
@@ -197,7 +198,7 @@ function InternalCommentBubble(props: {
 
                       <div
                         className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground"
-                        dangerouslySetInnerHTML={{ __html: reply.content }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(reply.content) }}
                       />
                     </div>
                   )

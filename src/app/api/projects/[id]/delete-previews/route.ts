@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { deleteFile } from '@/lib/storage'
-import { deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { deleteStoredFilesByCriteria, getStoredFileRecords, RESOLUTION_TO_FILE_ROLE, type FileRole } from '@/lib/stored-file'
+import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
@@ -11,18 +12,6 @@ export const runtime = 'nodejs'
 const deletePreviewsSchema = z.object({
   resolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1),
 })
-
-const RESOLUTION_TO_FIELD = {
-  '480p': 'preview480Path',
-  '720p': 'preview720Path',
-  '1080p': 'preview1080Path',
-} as const
-
-const RESOLUTION_TO_ROLE: Record<string, string> = {
-  '480p': 'PREVIEW_480',
-  '720p': 'PREVIEW_720',
-  '1080p': 'PREVIEW_1080',
-}
 
 export async function POST(
   request: NextRequest,
@@ -68,39 +57,34 @@ export async function POST(
 
     let deletedCount = 0
     const videoIdsToCleanup: string[] = []
-    const rolesToCleanup: string[] = resolutions.map(r => RESOLUTION_TO_ROLE[r])
+    const rolesToCleanup: FileRole[] = resolutions.map(r => RESOLUTION_TO_FILE_ROLE[r])
 
     for (const video of project.videos) {
-      const filesToDelete: string[] = []
-      const dbUpdate: Record<string, null> = {}
-
-      for (const res of resolutions) {
-        const field = RESOLUTION_TO_FIELD[res]
-        const path = (video as any)[field]
-        if (path) {
-          filesToDelete.push(path)
-          dbUpdate[field] = null
-        }
-      }
+      // Resolve preview file paths from the StoredFile registry. The legacy *Path
+      // columns were dropped, so the registry is the only source of truth here.
+      const stored = await getStoredFileRecords('VIDEO', [video.id], {
+        fileRoles: rolesToCleanup,
+        select: { storagePath: true },
+      }) as Array<{ storagePath: string | null }>
+      const filesToDelete = stored
+        .map(s => s.storagePath)
+        .filter((p): p is string => !!p)
 
       if (filesToDelete.length > 0) {
         await Promise.allSettled(filesToDelete.map(f => deleteFile(f)))
-        await prisma.video.update({
-          where: { id: video.id },
-          data: dbUpdate,
-        })
         videoIdsToCleanup.push(video.id)
         deletedCount += filesToDelete.length
       }
     }
 
-    // Clean up StoredFile rows for deleted previews
+    // Clean up StoredFile rows for deleted previews, then refresh project totals.
     if (videoIdsToCleanup.length > 0) {
       await deleteStoredFilesByCriteria({
         entityType: 'VIDEO',
         entityIds: videoIdsToCleanup,
-        fileRoles: rolesToCleanup as any,
+        fileRoles: rolesToCleanup,
       }).catch(() => {})
+      await recalculateAndStoreProjectTotalBytes(projectId).catch(() => {})
     }
 
     return NextResponse.json({

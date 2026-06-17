@@ -141,7 +141,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     for (const attachment of existing.accountingAttachments) {
       try {
         // Get current path from StoredFile
-        const currentStoragePath = await getStoredFilePath('ACCOUNTING_ATTACHMENT' as any, attachment.id, 'ORIGINAL' as any)
+        const currentStoragePath = await getStoredFilePath('ACCOUNTING_ATTACHMENT', attachment.id, 'ORIGINAL')
         if (!currentStoragePath) continue
         const currentStored = { storagePath: currentStoragePath }
         const newPath = await moveAccountingFile(
@@ -151,7 +151,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
           attachment.originalName,
         )
         if (newPath !== currentStored.storagePath) {
-          await updateStoredFilePath('ACCOUNTING_ATTACHMENT' as any, attachment.id, 'ORIGINAL' as any, newPath)
+          await updateStoredFilePath('ACCOUNTING_ATTACHMENT', attachment.id, 'ORIGINAL', newPath)
         }
       } catch {
         // Non-fatal — file may already be in right place or missing
@@ -211,7 +211,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   // Delete attachment files via StoredFile
   const attachmentIds = existing.accountingAttachments.map(a => a.id)
   if (attachmentIds.length > 0) {
-    const paths = await getStoredFileRecords('ACCOUNTING_ATTACHMENT' as any, attachmentIds, { select: { storagePath: true } })
+    const paths = await getStoredFileRecords('ACCOUNTING_ATTACHMENT', attachmentIds, { select: { storagePath: true } })
     await Promise.all(paths.map(p => deleteAccountingFile(p.storagePath).catch(() => {})))
   }
 

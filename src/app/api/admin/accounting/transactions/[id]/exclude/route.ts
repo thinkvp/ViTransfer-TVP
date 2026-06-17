@@ -60,7 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // Delete files via StoredFile
   const attachmentIds = txn.accountingAttachments.map(a => a.id)
   if (attachmentIds.length > 0) {
-    const paths = await getStoredFileRecords('ACCOUNTING_ATTACHMENT' as any, attachmentIds, { select: { storagePath: true } })
+    const paths = await getStoredFileRecords('ACCOUNTING_ATTACHMENT', attachmentIds, { select: { storagePath: true } })
     await Promise.all(paths.map(p => deleteAccountingFile(p.storagePath).catch(() => {})))
   }
 

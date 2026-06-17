@@ -6,10 +6,10 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath, deleteFile, deleteDirectory, sanitizeFilenameForHeader } from '@/lib/storage'
 // Video routes verify project access separately; getStoredFilePathForProject requires projectId plumbing.
 // eslint-disable-next-line no-restricted-imports
-import { deleteStoredFilesForEntity, getStoredFilePath, countStoredFilesByPath, registerStoredFile, getStoredFileRecords } from '@/lib/stored-file'
+import { deleteStoredFilesForEntity, getStoredFilePath, countStoredFilesByPath, deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
+import { getVideoQueue } from '@/lib/queue'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { createReadStream } from 'fs'
@@ -233,34 +233,44 @@ export async function DELETE(
       }
     }
 
-    // Check if this asset is being used as the video's thumbnail (via StoredFile)
-    const assetThumbPath = await getStoredFilePath('VIDEO_ASSET', assetId, 'THUMBNAIL')
-    const videoThumbPath = await getStoredFilePath('VIDEO', asset.video.id, 'THUMBNAIL')
-    const isCurrentThumbnail = videoThumbPath && assetThumbPath && videoThumbPath === assetThumbPath
-
-    // Only delete the physical file if no other assets reference the same storage path
+    // Detect whether this asset is the video's *custom* thumbnail. A custom thumbnail
+    // is recorded by repointing VIDEO/THUMBNAIL at the asset's own ORIGINAL file — there
+    // is no VIDEO_ASSET/THUMBNAIL row — so we compare the resolved paths.
     const assetOrigPath = await getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL')
-    const sharedCount = assetOrigPath ? await countStoredFilesByPath(assetOrigPath, { excludeEntityType: 'VIDEO_ASSET', excludeEntityId: assetId }) : 0
+    const videoThumbPath = await getStoredFilePath('VIDEO', videoId, 'THUMBNAIL')
+    const isCurrentThumbnail = !!(assetOrigPath && videoThumbPath && assetOrigPath === videoThumbPath)
 
-    if (sharedCount === 0 && assetOrigPath) {
-      await deleteFile(assetOrigPath)
+    // If this asset was the live custom thumbnail, drop the THUMBNAIL pointer and
+    // regenerate a system thumbnail from the video original (mirrors the 'remove'
+    // action in set-thumbnail). Done BEFORE the orphan check below so the asset's
+    // original file is no longer referenced by THUMBNAIL and can be deleted.
+    if (isCurrentThumbnail) {
+      await deleteStoredFilesByCriteria({
+        entityType: 'VIDEO', entityIds: [videoId], fileRoles: ['THUMBNAIL'],
+      }).catch(() => {})
+
+      const videoOriginalPath = await getStoredFilePath('VIDEO', videoId, 'ORIGINAL')
+      if (videoOriginalPath) {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: { status: 'QUEUED', processingProgress: 0, processingPhase: null, processingError: null },
+        })
+        await getVideoQueue().add('process-video', {
+          videoId,
+          storagePath: videoOriginalPath,
+          projectId: asset.video.projectId,
+          thumbnailOnly: true,
+        })
+      }
     }
 
-    // If this asset was the current thumbnail, revert to system-generated thumbnail
-    if (isCurrentThumbnail) {
-      const projectStoragePath = asset.video.project.storagePath
-        || buildProjectStorageRoot(asset.video.project.client?.name || asset.video.project.companyName || 'Client', asset.video.project.title)
-      const systemThumbnailPath = buildVideoThumbnailStoragePath(
-        projectStoragePath,
-        asset.video.storageFolderName || asset.video.name || videoId,
-        asset.video.versionLabel || `v${asset.video.version}`,
-      )
-
-      // Register thumbnail in StoredFile
-      await registerStoredFile({
-        entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL',
-        storagePath: systemThumbnailPath, fileName: 'thumbnail.jpg',
-      })
+    // Only delete the asset's physical original if nothing else references it now
+    // (the THUMBNAIL pointer, if any, was just removed above).
+    const sharedCount = assetOrigPath
+      ? await countStoredFilesByPath(assetOrigPath, { excludeEntityType: 'VIDEO_ASSET', excludeEntityId: assetId })
+      : 0
+    if (sharedCount === 0 && assetOrigPath) {
+      await deleteFile(assetOrigPath)
     }
 
                                     // Fetch all stored file records for this asset so we can delete physical files

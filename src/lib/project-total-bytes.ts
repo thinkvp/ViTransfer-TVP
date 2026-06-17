@@ -118,49 +118,15 @@ export async function computeProjectTotalBytes(
   const ZERO = BigInt(0)
   if (!projectId) return ZERO
 
-  // Resolve entity IDs first
-  const videoIds = await prismaClient.video.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(v => v.id))
-  const albumIds = await prismaClient.album.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(a => a.id))
-  const projectEmailIds = await prismaClient.projectEmail.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(e => e.id))
-  const projectFileIds = await prismaClient.projectFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
-  const commentFileIds = await prismaClient.commentFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
-  const shareUploadFileIds = await prismaClient.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
-
-  // Resolve asset and photo IDs through parent entities
-  const assetIds = videoIds.length > 0
-    ? await prismaClient.videoAsset.findMany({ where: { videoId: { in: videoIds } }, select: { id: true } }).then(r => r.map(a => a.id))
-    : [] as string[]
-  const photoIds = albumIds.length > 0
-    ? await prismaClient.albumPhoto.findMany({ where: { albumId: { in: albumIds } }, select: { id: true } }).then(r => r.map(p => p.id))
-    : [] as string[]
-  const emailAttachmentIds = projectEmailIds.length > 0
-    ? await prismaClient.projectEmailAttachment.findMany({ where: { projectEmailId: { in: projectEmailIds } }, select: { id: true } }).then(r => r.map(a => a.id))
-    : [] as string[]
-
-  // Aggregate all file sizes through StoredFile — single source of truth
-  const orClauses: any[] = [
-    videoIds.length > 0 && { entityType: 'VIDEO', entityId: { in: videoIds } },
-    assetIds.length > 0 && { entityType: 'VIDEO_ASSET', entityId: { in: assetIds } },
-    shareUploadFileIds.length > 0 && { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: shareUploadFileIds } },
-    albumIds.length > 0 && { entityType: 'ALBUM', entityId: { in: albumIds } },
-    photoIds.length > 0 && { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds } },
-    projectFileIds.length > 0 && { entityType: 'PROJECT_FILE', entityId: { in: projectFileIds } },
-    commentFileIds.length > 0 && { entityType: 'COMMENT_FILE', entityId: { in: commentFileIds } },
-    projectEmailIds.length > 0 && { entityType: 'PROJECT_EMAIL', entityId: { in: projectEmailIds } },
-    emailAttachmentIds.length > 0 && { entityType: 'PROJECT_EMAIL_ATTACHMENT', entityId: { in: emailAttachmentIds } },
-  ].filter(Boolean)
-
-  const groupRows = await prismaClient.storedFile.groupBy({
-    by: ['entityType'],
-    where: { OR: orClauses },
+  // Every project-scoped StoredFile row carries the denormalized projectId, so the
+  // whole total is a single aggregate — no need to enumerate videos/assets/albums/
+  // photos/comments/files/emails and resolve their child ids.
+  const agg = await prismaClient.storedFile.aggregate({
+    where: { projectId },
     _sum: { fileSize: true },
   })
 
-  let total = ZERO
-  for (const row of groupRows) {
-    total += toBigIntSafe(row._sum.fileSize)
-  }
-
+  const total = toBigIntSafe(agg._sum.fileSize)
   return total > ZERO ? total : ZERO
 }
 
@@ -287,32 +253,16 @@ export async function computeProjectPreviewBytes(
   const ZERO = BigInt(0)
   if (!projectId || !isS3Mode()) return ZERO
 
-  // Resolve entity IDs
-  const videoIds = await prismaClient.video.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(v => v.id))
-  const assetIds = videoIds.length > 0
-    ? await prismaClient.videoAsset.findMany({ where: { videoId: { in: videoIds } }, select: { id: true } }).then(r => r.map(a => a.id))
-    : [] as string[]
-  const uploadIds = await prismaClient.shareUploadFile.findMany({ where: { projectId }, select: { id: true } }).then(r => r.map(f => f.id))
-
-  // Collect all preview file paths from StoredFile
+  // Collect all preview file paths for the project in one query via the denormalized
+  // projectId (covers VIDEO, VIDEO_ASSET and SHARE_UPLOAD_FILE preview derivatives).
   const previewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL',
     'TIMELINE_VTT', 'TIMELINE_SPRITES', 'PREVIEW_IMAGE', 'PREVIEW_MP4']
   const spriteRoles: FileRole[] = ['TIMELINE_SPRITES']
 
-  const rows: Array<{ storagePath: string; fileRole: string }> = []
-  const baseWhere = { storagePath: { not: '' } } as const
-  if (videoIds.length > 0) {
-    const paths = await prisma.storedFile.findMany({ where: { entityType: 'VIDEO', entityId: { in: videoIds }, fileRole: { in: previewRoles }, ...baseWhere }, select: { storagePath: true, fileRole: true } })
-    rows.push(...paths.map(r => ({ storagePath: r.storagePath, fileRole: r.fileRole })))
-  }
-  if (assetIds.length > 0) {
-    const paths = await prisma.storedFile.findMany({ where: { entityType: 'VIDEO_ASSET', entityId: { in: assetIds }, fileRole: { in: previewRoles }, ...baseWhere }, select: { storagePath: true, fileRole: true } })
-    rows.push(...paths.map(r => ({ storagePath: r.storagePath, fileRole: r.fileRole })))
-  }
-  if (uploadIds.length > 0) {
-    const paths = await prisma.storedFile.findMany({ where: { entityType: 'SHARE_UPLOAD_FILE', entityId: { in: uploadIds }, fileRole: { in: previewRoles }, ...baseWhere }, select: { storagePath: true, fileRole: true } })
-    rows.push(...paths.map(r => ({ storagePath: r.storagePath, fileRole: r.fileRole })))
-  }
+  const rows = await prismaClient.storedFile.findMany({
+    where: { projectId, fileRole: { in: previewRoles }, storagePath: { not: '' } },
+    select: { storagePath: true, fileRole: true },
+  })
 
   if (rows.length === 0) return ZERO
 

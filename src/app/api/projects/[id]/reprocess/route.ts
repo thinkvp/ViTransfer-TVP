@@ -8,7 +8,7 @@ import {
   getVideoQueue,
 } from '@/lib/queue'
 import { deleteDirectory, deleteFile } from '@/lib/storage'
-import { deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
+import { deleteStoredFilesByCriteria, getStoredFileRecords, getVideosWithCustomThumbnail, RESOLUTION_TO_FILE_ROLE } from '@/lib/stored-file'
 import type { FileRole } from '@/lib/stored-file'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -136,9 +136,10 @@ export async function POST(
       map.set(sf.fileRole, sf.storagePath)
     }
 
-    // Check for custom thumbnails (asset-based) via StoredFile
-    const assetThumbnailStored = await getStoredFileRecords('VIDEO_ASSET', reprocessVideoIds, { fileRoles: ['THUMBNAIL'], select: { entityId: true } })
-    const customThumbnailVideoIds = new Set(assetThumbnailStored.map(s => s.entityId))
+    // Check for custom thumbnails: videos whose THUMBNAIL points at one of their own
+    // asset files. These must NOT have their THUMBNAIL deleted during reprocess, or we
+    // would delete the shared asset original from storage (breaking its preview + lightbox).
+    const customThumbnailVideoIds = await getVideosWithCustomThumbnail(reprocessVideoIds)
 
     for (const video of videosToReprocess) {
       const stored = storedByVideo.get(video.id) ?? new Map()
@@ -147,18 +148,11 @@ export async function POST(
       // Collect StoredFile roles to delete
       const rolesToDelete: FileRole[] = []
 
-      // Preview roles
-      const resolutionRoles: Record<string, FileRole> = {
-        '480p': 'PREVIEW_480',
-        '720p': 'PREVIEW_720',
-        '1080p': 'PREVIEW_1080',
-      }
-
       if (thumbnailOnlyMode) {
         // Only thumbnail
       } else if (targetedPreviewGeneration) {
         for (const res of previewResolutions!) {
-          rolesToDelete.push(resolutionRoles[res])
+          rolesToDelete.push(RESOLUTION_TO_FILE_ROLE[res])
         }
       } else {
         rolesToDelete.push('PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080')

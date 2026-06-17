@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { deleteFile, deleteDirectory, moveDirectory } from '@/lib/storage'
-import { getStoredPathsForEntities, deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
+import { getStoredPathsForEntities, deleteStoredFilesByCriteria, getStoredFileRecords, deleteStoredFilesForProject } from '@/lib/stored-file'
 import type { FileRole } from '@/lib/stored-file'
 import { requireApiAuth } from '@/lib/auth'
 import { encrypt, decrypt } from '@/lib/encryption'
@@ -1595,37 +1595,12 @@ export async function DELETE(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    // Delete all video/asset files from storage via StoredFile registry
-    const videoIds = project.videos.map(v => v.id)
-    const assetIds = project.videos.flatMap(v => v.assets.map(a => a.id))
-    const allEntityIds = [...videoIds, ...assetIds]
-
-    if (allEntityIds.length > 0) {
-      const [videoStored, assetStored] = await Promise.all([
-        videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { select: { storagePath: true, entityType: true, entityId: true, fileRole: true } }) : [],
-        assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { select: { storagePath: true, entityType: true, entityId: true, fileRole: true } }) : [],
-      ])
-      const storedFiles = [...videoStored, ...assetStored]
-
-      // Delete files from storage
-      await Promise.allSettled(
-        storedFiles.map(f => deleteFile(f.storagePath).catch(() => {}))
-      )
-
-      // Delete StoredFile DB records
-      if (videoIds.length > 0) {
-        await deleteStoredFilesByCriteria({
-          entityType: 'VIDEO',
-          entityIds: videoIds,
-        })
-      }
-      if (assetIds.length > 0) {
-        await deleteStoredFilesByCriteria({
-          entityType: 'VIDEO_ASSET',
-          entityIds: assetIds,
-        })
-      }
-    }
+    // Remove every StoredFile row for this project in one shot — all entity types,
+    // not just videos/assets. Relies on the denormalized projectId; the previous
+    // per-entity enumeration only cleaned VIDEO/VIDEO_ASSET and leaked album, photo,
+    // comment, project-file, share-upload and email rows. The physical files are
+    // removed by the whole-directory delete below.
+    await deleteStoredFilesForProject(project.id)
 
     // Delete the entire project directory after all files are removed
     try {

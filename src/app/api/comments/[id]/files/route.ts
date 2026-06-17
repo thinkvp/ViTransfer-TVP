@@ -7,7 +7,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { uploadFile, deleteFile } from '@/lib/storage'
-import { registerStoredFile, getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { registerStoredFile, getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -275,7 +275,8 @@ export async function DELETE(
     })
     const fileIds = fileRecords.map(f => f.id)
 
-    // Delete physical files via StoredFile
+    // Delete physical files via StoredFile (best-effort; storage failures shouldn't block
+    // the DB cleanup — any stragglers are caught by the orphan-file scan).
     if (fileIds.length > 0) {
       const paths = await getStoredFileRecords('COMMENT_FILE', fileIds, {
         select: { storagePath: true },
@@ -283,17 +284,14 @@ export async function DELETE(
       for (const { storagePath } of paths) {
         try { await deleteFile(storagePath) } catch {}
       }
-      // Clean up StoredFile rows
-      await deleteStoredFilesByCriteria({
-        entityType: 'COMMENT_FILE',
-        entityIds: fileIds,
-      }).catch(() => {})
     }
 
-    // Delete file from database
-    await prisma.commentFile.deleteMany({
-      where: { commentId },
-    })
+    // Delete the registry rows and the comment-file rows atomically so a failure can't
+    // leave dangling StoredFile rows pointing at a deleted entity.
+    await prisma.$transaction([
+      prisma.storedFile.deleteMany({ where: { entityType: 'COMMENT_FILE', entityId: { in: fileIds } } }),
+      prisma.commentFile.deleteMany({ where: { commentId } }),
+    ])
 
     await recalculateAndStoreProjectTotalBytes(comment.projectId)
 

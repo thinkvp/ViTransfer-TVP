@@ -114,12 +114,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (data.matchType === 'EXPENSE' && matchedExpenseAccountId) {
     // Move all AccountingAttachment files via StoredFile
     for (const a of txn.accountingAttachments) {
-      const storagePath = await getStoredFilePath('ACCOUNTING_ATTACHMENT' as any, a.id, 'ORIGINAL' as any)
+      const storagePath = await getStoredFilePath('ACCOUNTING_ATTACHMENT', a.id, 'ORIGINAL')
       if (!storagePath) continue
       const stored = { storagePath }
       const newPath = await moveAccountingFile(stored.storagePath, updated.date, matchedExpenseAccountId, a.originalName)
       if (newPath !== stored.storagePath) {
-        await updateStoredFilePath('ACCOUNTING_ATTACHMENT' as any, a.id, 'ORIGINAL' as any, newPath)
+        await updateStoredFilePath('ACCOUNTING_ATTACHMENT', a.id, 'ORIGINAL', newPath)
       }
     }
   }

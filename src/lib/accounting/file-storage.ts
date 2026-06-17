@@ -542,7 +542,7 @@ export async function normalizeAccountingAttachmentStoragePaths(
   // Paths now in StoredFile registry
   const rows = await prisma.storedFile.findMany({
     where: {
-      entityType: 'ACCOUNTING_ATTACHMENT' as any,
+      entityType: 'ACCOUNTING_ATTACHMENT',
       OR: [
         { storagePath: { startsWith: `${ACCOUNTING_S3_PREFIX}/` } },
         { storagePath: { startsWith: `${ACCOUNTING_S3_PREFIX}\\` } },
@@ -594,7 +594,7 @@ export async function normalizeAccountingAttachmentStoragePaths(
       const batch = updates.slice(index, index + batchSize)
       await prisma.$transaction(
         batch.map((row) => prisma.storedFile.update({
-          where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: row.id, fileRole: 'ORIGINAL' as any } },
+          where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT', entityId: row.id, fileRole: 'ORIGINAL' } },
           data: { storagePath: row.storagePath },
         })),
       )
@@ -744,7 +744,7 @@ export async function migrateAccountFolderFiles(accountId: string): Promise<void
   const storedMap = new Map<string, string>()
   if (attachmentIds.length > 0) {
     const stored = await prisma.storedFile.findMany({
-      where: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: { in: attachmentIds } },
+      where: { entityType: 'ACCOUNTING_ATTACHMENT', entityId: { in: attachmentIds } },
       select: { entityId: true, storagePath: true },
     })
     for (const s of stored) storedMap.set(s.entityId, s.storagePath)
@@ -768,7 +768,7 @@ export async function migrateAccountFolderFiles(accountId: string): Promise<void
     )
     if (newPath !== attachment.storagePath) {
       await prisma.storedFile.update({
-        where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT' as any, entityId: attachment.id, fileRole: 'ORIGINAL' as any } },
+        where: { entityType_entityId_fileRole: { entityType: 'ACCOUNTING_ATTACHMENT', entityId: attachment.id, fileRole: 'ORIGINAL' } },
         data: { storagePath: newPath },
       })
     }

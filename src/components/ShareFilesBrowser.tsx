@@ -415,9 +415,9 @@ export function ShareFilesBrowser({
   const [showDeleteSelectedDialog, setShowDeleteSelectedDialog] = useState(false)
   const [pendingDeleteFileId, setPendingDeleteFileId] = useState<string | null>(null)
   const [pendingDeleteFolderPath, setPendingDeleteFolderPath] = useState<string | null>(null)
-  const [videoAssetsThumbnailSize, setVideoAssetsThumbnailSize] = useState<'default' | 'large'>('default')
-  const [albumPhotosThumbnailSize, setAlbumPhotosThumbnailSize] = useState<'default' | 'large'>('default')
-  const [uploadsThumbnailSize, setUploadsThumbnailSize] = useState<'default' | 'large'>('default')
+  const [videoAssetsThumbnailSize, setVideoAssetsThumbnailSize] = useState<'small' | 'default' | 'large'>('default')
+  const [albumPhotosThumbnailSize, setAlbumPhotosThumbnailSize] = useState<'small' | 'default' | 'large'>('default')
+  const [uploadsThumbnailSize, setUploadsThumbnailSize] = useState<'small' | 'default' | 'large'>('default')
   const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
   const [visibleFolderNames, setVisibleFolderNames] = useState<Set<string>>(new Set())
   const [visibleFileKeys, setVisibleFileKeys] = useState<Set<string>>(new Set())
@@ -2936,6 +2936,18 @@ export function ShareFilesBrowser({
                           type="button"
                           className={cn(
                             'px-2 py-1 text-[11px] font-semibold transition-colors',
+                            videoAssetsThumbnailSize === 'small'
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-card text-muted-foreground hover:text-foreground'
+                          )}
+                          onClick={() => setVideoAssetsThumbnailSize('small')}
+                        >
+                          Small
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
                             videoAssetsThumbnailSize === 'default'
                               ? 'bg-primary text-primary-foreground'
                               : 'bg-card text-muted-foreground hover:text-foreground'
@@ -2963,9 +2975,11 @@ export function ShareFilesBrowser({
                         'grid',
                         videoAssetsThumbnailSize === 'large'
                           ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
-                          : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                          : videoAssetsThumbnailSize === 'default'
+                            ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3'
+                            : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
                       )}>
-                        {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, videoAssetsThumbnailSize !== 'large', openFolderVideoAssets))}
+                        {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, videoAssetsThumbnailSize === 'small', openFolderVideoAssets))}
                       </div>
                     ) : (
                       <p className="px-1 text-xs text-muted-foreground italic">There are currently no Video Assets for this video.</p>
@@ -2994,6 +3008,18 @@ export function ShareFilesBrowser({
                         type="button"
                         className={cn(
                           'px-2 py-1 text-[11px] font-semibold transition-colors',
+                          albumPhotosThumbnailSize === 'small'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setAlbumPhotosThumbnailSize('small')}
+                      >
+                        Small
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
                           albumPhotosThumbnailSize === 'default'
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-card text-muted-foreground hover:text-foreground'
@@ -3021,9 +3047,11 @@ export function ShareFilesBrowser({
                       'grid',
                       albumPhotosThumbnailSize === 'large'
                         ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
-                        : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                        : albumPhotosThumbnailSize === 'default'
+                          ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3'
+                          : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
                     )}>
-                      {openFolderAlbumPhotos.map((file) => renderOpenFolderFileCard(file, albumPhotosThumbnailSize !== 'large', openFolderAlbumPhotos))}
+                      {openFolderAlbumPhotos.map((file) => renderOpenFolderFileCard(file, albumPhotosThumbnailSize === 'small', openFolderAlbumPhotos))}
                     </div>
                   ) : (
                     <p className="px-1 text-xs text-muted-foreground italic">No photos available.</p>
@@ -3049,6 +3077,18 @@ export function ShareFilesBrowser({
                         type="button"
                         className={cn(
                           'px-2 py-1 text-[11px] font-semibold transition-colors',
+                          uploadsThumbnailSize === 'small'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-card text-muted-foreground hover:text-foreground'
+                        )}
+                        onClick={() => setUploadsThumbnailSize('small')}
+                      >
+                        Small
+                      </button>
+                      <button
+                        type="button"
+                        className={cn(
+                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
                           uploadsThumbnailSize === 'default'
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-card text-muted-foreground hover:text-foreground'
@@ -3076,9 +3116,11 @@ export function ShareFilesBrowser({
                       'grid',
                       uploadsThumbnailSize === 'large'
                         ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
-                        : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                        : uploadsThumbnailSize === 'default'
+                          ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3'
+                          : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
                     )}>
-                      {openFolderUploadFiles.map((file) => renderOpenFolderFileCard(file, uploadsThumbnailSize !== 'large', openFolderUploadFiles))}
+                      {openFolderUploadFiles.map((file) => renderOpenFolderFileCard(file, uploadsThumbnailSize === 'small', openFolderUploadFiles))}
                     </div>
                   ) : (
                     <p className="px-1 text-xs text-muted-foreground italic">No uploaded files available.</p>

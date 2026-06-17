@@ -3,10 +3,10 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { buildProjectStorageRoot, buildVideoThumbnailStoragePath } from '@/lib/project-do storage-paths'
 import { deleteFile } from '@/lib/storage'
+import { getVideoQueue } from '@/lib/queue'
 // eslint-disable-next-line no-restricted-imports
-import { getStoredFileRecords, getStoredFilePath, deleteStoredFilesByCriteria, registerStoredFile } from '@/lib/stored-file'
+import { getStoredFilePath, deleteStoredFilesByCriteria, registerStoredFile, countStoredFilesByPath } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 
@@ -55,10 +55,6 @@ export async function POST(
         project: {
           select: {
             status: true,
-            storagePath: true,
-            title: true,
-            companyName: true,
-            client: { select: { name: true } },
             assignedUsers: { select: { userId: true } },
           },
         },
@@ -78,24 +74,39 @@ export async function POST(
       }
     }
 
-    // If action is 'remove', revert to system-generated thumbnail
+    // If action is 'remove', revert to a system-generated thumbnail.
+    //
+    // The custom thumbnail simply points the THUMBNAIL StoredFile at a VideoAsset
+    // file; setting it deleted the old generated thumbnail (see below), so there is
+    // no generated file left to fall back to.  We therefore drop the custom THUMBNAIL
+    // row and re-queue a thumbnail-only reprocess to regenerate the system thumbnail.
     if (action === 'remove') {
-      const projectStoragePath = video.project.storagePath
-        || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
-      const systemThumbnailPath = buildVideoThumbnailStoragePath(
-        projectStoragePath,
-        video.storageFolderName || video.name || videoId,
-        video.versionLabel || `v${video.version}`,
-      )
-
-      // Delete custom thumbnail from StoredFile, reverting to system-generated
+      // Remove the custom thumbnail pointer. We do NOT delete the underlying file:
+      // it is the asset's own ORIGINAL, still owned by the VideoAsset StoredFile row.
       await deleteStoredFilesByCriteria({
         entityType: 'VIDEO', entityIds: [videoId], fileRoles: ['THUMBNAIL'],
       }).catch(() => {})
 
+      // Regenerate the system thumbnail from the original video. With the custom
+      // THUMBNAIL row gone, the worker's finalize step will register the freshly
+      // generated thumbnail under the THUMBNAIL role.
+      const originalPath = await getStoredFilePath('VIDEO', videoId, 'ORIGINAL')
+      if (originalPath) {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: { status: 'QUEUED', processingProgress: 0, processingPhase: null, processingError: null },
+        })
+        await getVideoQueue().add('process-video', {
+          videoId,
+          storagePath: originalPath,
+          projectId: video.projectId,
+          thumbnailOnly: true,
+        })
+      }
+
       return NextResponse.json({
         success: true,
-        message: 'Reverted to system-generated thumbnail',
+        message: 'Reverting to system-generated thumbnail',
       })
     }
 
@@ -135,12 +146,37 @@ export async function POST(
       )
     }
 
-    // Update StoredFile thumbnail path (Video.thumbnailPath column dropped)
+    // Resolve the asset's stored file (the image we are promoting to thumbnail).
     const assetStoragePath = await getStoredFilePath('VIDEO_ASSET', assetId, 'ORIGINAL')
-    if (assetStoragePath) {
-      await registerStoredFile({
-        entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL', storagePath: assetStoragePath, status: 'READY',
+    if (!assetStoragePath) {
+      return NextResponse.json(
+        { error: 'Asset file is not ready yet. Please try again in a moment.' },
+        { status: 409 }
+      )
+    }
+
+    // Capture the thumbnail currently in use before we overwrite it. If it is a
+    // generated thumbnail (not shared by any other entity such as a VideoAsset),
+    // it becomes unreferenced once we repoint THUMBNAIL at the asset — delete it
+    // so it does not linger as an orphan file in storage.
+    const previousThumbnailPath = await getStoredFilePath('VIDEO', videoId, 'THUMBNAIL')
+
+    // Point the video's THUMBNAIL at the asset file.
+    await registerStoredFile({
+      entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL', storagePath: assetStoragePath, status: 'READY',
+    })
+
+    if (previousThumbnailPath && previousThumbnailPath !== assetStoragePath) {
+      // Count references excluding this video's own rows (the THUMBNAIL row we just
+      // repointed). If nothing else references the old path it is the generated
+      // system thumbnail and is now an orphan — remove it from storage.
+      const stillReferenced = await countStoredFilesByPath(previousThumbnailPath, {
+        excludeEntityType: 'VIDEO',
+        excludeEntityId: videoId,
       })
+      if (stillReferenced === 0) {
+        await deleteFile(previousThumbnailPath).catch(() => {})
+      }
     }
 
     return NextResponse.json({

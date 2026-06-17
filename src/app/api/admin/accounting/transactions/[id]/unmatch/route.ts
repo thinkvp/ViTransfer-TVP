@@ -95,7 +95,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // Delete files after the DB transaction (best-effort) — paths from StoredFile
   const txnAttachmentIds = txn.accountingAttachments.map(a => a.id)
   const txnAttachmentStored = txnAttachmentIds.length > 0
-    ? await getStoredFileRecords('ACCOUNTING_ATTACHMENT' as any, txnAttachmentIds, { select: { storagePath: true } })
+    ? await getStoredFileRecords('ACCOUNTING_ATTACHMENT', txnAttachmentIds, { select: { storagePath: true } })
     : []
   const filesToDelete = txnAttachmentStored.map(s => s.storagePath)
   await Promise.all(filesToDelete.map(p => deleteAccountingFile(p).catch(() => {})))
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (txn.matchType === 'EXPENSE' && txn.expense) {
     const expenseAttachmentIds = (txn.expense.accountingAttachments ?? []).map(a => a.id)
     const expenseStored = expenseAttachmentIds.length > 0
-      ? await getStoredFileRecords('ACCOUNTING_ATTACHMENT' as any, expenseAttachmentIds, { select: { storagePath: true } })
+      ? await getStoredFileRecords('ACCOUNTING_ATTACHMENT', expenseAttachmentIds, { select: { storagePath: true } })
       : []
     const expenseFiles = expenseStored.map(s => s.storagePath)
     await Promise.all(expenseFiles.map(p => deleteAccountingFile(p).catch(() => {})))
