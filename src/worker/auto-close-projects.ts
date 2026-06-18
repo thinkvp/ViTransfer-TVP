@@ -1,8 +1,9 @@
 import { prisma } from '../lib/db'
-import { deleteFile, deleteDirectory } from '../lib/storage'
+import { deleteFile } from '../lib/storage'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '../lib/session-invalidation'
 import { cancelProjectJobs } from '../lib/cancel-project-jobs'
 import { findStoredFilesToDelete, deleteStoredFilesByCriteria } from '../lib/stored-file'
+import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '../lib/project-total-bytes'
 
 export async function processAutoCloseApprovedProjects(): Promise<{ closedCount: number }> {
   const settings = await prisma.settings.findUnique({
@@ -74,45 +75,57 @@ export async function processAutoCloseApprovedProjects(): Promise<{ closedCount:
     ids.map((projectId: string) => cancelProjectJobs(projectId))
   )
 
-  // Auto-delete previews and timeline sprites if the setting is enabled
+  // Auto-delete the heavy playable renditions if the setting is enabled. We only
+  // shed video 480/720/1080 previews and the video-asset playback MP4, keeping
+  // everything needed to still browse the FILES area after close (video THUMBNAIL,
+  // timeline sprites/VTT, and the video-asset still image PREVIEW_IMAGE).
   if (settings?.autoDeletePreviewsOnClose) {
+    const VIDEO_PREVIEW_ROLES = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080'] as const
+    const ASSET_PREVIEW_ROLES = ['PREVIEW_MP4'] as const
     for (const projectId of ids) {
       try {
-        // Get all video IDs for this project
+        // Get all video IDs (and their asset IDs) for this project
         const videos = await prisma.video.findMany({
           where: { projectId },
           select: { id: true },
         })
         const videoIds = videos.map(v => v.id)
+        const videoAssetIds = (await prisma.videoAsset.findMany({
+          where: { video: { projectId } },
+          select: { id: true },
+        })).map(a => a.id)
 
-        // Find all preview, thumbnail, and timeline files via StoredFile registry
-        const previewFilesToDelete = await findStoredFilesToDelete({
-          entityType: 'VIDEO',
-          entityIds: videoIds,
-          fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
-        })
+        // Resolve preview file paths via the StoredFile registry
+        const [videoFiles, assetFiles] = await Promise.all([
+          videoIds.length > 0
+            ? findStoredFilesToDelete({ entityType: 'VIDEO', entityIds: videoIds, fileRoles: [...VIDEO_PREVIEW_ROLES] })
+            : [],
+          videoAssetIds.length > 0
+            ? findStoredFilesToDelete({ entityType: 'VIDEO_ASSET', entityIds: videoAssetIds, fileRoles: [...ASSET_PREVIEW_ROLES] })
+            : [],
+        ])
 
-        // Delete the physical files from storage
-        if (previewFilesToDelete.length > 0) {
-          await Promise.allSettled(previewFilesToDelete.map(f => {
-            // TIMELINE_SPRITES is a directory — delete the whole prefix
-            if (f.fileRole === 'TIMELINE_SPRITES') {
-              return deleteDirectory(f.storagePath)
-            }
-            return deleteFile(f.storagePath)
-          }))
+        // Delete the physical files from storage (no directory roles in this set)
+        const filesToDelete = [...videoFiles, ...assetFiles]
+        if (filesToDelete.length > 0) {
+          await Promise.allSettled(filesToDelete.map(f => deleteFile(f.storagePath)))
         }
 
         // Clean up StoredFile rows for the deleted files
         if (videoIds.length > 0) {
-          await deleteStoredFilesByCriteria({
-            entityType: 'VIDEO',
-            entityIds: videoIds,
-            fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
-          })
+          await deleteStoredFilesByCriteria({ entityType: 'VIDEO', entityIds: videoIds, fileRoles: [...VIDEO_PREVIEW_ROLES] })
+        }
+        if (videoAssetIds.length > 0) {
+          await deleteStoredFilesByCriteria({ entityType: 'VIDEO_ASSET', entityIds: videoAssetIds, fileRoles: [...ASSET_PREVIEW_ROLES] })
         }
 
-        // StoredFile handles preview cleanup — legacy columns dropped
+        // Refresh precomputed storage totals so freed space shows up immediately
+        // instead of waiting for the daily reconcile job.
+        await Promise.allSettled([
+          recalculateAndStoreProjectTotalBytes(projectId),
+          recalculateAndStoreProjectPreviewBytes(projectId),
+          recalculateAndStoreProjectDiskBytes(projectId),
+        ])
 
         console.log(`[AUTO-CLOSE] Deleted previews for project ${projectId}`)
       } catch (err) {

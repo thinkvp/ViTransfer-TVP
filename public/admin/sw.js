@@ -1,7 +1,23 @@
 /* Admin-only service worker for Web Push.
  * Scope: /admin/
- * Note: intentionally no fetch handler (purely online; no caching/offline).
+ * Note: no caching/offline. The fetch handler below is a minimal pass-through
+ * required for PWA installability on Chrome/Android (Chrome 93+ withholds the
+ * install prompt unless the service worker has a fetch handler).
  */
+
+self.addEventListener('fetch', event => {
+  // Only intercept navigations; everything else hits the network normally.
+  if (event.request.mode !== 'navigate') return
+  event.respondWith(
+    fetch(event.request).catch(
+      () =>
+        new Response(
+          '<!doctype html><meta charset="utf-8"><title>Offline</title><p>You are offline.</p>',
+          { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+        )
+    )
+  )
+})
 
 self.addEventListener('push', event => {
   let payload = null

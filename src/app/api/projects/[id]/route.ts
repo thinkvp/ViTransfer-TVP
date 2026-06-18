@@ -18,6 +18,7 @@ import {
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 import { cancelProjectJobs, cancelProjectPreviewResolutionJobs } from '@/lib/cancel-project-jobs'
+import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { asNumberBigInt } from '@/lib/utils'
 import { generateShareUrl } from '@/lib/url'
 import { rateLimit } from '@/lib/rate-limit'
@@ -1164,9 +1165,12 @@ export async function PATCH(
             }).then(rows => rows.map(r => r.id)),
           ])
 
-          // Collect all StoredFile records to delete
-          const videoPreviewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'TIMELINE_VTT', 'TIMELINE_SPRITES']
-          const assetPreviewRoles: FileRole[] = ['PREVIEW_IMAGE', 'PREVIEW_MP4']
+          // Collect StoredFile records to delete. We only shed the heavy playable
+          // renditions (video 480/720/1080 + asset playback MP4) and keep everything
+          // needed to still browse the FILES area after close: video THUMBNAIL,
+          // timeline sprites/VTT, and the video-asset still image (PREVIEW_IMAGE).
+          const videoPreviewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080']
+          const assetPreviewRoles: FileRole[] = ['PREVIEW_MP4']
 
           // Get paths to delete from storage
           const [videoStored, assetStored] = await Promise.all([
@@ -1196,11 +1200,13 @@ export async function PATCH(
             })
           }
 
-          // Also clean up timeline sprite directories (StoredFile only tracks the base path)
-          const timelineSpriteFiles = await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['TIMELINE_SPRITES'], select: { storagePath: true } })
-          await Promise.allSettled(
-            timelineSpriteFiles.map(f => deleteDirectory(f.storagePath).catch(() => {}))
-          )
+          // Refresh precomputed storage totals so the dashboard reflects the freed
+          // space immediately instead of waiting for the daily reconcile job.
+          await Promise.allSettled([
+            recalculateAndStoreProjectTotalBytes(project.id),
+            recalculateAndStoreProjectPreviewBytes(project.id),
+            recalculateAndStoreProjectDiskBytes(project.id),
+          ])
         }
       } catch (err) {
         console.error('[PROJECT UPDATE] Error auto-deleting previews/zips on close:', err)

@@ -323,10 +323,19 @@ export async function GET(
     const assetIds = approvedVideo?.assets?.map((a: any) => a.id) ?? []
     const assetSizeMap = await batchResolveFileSizes('VIDEO_ASSET', assetIds)
 
+    // Resolve which video assets still have a playable preview (PREVIEW_MP4). When a
+    // project is closed the playback preview can be purged while the still image is
+    // kept; the lightbox uses this to show the image instead of an empty player.
+    const assetPlaybackPreview = assetIds.length > 0
+      ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['PREVIEW_MP4'], select: { entityId: true } })
+      : []
+    const assetHasPlaybackPreview = new Set(assetPlaybackPreview.map(s => s.entityId))
+
     const assetFiles: DownloadableFile[] = approvedVideo
       ? approvedVideo.assets.map((asset: any): DownloadableFile => {
           const tokens = assetTimelineTokens.get(asset.id)
           const hasTimeline = tokens !== undefined && tokens !== null
+          const isVideoAsset = String(asset.fileType || '').toLowerCase().startsWith('video/')
           return {
             type: 'asset',
             videoId: approvedVideo.id,
@@ -337,6 +346,10 @@ export async function GET(
             hasTimelinePreviews: hasTimeline,
             timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
             timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
+            // Only meaningful for playable (video) assets; gates the lightbox player.
+            playbackPreviewAvailable: isVideoAsset
+              ? (asset.previewStatus === 'READY' && assetHasPlaybackPreview.has(asset.id))
+              : undefined,
           }
         })
       : []

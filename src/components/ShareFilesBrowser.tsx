@@ -151,10 +151,19 @@ function formatSelectedTotalSize(bytes: number): string {
   return `${mb.toFixed(2)} MB`
 }
 
+// A video asset whose playable preview (PREVIEW_MP4) was purged — e.g. after the
+// project was closed — while its still image is kept. Such assets must not open a
+// player (it would have nothing to play), but their thumbnail still renders.
+function isAssetPlaybackPurged(file: DownloadableFile): boolean {
+  return file.type === 'asset'
+    && getDownloadableFileKind(file) === 'video'
+    && file.playbackPreviewAvailable === false
+}
+
 function isLightboxMediaFile(file: DownloadableFile): boolean {
   const kind = getDownloadableFileKind(file)
   if (kind === 'image' || kind === 'audio') return true
-  if (kind === 'video' && file.type !== 'video') return true
+  if (kind === 'video' && file.type !== 'video') return !isAssetPlaybackPurged(file)
   return false
 }
 
@@ -1851,6 +1860,8 @@ export function ShareFilesBrowser({
 
   const openVideoLightbox = useCallback((file: DownloadableFile, fileList: DownloadableFile[]) => {
     if (getDownloadableFileKind(file) !== 'video' || file.type === 'video') return
+    // No playable preview (purged on close) — don't open an empty player.
+    if (isAssetPlaybackPurged(file)) return
 
     const mediaItems = fileList.filter(isLightboxMediaFile)
     const source = mediaItems.length > 0 ? mediaItems : [file]
@@ -2059,6 +2070,7 @@ export function ShareFilesBrowser({
     const isImageFile = fileKind === 'image'
     const isAudioFile = fileKind === 'audio'
     const isVideoAssetFile = fileKind === 'video' && file.type === 'asset'
+    const isPlaybackPurgedAsset = isAssetPlaybackPurged(file)
     const isSelected = selectedFileIds.has(fileKey)
     const resolvedPreview = previewUrlByFileKey[fileKey]
     const inlinePreview = file.thumbnailUrl || file.previewUrl || null
@@ -2130,7 +2142,7 @@ export function ShareFilesBrowser({
       onApproveVideo &&
       !muteInactiveVideoVersion &&
       !groupHasApprovedVersion
-    const showPlayableVideoOverlay = (isVideoAssetFile || (file.type === 'video' && !muteInactiveVideoVersion)) && (showImagePreview || showVideoPreview)
+    const showPlayableVideoOverlay = !isPlaybackPurgedAsset && (isVideoAssetFile || (file.type === 'video' && !muteInactiveVideoVersion)) && (showImagePreview || showVideoPreview)
     const actionButtons = canDownloadFile ? (
       <div className="flex items-center gap-1">
         {file.type === 'upload-file' && canDeleteUploads && onDeleteUploadFile && file.uploadFileId ? (

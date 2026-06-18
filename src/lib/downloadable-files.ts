@@ -35,6 +35,12 @@ export interface DownloadableFile {
   previewUrl?: string
   /** Preview generation lifecycle status for upload files. */
   previewStatus?: string
+  /**
+   * For type 'asset' video files: whether a playable preview (PREVIEW_MP4) still
+   * exists. False when the playback preview was purged (e.g. project closed) while
+   * the still image is kept — the lightbox should then show the image, not a player.
+   */
+  playbackPreviewAvailable?: boolean
   /** Optional tokenized direct download URL. */
   downloadUrl?: string
   /** Whether this video has timeline hover previews (sprite sheets + VTT). */
