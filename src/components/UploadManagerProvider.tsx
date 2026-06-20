@@ -122,6 +122,8 @@ export type CompletedServerJob = {
   type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename' | 'videoAssetPreview' | 'albumSocial'
   label: string
   sublabel: string
+  /** Clean project name for grouping display (distinct from the job-specific `sublabel`). */
+  projectName?: string
   projectId: string
   completedAt: number
   /** True when the job finished with an error (not a successful completion). */
@@ -745,6 +747,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                     type: 'processing',
                     label: prev.videoName,
                     sublabel: prev.projectName,
+                    projectName: prev.projectName,
                     projectId: prev.projectId,
                     completedAt: now,
                   })
@@ -790,6 +793,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                     type: 'albumZip',
                     label: prev.albumName,
                     sublabel: `${prev.projectName} · ${variantLabel}`,
+                    projectName: prev.projectName,
                     projectId: prev.projectId,
                     completedAt: now,
                   })
@@ -825,6 +829,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                     type: 'albumThumbnail',
                     label: prev.albumName,
                     sublabel: `${prev.projectName} · Album thumbnails complete`,
+                    projectName: prev.projectName,
                     projectId: prev.projectId,
                     completedAt: now,
                   })
@@ -863,6 +868,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                       : prev.entityType === 'VIDEO_GROUP' ? 'Video rename complete'
                       : prev.entityType === 'VIDEO_VERSION' ? 'Video version rename complete'
                       : 'Album rename complete',
+                    projectName: prev.entityType === 'PROJECT' ? prev.entityName : '',
                     projectId: prev.entityType === 'PROJECT' ? prev.entityId : '',
                     completedAt: now,
                   })
@@ -898,6 +904,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                     type: 'videoAssetPreview',
                     label: 'Asset previews',
                     sublabel: prev.projectName,
+                    projectName: prev.projectName,
                     projectId: prev.projectId,
                     completedAt: now,
                   })
@@ -933,6 +940,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                     type: 'albumSocial',
                     label: prev.albumName,
                     sublabel: prev.projectName,
+                    projectName: prev.projectName,
                     projectId: prev.projectId,
                     completedAt: now,
                   })
@@ -1098,7 +1106,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       const job = jobsRef.current.find((j) => j.id === id)
       if (!job) return
 
-       job.cancelled = true
+      job.cancelled = true
 
       if (job.s3AbortController) {
         job.s3AbortController.abort()
@@ -1158,7 +1166,6 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       const job = jobsRef.current.find((j) => j.id === id)
       if (!job || job.status !== 'uploading') return
       // S3 multipart uploads cannot be paused (no resume support in this implementation)
-      // S3 multipart uploads cannot be paused in this implementation
       if (job.s3AbortController) return
       if (job.tusUpload) {
         try {
@@ -1251,7 +1258,14 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     videoAssetPreviewJobs.length +
     albumSocialJobs.length
 
-  const totalActiveItems = totalActiveCount + groupedItemCount - videoAssetPreviewJobs.length - albumSocialJobs.length
+  // Like totalActiveCount, but grouped job types contribute their per-item count
+  // instead of counting as a single job: drop the one-per-group placeholders, then
+  // add the real item totals back in.
+  const totalActiveItems =
+    totalActiveCount
+    - videoAssetPreviewJobs.length
+    - albumSocialJobs.length
+    + groupedItemCount
 
   // Prune on each dismissal
   const dismissCompletedJob = useCallback(

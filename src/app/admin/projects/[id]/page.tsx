@@ -56,6 +56,7 @@ export default function ProjectPage() {
   const [shareUrl, setShareUrl] = useState('')
   const [companyName, setCompanyName] = useState('Studio')
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
+  const [albumSummary, setAlbumSummary] = useState<{ albumCount: number; photoCount: number }>({ albumCount: 0, photoCount: 0 })
   const [adminUser, setAdminUser] = useState<any>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [assignedUsers, setAssignedUsers] = useState<AssignableUser[]>([])
@@ -825,19 +826,27 @@ export default function ProjectPage() {
 
             {canAccessPhotoVideo && project.enableVideos !== false && (
               <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <h2 className="text-xl font-semibold flex items-center gap-2 min-w-0">
                     <span className={iconBadgeClassName}>
-	                    <Video className={iconBadgeIconClassName} />
-	                  </span>
-	                  Videos
-	                </h2>
+                      <Video className={iconBadgeIconClassName} />
+                    </span>
+                    <span>Videos</span>
+                    {(() => {
+                      const videoCount = new Set(videos.map((v: any) => v.name)).size
+                      return videoCount > 0 ? (
+                        <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                          {videoCount} {videoCount === 1 ? 'video' : 'videos'}
+                        </span>
+                      ) : null
+                    })()}
+                  </h2>
                   {videos.length > 0 && (
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
-                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 flex-shrink-0"
                       title={sortMode === 'status' ? 'Sort alphabetically' : 'Sort by status'}
                     >
                       <span>{sortMode === 'status' ? 'Status' : 'Alphabetical'}</span>
@@ -867,12 +876,18 @@ export default function ProjectPage() {
 
             {canAccessPhotoVideo && project.enablePhotos !== false && (
               <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <h2 className="text-xl font-semibold flex items-center gap-2 min-w-0">
                     <span className={iconBadgeClassName}>
                       <Images className={iconBadgeIconClassName} />
                     </span>
-                    Photos
+                    <span>Photos</span>
+                    {albumSummary.albumCount > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        {albumSummary.albumCount} {albumSummary.albumCount === 1 ? 'album' : 'albums'}
+                        {albumSummary.photoCount > 0 && ` · ${albumSummary.photoCount} ${albumSummary.photoCount === 1 ? 'photo' : 'photos'}`}
+                      </span>
+                    )}
                   </h2>
                 </div>
                 <AdminAlbumManager
@@ -880,6 +895,7 @@ export default function ProjectPage() {
                   projectStatus={project.status}
                   canDelete={canDeleteInternalFiles}
                   onProjectDataChanged={bumpProjectStorageRefresh}
+                  onSummaryChange={setAlbumSummary}
                 />
               </div>
             )}

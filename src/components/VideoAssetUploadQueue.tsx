@@ -4,7 +4,7 @@ import { useState, useRef } from 'react'
 import { Button } from './ui/button'
 import { Label } from './ui/label'
 import { Input } from './ui/input'
-import { Upload, Trash2 } from 'lucide-react'
+import { Upload } from 'lucide-react'
 import { useAssetUploadQueue } from '@/hooks/useAssetUploadQueue'
 import { VideoAssetUploadItem } from './VideoAssetUploadItem'
 import { validateAssetExtension, detectAssetCategory } from '@/lib/asset-validation'
@@ -21,7 +21,6 @@ export function VideoAssetUploadQueue({
   maxConcurrent = 3
 }: VideoAssetUploadQueueProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -33,25 +32,12 @@ export function VideoAssetUploadQueue({
     resumeUpload,
     cancelUpload,
     removeCompleted,
-    clearCompleted,
     retryUpload,
   } = useAssetUploadQueue({
     videoId,
     maxConcurrent,
     onUploadComplete,
   })
-
-  const handleFileSelect = (files: FileList | File[] | null) => {
-    if (!files || files.length === 0) {
-      setSelectedFiles([])
-      setError(null)
-      return
-    }
-
-    const fileArray = Array.from(files)
-    setSelectedFiles(fileArray)
-    setError(null)
-  }
 
   function validateAssetFile(file: File): { valid: boolean; error?: string } {
     if (file.size === 0) {
@@ -63,35 +49,25 @@ export function VideoAssetUploadQueue({
     return validateAssetExtension(file.name)
   }
 
-  const handleAddToQueue = () => {
-    if (selectedFiles.length === 0) return
+  // Selecting (or dropping) files adds them straight to the queue, which starts
+  // uploading immediately — no separate "add to queue" step. Category is
+  // auto-detected per file.
+  const handleFileSelect = (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return
 
-    let hasErrors = false
     const errors: string[] = []
 
-    // Validate and add all files to queue with auto-detected category per file
-    selectedFiles.forEach(file => {
+    Array.from(files).forEach((file) => {
       const validation = validateAssetFile(file)
       if (!validation.valid) {
-        hasErrors = true
         errors.push(`${file.name}: ${validation.error}`)
       } else {
-        // Auto-detect category for each file individually
         const fileCategory = detectAssetCategory(file.name)
         addToQueue(file, fileCategory || '')
       }
     })
 
-    if (hasErrors) {
-      setError(errors.join('\n'))
-      return
-    }
-
-    // Reset form
-    setSelectedFiles([])
-    setError(null)
-
-    // Reset file input
+    setError(errors.length > 0 ? errors.join('\n') : null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -163,71 +139,39 @@ export function VideoAssetUploadQueue({
               className="w-full"
             >
               <Upload className="w-4 h-4 mr-2" />
-              {selectedFiles.length > 0 ? 'Change Files' : 'Drag & Drop or Click to Choose'}
+              {queue.length > 0 ? 'Add More Files' : 'Drag & Drop or Click to Choose'}
             </Button>
           </div>
-          {selectedFiles.length > 0 && (
-            <p className="text-sm text-muted-foreground">
-              Selected: {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''} ({(selectedFiles.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024)).toFixed(2)} MB total)
-            </p>
-          )}
         </div>
-
-        {/* Add to Queue Button */}
-        {selectedFiles.length > 0 && (
-          <Button
-            type="button"
-            onClick={handleAddToQueue}
-            className="w-full"
-          >
-            <Upload className="w-4 h-4 mr-2" />
-            Add to Upload Queue
-          </Button>
-        )}
       </div>
 
       {/* Queue Statistics */}
       {queue.length > 0 && (
-        <div className="flex items-center justify-between p-3 rounded-md border bg-muted/50">
-          <div className="flex gap-4 text-sm">
-            {stats.uploading > 0 && (
-              <span className="font-medium text-primary">
-                {stats.uploading} uploading
-              </span>
-            )}
-            {stats.queued > 0 && (
-              <span className="text-muted-foreground">
-                {stats.queued} queued
-              </span>
-            )}
-            {stats.paused > 0 && (
-              <span className="text-warning">
-                {stats.paused} paused
-              </span>
-            )}
-            {stats.completed > 0 && (
-              <span className="text-success">
-                {stats.completed} completed
-              </span>
-            )}
-            {stats.error > 0 && (
-              <span className="text-destructive">
-                {stats.error} failed
-              </span>
-            )}
-          </div>
-
+        <div className="flex items-center gap-4 p-3 rounded-md border bg-muted/50 text-sm">
+          {stats.uploading > 0 && (
+            <span className="font-medium text-primary">
+              {stats.uploading} uploading
+            </span>
+          )}
+          {stats.queued > 0 && (
+            <span className="text-muted-foreground">
+              {stats.queued} queued
+            </span>
+          )}
+          {stats.paused > 0 && (
+            <span className="text-warning">
+              {stats.paused} paused
+            </span>
+          )}
           {stats.completed > 0 && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={clearCompleted}
-              className="text-xs"
-            >
-              <Trash2 className="w-3 h-3 mr-1" />
-              Clear Completed
-            </Button>
+            <span className="text-success">
+              {stats.completed} completed
+            </span>
+          )}
+          {stats.error > 0 && (
+            <span className="text-destructive">
+              {stats.error} failed
+            </span>
           )}
         </div>
       )}

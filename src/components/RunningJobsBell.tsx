@@ -3,9 +3,13 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import {
   Activity,
+  AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   FileArchive,
   Film,
+  Folder,
   FolderSync,
   ImageIcon,
   Loader2,
@@ -13,6 +17,7 @@ import {
   Play,
   Share2,
   Upload,
+  Wrench,
   X,
   XCircle,
 } from 'lucide-react'
@@ -94,6 +99,8 @@ type UnifiedJob = {
   status: JobStatus
   progress: number
   indeterminate: boolean
+  /** Number of discrete items this job represents (1 for most; the batch size for grouped preview/social jobs). Drives project roll-up progress. */
+  itemCount: number
   statusLine: string
   statusLineRight?: string
   error?: string
@@ -138,7 +145,138 @@ const KIND_LABEL: Record<JobKind, string> = {
 }
 
 // ---------------------------------------------------------------------------
-// JobRow — single component for every job type
+// CompactJobRow — slim single-line variant used inside expanded project cards
+// ---------------------------------------------------------------------------
+
+function CompactJobRow({
+  job,
+  onNavigate,
+}: {
+  job: UnifiedJob
+  onNavigate: (projectId: string) => void
+}) {
+  const Icon = KIND_ICON[job.kind]
+  const isActive = job.status === 'active'
+  const isQueued = job.status === 'queued'
+  const isDone = job.status === 'done'
+  const isFailed = job.status === 'failed'
+  const showBar = isActive && !job.indeterminate && job.progress > 0
+
+  // Right-hand state indicator.
+  const rightText =
+    isActive && job.statusLineRight ? job.statusLineRight
+    : isActive && !job.indeterminate && job.progress > 0 ? `${job.progress}%`
+    : isQueued ? 'queued'
+    : null
+
+  // Secondary "what it's doing" line. For active jobs that already surface their
+  // percent on the right, strip a trailing "· NN%" to avoid showing it twice.
+  const detailLine =
+    isFailed ? (job.error || job.statusLine)
+    : (isActive || isDone) && job.statusLine
+      ? rightText && job.statusLine.endsWith(`· ${rightText}`)
+        ? job.statusLine.slice(0, job.statusLine.lastIndexOf('·')).trim()
+        : job.statusLine
+      : null
+
+  return (
+    <div
+      className={cn(
+        'px-3 py-1.5 transition-colors',
+        job.projectId ? 'cursor-pointer hover:bg-accent/30' : '',
+      )}
+      onClick={() => { if (job.projectId) onNavigate(job.projectId) }}
+    >
+      <div className="flex items-center gap-1.5">
+        <span className="flex-shrink-0">
+          {isDone ? (
+            <CheckCircle2 className="w-3.5 h-3.5 text-success" />
+          ) : isFailed ? (
+            <XCircle className="w-3.5 h-3.5 text-destructive" />
+          ) : isActive ? (
+            <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
+          ) : (
+            <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+          )}
+        </span>
+        <span
+          className={cn(
+            'min-w-0 truncate text-[12px]',
+            isDone ? 'text-muted-foreground' : 'text-foreground',
+          )}
+        >
+          {job.label}
+        </span>
+        {job.sublabel ? (
+          <span className="flex-shrink-0 max-w-[35%] truncate text-[11px] text-muted-foreground/70">
+            {job.sublabel}
+          </span>
+        ) : null}
+        {(isActive || isQueued) ? (
+          <span className="flex-shrink-0 text-[9px] px-1 py-px rounded bg-muted text-muted-foreground font-medium uppercase tracking-wide">
+            {KIND_LABEL[job.kind]}
+          </span>
+        ) : null}
+        <span className="flex-1" />
+        {rightText ? (
+          <span
+            className={cn(
+              'flex-shrink-0 text-[11px] tabular-nums',
+              isQueued ? 'text-muted-foreground/60' : 'text-muted-foreground',
+            )}
+          >
+            {rightText}
+          </span>
+        ) : null}
+        <div className="flex-shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
+          {job.canClear && (
+            <button
+              type="button"
+              onClick={job.onClear}
+              className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+              title="Cancel"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+          {job.canDismiss && (
+            <button
+              type="button"
+              onClick={job.onDismiss}
+              className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+              title="Dismiss"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {detailLine ? (
+        <div
+          className={cn(
+            'pl-5 truncate text-[11px] leading-tight',
+            isFailed ? 'text-destructive' : isDone ? 'text-success/80' : 'text-muted-foreground',
+          )}
+        >
+          {detailLine}
+        </div>
+      ) : null}
+
+      {showBar && (
+        <div className="ml-5 mt-1 h-[2px] w-full overflow-hidden rounded-full bg-secondary">
+          <div
+            className="h-full rounded-full bg-primary/70 transition-all duration-700"
+            style={{ width: `${job.progress}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// JobRow — full-size variant used in standalone finished rows
 // ---------------------------------------------------------------------------
 
 function JobRow({
@@ -241,10 +379,7 @@ function JobRow({
           {isActive ? (
             <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
               <div
-                className={cn(
-                  'h-full rounded-full transition-all duration-700',
-                  isQueued ? 'bg-warning' : 'bg-primary',
-                )}
+                className="h-full rounded-full bg-primary transition-all duration-700"
                 style={{ width: barWidth }}
               />
               {job.indeterminate ? (
@@ -337,6 +472,7 @@ function normalizeUpload(
 
   return {
     key: `upload:${job.id}`,
+    itemCount: 1,
     kind: 'upload',
     projectId: job.projectId,
     projectName: '',
@@ -395,6 +531,7 @@ function normalizeProcessing(
 
   return {
     key: `${kind}:${job.id}`,
+    itemCount: 1,
     kind,
     projectId: job.projectId,
     projectName: job.projectName,
@@ -426,6 +563,7 @@ function normalizeAlbumZip(
 
   return {
     key: `zip:${job.id}`,
+    itemCount: 1,
     kind: 'zip',
     projectId: job.projectId,
     projectName: job.projectName,
@@ -460,6 +598,7 @@ function normalizeAlbumThumbnail(
 
   return {
     key: `thumbnail:${job.id}`,
+    itemCount: 1,
     kind: 'thumbnail',
     projectId: job.projectId,
     projectName: job.projectName,
@@ -498,6 +637,7 @@ function normalizeFolderRename(
 
   return {
     key: `rename:${job.id}`,
+    itemCount: 1,
     kind: 'rename',
     projectId: '',
     projectName: '',
@@ -525,6 +665,7 @@ function normalizeVideoAssetPreview(job: VideoAssetPreviewJob): UnifiedJob {
 
   return {
     key: `asset-preview:${job.projectId}`,
+    itemCount: job.totalCount,
     kind: 'asset-preview',
     projectId: job.projectId,
     projectName: job.projectName,
@@ -555,6 +696,7 @@ function normalizeAlbumSocial(job: AlbumSocialJob): UnifiedJob {
 
   return {
     key: `social:${job.albumId}`,
+    itemCount: job.totalCount,
     kind: 'social',
     projectId: job.projectId,
     projectName: job.projectName,
@@ -605,11 +747,15 @@ function normalizeCompletedServerJob(
     : job.type === 'albumSocial' ? 'social'
     : 'rename'
 
+  // Clean project name for grouping (falls back to the sublabel up to the first ' · ').
+  const cleanProjectName = job.projectName || job.sublabel.split(' · ')[0] || ''
+
   return {
     key: `done:${job.type}:${job.id}`,
+    itemCount: job.assets?.length ?? 1,
     kind,
     projectId: job.projectId,
-    projectName: job.sublabel,
+    projectName: cleanProjectName,
     label: job.label,
     detail: job.sublabel,
     status: isError ? 'failed' : 'done',
@@ -630,6 +776,324 @@ function normalizeCompletedServerJob(
       status: 'done' as const,
     })),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Grouping by project
+// ---------------------------------------------------------------------------
+
+/** Bucket key for jobs that don't belong to a project (e.g. client folder renames). */
+const MAINTENANCE_KEY = '__maintenance__'
+
+const KIND_NOUN: Record<JobKind, [singular: string, plural: string]> = {
+  'upload': ['upload', 'uploads'],
+  'transcode': ['transcode', 'transcodes'],
+  'asset-timeline': ['timeline', 'timelines'],
+  'upload-timeline': ['timeline', 'timelines'],
+  'zip': ['ZIP', 'ZIPs'],
+  'thumbnail': ['thumbnail', 'thumbnails'],
+  'rename': ['rename', 'renames'],
+  'asset-preview': ['preview', 'previews'],
+  'social': ['social copy', 'social copies'],
+}
+
+function kindChip(kind: JobKind, count: number): string {
+  const [singular, plural] = KIND_NOUN[kind]
+  return `${count} ${count === 1 ? singular : plural}`
+}
+
+type ProjectGroup = {
+  /** Bucket key — real projectId, or MAINTENANCE_KEY. */
+  key: string
+  /** Empty for the maintenance bucket; otherwise the navigable project id. */
+  projectId: string
+  name: string
+  isMaintenance: boolean
+  /** Active + queued jobs, active first. */
+  jobs: UnifiedJob[]
+  activeCount: number
+  queuedCount: number
+  hasActive: boolean
+  /** Item count of this project's recently-failed jobs (shown as a chip while still active). */
+  failedCount: number
+  /** Roll-up progress 0–100. */
+  progress: number
+  showBar: boolean
+  breakdown: { kind: JobKind; label: string }[]
+  /** Finished (done/failed) jobs for this project that completed while still active — shown inline within the expanded card. */
+  completedJobs: UnifiedJob[]
+}
+
+/**
+ * Group active + queued jobs into one entry per project. Progress rolls up as
+ * completed-items / total-items (with partial credit for in-flight jobs), using
+ * `finished` to know how many of the project's items have already completed.
+ */
+function buildProjectGroups(activeQueued: UnifiedJob[], finished: UnifiedJob[]): ProjectGroup[] {
+  const doneItemsByProject = new Map<string, number>()
+  const failedItemsByProject = new Map<string, number>()
+  const completedJobsByProject = new Map<string, UnifiedJob[]>()
+  for (const j of finished) {
+    const pid = j.projectId || MAINTENANCE_KEY
+    if (j.status === 'done') doneItemsByProject.set(pid, (doneItemsByProject.get(pid) ?? 0) + j.itemCount)
+    else if (j.status === 'failed') failedItemsByProject.set(pid, (failedItemsByProject.get(pid) ?? 0) + j.itemCount)
+    const arr = completedJobsByProject.get(pid)
+    if (arr) arr.push(j)
+    else completedJobsByProject.set(pid, [j])
+  }
+
+  const byProject = new Map<string, UnifiedJob[]>()
+  for (const j of activeQueued) {
+    const pid = j.projectId || MAINTENANCE_KEY
+    const arr = byProject.get(pid)
+    if (arr) arr.push(j)
+    else byProject.set(pid, [j])
+  }
+
+  const groups: ProjectGroup[] = []
+  for (const [pid, jobs] of byProject) {
+    jobs.sort((a, b) => (a.status === b.status ? 0 : a.status === 'active' ? -1 : 1))
+
+    const activeCount = jobs.filter((j) => j.status === 'active').length
+    const queuedCount = jobs.length - activeCount
+    const hasActive = activeCount > 0
+    const isMaintenance = pid === MAINTENANCE_KEY
+
+    const remainingItems = jobs.reduce((sum, j) => sum + j.itemCount, 0)
+    const activeProgressItems = jobs.reduce(
+      (sum, j) =>
+        sum + (j.status === 'active' ? (j.itemCount * Math.min(Math.max(j.progress, 0), 100)) / 100 : 0),
+      0,
+    )
+    const doneItems = doneItemsByProject.get(pid) ?? 0
+    const totalItems = doneItems + remainingItems
+    const progress = totalItems > 0 ? Math.round(((doneItems + activeProgressItems) / totalItems) * 100) : 0
+
+    const kindCounts = new Map<JobKind, number>()
+    for (const j of jobs) kindCounts.set(j.kind, (kindCounts.get(j.kind) ?? 0) + j.itemCount)
+
+    const named = jobs.find((j) => j.projectName)?.projectName
+
+    // Completed jobs for this project — newest first, only for projects that have active/queued work.
+    const completedJobs = (completedJobsByProject.get(pid) ?? []).slice().sort((a, b) => b.completedAt - a.completedAt)
+
+    groups.push({
+      key: pid,
+      projectId: isMaintenance ? '' : pid,
+      name: isMaintenance ? 'Maintenance' : named || jobs[0].label || 'Project',
+      isMaintenance,
+      jobs,
+      activeCount,
+      queuedCount,
+      hasActive,
+      failedCount: failedItemsByProject.get(pid) ?? 0,
+      progress,
+      showBar: hasActive || doneItems > 0,
+      breakdown: [...kindCounts.entries()].map(([kind, count]) => ({ kind, label: kindChip(kind, count) })),
+      completedJobs,
+    })
+  }
+
+  // Maintenance last; otherwise alphabetical for stable ordering.
+  groups.sort((a, b) => (a.isMaintenance !== b.isMaintenance ? (a.isMaintenance ? 1 : -1) : a.name.localeCompare(b.name)))
+  return groups
+}
+
+type FinishedGroup = {
+  key: string
+  projectId: string
+  name: string
+  isMaintenance: boolean
+  /** Finished jobs (done + failed) for this project, newest first. */
+  children: UnifiedJob[]
+  completedAt: number
+}
+
+/** Consolidate finished jobs into one entry per project (newest first). */
+function buildFinishedGroups(finished: UnifiedJob[]): FinishedGroup[] {
+  const byProject = new Map<string, UnifiedJob[]>()
+  for (const j of finished) {
+    const pid = j.projectId || MAINTENANCE_KEY
+    const arr = byProject.get(pid)
+    if (arr) arr.push(j)
+    else byProject.set(pid, [j])
+  }
+
+  const groups: FinishedGroup[] = []
+  for (const [pid, children] of byProject) {
+    children.sort((a, b) => b.completedAt - a.completedAt)
+    const isMaintenance = pid === MAINTENANCE_KEY
+    const named = children.find((c) => c.projectName)?.projectName
+    groups.push({
+      key: pid,
+      projectId: isMaintenance ? '' : pid,
+      name: isMaintenance ? 'Maintenance' : named || children[0].label || 'Project',
+      isMaintenance,
+      children,
+      completedAt: Math.max(...children.map((c) => c.completedAt)),
+    })
+  }
+
+  groups.sort((a, b) => b.completedAt - a.completedAt)
+  return groups
+}
+
+// ---------------------------------------------------------------------------
+// Project group card (active / queued) — collapsible roll-up over its jobs
+// ---------------------------------------------------------------------------
+
+function ProjectGroupCard({
+  group,
+  expanded,
+  onToggle,
+  onNavigate,
+}: {
+  group: ProjectGroup
+  expanded: boolean
+  onToggle: () => void
+  onNavigate: (projectId: string) => void
+}) {
+  const Chevron = expanded ? ChevronDown : ChevronRight
+  const FolderIcon = group.isMaintenance ? Wrench : Folder
+
+  return (
+    <div>
+      <div className="px-4 py-3 cursor-pointer hover:bg-accent/40 transition-colors" onClick={onToggle}>
+        <div className="flex items-center gap-2.5">
+          <Chevron className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+          <FolderIcon className={cn('w-4 h-4 flex-shrink-0', group.hasActive ? 'text-primary' : 'text-muted-foreground')} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-foreground">{group.name}</div>
+            <div className="text-[11px] text-muted-foreground truncate">
+              {[
+                group.activeCount > 0 ? `${group.activeCount} active` : null,
+                group.queuedCount > 0 ? `${group.queuedCount} queued` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+          </div>
+          {group.failedCount > 0 ? (
+            <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
+              <AlertTriangle className="w-3 h-3" />
+              {group.failedCount}
+            </span>
+          ) : null}
+          <span className="flex-shrink-0 text-xs font-medium text-muted-foreground">
+            {group.showBar ? `${group.progress}%` : 'Queued'}
+          </span>
+        </div>
+
+        {group.showBar ? (
+          <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary mt-2.5">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-700"
+              style={{ width: `${Math.max(group.progress, group.hasActive ? 2 : 0)}%` }}
+            />
+          </div>
+        ) : null}
+
+        {!expanded && group.breakdown.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {group.breakdown.map((b) => (
+              <span
+                key={b.kind}
+                className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground font-medium"
+              >
+                {b.label}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {expanded ? (
+        <div className="border-t border-border/50 bg-muted/10 divide-y divide-border/50">
+          {group.jobs.map((job) => (
+            <CompactJobRow key={job.key} job={job} onNavigate={onNavigate} />
+          ))}
+          {group.completedJobs.length > 0 && (
+            <>
+              <div className="px-3 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/60 font-medium bg-muted/20 select-none">
+                Completed
+              </div>
+              {group.completedJobs.map((job) => (
+                <CompactJobRow key={job.key} job={job} onNavigate={onNavigate} />
+              ))}
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Consolidated finished card — one entry per project, expandable to children
+// ---------------------------------------------------------------------------
+
+function ConsolidatedFinishedRow({
+  group,
+  expanded,
+  onToggle,
+  onNavigate,
+}: {
+  group: FinishedGroup
+  expanded: boolean
+  onToggle: () => void
+  onNavigate: (projectId: string) => void
+}) {
+  const doneCount = group.children.filter((c) => c.status === 'done').length
+  const failedCount = group.children.length - doneCount
+  const Chevron = expanded ? ChevronDown : ChevronRight
+  const allFailed = doneCount === 0 && failedCount > 0
+
+  const dismissAll = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    for (const child of group.children) child.onDismiss?.()
+  }
+
+  return (
+    <div>
+      <div className="px-4 py-3 cursor-pointer hover:bg-accent/40 transition-colors" onClick={onToggle}>
+        <div className="flex items-center gap-2.5">
+          <Chevron className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+          {allFailed ? (
+            <XCircle className="w-4 h-4 flex-shrink-0 text-destructive" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-success" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-foreground">{group.name}</div>
+            <div className="text-[11px] text-muted-foreground truncate">
+              {[
+                doneCount > 0 ? `${doneCount} complete` : null,
+                failedCount > 0 ? `${failedCount} failed` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={dismissAll}
+            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+            title="Dismiss all"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {expanded ? (
+        <div className="border-t border-border/50 bg-muted/10 divide-y divide-border/50">
+          {group.children.map((job) => (
+            <CompactJobRow key={job.key} job={job} onNavigate={onNavigate} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -751,12 +1215,8 @@ export default function RunningJobsBell() {
     cancelUpload, pauseUpload, resumeUpload, dismissUpload, dismissCompletedJob, handleClearJob,
   ])
 
-  const activeJobs = useMemo(
-    () => allJobs.filter((j) => j.status === 'active'),
-    [allJobs],
-  )
-  const queuedJobs = useMemo(
-    () => allJobs.filter((j) => j.status === 'queued'),
+  const activeAndQueued = useMemo(
+    () => allJobs.filter((j) => j.status === 'active' || j.status === 'queued'),
     [allJobs],
   )
   const finishedJobs = useMemo(
@@ -766,7 +1226,35 @@ export default function RunningJobsBell() {
     [allJobs],
   )
 
-  const hasAnything = allJobs.length > 0
+  // Group active/queued work into one card per project.
+  const projectGroups = useMemo(
+    () => buildProjectGroups(activeAndQueued, finishedJobs),
+    [activeAndQueued, finishedJobs],
+  )
+  const inProgressGroups = useMemo(() => projectGroups.filter((g) => g.hasActive), [projectGroups])
+  const queuedGroups = useMemo(() => projectGroups.filter((g) => !g.hasActive), [projectGroups])
+
+  // A project lives in exactly one section. Finished entries surface only once the
+  // project has no active/queued work left (avoids the same project in two sections,
+  // and lets re-runs reuse the same keys without a stale "complete" lingering).
+  const activeProjectKeys = useMemo(
+    () => new Set(projectGroups.map((g) => g.key)),
+    [projectGroups],
+  )
+  const finishedGroups = useMemo(
+    () => buildFinishedGroups(finishedJobs.filter((j) => !activeProjectKeys.has(j.projectId || MAINTENANCE_KEY))),
+    [finishedJobs, activeProjectKeys],
+  )
+
+  // Expand/collapse overrides keyed by card key; absent = use the default rule.
+  const [expandedOverrides, setExpandedOverrides] = useState<Record<string, boolean>>({})
+  const isExpanded = (key: string, fallback: boolean) =>
+    key in expandedOverrides ? expandedOverrides[key] : fallback
+  const toggleExpanded = useCallback((key: string, fallback: boolean) => {
+    setExpandedOverrides((prev) => ({ ...prev, [key]: !(key in prev ? prev[key] : fallback) }))
+  }, [])
+
+  const hasAnything = activeAndQueued.length > 0 || finishedGroups.length > 0
 
   // -----------------------------------------------------------------------
 
@@ -791,15 +1279,16 @@ export default function RunningJobsBell() {
           className="relative p-2 w-9 sm:w-10 data-[state=open]:bg-accent data-[state=open]:text-accent-foreground data-[state=open]:border-primary/50"
         >
           <Activity className="h-4 w-4 sm:h-5 sm:w-5" />
-          {totalActiveItems > 0 ? (
-            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-[18px] text-center">
-              {totalActiveItems > 99 ? '99+' : totalActiveItems}
-            </span>
-          ) : totalActiveCount > 0 ? (
-            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-[18px] text-center">
-              {totalActiveCount > 99 ? '99+' : totalActiveCount}
-            </span>
-          ) : null}
+          {(() => {
+            // Prefer the per-item count (which expands grouped jobs); fall back to
+            // the job count. They only differ when grouped jobs have >1 item.
+            const badgeCount = Math.max(totalActiveItems, totalActiveCount)
+            return badgeCount > 0 ? (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] leading-[18px] text-center">
+                {badgeCount > 99 ? '99+' : badgeCount}
+              </span>
+            ) : null
+          })()}
         </Button>
       </DropdownMenuTrigger>
 
@@ -840,35 +1329,71 @@ export default function RunningJobsBell() {
               <div className="p-6 text-center text-sm text-muted-foreground">No jobs running.</div>
             ) : (
               <div>
-                {activeJobs.length > 0 && (
+                {inProgressGroups.length > 0 && (
                   <div>
-                    <SectionHeader label="In Progress" count={activeJobs.length} />
+                    <SectionHeader label="In Progress" count={inProgressGroups.length} />
                     <div className="divide-y divide-border">
-                      {activeJobs.map((job) => (
-                        <JobRow key={job.key} job={job} onNavigate={handleNavigate} />
-                      ))}
+                      {inProgressGroups.map((group) => {
+                        const cardKey = `grp:${group.key}`
+                        const fallback = group.jobs.length <= 3
+                        return (
+                          <ProjectGroupCard
+                            key={cardKey}
+                            group={group}
+                            expanded={isExpanded(cardKey, fallback)}
+                            onToggle={() => toggleExpanded(cardKey, fallback)}
+                            onNavigate={handleNavigate}
+                          />
+                        )
+                      })}
                     </div>
                   </div>
                 )}
 
-                {queuedJobs.length > 0 && (
+                {queuedGroups.length > 0 && (
                   <div>
-                    <SectionHeader label="Queued" count={queuedJobs.length} />
+                    <SectionHeader label="Queued" count={queuedGroups.length} />
                     <div className="divide-y divide-border">
-                      {queuedJobs.map((job) => (
-                        <JobRow key={job.key} job={job} onNavigate={handleNavigate} />
-                      ))}
+                      {queuedGroups.map((group) => {
+                        const cardKey = `grp:${group.key}`
+                        const fallback = group.jobs.length <= 3
+                        return (
+                          <ProjectGroupCard
+                            key={cardKey}
+                            group={group}
+                            expanded={isExpanded(cardKey, fallback)}
+                            onToggle={() => toggleExpanded(cardKey, fallback)}
+                            onNavigate={handleNavigate}
+                          />
+                        )
+                      })}
                     </div>
                   </div>
                 )}
 
-                {finishedJobs.length > 0 && (
+                {finishedGroups.length > 0 && (
                   <div>
-                    <SectionHeader label="Recently Finished" count={finishedJobs.length} />
+                    <SectionHeader label="Recently Finished" count={finishedGroups.length} />
                     <div className="divide-y divide-border">
-                      {finishedJobs.map((job) => (
-                        <JobRow key={job.key} job={job} onNavigate={handleNavigate} />
-                      ))}
+                      {finishedGroups.map((group) => {
+                        // A lone completion renders as its own row; multiples consolidate.
+                        if (group.children.length === 1) {
+                          return (
+                            <JobRow key={group.children[0].key} job={group.children[0]} onNavigate={handleNavigate} />
+                          )
+                        }
+                        const cardKey = `fin:${group.key}`
+                        const fallback = group.children.length <= 3 || group.children.some((c) => c.status === 'failed')
+                        return (
+                          <ConsolidatedFinishedRow
+                            key={cardKey}
+                            group={group}
+                            expanded={isExpanded(cardKey, fallback)}
+                            onToggle={() => toggleExpanded(cardKey, fallback)}
+                            onNavigate={handleNavigate}
+                          />
+                        )
+                      })}
                     </div>
                   </div>
                 )}

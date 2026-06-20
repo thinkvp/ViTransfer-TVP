@@ -169,6 +169,25 @@ export default function VideoHoverPreview({
     }
   }, [vttUrl, cues, vttError])
 
+  // Preload all distinct sprite sheets once cues are parsed so moving across
+  // sprite-file boundaries doesn't flash a black frame while the next sheet
+  // downloads. URL must match the one used for display so the cache is shared.
+  useEffect(() => {
+    if (!cues || cues.length === 0) return
+    const seen = new Set<string>()
+    const images: HTMLImageElement[] = []
+    for (const cue of cues) {
+      if (seen.has(cue.spriteFile)) continue
+      seen.add(cue.spriteFile)
+      const img = new Image()
+      img.src = `${spriteBaseUrl}?file=${encodeURIComponent(cue.spriteFile)}`
+      images.push(img)
+    }
+    return () => {
+      images.length = 0
+    }
+  }, [cues, spriteBaseUrl])
+
   const handleMouseEnter = useCallback(() => {
     void loadVtt()
   }, [loadVtt])

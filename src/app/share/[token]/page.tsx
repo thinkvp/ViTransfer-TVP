@@ -129,6 +129,10 @@ export default function SharePage() {
   const lastVideoTokenRefreshAtRef = useRef(0)
   const uploadAccessUrlCacheRef = useRef<Map<string, UploadAccessUrlCacheEntry>>(new Map())
   const uploadAccessUrlRequestCacheRef = useRef<Map<string, Promise<UploadAccessUrlCacheEntry | null>>>(new Map())
+  // Pending upload-access requests coalesced into a single batch POST. Keyed by cacheKey;
+  // each entry carries the fileId to request and the resolver for its in-flight promise.
+  const uploadAccessBatchRef = useRef<Map<string, { fileId: string; resolve: (value: UploadAccessUrlCacheEntry | null) => void }>>(new Map())
+  const uploadAccessBatchTimerRef = useRef<number | null>(null)
   const logoSrc = '/api/branding/logo'
 
   // Centralised session-expiry handler — clears all caches and resets auth state.
@@ -140,6 +144,12 @@ export default function SharePage() {
     sidebarThumbnailRequestCacheRef.current.clear()
     uploadAccessUrlCacheRef.current.clear()
     uploadAccessUrlRequestCacheRef.current.clear()
+    if (uploadAccessBatchTimerRef.current != null) {
+      window.clearTimeout(uploadAccessBatchTimerRef.current)
+      uploadAccessBatchTimerRef.current = null
+    }
+    uploadAccessBatchRef.current.forEach((item) => item.resolve(null))
+    uploadAccessBatchRef.current.clear()
     lastFilesRefreshAtRef.current = 0
     filesRefreshInFlightRef.current = false
     lastVideoTokenRefreshAtRef.current = 0
@@ -957,6 +967,79 @@ export default function SharePage() {
     return data.token || ''
   }, [token, shareToken, handleSessionExpired])
 
+  // Fire the queued upload-access requests as one (chunked) batch POST and fan the
+  // results back out to each waiting caller. Replaces the previous one-POST-per-file
+  // pattern that the visible-tile observer triggered for every file in a folder.
+  const flushUploadAccessBatch = useCallback(async () => {
+    uploadAccessBatchTimerRef.current = null
+    const items = Array.from(uploadAccessBatchRef.current.entries()) // [cacheKey, { fileId, resolve }]
+    uploadAccessBatchRef.current.clear()
+    if (items.length === 0) return
+
+    const buildEntry = (data: any): UploadAccessUrlCacheEntry => ({
+      downloadUrl: typeof data?.downloadUrl === 'string'
+        ? data.downloadUrl
+        : (typeof data?.url === 'string' ? data.url : null),
+      playbackUrl: typeof data?.playbackUrl === 'string' && data.playbackUrl ? data.playbackUrl : null,
+      previewUrl: typeof data?.previewUrl === 'string' && data.previewUrl ? data.previewUrl : null,
+      previewStatus: typeof data?.previewStatus === 'string' ? data.previewStatus : null,
+      expiresAt: Date.now() + UPLOAD_ACCESS_URL_CACHE_TTL_MS,
+    })
+
+    const uniqueFileIds = Array.from(new Set(items.map(([, item]) => item.fileId)))
+    const CHUNK = 100
+    const chunks: string[][] = []
+    for (let i = 0; i < uniqueFileIds.length; i += CHUNK) {
+      chunks.push(uniqueFileIds.slice(i, i + CHUNK))
+    }
+
+    const merged: Record<string, any> = {}
+    let authFailed = false
+
+    await Promise.all(chunks.map(async (chunkIds) => {
+      try {
+        const url = `/api/share/${token}/uploads/download-tokens`
+        const init: RequestInit = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(!isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : {}),
+          },
+          body: JSON.stringify({ fileIds: chunkIds }),
+        }
+        const response = isAdminSession ? await apiFetch(url, init) : await fetch(url, init)
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            authFailed = true
+          }
+          return
+        }
+        const data = await response.json().catch(() => ({}))
+        const results = (data && typeof (data as any).results === 'object' && (data as any).results)
+          ? (data as any).results
+          : {}
+        Object.assign(merged, results)
+      } catch {
+        // Leave this chunk's files out of `merged` → they resolve null and can retry.
+      }
+    }))
+
+    if (authFailed) requestFilesRefresh(true)
+
+    for (const [cacheKey, item] of items) {
+      uploadAccessUrlRequestCacheRef.current.delete(cacheKey)
+      const raw = merged[item.fileId]
+      if (!raw || typeof raw !== 'object') {
+        // File missing from response (deleted / not found / chunk error) — don't cache.
+        item.resolve(null)
+        continue
+      }
+      const entry = buildEntry(raw)
+      uploadAccessUrlCacheRef.current.set(cacheKey, entry)
+      item.resolve(entry)
+    }
+  }, [isAdminSession, requestFilesRefresh, shareToken, token])
+
   const getUploadAccessUrl = useCallback(async (fileId: string): Promise<UploadAccessUrlCacheEntry | null> => {
     const normalizedFileId = String(fileId || '').trim()
     if (!normalizedFileId || normalizedFileId.startsWith('pending-')) return null
@@ -975,75 +1058,31 @@ export default function SharePage() {
       return inFlight
     }
 
-    const request = (async () => {
-      try {
-        const url = `/api/share/${token}/uploads/download-token`
-        const response = isAdminSession
-          ? await apiFetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ fileId: normalizedFileId }),
-            })
-          : shareToken
-            ? await fetch(url, {
-                method: 'POST',
-                headers: {
-                  Authorization: `Bearer ${shareToken}`,
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ fileId: normalizedFileId }),
-              })
-            : await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fileId: normalizedFileId }),
-              })
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403 || response.status === 404) {
-            requestFilesRefresh(true)
-          }
-          return null
-        }
-
-        const data = await response.json().catch(() => ({}))
-        const downloadUrl = typeof (data as any)?.downloadUrl === 'string'
-          ? String((data as any).downloadUrl)
-          : (typeof (data as any)?.url === 'string' ? String((data as any).url) : null)
-        const playbackUrl = typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl
-          ? String((data as any).playbackUrl)
-          : null
-        const previewUrl = typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl
-          ? String((data as any).previewUrl)
-          : null
-        const previewStatus = typeof (data as any)?.previewStatus === 'string'
-          ? String((data as any).previewStatus)
-          : null
-
-        const entry: UploadAccessUrlCacheEntry = {
-          downloadUrl,
-          playbackUrl,
-          previewUrl,
-          previewStatus,
-          expiresAt: now + UPLOAD_ACCESS_URL_CACHE_TTL_MS,
-        }
-
-        uploadAccessUrlCacheRef.current.set(cacheKey, entry)
-        return entry
-      } catch {
-        return null
-      } finally {
-        uploadAccessUrlRequestCacheRef.current.delete(cacheKey)
-      }
-    })()
-
+    // Queue this file for the next batch instead of firing its own request. A short
+    // timer coalesces the burst of cache-miss calls the visible-tile observer makes.
+    const request = new Promise<UploadAccessUrlCacheEntry | null>((resolve) => {
+      uploadAccessBatchRef.current.set(cacheKey, { fileId: normalizedFileId, resolve })
+    })
     uploadAccessUrlRequestCacheRef.current.set(cacheKey, request)
+
+    if (uploadAccessBatchTimerRef.current == null) {
+      uploadAccessBatchTimerRef.current = window.setTimeout(() => {
+        void flushUploadAccessBatch()
+      }, 16)
+    }
+
     return request
-  }, [isAdminSession, requestFilesRefresh, shareToken, token])
+  }, [flushUploadAccessBatch, isAdminSession, shareToken, token])
 
   useEffect(() => {
     uploadAccessUrlCacheRef.current.clear()
     uploadAccessUrlRequestCacheRef.current.clear()
+    if (uploadAccessBatchTimerRef.current != null) {
+      window.clearTimeout(uploadAccessBatchTimerRef.current)
+      uploadAccessBatchTimerRef.current = null
+    }
+    uploadAccessBatchRef.current.forEach((item) => item.resolve(null))
+    uploadAccessBatchRef.current.clear()
   }, [shareToken, isAdminSession, token])
 
   const resolveDownloadTarget = useCallback(async (file: DownloadableFile, signal?: AbortSignal): Promise<DownloadQueueItem | null> => {
@@ -2006,7 +2045,12 @@ export default function SharePage() {
               streamToken1080p = token1080
             }
 
-            let thumbnailUrl = sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null
+            // Prefer the thumbnail URL minted into the share payload (no extra round-trip).
+            // Fall back to the per-session cache, then to an on-demand token fetch (e.g. for
+            // videos whose thumbnail finished processing after the payload was built).
+            let thumbnailUrl = (typeof video.thumbnailUrl === 'string' && video.thumbnailUrl)
+              ? video.thumbnailUrl
+              : (sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null)
             if (!thumbnailUrl && video.hasThumbnail) {
               const thumbToken = await fetchVideoToken(video.id, 'thumbnail')
               if (thumbToken) {

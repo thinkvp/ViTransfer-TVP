@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
 import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X, RotateCw, Loader2 } from 'lucide-react'
@@ -77,12 +77,59 @@ export default function AdminVideoManager({
 
   // Reprocess state per video group
   const [reprocessingGroups, setReprocessingGroups] = useState<Set<string>>(new Set())
-  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null)
+
+  // Poster thumbnails for the latest version of each group. Tokens are minted in one
+  // batch request and served via /api/content/<token>; we cache per-video so list
+  // refreshes don't re-request, and re-request on image error (token expiry).
+  const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
+  const [thumbUrlByVideoId, setThumbUrlByVideoId] = useState<Record<string, string>>({})
+  const thumbRequestedRef = useRef<Set<string>>(new Set())
 
   // Notify parent when component mounts with first video
   useEffect(() => {
     // No auto-expansion on mount; admin will expand explicitly
   }, [])
+
+  // Mint poster-thumbnail tokens for the latest READY version of each video group.
+  useEffect(() => {
+    const latestPerGroup = Object.values(videoGroups)
+      .map((vs) => vs.slice().sort((a, b) => b.version - a.version)[0])
+      .filter((v) => v && v.status === 'READY' && v.thumbnailPath && !thumbRequestedRef.current.has(v.id))
+
+    if (latestPerGroup.length === 0) return
+
+    const items = latestPerGroup.map((v) => ({ videoId: v.id, quality: 'thumbnail' }))
+    items.forEach((it) => thumbRequestedRef.current.add(it.videoId))
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiPost<{ results?: Record<string, string> }>('/api/admin/video-token/batch', {
+          projectId,
+          sessionId: sessionIdRef.current,
+          items,
+        })
+        if (cancelled) return
+        const results = res?.results || {}
+        const next: Record<string, string> = {}
+        for (const [pairKey, token] of Object.entries(results)) {
+          const videoId = pairKey.split(':')[0]
+          if (typeof token === 'string' && token) next[videoId] = `/api/content/${token}`
+        }
+        if (Object.keys(next).length > 0) {
+          setThumbUrlByVideoId((prev) => ({ ...prev, ...next }))
+        }
+      } catch {
+        // Allow a later retry for these videos.
+        items.forEach((it) => thumbRequestedRef.current.delete(it.videoId))
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videos, projectId])
 
   const toggleGroup = (name: string) => {
     const wasExpanded = expandedGroup === name
@@ -183,7 +230,13 @@ export default function AdminVideoManager({
         const hasFailed = groupVideos.some((v) => v?.status === 'ERROR')
 
         return (
-          <Card key={groupName} className="overflow-hidden">
+          <Card
+            key={groupName}
+            className={cn(
+              'overflow-hidden transition-shadow hover:shadow-sm',
+              hasApprovedVideos && 'border-l-2 border-l-success'
+            )}
+          >
             <CardHeader
               className={cn(
                 'cursor-pointer hover:bg-accent/50 transition-colors',
@@ -194,16 +247,21 @@ export default function AdminVideoManager({
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {(() => {
                   const isReprocessing = reprocessingGroups.has(groupName)
-                  const isHovered = hoveredGroup === groupName
                   const canReprocess = projectStatus !== 'APPROVED' && projectStatus !== 'CLOSED'
                   const hasError = hasFailed
                   const hasBusy = hasUploading || hasProcessing || hasQueued
-                  // Color: red for error, orange for busy, primary for healthy
+                  // Status accent: red for error, orange for busy, neutral border when healthy.
+                  const ringColor = hasError
+                    ? 'ring-destructive/60'
+                    : hasBusy
+                    ? 'ring-orange-500/60'
+                    : 'ring-border'
                   const iconColor = hasError
                     ? 'text-destructive'
                     : hasBusy
                     ? 'text-orange-500'
                     : 'text-primary'
+                  const thumbUrl = thumbUrlByVideoId[latestVideo.id]
 
                   const handleReprocess = async (e: React.MouseEvent) => {
                     e.stopPropagation()
@@ -225,44 +283,51 @@ export default function AdminVideoManager({
                     }
                   }
 
-                  if (isReprocessing) {
-                    return (
-                      <span title="Reprocessing…" className="flex-shrink-0">
-                        <Loader2
-                          className="w-5 h-5 text-primary animate-spin"
-                        />
-                      </span>
-                    )
-                  }
-
-                  if (isHovered && canReprocess) {
-                    return (
-                      <span
-                        title="Reprocess previews"
-                        className="flex-shrink-0"
-                        onMouseEnter={() => setHoveredGroup(groupName)}
-                        onMouseLeave={() => setHoveredGroup(null)}
-                      >
-                        <RotateCw
-                          className={`w-5 h-5 cursor-pointer ${iconColor} hover:scale-110 transition-transform`}
-                          onClick={handleReprocess}
-                        />
-                      </span>
-                    )
-                  }
-
                   return (
-                    <span
-                      title={canReprocess ? 'Reprocess previews' : undefined}
-                      className="flex-shrink-0"
-                      onMouseEnter={() => setHoveredGroup(groupName)}
-                      onMouseLeave={() => setHoveredGroup(null)}
+                    <div
+                      className={cn(
+                        'group/thumb relative flex-shrink-0 w-20 h-12 sm:w-24 sm:h-14 rounded-md overflow-hidden bg-muted ring-1',
+                        ringColor
+                      )}
                     >
-                      <Video
-                        className={`w-5 h-5 ${iconColor} ${canReprocess ? 'cursor-pointer' : ''}`}
-                        onClick={canReprocess ? handleReprocess : undefined}
-                      />
-                    </span>
+                      {/* eslint-disable @next/next/no-img-element */}
+                      {thumbUrl ? (
+                        <img
+                          src={thumbUrl}
+                          alt={groupName}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          onError={() => {
+                            thumbRequestedRef.current.delete(latestVideo.id)
+                            setThumbUrlByVideoId((prev) => {
+                              const next = { ...prev }
+                              delete next[latestVideo.id]
+                              return next
+                            })
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Video className={`w-5 h-5 ${iconColor}`} />
+                        </div>
+                      )}
+                      {/* eslint-enable @next/next/no-img-element */}
+
+                      {isReprocessing ? (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                          <Loader2 className="w-5 h-5 text-white animate-spin" />
+                        </div>
+                      ) : canReprocess ? (
+                        <button
+                          type="button"
+                          title="Reprocess previews"
+                          onClick={handleReprocess}
+                          className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-all hover:bg-black/45 hover:opacity-100 focus-visible:bg-black/45 focus-visible:opacity-100"
+                        >
+                          <RotateCw className="w-5 h-5" />
+                        </button>
+                      ) : null}
+                    </div>
                   )
                 })()}
                 <div className="flex-1 min-w-0">
@@ -347,7 +412,7 @@ export default function AdminVideoManager({
             </CardHeader>
 
             {(isExpanded || showNewVersionForGroup === groupName) && (
-              <CardContent className={cn("border-t border-border pt-0 space-y-4", !isExpanded && "hidden")}>
+              <CardContent className={cn("border-t border-border pt-0 space-y-4", isExpanded ? "animate-in fade-in slide-in-from-top-1 duration-200" : "hidden")}>
                 {/* Upload new version for this video */}
                 {projectStatus !== 'APPROVED' && (
                   <div className="mt-4">
@@ -408,6 +473,22 @@ export default function AdminVideoManager({
           </Card>
         )
       })}
+
+      {!hasVideos && (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+            <span className="rounded-full bg-muted p-3">
+              <Video className="w-6 h-6 text-muted-foreground" />
+            </span>
+            <p className="text-sm font-medium">No videos yet</p>
+            <p className="text-sm text-muted-foreground">
+              {projectStatus === 'APPROVED'
+                ? 'This project is approved.'
+                : 'Add a video to start collecting feedback.'}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Add new video button */}
       {projectStatus !== 'APPROVED' && (

@@ -9,6 +9,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
+import { generateVideoAccessToken } from '@/lib/video-access'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -114,11 +115,47 @@ export async function GET(
     })
     const currentThumbnailPath = thumbnailRecord?.storagePath ?? null
 
+    // Resolve still-image preview availability so the asset list can render thumbnails.
+    // Mirrors the gating in the asset download-token route: image/video assets with a
+    // READY generated preview get a tokenised `assetPreview=1` URL served by the content route.
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif']
+    const videoExtensions = ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'mxf']
+    const previewImageStored = assetIds.length > 0
+      ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['PREVIEW_IMAGE'], select: { entityId: true } })
+      : []
+    const hasPreviewImage = new Set(previewImageStored.map((s) => s.entityId))
+
+    // 2-hour TTL matches the download-token route so thumbnails outlive a normal session window.
+    const DOWNLOAD_TOKEN_TTL = 2 * 60 * 60
+    const sessionId = accessCheck.shareTokenSessionId
+      || (accessCheck.isAdmin ? `admin:${Date.now()}` : `guest:${Date.now()}`)
+
+    const thumbnailUrlByAssetId = new Map<string, string>()
+    await Promise.all(
+      assets.map(async (asset) => {
+        const ft = String(asset.fileType || '').toLowerCase()
+        const ext = asset.fileName.includes('.')
+          ? asset.fileName.slice(asset.fileName.lastIndexOf('.') + 1).toLowerCase()
+          : ''
+        const isImage = ft.startsWith('image/') || imageExtensions.includes(ext)
+        const isVideo = ft.startsWith('video/') || videoExtensions.includes(ext)
+        const hasReadyPreview = asset.previewStatus === 'READY' && (isVideo || hasPreviewImage.has(asset.id))
+        if (!((isImage || isVideo) && hasReadyPreview)) return
+        try {
+          const token = await generateVideoAccessToken(videoId, project.id, 'asset-download', request, sessionId, DOWNLOAD_TOKEN_TTL)
+          thumbnailUrlByAssetId.set(asset.id, `/api/content/${token}?assetId=${asset.id}&assetPreview=1`)
+        } catch {
+          // Best-effort; the UI falls back to the file-type icon.
+        }
+      })
+    )
+
     // Convert to serializable format
     const serializedAssets = assets.map(asset => ({
       ...asset,
       fileSize: sizeByAssetId.get(asset.id) ?? '0',
       previewFileSize: null as string | null,
+      thumbnailUrl: thumbnailUrlByAssetId.get(asset.id) ?? null,
     }))
 
     return NextResponse.json({

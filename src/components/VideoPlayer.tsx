@@ -1203,6 +1203,31 @@ export default function VideoPlayer({
     selectedVideoTimelinePreviewsReady,
   ])
 
+  // Preload all distinct sprite sheets once cues are known so scrubbing across
+  // sprite-file boundaries doesn't flash a black frame while the next sheet
+  // downloads. URLs must match exactly what the hover handlers use so the
+  // browser cache entry is shared.
+  useEffect(() => {
+    const spriteBaseUrl = selectedVideoTimelineSpriteUrl
+    if (!spriteBaseUrl || timelineCues.length === 0) return
+
+    const seen = new Set<string>()
+    const images: HTMLImageElement[] = []
+    for (const cue of timelineCues) {
+      if (seen.has(cue.sprite)) continue
+      seen.add(cue.sprite)
+      // Use createElement, not `new Image()` — `Image` is shadowed by the
+      // `next/image` import at the top of this file.
+      const img = document.createElement('img')
+      img.src = `${spriteBaseUrl}?file=${encodeURIComponent(cue.sprite)}`
+      images.push(img)
+    }
+    return () => {
+      // Drop references so the browser can reclaim them; cache stays warm.
+      images.length = 0
+    }
+  }, [timelineCues, selectedVideoTimelineSpriteUrl])
+
   const getTimeFromScrubEvent = (clientX: number) => {
     const el = scrubBarRef.current
     const duration = (videoRef.current?.duration || durationSeconds || (selectedVideo as any)?.duration || 0) as number

@@ -5,13 +5,12 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getAlbumZipStoragePath, getAlbumZipJobId } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
-import { deleteFile, getFilePath } from '@/lib/storage'
+import { deleteFile } from '@/lib/storage'
 // ALBUM_PHOTO paths used for derivative computation — project context not needed here.
 // eslint-disable-next-line no-restricted-imports
-import { deleteStoredFile, getStoredFilePath } from '@/lib/stored-file'
+import { deleteStoredFile, getStoredFilePath, getStoredFileRecords } from '@/lib/stored-file'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
-import fs from 'fs'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -102,15 +101,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       albumName: album.name,
       variant: 'social',
     })
-    try {
-      const fullPath = getFilePath(socialZipPath)
-      const stat = fs.statSync(fullPath)
-      freedBytes += BigInt(stat.size)
-      await deleteFile(socialZipPath)
-      await deleteStoredFile('ALBUM', album.id, 'ZIP_SOCIAL').catch(() => {})
-    } catch {
-      // ZIP may not exist
+
+    // Read size from StoredFile (works in both local and S3 mode)
+    const [socialZipRecord] = await getStoredFileRecords('ALBUM', [album.id], {
+      fileRoles: ['ZIP_SOCIAL'],
+      select: { fileSize: true },
+    })
+    if (socialZipRecord?.fileSize) {
+      freedBytes += BigInt(socialZipRecord.fileSize)
     }
+
+    await deleteFile(socialZipPath).catch(() => {})
+    await deleteStoredFile('ALBUM', album.id, 'ZIP_SOCIAL').catch(() => {})
 
     // 2. Update album: disable social downloads, clear social ZIP tracking
     await prisma.album.update({

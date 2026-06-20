@@ -6,6 +6,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { allocateUniqueStorageName } from '@/lib/project-storage-paths'
 import { getStoredFileRecords } from '@/lib/stored-file'
 import { asNumberBigInt } from '@/lib/utils'
+import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -62,6 +63,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     orderBy: { createdAt: 'desc' },
     include: {
       _count: { select: { photos: true } },
+      // First ready photo is used to render the album cover thumbnail in the admin card list.
+      photos: {
+        where: { status: 'READY' },
+        orderBy: { createdAt: 'asc' },
+        take: 1,
+        select: { id: true },
+      },
     },
   })
 
@@ -77,14 +85,41 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     zipSizeByAlbum.get(f.entityId)!.set(f.fileRole, f.fileSize)
   }
 
-  const albumsSafe = albums.map((a) => {
-    const sizes = zipSizeByAlbum.get(a.id)
-    return {
-      ...a,
-      fullZipFileSize: asNumberBigInt(sizes?.get('ZIP_FULL')),
-      socialZipFileSize: asNumberBigInt(sizes?.get('ZIP_SOCIAL')),
-    }
-  })
+  // Admin sessions can mint photo-access tokens directly (the photo content route
+  // accepts any `admin:`-prefixed session). Use a per-user stable session id so the
+  // token generator's Redis cache is reused across list refreshes.
+  const adminSessionId = `admin:${auth.id}`
+
+  const albumsSafe = await Promise.all(
+    albums.map(async (a) => {
+      const sizes = zipSizeByAlbum.get(a.id)
+      const firstPhotoId = (a as any)?.photos?.[0]?.id as string | undefined
+
+      let coverThumbnailUrl: string | null = null
+      if (firstPhotoId) {
+        try {
+          const tokenValue = await generateAlbumPhotoAccessToken({
+            photoId: firstPhotoId,
+            albumId: a.id,
+            projectId,
+            request,
+            sessionId: adminSessionId,
+          })
+          coverThumbnailUrl = `/api/content/photo/${tokenValue}?variant=thumbnail`
+        } catch {
+          // Cover thumbnail is best-effort; fall back to the icon in the UI.
+        }
+      }
+
+      const { photos: _firstPhotos, ...rest } = a as any
+      return {
+        ...rest,
+        coverThumbnailUrl,
+        fullZipFileSize: asNumberBigInt(sizes?.get('ZIP_FULL')),
+        socialZipFileSize: asNumberBigInt(sizes?.get('ZIP_SOCIAL')),
+      }
+    })
+  )
 
   return NextResponse.json({ albums: albumsSafe })
 }

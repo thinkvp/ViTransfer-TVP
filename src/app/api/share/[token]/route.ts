@@ -11,6 +11,7 @@ import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import crypto from 'crypto'
 import { getStoredFileRecords } from '@/lib/stored-file'
+import { generateVideoAccessToken } from '@/lib/video-access'
 export const runtime = 'nodejs'
 
 
@@ -179,6 +180,27 @@ export async function GET(
       }
     }
 
+    // Mint thumbnail access tokens inline so the client can render preview tiles
+    // immediately, without a per-video /video-token round-trip before each image.
+    // Tokens are session-bound and cached per session (see generateVideoAccessToken),
+    // so re-loading the payload within a session reuses the same token — no proliferation.
+    // Skipped entirely when videos are disabled for the project.
+    const thumbnailSessionId = shareContext?.sessionId || `share:${projectMeta.id}:${token}`
+    const thumbnailUrlByVideoId = new Map<string, string>()
+    if (project.enableVideos !== false) {
+      const videosWithThumb = project.videos.filter((v: any) => previewMap.get(v.id)?.has('THUMBNAIL'))
+      await Promise.all(
+        videosWithThumb.map(async (v: any) => {
+          try {
+            const thumbToken = await generateVideoAccessToken(v.id, projectMeta.id, 'thumbnail', request, thumbnailSessionId)
+            if (thumbToken) thumbnailUrlByVideoId.set(v.id, `/api/content/${thumbToken}`)
+          } catch (error) {
+            console.error('[SHARE] Failed to mint thumbnail token', { videoId: v.id, error })
+          }
+        }),
+      )
+    }
+
     const videosSanitizedBase = project.videos.map((video: any) => {
       const previews = previewMap.get(video.id) ?? new Set<string>()
       const hasOriginal = previews.has('ORIGINAL')
@@ -190,7 +212,7 @@ export async function GET(
         streamUrl720p: '',
         streamUrl1080p: '',
         downloadUrl: null,
-        thumbnailUrl: null,
+        thumbnailUrl: thumbnailUrlByVideoId.get(video.id) ?? null,
         hasThumbnail: hasThumb,
         thumbnailPath: hasThumb,       // used as boolean by admin share page
         preview480Path: previews.has('PREVIEW_480'),

@@ -439,6 +439,29 @@ export function useAlbumPhotoUploadQueue({
     }
   }, [queue, maxConcurrent, startUpload])
 
+  // Auto-clear completed uploads shortly after they finish so the queue doesn't
+  // accumulate finished rows — the album photo grid is the source of truth. Errors
+  // are left in place so they remain visible for retry.
+  const clearTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  useEffect(() => {
+    for (const u of queue) {
+      if (u.status === 'completed' && !clearTimersRef.current.has(u.id)) {
+        const timer = setTimeout(() => {
+          clearTimersRef.current.delete(u.id)
+          setQueue((prev) => prev.filter((x) => x.id !== u.id))
+        }, 1500)
+        clearTimersRef.current.set(u.id, timer)
+      }
+    }
+  }, [queue])
+  useEffect(() => {
+    const timers = clearTimersRef.current
+    return () => {
+      for (const t of timers.values()) clearTimeout(t)
+      timers.clear()
+    }
+  }, [])
+
   useEffect(() => {
     const hasActiveUploads = queue.some((u) => u.status === 'uploading' || u.status === 'queued' || u.status === 'paused')
     if (!hasActiveUploads) return

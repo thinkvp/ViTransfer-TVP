@@ -8,6 +8,7 @@ import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildAlbumPhotoStoragePath, buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
+import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -77,6 +78,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       fileName: true,
       fileType: true,
       status: true,
+      thumbnailStatus: true,
       error: true,
       createdAt: true,
       updatedAt: true,
@@ -87,10 +89,36 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const storedSizes = photoIds.length > 0 ? await getStoredFileRecords('ALBUM_PHOTO', photoIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true } }) : []
   const sizeByPhotoId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
 
+  // Mint per-photo thumbnail URLs so the admin album manager can render a thumbnail grid.
+  // Admin sessions are accepted by the photo content route; a per-user stable session id
+  // lets the token generator reuse its Redis cache across refreshes. The content route
+  // gracefully falls back (social/original) when a dedicated thumbnail isn't ready.
+  const adminSessionId = `admin:${auth.id}`
+  const thumbnailUrlByPhotoId = new Map<string, string>()
+  await Promise.all(
+    photos
+      .filter((p) => p.status === 'READY')
+      .map(async (p) => {
+        try {
+          const tokenValue = await generateAlbumPhotoAccessToken({
+            photoId: p.id,
+            albumId,
+            projectId: album.projectId,
+            request,
+            sessionId: adminSessionId,
+          })
+          thumbnailUrlByPhotoId.set(p.id, `/api/content/photo/${tokenValue}?variant=thumbnail`)
+        } catch {
+          // Best-effort; the UI falls back to a placeholder tile.
+        }
+      })
+  )
+
   return NextResponse.json({
     photos: photos.map((p) => ({
       ...p,
       fileSize: sizeByPhotoId.get(p.id) ?? '0',
+      thumbnailUrl: thumbnailUrlByPhotoId.get(p.id) ?? null,
     })),
   })
 }

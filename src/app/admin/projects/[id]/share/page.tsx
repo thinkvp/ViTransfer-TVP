@@ -45,6 +45,15 @@ type AdminSwitchableProject = {
 
 const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
 
+type UploadAccessUrlCacheEntry = {
+  downloadUrl: string | null
+  playbackUrl: string | null
+  previewUrl: string | null
+  previewStatus: string | null
+  expiresAt: number
+}
+const UPLOAD_ACCESS_URL_CACHE_TTL_MS = 45 * 1000
+
 export default function AdminSharePage() {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -96,6 +105,17 @@ export default function AdminSharePage() {
   const sidebarVideoCacheRef = useRef<Map<string, any>>(new Map())
   const sidebarThumbnailRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
   const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
+  // Coalesces per-video admin video-token requests (thumbnail/timeline) into one batch
+  // POST instead of one GET per video. Keyed by `${videoId}:${quality}`.
+  const videoTokenBatchRef = useRef<Map<string, { videoId: string; quality: string; resolve: (token: string | null) => void }>>(new Map())
+  const videoTokenRequestRef = useRef<Map<string, Promise<string | null>>>(new Map())
+  const videoTokenBatchTimerRef = useRef<number | null>(null)
+  // Coalesces per-file upload-access requests into one batch POST (matches the client
+  // share page). Keyed by uploadFileId.
+  const uploadAccessUrlCacheRef = useRef<Map<string, UploadAccessUrlCacheEntry>>(new Map())
+  const uploadAccessUrlRequestCacheRef = useRef<Map<string, Promise<UploadAccessUrlCacheEntry | null>>>(new Map())
+  const uploadAccessBatchRef = useRef<Map<string, { fileId: string; resolve: (value: UploadAccessUrlCacheEntry | null) => void }>>(new Map())
+  const uploadAccessBatchTimerRef = useRef<number | null>(null)
 
   const availableFileCount = useMemo(() => {
     return (downloadableFiles || []).reduce((total, group) => {
@@ -256,6 +276,60 @@ export default function AdminSharePage() {
     }
   }
 
+  // Fire the queued admin video-token requests as one batch POST and fan the tokens
+  // back out to each waiting caller.
+  const flushVideoTokenBatch = useCallback(async () => {
+    videoTokenBatchTimerRef.current = null
+    const entries = Array.from(videoTokenBatchRef.current.entries()) // [pairKey, { videoId, quality, resolve }]
+    videoTokenBatchRef.current.clear()
+    if (entries.length === 0) return
+
+    const sessionId = sessionIdRef.current
+    const items = entries.map(([, e]) => ({ videoId: e.videoId, quality: e.quality }))
+
+    try {
+      const response = await apiFetch('/api/admin/video-token/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: id, sessionId, items }),
+      })
+      if (!response.ok) {
+        for (const [, e] of entries) e.resolve(null)
+        return
+      }
+      const data = await response.json().catch(() => ({}))
+      const results = (data && typeof (data as any).results === 'object' && (data as any).results) ? (data as any).results : {}
+      for (const [pairKey, e] of entries) {
+        const token = results[pairKey]
+        e.resolve(typeof token === 'string' && token ? token : null)
+      }
+    } catch {
+      for (const [, e] of entries) e.resolve(null)
+    }
+  }, [id])
+
+  const getAdminVideoToken = useCallback((videoId: string, quality: string): Promise<string | null> => {
+    if (!videoId || !quality) return Promise.resolve(null)
+    const pairKey = `${videoId}:${quality}`
+
+    const inFlight = videoTokenRequestRef.current.get(pairKey)
+    if (inFlight) return inFlight
+
+    const request = new Promise<string | null>((resolve) => {
+      videoTokenBatchRef.current.set(pairKey, { videoId, quality, resolve })
+    }).finally(() => {
+      videoTokenRequestRef.current.delete(pairKey)
+    })
+    videoTokenRequestRef.current.set(pairKey, request)
+
+    if (videoTokenBatchTimerRef.current == null) {
+      videoTokenBatchTimerRef.current = window.setTimeout(() => {
+        void flushVideoTokenBatch()
+      }, 16)
+    }
+    return request
+  }, [flushVideoTokenBatch])
+
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     const sessionId = sessionIdRef.current
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
@@ -324,28 +398,19 @@ export default function AdminSharePage() {
 
             let thumbnailUrl = sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null
             if (!thumbnailUrl && video.thumbnailPath) {
-              const responseThumbnail = await apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=thumbnail&sessionId=${sessionId}`)
-              if (responseThumbnail.ok) {
-                const dataThumbnail = await responseThumbnail.json()
-                thumbnailUrl = dataThumbnail.token ? `/api/content/${dataThumbnail.token}` : null
-              }
+              const thumbToken = await getAdminVideoToken(video.id, 'thumbnail')
+              thumbnailUrl = thumbToken ? `/api/content/${thumbToken}` : null
             }
 
             let timelineVttUrl = null
             let timelineSpriteUrl = null
             if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
-              const [responseVtt, responseSprite] = await Promise.all([
-                apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-vtt&sessionId=${sessionId}`),
-                apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-sprite&sessionId=${sessionId}`),
+              const [vttToken, spriteToken] = await Promise.all([
+                getAdminVideoToken(video.id, 'timeline-vtt'),
+                getAdminVideoToken(video.id, 'timeline-sprite'),
               ])
-              if (responseVtt.ok) {
-                const dataVtt = await responseVtt.json()
-                timelineVttUrl = dataVtt.token ? `/api/content/${dataVtt.token}` : null
-              }
-              if (responseSprite.ok) {
-                const dataSprite = await responseSprite.json()
-                timelineSpriteUrl = dataSprite.token ? `/api/content/${dataSprite.token}` : null
-              }
+              timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
+              timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
             }
 
             const tokenized = {
@@ -374,10 +439,9 @@ export default function AdminSharePage() {
         return request
       })
     )
-  }, [id, project])
+  }, [id, project, getAdminVideoToken])
 
   const fetchSidebarVideos = useCallback(async (videos: any[]) => {
-    const sessionId = sessionIdRef.current
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
 
     return Promise.all(
@@ -401,29 +465,19 @@ export default function AdminSharePage() {
           try {
             let thumbnailUrl = null
             if (video.thumbnailPath) {
-              const responseThumbnail = await apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=thumbnail&sessionId=${sessionId}`)
-              if (responseThumbnail.ok) {
-                const dataThumbnail = await responseThumbnail.json()
-                thumbnailUrl = dataThumbnail.token ? `/api/content/${dataThumbnail.token}` : null
-              }
+              const thumbToken = await getAdminVideoToken(video.id, 'thumbnail')
+              thumbnailUrl = thumbToken ? `/api/content/${thumbToken}` : null
             }
 
             let timelineVttUrl = null
             let timelineSpriteUrl = null
             if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
-              const [responseVtt, responseSprite] = await Promise.all([
-                apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-vtt&sessionId=${sessionId}`),
-                apiFetch(`/api/admin/video-token?videoId=${video.id}&projectId=${id}&quality=timeline-sprite&sessionId=${sessionId}`),
+              const [vttToken, spriteToken] = await Promise.all([
+                getAdminVideoToken(video.id, 'timeline-vtt'),
+                getAdminVideoToken(video.id, 'timeline-sprite'),
               ])
-
-              if (responseVtt.ok) {
-                const dataVtt = await responseVtt.json()
-                timelineVttUrl = dataVtt.token ? `/api/content/${dataVtt.token}` : null
-              }
-              if (responseSprite.ok) {
-                const dataSprite = await responseSprite.json()
-                timelineSpriteUrl = dataSprite.token ? `/api/content/${dataSprite.token}` : null
-              }
+              timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
+              timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
             }
 
             const sidebarVideo = {
@@ -446,7 +500,7 @@ export default function AdminSharePage() {
         return request
       })
     )
-  }, [id, project?.timelinePreviewsEnabled])
+  }, [project?.timelinePreviewsEnabled, getAdminVideoToken])
 
   // Load project data, settings, and admin user
   useEffect(() => {
@@ -562,6 +616,105 @@ export default function AdminSharePage() {
       filesRefreshInFlightRef.current = false
     })
   }, [desktopContentTab, fetchDownloadableFiles])
+
+  // Fire the queued upload-access requests as one (chunked) batch POST and fan results
+  // back to each waiting caller. Mirrors the client share page's batching.
+  const flushUploadAccessBatch = useCallback(async () => {
+    uploadAccessBatchTimerRef.current = null
+    const items = Array.from(uploadAccessBatchRef.current.entries()) // [fileId, { fileId, resolve }]
+    uploadAccessBatchRef.current.clear()
+    if (items.length === 0) return
+
+    const slug = project?.slug
+    if (!slug) {
+      for (const [, item] of items) item.resolve(null)
+      return
+    }
+
+    const buildEntry = (data: any): UploadAccessUrlCacheEntry => ({
+      downloadUrl: typeof data?.downloadUrl === 'string'
+        ? data.downloadUrl
+        : (typeof data?.url === 'string' ? data.url : null),
+      playbackUrl: typeof data?.playbackUrl === 'string' && data.playbackUrl ? data.playbackUrl : null,
+      previewUrl: typeof data?.previewUrl === 'string' && data.previewUrl ? data.previewUrl : null,
+      previewStatus: typeof data?.previewStatus === 'string' ? data.previewStatus : null,
+      expiresAt: Date.now() + UPLOAD_ACCESS_URL_CACHE_TTL_MS,
+    })
+
+    const uniqueFileIds = Array.from(new Set(items.map(([, item]) => item.fileId)))
+    const CHUNK = 100
+    const chunks: string[][] = []
+    for (let i = 0; i < uniqueFileIds.length; i += CHUNK) {
+      chunks.push(uniqueFileIds.slice(i, i + CHUNK))
+    }
+
+    const merged: Record<string, any> = {}
+    let authFailed = false
+
+    await Promise.all(chunks.map(async (chunkIds) => {
+      try {
+        const response = await apiFetch(`/api/share/${slug}/uploads/download-tokens`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileIds: chunkIds }),
+        })
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            authFailed = true
+          }
+          return
+        }
+        const data = await response.json().catch(() => ({}))
+        const results = (data && typeof (data as any).results === 'object' && (data as any).results)
+          ? (data as any).results
+          : {}
+        Object.assign(merged, results)
+      } catch {
+        // Leave this chunk's files out of `merged` → they resolve null and can retry.
+      }
+    }))
+
+    if (authFailed) requestFilesRefresh(true)
+
+    for (const [fileId, item] of items) {
+      uploadAccessUrlRequestCacheRef.current.delete(fileId)
+      const raw = merged[item.fileId]
+      if (!raw || typeof raw !== 'object') {
+        item.resolve(null)
+        continue
+      }
+      const entry = buildEntry(raw)
+      uploadAccessUrlCacheRef.current.set(fileId, entry)
+      item.resolve(entry)
+    }
+  }, [project?.slug, requestFilesRefresh])
+
+  const getUploadAccessUrl = useCallback((fileId: string): Promise<UploadAccessUrlCacheEntry | null> => {
+    const normalizedFileId = String(fileId || '').trim()
+    if (!normalizedFileId || normalizedFileId.startsWith('pending-')) return Promise.resolve(null)
+
+    const now = Date.now()
+    const cached = uploadAccessUrlCacheRef.current.get(normalizedFileId)
+    if (cached && cached.expiresAt > now) {
+      return Promise.resolve(cached)
+    }
+
+    const inFlight = uploadAccessUrlRequestCacheRef.current.get(normalizedFileId)
+    if (inFlight) return inFlight
+
+    const request = new Promise<UploadAccessUrlCacheEntry | null>((resolve) => {
+      uploadAccessBatchRef.current.set(normalizedFileId, { fileId: normalizedFileId, resolve })
+    })
+    uploadAccessUrlRequestCacheRef.current.set(normalizedFileId, request)
+
+    if (uploadAccessBatchTimerRef.current == null) {
+      uploadAccessBatchTimerRef.current = window.setTimeout(() => {
+        void flushUploadAccessBatch()
+      }, 16)
+    }
+
+    return request
+  }, [flushUploadAccessBatch])
 
   const fetchSwitchableProjects = useCallback(async () => {
     if (!project?.id) return
@@ -1706,27 +1859,9 @@ export default function AdminSharePage() {
         return null
       }
 
-      try {
-        const response = await apiFetch(`/api/share/${project.slug}/uploads/download-token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileId: file.uploadFileId }),
-        })
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403 || response.status === 404) {
-            requestFilesRefresh(true)
-          }
-          return null
-        }
-        const data = await response.json().catch(() => ({}))
-        if (typeof (data as any)?.previewUrl === 'string' && (data as any).previewUrl) {
-          return String((data as any).previewUrl)
-        }
-        // Do not fall back to downloadUrl — videos without a ready preview should show the icon fallback
-        return null
-      } catch {
-        return null
-      }
+      const entry = await getUploadAccessUrl(file.uploadFileId)
+      // Do not fall back to downloadUrl — videos without a ready preview should show the icon fallback
+      return entry?.previewUrl || null
     }
 
     if (file.type === 'video' && file.videoId) {
@@ -1753,35 +1888,12 @@ export default function AdminSharePage() {
     } catch {
       return null
     }
-  }, [filePreviewByVideoId, project?.slug, requestFilesRefresh])
+  }, [filePreviewByVideoId, project?.slug, requestFilesRefresh, getUploadAccessUrl])
 
   const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
     if (file.type === 'upload-file' && file.uploadFileId && project?.slug) {
-      try {
-        const response = await apiFetch(`/api/share/${project.slug}/uploads/download-token`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileId: file.uploadFileId }),
-        })
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403 || response.status === 404) {
-            requestFilesRefresh(true)
-          }
-          return null
-        }
-
-        const data = await response.json().catch(() => ({}))
-        if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
-          return String((data as any).playbackUrl)
-        }
-        if (typeof (data as any)?.downloadUrl === 'string' && (data as any).downloadUrl) {
-          return String((data as any).downloadUrl)
-        }
-        return null
-      } catch {
-        return null
-      }
+      const entry = await getUploadAccessUrl(file.uploadFileId)
+      return entry?.playbackUrl || entry?.downloadUrl || null
     }
 
     if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
@@ -1799,7 +1911,7 @@ export default function AdminSharePage() {
     } catch {
       return null
     }
-  }, [project?.slug, requestFilesRefresh])
+  }, [project?.slug, getUploadAccessUrl])
 
   // Photos-only projects: default to first album once albums load.
   useEffect(() => {

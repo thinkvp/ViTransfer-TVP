@@ -101,7 +101,8 @@ export async function GET(request: NextRequest) {
       if (queueStatus) {
         status = queueStatus
       } else if (video.status === 'READY' && processingPhase) {
-        status = queueStatus ?? ((video.processingProgress ?? 0) > 0 ? 'PROCESSING' : 'QUEUED')
+        // queueStatus is known falsy in this branch (handled above).
+        status = (video.processingProgress ?? 0) > 0 ? 'PROCESSING' : 'QUEUED'
       }
 
       return {
@@ -116,16 +117,24 @@ export async function GET(request: NextRequest) {
       }
     })
 
-    // Also include asset and upload timeline jobs
+    // Also include asset and upload timeline jobs.
+    // Scope to projects the user may see, matching the visibility rules applied
+    // to every other query in this route (system admins see all; others only
+    // their assigned projects, filtered by allowed project statuses).
+    const projectVisibilityFilter = {
+      status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+      ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
+    }
+
     const [assetJobs, uploadJobs] = await Promise.all([
       prisma.videoAsset.findMany({
-        where: { processingPhase: { not: null } },
+        where: { processingPhase: { not: null }, video: { project: projectVisibilityFilter } },
         select: { id: true, fileName: true, processingPhase: true, processingProgress: true,
           video: { select: { id: true, name: true, projectId: true, project: { select: { title: true } } } },
         },
       }),
       prisma.shareUploadFile.findMany({
-        where: { processingPhase: { not: null } },
+        where: { processingPhase: { not: null }, project: projectVisibilityFilter },
         select: { id: true, fileName: true, processingPhase: true, processingProgress: true,
           projectId: true, project: { select: { title: true } },
         },
@@ -293,6 +302,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid running job target' }, { status: 400 })
   }
 
+  // Visibility context — a user may only clear jobs for projects they can see.
+  const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
+  const permissions = getUserPermissions(authResult)
+  const allowedStatuses = permissions.projectVisibility?.statuses ?? []
+  const projectVisibilityFilter = {
+    status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+    ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
+  }
+  // System admins always pass; others must have the project in their visible set.
+  const canSeeProject = async (projectId: string | null | undefined): Promise<boolean> => {
+    if (isSystemAdmin) return true
+    if (!projectId) return false
+    const match = await prisma.project.findFirst({
+      where: { id: projectId, ...projectVisibilityFilter },
+      select: { id: true },
+    })
+    return match !== null
+  }
+  const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
   try {
     if (type === 'processing') {
       const video = await prisma.video.findUnique({
@@ -300,11 +329,16 @@ export async function POST(request: NextRequest) {
         select: {
           id: true,
           status: true,
+          projectId: true,
         },
       })
 
       if (!video) {
         return NextResponse.json({ error: 'Video not found' }, { status: 404 })
+      }
+
+      if (!(await canSeeProject(video.projectId))) {
+        return forbidden()
       }
 
       if (video.status !== 'QUEUED') {
@@ -340,6 +374,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid album ZIP job id' }, { status: 400 })
       }
 
+      const album = await prisma.album.findUnique({ where: { id: albumId }, select: { projectId: true } })
+      if (!album) {
+        return NextResponse.json({ error: 'Album not found' }, { status: 404 })
+      }
+      if (!(await canSeeProject(album.projectId))) {
+        return forbidden()
+      }
+
       const albumZipQueue = getAlbumPhotoZipQueue()
       const queueJobId = getAlbumZipJobId({ albumId, variant })
       const queueJob = await albumZipQueue.getJob(queueJobId)
@@ -356,12 +398,17 @@ export async function POST(request: NextRequest) {
         select: {
           id: true,
           albumId: true,
+          projectId: true,
           status: true,
         },
       })
 
       if (!albumThumbnailJob) {
         return NextResponse.json({ error: 'Album thumbnail job not found' }, { status: 404 })
+      }
+
+      if (!(await canSeeProject(albumThumbnailJob.projectId))) {
+        return forbidden()
       }
 
       if (albumThumbnailJob.status !== 'PENDING') {
@@ -385,11 +432,23 @@ export async function POST(request: NextRequest) {
         select: {
           id: true,
           status: true,
+          entityType: true,
+          entityId: true,
         },
       })
 
       if (!folderRenameJob) {
         return NextResponse.json({ error: 'Folder rename job not found' }, { status: 404 })
+      }
+
+      // Only PROJECT renames map to a single project we can scope by id.
+      // CLIENT (and any other) renames span projects — restrict those to system admins.
+      if (folderRenameJob.entityType === 'PROJECT') {
+        if (!(await canSeeProject(folderRenameJob.entityId))) {
+          return forbidden()
+        }
+      } else if (!isSystemAdmin) {
+        return forbidden()
       }
 
       if (folderRenameJob.status !== 'PENDING') {
@@ -530,6 +589,7 @@ async function buildAlbumZipJobs({
         updatedAt: true,
       },
       orderBy: { updatedAt: 'desc' },
+      take: 50,
     })
 
     // Check StoredFile for ZIP sizes (legacy album columns dropped)
@@ -594,6 +654,7 @@ async function buildAlbumThumbnailJobs() {
     prisma.albumThumbnailJob.findMany({
       where: { status: 'FAILED' },
       orderBy: { completedAt: 'desc' },
+      take: 50,
     }),
   ])
 
@@ -745,10 +806,11 @@ async function buildFolderRenameJobs() {
       where: { status: 'COMPLETED', completedAt: { gte: cutoff } },
       orderBy: { completedAt: 'desc' },
     }),
-    // Failed (no time cutoff — persist until manually dismissed)
+    // Failed (no time cutoff — persist until manually dismissed; capped to bound payload)
     prisma.folderRenameJob.findMany({
       where: { status: 'FAILED' },
       orderBy: { completedAt: 'desc' },
+      take: 50,
     }),
   ])
 

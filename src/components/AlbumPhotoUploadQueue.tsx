@@ -19,30 +19,11 @@ export function AlbumPhotoUploadQueue({ albumId, onUploadComplete, maxConcurrent
   const MAX_PHOTOS_PER_BATCH = 300
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const { queue, stats, addToQueue, pauseUpload, resumeUpload, cancelUpload, removeCompleted, clearCompleted, retryUpload } =
+  const { queue, stats, addToQueue, pauseUpload, resumeUpload, cancelUpload, removeCompleted, retryUpload } =
     useAlbumPhotoUploadQueue({ albumId, maxConcurrent, onUploadComplete })
-
-  const handleFileSelect = (files: FileList | File[] | null) => {
-    if (!files || files.length === 0) {
-      setSelectedFiles([])
-      setError(null)
-      return
-    }
-
-    const next = Array.from(files)
-    if (next.length > MAX_PHOTOS_PER_BATCH) {
-      setSelectedFiles(next.slice(0, MAX_PHOTOS_PER_BATCH))
-      setError(`Please select up to ${MAX_PHOTOS_PER_BATCH} photos at a time.`)
-      return
-    }
-
-    setSelectedFiles(next)
-    setError(null)
-  }
 
   function validatePhotoFile(file: File): { valid: boolean; error?: string } {
     if (file.size === 0) return { valid: false, error: 'File is empty' }
@@ -53,29 +34,29 @@ export function AlbumPhotoUploadQueue({ albumId, onUploadComplete, maxConcurrent
     return { valid: true }
   }
 
-  const handleAddToQueue = () => {
-    if (selectedFiles.length === 0) return
+  // Selecting (or dropping) files adds them straight to the queue, which starts
+  // uploading immediately — no separate "add to queue" step.
+  const handleFileSelect = (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return
 
-    let hasErrors = false
+    let next = Array.from(files)
     const errors: string[] = []
 
-    selectedFiles.forEach((file) => {
+    if (next.length > MAX_PHOTOS_PER_BATCH) {
+      next = next.slice(0, MAX_PHOTOS_PER_BATCH)
+      errors.push(`Only the first ${MAX_PHOTOS_PER_BATCH} photos were added.`)
+    }
+
+    next.forEach((file) => {
       const validation = validatePhotoFile(file)
       if (!validation.valid) {
-        hasErrors = true
         errors.push(`${file.name}: ${validation.error}`)
       } else {
         addToQueue(file)
       }
     })
 
-    if (hasErrors) {
-      setError(errors.join('\n'))
-      return
-    }
-
-    setSelectedFiles([])
-    setError(null)
+    setError(errors.length > 0 ? errors.join('\n') : null)
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -100,8 +81,6 @@ export function AlbumPhotoUploadQueue({ albumId, onUploadComplete, maxConcurrent
       handleFileSelect(e.dataTransfer.files)
     }
   }
-
-  const hasActiveUploads = stats.uploading > 0 || stats.queued > 0 || stats.paused > 0
 
   return (
     <div className="space-y-4">
@@ -134,41 +113,19 @@ export function AlbumPhotoUploadQueue({ albumId, onUploadComplete, maxConcurrent
             />
             <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full">
               <Upload className="w-4 h-4 mr-2" />
-              {selectedFiles.length > 0 ? 'Change Files' : 'Drag & Drop or Click to Choose'}
+              {queue.length > 0 ? 'Add More Photos' : 'Drag & Drop or Click to Choose'}
             </Button>
           </div>
-          {selectedFiles.length > 0 && (
-            <p className="text-sm text-muted-foreground">
-              Selected: {selectedFiles.length} file{selectedFiles.length !== 1 ? 's' : ''}
-            </p>
-          )}
         </div>
-
-        {selectedFiles.length > 0 && (
-          <Button type="button" onClick={handleAddToQueue} className="w-full">
-            <Upload className="w-4 h-4 mr-2" />
-            Add to Upload Queue
-          </Button>
-        )}
       </div>
 
       {queue.length > 0 && (
-        <div className="flex items-center justify-between p-3 rounded-md border bg-muted/50">
-          <div className="flex gap-4 text-sm">
-            {stats.uploading > 0 && <span className="font-medium text-primary">{stats.uploading} uploading</span>}
-            {stats.queued > 0 && <span className="text-muted-foreground">{stats.queued} queued</span>}
-            {stats.paused > 0 && <span className="text-warning">{stats.paused} paused</span>}
-            {stats.completed > 0 && <span className="text-success">{stats.completed} completed</span>}
-            {stats.error > 0 && <span className="text-destructive">{stats.error} failed</span>}
-          </div>
-
-          {stats.completed > 0 && (
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={clearCompleted}>
-                Clear Completed
-              </Button>
-            </div>
-          )}
+        <div className="flex items-center gap-4 p-3 rounded-md border bg-muted/50 text-sm">
+          {stats.uploading > 0 && <span className="font-medium text-primary">{stats.uploading} uploading</span>}
+          {stats.queued > 0 && <span className="text-muted-foreground">{stats.queued} queued</span>}
+          {stats.paused > 0 && <span className="text-warning">{stats.paused} paused</span>}
+          {stats.completed > 0 && <span className="text-success">{stats.completed} completed</span>}
+          {stats.error > 0 && <span className="text-destructive">{stats.error} failed</span>}
         </div>
       )}
 
@@ -185,14 +142,6 @@ export function AlbumPhotoUploadQueue({ albumId, onUploadComplete, maxConcurrent
               onRetry={() => retryUpload(upload.id)}
             />
           ))}
-
-          {!hasActiveUploads && stats.completed > 0 && (
-            <div className="pt-2">
-              <Button type="button" variant="outline" size="sm" onClick={clearCompleted} className="w-full">
-                Clear Completed
-              </Button>
-            </div>
-          )}
         </div>
       )}
     </div>
