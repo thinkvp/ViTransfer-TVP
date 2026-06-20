@@ -788,75 +788,6 @@ export function ShareFilesBrowser({
     })
   }, [])
 
-  const captureVideoPoster = useCallback(async (videoUrl: string): Promise<string | null> => {
-    if (!videoUrl) return null
-
-    return await new Promise((resolve) => {
-      const video = document.createElement('video')
-      video.crossOrigin = 'anonymous'
-      video.preload = 'metadata'
-      video.muted = true
-      video.playsInline = true
-
-      let settled = false
-      const cleanup = () => {
-        video.pause()
-        video.removeAttribute('src')
-        video.load()
-      }
-
-      const finish = (value: string | null) => {
-        if (settled) return
-        settled = true
-        cleanup()
-        resolve(value)
-      }
-
-      const capture = () => {
-        try {
-          if (!video.videoWidth || !video.videoHeight) {
-            finish(null)
-            return
-          }
-
-          const canvas = document.createElement('canvas')
-          canvas.width = video.videoWidth
-          canvas.height = video.videoHeight
-          const context = canvas.getContext('2d')
-          if (!context) {
-            finish(null)
-            return
-          }
-
-          context.drawImage(video, 0, 0, canvas.width, canvas.height)
-          const poster = canvas.toDataURL('image/jpeg', 0.8)
-          finish(poster && poster !== 'data:,' ? poster : null)
-        } catch {
-          finish(null)
-        }
-      }
-
-      video.addEventListener('loadedmetadata', () => {
-        try {
-          const targetTime = Math.min(0.75, Math.max(0.1, (video.duration || 0) * 0.1))
-          if (Number.isFinite(targetTime) && targetTime > 0 && video.duration > targetTime) {
-            video.currentTime = targetTime
-            return
-          }
-        } catch {
-          // ignore and capture the first available frame
-        }
-
-        capture()
-      }, { once: true })
-      video.addEventListener('loadeddata', capture, { once: true })
-      video.addEventListener('seeked', capture, { once: true })
-      video.addEventListener('error', () => finish(null), { once: true })
-      video.src = videoUrl
-
-      window.setTimeout(() => finish(null), 10000)
-    })
-  }, [])
 
   const looksLikeVideoUrl = useCallback((value: string): boolean => {
     const lower = value.toLowerCase()
@@ -1136,13 +1067,17 @@ export function ShareFilesBrowser({
           if (videoCandidate) {
             try {
               const videoUrl = await resolveFilePreviewUrl(videoCandidate)
-              if (typeof videoUrl === 'string' && videoUrl.length > 0) {
-                nextPoster[group.name] = videoCandidate.type === 'upload-file'
-                  ? videoUrl
-                  : await captureVideoPoster(videoUrl)
-              } else {
-                nextPoster[group.name] = null
-              }
+              // Only use server-provided previews. Previously non-upload video
+              // candidates were turned into a poster by downloading the video and
+              // grabbing a frame client-side; that pulled video bytes just to fill a
+              // folder tile, so we now fall back to the icon instead.
+              nextPoster[group.name] = (
+                videoCandidate.type === 'upload-file'
+                && typeof videoUrl === 'string'
+                && videoUrl.length > 0
+              )
+                ? videoUrl
+                : null
             } catch {
               nextPoster[group.name] = null
             }
@@ -1169,7 +1104,6 @@ export function ShareFilesBrowser({
     sortedGroups,
     resolveFilePreviewUrl,
     folderPreviewByName,
-    captureVideoPoster,
     visibleFolderNames,
     folderPreviewTilesByName,
     folderPreviewPosterByName,
@@ -1216,13 +1150,17 @@ export function ShareFilesBrowser({
             return null
           }
 
-          let displayUrl = url
+          // If the only resolved preview is a video URL (no server-side image
+          // thumbnail), fall back to the icon rather than downloading the video to
+          // synthesize a poster frame client-side.
           if (fileKind === 'video' && looksLikeVideoUrl(url)) {
-            const poster = await captureVideoPoster(url)
-            if (poster) {
-              displayUrl = poster
+            setPreviewUrlByFileKey((prev) => ({ ...prev, [fileKey]: null }))
+            if (file.type === 'upload-file' && file.previewStatus !== 'FAILED') {
+              schedulePreviewRetry(fileKey)
             }
+            return null
           }
+          const displayUrl = url
 
           const retryTimer = previewRetryTimerRef.current.get(fileKey)
           if (retryTimer != null) {
@@ -1251,7 +1189,6 @@ export function ShareFilesBrowser({
     filesInOpenFolder,
     previewUrlByFileKey,
     resolveFilePreviewUrl,
-    captureVideoPoster,
     looksLikeVideoUrl,
     schedulePreviewRetry,
     visibleFileKeys,

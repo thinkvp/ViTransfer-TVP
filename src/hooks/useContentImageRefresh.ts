@@ -6,6 +6,8 @@ const CONTENT_API_PATH = '/api/content/'
 const DEBOUNCE_MS = 2_000
 const MIN_REFRESH_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes floor
 const MIN_AWAY_MS = 30_000 // Only refresh on visibility if tab was hidden >30s
+const HEARTBEAT_INTERVAL_MS = 20_000 // Wall-clock heartbeat tick
+const SLEEP_GAP_MS = 60_000 // A gap this large between ticks means the device slept / timers were throttled
 
 function isContentApiUrl(url: string): boolean {
   return url.includes(CONTENT_API_PATH)
@@ -33,6 +35,13 @@ interface UseContentImageRefreshOptions {
  *
  * Layer 3 – Visibility-change refresh: when the tab becomes visible after being
  *   hidden for >30 s (user returns from AFK), calls onRefresh.
+ *
+ * Layer 4 – Sleep/throttle detection: a short wall-clock heartbeat detects when
+ *   the device slept or timers were suspended (gap between ticks >> interval) and
+ *   refreshes on wake. This covers the "AFK at the desk, display/PC sleeps while
+ *   the tab stays visible" case, which fires neither a visibilitychange nor a
+ *   window focus event, and which suspends the Layer 2 interval mid-cycle so its
+ *   next run lands after the Redis token TTL has already lapsed.
  */
 export function useContentImageRefresh({
   onRefresh,
@@ -115,5 +124,26 @@ export function useContentImageRefresh({
 
     document.addEventListener('visibilitychange', handleVisibility)
     return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [enabled])
+
+  // ── Layer 4: Sleep/throttle detection via wall-clock heartbeat ──
+  // A visible tab on a sleeping machine never fires visibilitychange or focus, and
+  // the Layer 2 interval is suspended while asleep. We tick on a short interval and
+  // compare wall-clock elapsed time against the expected interval — a large overshoot
+  // means the device was asleep / throttled, so we refresh as soon as it wakes.
+  useEffect(() => {
+    if (!enabled) return
+
+    let lastTick = Date.now()
+    const intervalId = setInterval(() => {
+      const now = Date.now()
+      const gap = now - lastTick
+      lastTick = now
+      if (gap > SLEEP_GAP_MS) {
+        onRefreshRef.current()
+      }
+    }, HEARTBEAT_INTERVAL_MS)
+
+    return () => clearInterval(intervalId)
   }, [enabled])
 }

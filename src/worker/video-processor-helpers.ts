@@ -795,7 +795,16 @@ export async function processThumbnail(
   inputPath: string,
   duration: number,
   tempFiles: TempFiles
-): Promise<string> {
+): Promise<string | null> {
+  // If the video has a user-set custom (asset-based) thumbnail, do NOT generate
+  // a thumbnail.jpg. The finalize* paths skip registering a THUMBNAIL StoredFile
+  // row for custom thumbnails, so any generated file would be written to storage
+  // but never tracked — leaving an orphan behind on every reprocess.
+  if (await videoHasCustomThumbnail(videoId)) {
+    debugLog('Skipping thumbnail generation — video has a custom (asset-based) thumbnail')
+    return null
+  }
+
   // Calculate thumbnail timestamp using constants
   const timestamp = Math.min(
     Math.max(duration * THUMBNAIL_CONFIG.percentage, THUMBNAIL_CONFIG.min),

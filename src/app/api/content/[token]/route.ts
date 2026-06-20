@@ -458,9 +458,24 @@ export async function GET(
         const sanitizedFilename = sanitizeFilenameForHeader(rawFilename)
         const dlContentType = isThumbnail ? 'image/jpeg' : contentType
         presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, dlContentType)
-      } else if (isThumbnail || isTimelineAsset || isAssetPreview) {
-        // Keep timeline/thumbnail requests same-origin to avoid browser CORS issues
-        // when these assets are fetched from JS (timeline VTT/sprites, hover thumbnails).
+      } else if (isThumbnail) {
+        // Thumbnails are rendered via <img> / CSS background-image, which are NOT
+        // subject to CORS — so we can hand the browser a presigned R2 URL directly
+        // instead of proxying every thumbnail's bytes through the app server. This
+        // offloads the transfer to R2 and cuts latency for VIEW/FILES preview grids.
+        // (Timeline VTT is fetched from JS and IS CORS-sensitive, so it stays proxied
+        // below.)
+        presignedUrl = await s3GetPresignedStreamUrl(filePath, 900, contentType)
+        return NextResponse.redirect(presignedUrl, {
+          status: 302,
+          headers: {
+            'Cache-Control': 'private, max-age=300',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+          },
+        })
+      } else if (isTimelineAsset || isAssetPreview) {
+        // Keep timeline VTT/sprite and asset-preview requests same-origin to avoid
+        // browser CORS issues when these assets are fetched from JS.
         presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, contentType)
 
         if (isAssetPreview) {
@@ -482,7 +497,10 @@ export async function GET(
           status: 200,
           headers: {
             'Content-Type': contentType,
-            'Cache-Control': 'private, no-store, must-revalidate',
+            // Cacheable privately — see note on `cacheControl` in local mode below.
+            // Lets preloaded sprite sheets be reused instead of re-fetched (avoids
+            // black frames when scrubbing across sprite-file boundaries).
+            'Cache-Control': 'private, max-age=3600',
             'X-Content-Type-Options': 'nosniff',
           },
         })
@@ -531,10 +549,16 @@ export async function GET(
     const range = request.headers.get('range')
     const { downloadChunkSizeBytes } = await getTransferTuningSettings()
 
+    // Timeline sprites/VTT and thumbnails are token-gated, non-sensitive derived
+    // preview files. Allow the browser to cache them privately so preloading and
+    // repeated hover scrubbing reuse the bytes instead of re-fetching (which
+    // caused brief black frames when crossing into a not-yet-loaded sprite sheet).
+    // `private` keeps them out of shared/CDN caches; the access token lives in the
+    // URL, so a rotated token is a fresh URL requiring fresh authorization.
     const cacheControl = isProbe
       ? 'private, no-store, must-revalidate'
       : (isThumbnail || isTimelineAsset)
-      ? 'private, no-store, must-revalidate'
+      ? 'private, max-age=3600'
       : 'public, max-age=3600'
 
     if (isDownload) {

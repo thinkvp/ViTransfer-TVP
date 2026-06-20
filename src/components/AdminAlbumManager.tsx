@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Loader2, Layers, RotateCw } from 'lucide-react'
+import { ChevronDown, ChevronUp, Images, Plus, Trash2, Pencil, X, Loader2, Layers, RotateCw, ArrowUpDown } from 'lucide-react'
 import { cn, formatFileSize } from '@/lib/utils'
 import { apiDelete, apiJson, apiPatch, apiPost } from '@/lib/api-client'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -23,6 +23,7 @@ type AlbumSummary = {
   socialCopiesEnabled: boolean
   createdAt: string
   updatedAt: string
+  coverThumbnailUrl?: string | null
   _count?: { photos?: number }
 }
 
@@ -34,6 +35,8 @@ type AlbumPhoto = {
   fileType: string
   storagePath: string
   status: string
+  thumbnailStatus?: string
+  thumbnailUrl?: string | null
   error: string | null
   createdAt: string
   updatedAt: string
@@ -57,11 +60,13 @@ interface AdminAlbumManagerProps {
   projectStatus: string
   canDelete?: boolean
   onProjectDataChanged?: () => void
+  /** Reports album/photo counts so the parent can render a summary chip in the section header. */
+  onSummaryChange?: (summary: { albumCount: number; photoCount: number }) => void
 }
 
 type PhotoSortMode = 'alphabetical' | 'upload-date'
 
-export default function AdminAlbumManager({ projectId, projectStatus, canDelete = true, onProjectDataChanged }: AdminAlbumManagerProps) {
+export default function AdminAlbumManager({ projectId, projectStatus, canDelete = true, onProjectDataChanged, onSummaryChange }: AdminAlbumManagerProps) {
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -100,7 +105,6 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
   // Reprocess state per album
   const [reprocessingAlbumIds, setReprocessingAlbumIds] = useState<Set<string>>(new Set())
-  const [hoveredAlbumId, setHoveredAlbumId] = useState<string | null>(null)
 
   const sortedAlbums = useMemo(() => {
     return [...albums].sort((a, b) => {
@@ -193,6 +197,12 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     void fetchAlbums()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
+
+  // Report album/photo counts upward for the section header summary chip.
+  useEffect(() => {
+    const photoCount = albums.reduce((sum, a) => sum + (a._count?.photos ?? 0), 0)
+    onSummaryChange?.({ albumCount: albums.length, photoCount })
+  }, [albums, onSummaryChange])
 
   // Refresh the album list in the background while any album is still uploading/processing.
   // This keeps the header pill in sync (similar to how videos update as status changes).
@@ -333,7 +343,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       return
     }
 
-    await executeSocialToggle(albumId, false)
+    await executeSocialToggle(albumId, true)
   }, [togglingSocialCopiesAlbumId, executeSocialToggle])
 
   const handleDeleteAlbum = (albumId: string, albumName: string) => {
@@ -517,7 +527,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
         })()
 
         return (
-          <Card key={album.id} className="overflow-hidden">
+          <Card key={album.id} className="overflow-hidden transition-shadow hover:shadow-sm">
             <CardHeader
               className={cn(
                 'cursor-pointer hover:bg-accent/50 transition-colors',
@@ -528,16 +538,21 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {(() => {
                   const isReprocessing = reprocessingAlbumIds.has(album.id)
-                  const isHovered = hoveredAlbumId === album.id
                   const canReprocess = projectStatus !== 'APPROVED' && projectStatus !== 'CLOSED'
                   const hasError = album.status === 'ERROR'
                   const hasBusy = album.status === 'UPLOADING' || album.status === 'PROCESSING'
-                  // Color: red for error, orange for busy, primary for healthy
+                  // Status accent: red for error, orange for busy, neutral border when healthy.
+                  const ringColor = hasError
+                    ? 'ring-destructive/60'
+                    : hasBusy
+                    ? 'ring-orange-500/60'
+                    : 'ring-border'
                   const iconColor = hasError
                     ? 'text-destructive'
                     : hasBusy
                     ? 'text-orange-500'
                     : 'text-primary'
+                  const coverUrl = album.coverThumbnailUrl
 
                   const handleReprocess = async (e: React.MouseEvent) => {
                     e.stopPropagation()
@@ -559,44 +574,50 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                     }
                   }
 
-                  if (isReprocessing) {
-                    return (
-                      <span title="Reprocessing…" className="flex-shrink-0">
-                        <Loader2
-                          className="w-5 h-5 text-primary animate-spin"
-                        />
-                      </span>
-                    )
-                  }
-
-                  if (isHovered && canReprocess) {
-                    return (
-                      <span
-                        title="Reprocess album (ZIPs, thumbnails, social copies)"
-                        className="flex-shrink-0"
-                        onMouseEnter={() => setHoveredAlbumId(album.id)}
-                        onMouseLeave={() => setHoveredAlbumId(null)}
-                      >
-                        <RotateCw
-                          className={`w-5 h-5 cursor-pointer ${iconColor} hover:scale-110 transition-transform`}
-                          onClick={handleReprocess}
-                        />
-                      </span>
-                    )
-                  }
-
                   return (
-                    <span
-                      title={canReprocess ? 'Reprocess album (ZIPs, thumbnails, social copies)' : undefined}
-                      className="flex-shrink-0"
-                      onMouseEnter={() => setHoveredAlbumId(album.id)}
-                      onMouseLeave={() => setHoveredAlbumId(null)}
+                    <div
+                      className={cn(
+                        'relative flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden bg-muted ring-1',
+                        ringColor
+                      )}
                     >
-                      <Images
-                        className={`w-5 h-5 ${iconColor} ${canReprocess ? 'cursor-pointer' : ''}`}
-                        onClick={canReprocess ? handleReprocess : undefined}
-                      />
-                    </span>
+                      {/* eslint-disable @next/next/no-img-element */}
+                      {coverUrl ? (
+                        <img
+                          src={coverUrl}
+                          alt={album.name}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          onError={() => {
+                            // Token likely expired — drop the URL so we show the icon;
+                            // the next fetchAlbums() re-mints a fresh cover token.
+                            setAlbums((prev) =>
+                              prev.map((x) => (x.id === album.id ? { ...x, coverThumbnailUrl: null } : x))
+                            )
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Images className={`w-5 h-5 ${iconColor}`} />
+                        </div>
+                      )}
+                      {/* eslint-enable @next/next/no-img-element */}
+
+                      {isReprocessing ? (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/45">
+                          <Loader2 className="w-4 h-4 text-white animate-spin" />
+                        </div>
+                      ) : canReprocess ? (
+                        <button
+                          type="button"
+                          title="Reprocess album (ZIPs, thumbnails, social copies)"
+                          onClick={handleReprocess}
+                          className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-all hover:bg-black/45 hover:opacity-100 focus-visible:bg-black/45 focus-visible:opacity-100"
+                        >
+                          <RotateCw className="w-4 h-4" />
+                        </button>
+                      ) : null}
+                    </div>
                   )
                 })()}
                 <div className="flex-1 min-w-0">
@@ -658,7 +679,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
             </CardHeader>
 
             {isExpanded && (
-              <CardContent className="border-t border-border pt-4 space-y-4">
+              <CardContent className="border-t border-border pt-4 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
                 {album.notes && (
                   <div className="text-sm">
                     <p className="text-muted-foreground">Album Notes</p>
@@ -668,29 +689,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
                 <div className="rounded-md border bg-card p-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">Download ZIPs</p>
-                      <div className="mt-1 text-xs text-muted-foreground space-y-1">
-                        {(() => {
-                          const status = zipStatusByAlbumId[album.id]
-                          if (!status) return <p>Checking status…</p>
-
-                          const full = status.zip.fullReady ? 'Ready' : 'Not ready'
-                          const social = status.zip.socialReady ? 'Ready' : 'Not ready'
-
-                          return (
-                            <>
-                              <p>Full resolution ZIP: {full}</p>
-                              {album.socialCopiesEnabled && <p>Social media ZIP: {social}</p>}
-                              <p>
-                                Uploads in progress: {status.counts.uploading} • Social previews: {status.counts.socialReady} ready, {status.counts.socialPending} pending, {status.counts.socialError} error
-                              </p>
-                            </>
-                          )
-                        })()}
-                      </div>
-                    </div>
-
+                    <p className="text-sm font-medium">Download ZIPs</p>
                     <div className="flex items-center gap-2">
                       <Button
                         type="button"
@@ -717,6 +716,50 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                       </Button>
                     </div>
                   </div>
+
+                  {(() => {
+                    const status = zipStatusByAlbumId[album.id]
+                    if (!status) {
+                      return <p className="mt-2 text-xs text-muted-foreground">Checking status…</p>
+                    }
+
+                    const ZipRow = ({ label, ready, hint }: { label: string; ready: boolean; hint?: string }) => (
+                      <div className="flex items-center justify-between gap-3 py-1.5">
+                        <p className="text-sm">{label}</p>
+                        <div className="flex items-center gap-2">
+                          {hint && !ready ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+                          <span
+                            className={cn(
+                              'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium',
+                              ready
+                                ? 'bg-success-visible text-success'
+                                : 'bg-warning-visible text-warning'
+                            )}
+                          >
+                            <span className={cn('h-1.5 w-1.5 rounded-full', ready ? 'bg-success' : 'bg-warning animate-pulse')} />
+                            {ready ? 'Ready' : 'Building…'}
+                          </span>
+                        </div>
+                      </div>
+                    )
+
+                    const socialHint = album.socialCopiesEnabled
+                      ? `${status.counts.socialReady} ready · ${status.counts.socialPending} pending${status.counts.socialError ? ` · ${status.counts.socialError} error` : ''}`
+                      : undefined
+
+                    return (
+                      <div className="mt-2 divide-y divide-border/60">
+                        <ZipRow
+                          label="Full resolution"
+                          ready={status.zip.fullReady}
+                          hint={status.counts.uploading > 0 ? `${status.counts.uploading} upload(s) in progress` : undefined}
+                        />
+                        {album.socialCopiesEnabled && (
+                          <ZipRow label="Social media" ready={status.zip.socialReady} hint={socialHint} />
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 {projectStatus !== 'APPROVED' && (
@@ -777,17 +820,27 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                         type="button"
                         variant="ghost"
                         size="sm"
+                        className="text-muted-foreground"
                         onClick={() =>
                           setPhotoSortModeByAlbumId((prev) => ({
                             ...prev,
                             [album.id]: (prev[album.id] || 'alphabetical') === 'alphabetical' ? 'upload-date' : 'alphabetical',
                           }))
                         }
+                        title={`Sorted by ${photoSortMode === 'alphabetical' ? 'name' : 'upload date'} — click to change`}
                       >
-                        Sort: {photoSortMode === 'alphabetical' ? 'A–Z' : 'Upload date'}
+                        <ArrowUpDown className="w-4 h-4 mr-1.5" />
+                        {photoSortMode === 'alphabetical' ? 'A–Z' : 'Upload date'}
                       </Button>
-                      <Button type="button" variant="ghost" size="sm" onClick={() => void fetchPhotos(album.id)}>
-                        Refresh
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground"
+                        onClick={() => void fetchPhotos(album.id)}
+                        title="Refresh photos"
+                      >
+                        <RotateCw className="w-4 h-4" />
                       </Button>
                     </div>
                   </div>
@@ -797,35 +850,86 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                   ) : photos.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No photos yet</p>
                   ) : (
-                    <div className="space-y-2">
-                      {sortedPhotos.map((p) => (
-                        <div key={p.id} className="flex items-center justify-between gap-3 p-2 rounded-md border bg-card">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{p.fileName}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {typeof p.fileSize === 'string' ? formatFileSize(Number(p.fileSize)) : formatFileSize(p.fileSize)}
-                              {' • '}
-                              {p.status}
-                              {p.error ? ` • ${p.error}` : ''}
-                            </p>
-                          </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+                      {sortedPhotos.map((p) => {
+                        const sizeBytes = typeof p.fileSize === 'string' ? Number(p.fileSize) : p.fileSize
+                        const isReady = p.status === 'READY'
+                        const hasError = p.status === 'ERROR'
+                        return (
+                          <div
+                            key={p.id}
+                            className={cn(
+                              'group/photo relative aspect-square overflow-hidden rounded-md border bg-muted',
+                              hasError && 'border-destructive/60'
+                            )}
+                          >
+                            {/* eslint-disable @next/next/no-img-element */}
+                            {p.thumbnailUrl && isReady ? (
+                              <img
+                                src={p.thumbnailUrl}
+                                alt={p.fileName}
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                                onError={() => {
+                                  // Token likely expired — drop the URL so we show the placeholder;
+                                  // the next fetchPhotos() re-mints a fresh thumbnail token.
+                                  setPhotosByAlbumId((prev) => ({
+                                    ...prev,
+                                    [album.id]: (prev[album.id] || []).map((x) =>
+                                      x.id === p.id ? { ...x, thumbnailUrl: null } : x
+                                    ),
+                                  }))
+                                }}
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center">
+                                {hasError ? (
+                                  <Images className="w-5 h-5 text-destructive" />
+                                ) : isReady ? (
+                                  <Images className="w-5 h-5 text-muted-foreground" />
+                                ) : (
+                                  <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+                                )}
+                              </div>
+                            )}
+                            {/* eslint-enable @next/next/no-img-element */}
 
-                          {canDelete && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                void handleDeletePhoto(album.id, p.id, p.fileName)
-                              }}
-                            >
-                              <Trash2 className="w-4 h-4 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      ))}
+                            {/* Filename / size overlay (bottom), revealed on hover */}
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1 pt-4 opacity-0 transition-opacity group-hover/photo:opacity-100">
+                              <p className="truncate text-[11px] font-medium text-white" title={p.fileName}>
+                                {p.fileName}
+                              </p>
+                              <p className="text-[10px] text-white/80">
+                                {formatFileSize(sizeBytes)}
+                                {!isReady ? ` · ${p.status}` : ''}
+                              </p>
+                            </div>
+
+                            {hasError && p.error && (
+                              <div className="absolute inset-x-0 top-0 truncate bg-destructive/90 px-1.5 py-0.5 text-[10px] text-destructive-foreground" title={p.error}>
+                                {p.error}
+                              </div>
+                            )}
+
+                            {canDelete && (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="icon"
+                                className="absolute right-1 top-1 h-6 w-6 opacity-0 shadow-sm transition-opacity group-hover/photo:opacity-100 focus-visible:opacity-100"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  void handleDeletePhoto(album.id, p.id, p.fileName)
+                                }}
+                                title={`Delete ${p.fileName}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -834,6 +938,22 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
           </Card>
         )
       })}
+
+      {!loading && sortedAlbums.length === 0 && (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+            <span className="rounded-full bg-muted p-3">
+              <Images className="w-6 h-6 text-muted-foreground" />
+            </span>
+            <p className="text-sm font-medium">No albums yet</p>
+            <p className="text-sm text-muted-foreground">
+              {projectStatus === 'APPROVED'
+                ? 'This project is approved.'
+                : 'Create an album to share photos with your client.'}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {projectStatus !== 'APPROVED' && (
         <div>

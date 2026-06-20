@@ -30,6 +30,7 @@ interface VideoAsset {
   fileType: string
   category: string | null
   createdAt: string
+  thumbnailUrl?: string | null
 }
 
 interface VideoAssetListProps {
@@ -291,7 +292,22 @@ export function VideoAssetList({
               key={asset.id}
               className="flex items-center gap-3 rounded-md border bg-card p-2 transition-colors hover:bg-accent/50"
             >
-              {getAssetIcon(asset)}
+              {asset.thumbnailUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={asset.thumbnailUrl}
+                  alt={asset.fileName}
+                  className="h-10 w-10 flex-shrink-0 rounded border bg-muted object-cover"
+                  loading="lazy"
+                  onError={() => {
+                    // Token likely expired — drop the URL so we show the file-type icon;
+                    // the next fetchAssets() re-mints a fresh preview token.
+                    setAssets((prev) => prev.map((a) => (a.id === asset.id ? { ...a, thumbnailUrl: null } : a)))
+                  }}
+                />
+              ) : (
+                getAssetIcon(asset)
+              )}
               <div className="flex-1 min-w-0">
                 <button
                   type="button"
