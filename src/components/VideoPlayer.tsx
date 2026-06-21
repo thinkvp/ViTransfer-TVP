@@ -129,6 +129,11 @@ interface VideoPlayerProps {
   // Download button closes the player and returns the viewer to the Files browser
   // instead of opening the asset-download modal.
   onCloseVideo?: () => void
+
+  // Optional: invoked when the <video> element fails to load its source (e.g. an
+  // expired stream token). The parent can re-mint tokens and feed back fresh URLs.
+  // Fired at most once per failed source until a subsequent load succeeds.
+  onStreamError?: (videoId: string) => void
 }
 
 export default function VideoPlayer({
@@ -160,6 +165,7 @@ export default function VideoPlayer({
   useFullTimecode = false, // Default to duration mode
   showTimeDisplayToggle = false, // Default: hide the toggle (admin view)
   onCloseVideo,
+  onStreamError,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
@@ -173,6 +179,9 @@ export default function VideoPlayer({
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
   const lastNonZeroVolumeRef = useRef(1)
   const volumeSliderCloseTimeoutRef = useRef<number | null>(null)
+  // Tracks the videoId we've already asked the parent to recover, so a failing source
+  // triggers exactly one token-refresh request (cleared once a load succeeds).
+  const streamErrorRecoveryRef = useRef<string | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState<number>(DEFAULT_ASPECT_RATIO)
   const [showPosterOverlay, setShowPosterOverlay] = useState(true)
 
@@ -1970,8 +1979,24 @@ export default function VideoPlayer({
                 poster={(selectedVideo as any).thumbnailUrl || undefined}
                 className="w-full h-full"
                 onTimeUpdate={handleTimeUpdate}
+                onError={() => {
+                  // A failed source (commonly an expired /api/content stream token) leaves the
+                  // element unplayable even on a manual retry. Ask the parent to re-mint tokens,
+                  // but only once per source to avoid an error→refresh→error loop.
+                  const vid = (selectedVideo as any)?.id
+                  if (!vid || !videoUrl) return
+                  if (streamErrorRecoveryRef.current === vid) return
+                  streamErrorRecoveryRef.current = vid
+                  onStreamError?.(vid)
+                }}
                 onLoadedMetadata={(e) => {
                   const el = e.currentTarget
+
+                  // Source loaded successfully — clear any pending recovery latch so a future
+                  // failure can trigger another refresh.
+                  if (streamErrorRecoveryRef.current === (selectedVideo as any)?.id) {
+                    streamErrorRecoveryRef.current = null
+                  }
 
                   if (Number.isFinite(el.duration)) {
                     setDurationSeconds(el.duration)

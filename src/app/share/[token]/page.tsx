@@ -128,6 +128,13 @@ export default function SharePage() {
   // each entry carries the fileId to request and the resolver for its in-flight promise.
   const uploadAccessBatchRef = useRef<Map<string, { fileId: string; resolve: (value: UploadAccessUrlCacheEntry | null) => void }>>(new Map())
   const uploadAccessBatchTimerRef = useRef<number | null>(null)
+  // Single source of truth for the live share token, readable synchronously by async
+  // fetchers/retries without capturing a stale value in their closures. Kept in sync
+  // with the `shareToken` state below.
+  const shareTokenRef = useRef<string | null>(null)
+  // Coalesces concurrent session-recovery probes (a video switch fires a burst of token
+  // requests that can all 401 at once) into a single revalidation.
+  const sessionRecoveryInFlightRef = useRef<Promise<boolean> | null>(null)
   const logoSrc = '/api/branding/logo'
 
   // Centralised session-expiry handler — clears all caches and resets auth state.
@@ -150,10 +157,63 @@ export default function SharePage() {
     lastVideoTokenRefreshAtRef.current = 0
   }, [])
 
+  // Keep the synchronous token ref aligned with React state.
+  useEffect(() => {
+    shareTokenRef.current = shareToken
+  }, [shareToken])
+
+  // Adopt a share token everywhere at once (ref + state + storage) so async readers
+  // never see a torn value.
+  const adoptShareToken = useCallback((value: string | null) => {
+    shareTokenRef.current = value
+    setShareToken(value)
+    saveShareToken(storageKey, value)
+  }, [storageKey])
+
+  // Re-validate the session with the freshest persisted token before tearing it down.
+  // A burst of concurrent 401s (token mid-rotation, stale closures) collapses to ONE
+  // probe; if the session is actually healthy we adopt the renewed token and keep going.
+  const revalidateShareSession = useCallback(async (): Promise<boolean> => {
+    if (isAdminSession) return false
+    if (sessionRecoveryInFlightRef.current) return sessionRecoveryInFlightRef.current
+
+    const attempt = (async (): Promise<boolean> => {
+      const persisted = loadShareToken(storageKey) || shareTokenRef.current
+      if (!persisted) return false
+      try {
+        const res = await apiFetch(`/api/share/${token}`, {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${persisted}` },
+        })
+        if (!res.ok) return false
+        const data = await res.json().catch(() => null)
+        const renewed = (data && typeof data === 'object' && typeof (data as any).shareToken === 'string' && (data as any).shareToken)
+          ? (data as any).shareToken
+          : persisted
+        adoptShareToken(renewed)
+        return true
+      } catch {
+        return false
+      }
+    })()
+
+    sessionRecoveryInFlightRef.current = attempt
+    try {
+      return await attempt
+    } finally {
+      sessionRecoveryInFlightRef.current = null
+    }
+  }, [isAdminSession, storageKey, token, adoptShareToken])
+
   const handleSessionExpired = useCallback(async (response?: Response) => {
+    // Don't nuke a healthy session on a single transient 401 — confirm it's really dead
+    // first. If revalidation succeeds, the renewed token has already been adopted.
+    if (!isAdminSession) {
+      const recovered = await revalidateShareSession()
+      if (recovered) return
+    }
     clearAllShareCaches()
-    saveShareToken(storageKey, null)
-    setShareToken(null)
+    adoptShareToken(null)
     setDownloadableFiles(null)
     setAlbums([])
     setSwitchableProjects([])
@@ -170,7 +230,7 @@ export default function SharePage() {
     } else {
       setAuthMode('PASSWORD')
     }
-  }, [clearAllShareCaches, storageKey])
+  }, [clearAllShareCaches, adoptShareToken, isAdminSession, revalidateShareSession])
 
   const isUploadsFilesBrowse = desktopContentTab === 'files'
     && String(requestedFilesFolderName || '').trim().startsWith('UPLOADS')
@@ -361,7 +421,7 @@ export default function SharePage() {
 
   // Fetch comments separately for security
   const fetchComments = useCallback(async (tokenOverride?: string | null) => {
-    const authToken = tokenOverride || shareToken
+    const authToken = tokenOverride || shareTokenRef.current
     if (!token) return
     if (!isAdminSession && !authToken) return
 
@@ -384,7 +444,7 @@ export default function SharePage() {
     } finally {
       setCommentsLoading(false)
     }
-  }, [token, shareToken, isAdminSession, handleSessionExpired])
+  }, [token, isAdminSession, handleSessionExpired])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -754,9 +814,14 @@ export default function SharePage() {
       try {
         setLoadError(null)
 
+        // Read the freshest persisted token synchronously rather than depending on the
+        // `shareToken` state. The base route mints a new token on every call, so depending
+        // on state here created a self-feeding refetch loop (load → setShareToken → reload)
+        // that churned the token and opened the 401 race window when switching videos.
+        const authToken = !isAdminSession ? (loadShareToken(storageKey) || shareTokenRef.current) : null
         const response = await apiFetch(`/api/share/${token}`, {
           cache: 'no-store',
-          headers: !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : undefined,
+          headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
         })
 
         if (!isMounted) return
@@ -789,8 +854,7 @@ export default function SharePage() {
         if (response.ok) {
           const projectData = await response.json()
           if (projectData.shareToken) {
-            setShareToken(projectData.shareToken)
-            saveShareToken(storageKey, projectData.shareToken)
+            adoptShareToken(projectData.shareToken)
           }
           if (isMounted) {
             setProject(projectData)
@@ -830,7 +894,10 @@ export default function SharePage() {
     return () => {
       isMounted = false
     }
-  }, [token, shareToken, storageKey, fetchComments, isAdminSession, handleSessionExpired])
+    // NOTE: `shareToken` is intentionally NOT a dependency. loadProject reads the freshest
+    // persisted token at call time; depending on the state value re-ran this effect on every
+    // token rotation, which is the refetch loop we removed.
+  }, [token, storageKey, fetchComments, isAdminSession, handleSessionExpired, adoptShareToken])
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
@@ -2148,6 +2215,18 @@ export default function SharePage() {
     }
   }, [activeVideoName, fetchTokensForVideos, project?.enableVideos, project?.videosByName, shareToken])
 
+  // Safety net: if the <video> element fails to load its stream (e.g. an expired
+  // /api/content token after a session hiccup), drop the stale cache entry and re-mint
+  // fresh tokens for the current videos so playback can recover without a full reload.
+  const handleVideoStreamError = useCallback((videoId: string) => {
+    if (isAdminSession) return
+    if (!shareTokenRef.current) return
+    tokenCacheRef.current.delete(videoId)
+    tokenRequestCacheRef.current.delete(videoId)
+    sidebarVideoCacheRef.current.delete(videoId)
+    void refreshViewVideoTokens(true)
+  }, [isAdminSession, refreshViewVideoTokens])
+
   useEffect(() => {
     let isMounted = true
 
@@ -2955,7 +3034,7 @@ export default function SharePage() {
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: file.videoId } }))
             window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: file.videoId } }))
-            window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null, autoPlay: true } }))
+            window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null } }))
           }, 0)
         }}
         onApproveVideo={handleApproveVideo}
@@ -2993,7 +3072,7 @@ export default function SharePage() {
                 setTimeout(() => {
                   window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: file.videoId } }))
                   window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: file.videoId } }))
-                  window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null, autoPlay: true } }))
+                  window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null } }))
                 }, 0)
               }}
               onDownloadFiles={handleDownloadFiles}
@@ -3058,6 +3137,7 @@ export default function SharePage() {
                     isAdmin={false}
                     isGuest={false}
                     shareToken={shareToken}
+                    onStreamError={handleVideoStreamError}
                     commentsForTimeline={filteredComments}
                     hideDownloadButton={true}
                     useFullTimecode={Boolean(project?.useFullTimecode)}
@@ -3108,6 +3188,7 @@ export default function SharePage() {
                   }}
                   onApprove={fetchProjectData}
                   onCloseVideo={() => setDesktopContentTab('files')}
+                  onStreamError={handleVideoStreamError}
                 />
               )}
 
@@ -3138,6 +3219,7 @@ function ShareFeedbackGrid({
   onDraftGuardChange,
   onApprove,
   onCloseVideo,
+  onStreamError,
 }: {
   project: any
   readyVideos: any[]
@@ -3156,6 +3238,7 @@ function ShareFeedbackGrid({
   onDraftGuardChange?: (guard: DraftNavigationGuard | null) => void
   onApprove: () => void
   onCloseVideo?: () => void
+  onStreamError?: (videoId: string) => void
 }) {
   const logoSrc = '/api/branding/logo'
   const [isDesktop, setIsDesktop] = useState(false)
@@ -3414,6 +3497,7 @@ function ShareFeedbackGrid({
               isAdmin={false}
               isGuest={false}
               shareToken={shareToken}
+              onStreamError={onStreamError}
               commentsForTimeline={management.comments as any}
               disableFullscreenCommentsUI={commentsDisabled}
               useFullTimecode={Boolean(project?.useFullTimecode)}
