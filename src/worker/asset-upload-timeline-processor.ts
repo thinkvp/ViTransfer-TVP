@@ -7,10 +7,15 @@ import { moveUploadedFile } from '@/lib/storage'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import { buildAssetTimelineStorageRoot, buildUploadTimelineStorageRoot } from '@/lib/project-storage-paths'
 import { getStoredFilePath, registerStoredFile } from '@/lib/stored-file'
+import { TEMP_DIR as WORKER_TEMP_DIR } from './cleanup'
 import type { AssetTimelineJob, UploadTimelineJob } from '@/lib/queue'
 
 const DEBUG = process.env.DEBUG_FFMPEG === 'true'
-const TEMP_DIR = process.env.TEMP_DIR || path.join(process.cwd(), 'temp')
+// Scratch space for sprite generation. Use the shared worker temp dir (under
+// STORAGE_ROOT, created at startup and swept by cleanupOldTempFiles) rather than
+// a path under process.cwd() — in the container cwd is /app, which the non-root
+// worker user cannot write to (EACCES on mkdir '/app/temp').
+const TEMP_DIR = process.env.TEMP_DIR || WORKER_TEMP_DIR
 
 function calculateScaledHeight(inputWidth: number, inputHeight: number, targetWidth: number): number {
   if (inputWidth <= 0 || inputHeight <= 0) return 90

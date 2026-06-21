@@ -25,7 +25,7 @@ async function requireGuestVideoLinkContext(
   | {
       ok: true, isAdmin: boolean
       userId: string | null
-      project: { id: string; title: string; status: string; guestMode: boolean }
+      project: { id: string; title: string; status: string }
       video: { id: string; name: string | null; version: number | null; versionLabel: string | null }
     }
   | { ok: false; response: NextResponse }
@@ -52,7 +52,6 @@ async function requireGuestVideoLinkContext(
       id: true,
       title: true,
       status: true,
-      guestMode: true,
     },
   })
 

@@ -88,7 +88,6 @@ const updateProjectSchema = z.object({
   timelinePreviewsEnabled: z.boolean().optional(),
   sharePassword: z.string().max(200).nullable().optional(),
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
-  guestMode: z.boolean().optional(),
   enableVideos: z.boolean().optional(),
   enablePhotos: z.boolean().optional(),
   clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']).optional(),
@@ -752,17 +751,16 @@ export async function PATCH(
       updateData.watermarkText = validatedBody.watermarkText || null
     }
 
-    // Handle password, authMode, and guest settings updates
+    // Handle password and authMode settings updates
     // Fetch current project once if any security field is being updated
     let passwordWasChanged = false
     let authModeWasChanged = false
-    let guestModeWasChanged = false
 
-    if (validatedBody.sharePassword !== undefined || validatedBody.authMode !== undefined || validatedBody.guestMode !== undefined) {
+    if (validatedBody.sharePassword !== undefined || validatedBody.authMode !== undefined) {
       // Get current project state (single query for all security checks)
       const currentProject = await prisma.project.findUnique({
         where: { id },
-        select: { authMode: true, sharePassword: true, guestMode: true }
+        select: { authMode: true, sharePassword: true }
       })
 
       if (!currentProject) {
@@ -830,14 +828,6 @@ export async function PATCH(
         }
       }
 
-      // Handle guest mode
-      if (validatedBody.guestMode !== undefined) {
-        // Detect if guestMode actually changed
-        if (currentProject.guestMode !== validatedBody.guestMode) {
-          guestModeWasChanged = true
-        }
-        updateData.guestMode = validatedBody.guestMode
-      }
     }
 
     // Separate validation when only password is being cleared without authMode change
@@ -1520,9 +1510,9 @@ export async function PATCH(
       }
     }
 
-    // SECURITY: After password, authMode, or guestMode is updated in DB, invalidate ALL sessions for this project
+    // SECURITY: After password or authMode is updated in DB, invalidate ALL sessions for this project
     // This prevents clients from using old authentication/authorization even though security rules changed
-    if (passwordWasChanged || authModeWasChanged || guestModeWasChanged) {
+    if (passwordWasChanged || authModeWasChanged) {
       try {
         // Invalidate JWT-based share sessions
         const shareSessionsInvalidated = await invalidateShareTokensByProject(id)
@@ -1534,7 +1524,6 @@ export async function PATCH(
         const changes: string[] = []
         if (passwordWasChanged) changes.push('password')
         if (authModeWasChanged) changes.push('auth mode')
-        if (guestModeWasChanged) changes.push('guest mode')
         const changeReason = changes.join(' and ') + ' changed'
 
         console.log(

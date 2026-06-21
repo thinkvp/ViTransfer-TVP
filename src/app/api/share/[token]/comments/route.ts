@@ -52,7 +52,6 @@ export async function GET(
         companyName: true,
         hideFeedback: true,
         status: true,
-        guestMode: true,
       }
     })
 
@@ -77,12 +76,7 @@ export async function GET(
       return accessCheck.errorResponse!
     }
 
-    const { isAdmin, isAuthenticated, isGuest } = accessCheck
-
-    // Block guest users from seeing comments
-    if (project.guestMode && isGuest) {
-      return NextResponse.json([], { headers: noStoreHeaders })
-    }
+    const { isAdmin, isAuthenticated } = accessCheck
 
     // Fetch comments with nested replies
     const comments = await prisma.comment.findMany({

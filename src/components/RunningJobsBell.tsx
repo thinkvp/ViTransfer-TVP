@@ -661,7 +661,11 @@ function normalizeFolderRename(
 
 function normalizeVideoAssetPreview(job: VideoAssetPreviewJob): UnifiedJob {
   const isProcessing = job.processingCount > 0
-  const progress = job.totalCount > 0 ? Math.round((job.processingCount / job.totalCount) * 100) : 0
+  // Full wave size = already-done + remaining (pending + processing). Progress
+  // is measured against completed work so it climbs monotonically, instead of
+  // dividing the live concurrency count by an ever-shrinking remaining count.
+  const waveTotal = job.doneCount + job.totalCount
+  const progress = waveTotal > 0 ? Math.round((job.doneCount / waveTotal) * 100) : 0
 
   return {
     key: `asset-preview:${job.projectId}`,
@@ -669,14 +673,14 @@ function normalizeVideoAssetPreview(job: VideoAssetPreviewJob): UnifiedJob {
     kind: 'asset-preview',
     projectId: job.projectId,
     projectName: job.projectName,
-    label: `${job.totalCount} asset preview${job.totalCount !== 1 ? 's' : ''}`,
+    label: `${waveTotal} asset preview${waveTotal !== 1 ? 's' : ''}`,
     detail: job.projectName,
     status: isProcessing ? 'active' : 'queued',
     progress: isProcessing ? Math.max(progress, 5) : 0,
     indeterminate: !isProcessing,
     statusLine: !isProcessing
-      ? `${job.pendingCount} queued · ${job.processingCount} processing`
-      : `${job.processingCount}/${job.totalCount} processed · ${progress}%`,
+      ? `${job.pendingCount} queued`
+      : `${job.doneCount}/${waveTotal} processed · ${progress}%`,
     completedAt: 0,
     canClear: false,
     canDismiss: false,

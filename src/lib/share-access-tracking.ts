@@ -41,7 +41,7 @@ export async function trackSharePageAccess(params: {
 
   // Best-effort: skip tracking when the visitor's IP matches a known internal user.
   // This catches admins accessing the share page without an admin JWT in the request
-  // (e.g. opening it in a separate tab or clicking "Continue as Guest").
+  // (e.g. opening it in a separate tab).
   const likelyAdmin = await isLikelyAdminIp(ipAddress).catch(() => false)
 
   if (likelyAdmin) {

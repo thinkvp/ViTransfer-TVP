@@ -34,7 +34,7 @@ export async function POST(
   try {
     const project = await prisma.project.findUnique({
       where: { slug: token },
-      select: { id: true, sharePassword: true, authMode: true, guestMode: true },
+      select: { id: true, sharePassword: true, authMode: true },
     })
 
     if (!project) {

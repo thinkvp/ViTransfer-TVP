@@ -82,7 +82,6 @@ export async function validateCommentPermissions(params: {
       authMode: true,
       hideFeedback: true,
       status: true,
-      guestMode: true,
     }
   })
 

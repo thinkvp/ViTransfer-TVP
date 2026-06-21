@@ -44,6 +44,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { FolderPreviewMosaic } from './FolderPreviewMosaic'
 
 type DownloadProgressSnapshot = {
   percent: number
@@ -387,7 +388,13 @@ export function ShareFilesBrowser({
   onPreviewTokenExpired,
   onApproveVideo,
 }: ShareFilesBrowserProps) {
-  const [openFolderName, setOpenFolderName] = useState<string | null>(null)
+  // Initialise from the parent's requested folder so a freshly-mounted browser
+  // (e.g. after switching from the player back to FILES) opens the right folder
+  // instead of starting at root and then bouncing.
+  const [openFolderName, setOpenFolderName] = useState<string | null>(() => {
+    const requested = String(requestedOpenFolderName || '').trim()
+    return requested ? requested : null
+  })
   const [isDownloadingSelected, setIsDownloadingSelected] = useState(false)
   const [bulkFsaUnsupportedFiles, setBulkFsaUnsupportedFiles] = useState<DownloadableFile[] | null>(null)
   const [localDownloadProgress, setLocalDownloadProgress] = useState<DownloadProgressSnapshot | null>(null)
@@ -862,32 +869,47 @@ export function ShareFilesBrowser({
       .some((f) => f.type === 'video' && f.isApproved === true)
   }, [openFolder])
 
+  // Navigate to a folder (or null for the project root) in response to genuine
+  // in-browser navigation, and report it to the parent so the sidebar selection
+  // stays in sync. The parent → child direction is handled one-way by the
+  // requestedOpenFolderName effect below; we deliberately do NOT mirror
+  // openFolderName back to the parent from an effect watching it, because a
+  // two-way effect sync oscillates (parent ⇄ child) and trips React's
+  // "maximum update depth" guard (#185).
+  const navigateToFolder = useCallback((name: string | null) => {
+    setOpenFolderName(name)
+    onOpenFolderNameChange?.(name)
+  }, [onOpenFolderNameChange])
+
   useEffect(() => {
     if (!openFolderName) return
     if (openFolderName === 'UPLOADS' && rootUploadGroups.length > 0) {
       return
     }
     if (!sortedGroups.some((group) => group.name === openFolderName)) {
-      setOpenFolderName(null)
+      // The folder we were viewing no longer exists (e.g. it was deleted). Drop to
+      // the project root and let the parent know so the sidebar deselects too.
+      navigateToFolder(null)
     }
-  }, [openFolderName, sortedGroups, rootUploadGroups.length])
+  }, [openFolderName, sortedGroups, rootUploadGroups.length, navigateToFolder])
 
   useEffect(() => {
     const requested = String(requestedOpenFolderName || '').trim()
-    if (!requested) return
-
-    if (requested === 'UPLOADS' && rootUploadGroups.length > 0) {
-      setOpenFolderName('UPLOADS')
-      return
+    // Resolve the folder the parent is asking for. Empty → project root (e.g.
+    // deselecting the active sidebar item in the combined files view).
+    let target: string | null = null
+    if (!requested) {
+      target = null
+    } else if (requested === 'UPLOADS' && rootUploadGroups.length > 0) {
+      target = 'UPLOADS'
+    } else {
+      const matchingGroup = sortedGroups.find((group) => group.name === requested)
+      target = matchingGroup ? matchingGroup.name : null
     }
 
-    const matchingGroup = sortedGroups.find((group) => group.name === requested)
-    if (matchingGroup) {
-      setOpenFolderName(matchingGroup.name)
-      return
-    }
-
-    setOpenFolderName(null)
+    // One-way: apply the parent's request to the local view. This must NOT report
+    // back to the parent (no onOpenFolderNameChange) — the parent already knows.
+    setOpenFolderName(target)
   }, [requestedOpenFolderName, sortedGroups, rootUploadGroups.length])
 
   const getUploadsFolderPathFromGroup = useCallback((groupName: string): string => {
@@ -908,7 +930,11 @@ export function ShareFilesBrowser({
   const getUploadsFolderLabelFromGroup = useCallback((groupName: string): string => {
     const relativePath = getUploadsFolderPathFromGroup(groupName)
     if (!relativePath) return 'UPLOADS'
-    return relativePath
+    // Show only the leaf segment. A folder card always sits inside its parent's view,
+    // so the full relative path (e.g. "TEST/TEST 2") would be redundant and reads like
+    // a flat sibling rather than a nested folder. The breadcrumb conveys the full path.
+    const segments = relativePath.split('/').map((segment) => segment.trim()).filter(Boolean)
+    return segments[segments.length - 1] || relativePath
   }, [getUploadsFolderPathFromGroup])
 
   const getFolderHierarchySegments = useCallback((folderName: string): string[] => {
@@ -976,39 +1002,35 @@ export function ShareFilesBrowser({
 
     const segments = getFolderHierarchySegments(openFolderName)
     if (segments.length <= 1) {
-      setOpenFolderName(null)
+      navigateToFolder(null)
       return
     }
 
     const parentSegments = segments.slice(0, -1)
     const resolvedParentName = resolveFolderNameFromSegments(parentSegments)
     if (!resolvedParentName) {
-      setOpenFolderName(null)
+      navigateToFolder(null)
       return
     }
 
     if (resolvedParentName === 'UPLOADS' && rootUploadGroups.length === 0) {
-      setOpenFolderName(null)
+      navigateToFolder(null)
       return
     }
 
-    setOpenFolderName(resolvedParentName)
-  }, [openFolderName, getFolderHierarchySegments, resolveFolderNameFromSegments, rootUploadGroups.length])
-
-  useEffect(() => {
-    onOpenFolderNameChange?.(openFolderName)
-  }, [openFolderName, onOpenFolderNameChange])
+    navigateToFolder(resolvedParentName)
+  }, [openFolderName, getFolderHierarchySegments, resolveFolderNameFromSegments, rootUploadGroups.length, navigateToFolder])
 
   useEffect(() => {
     const handleOpenRoot = () => {
-      setOpenFolderName(null)
+      navigateToFolder(null)
     }
 
     window.addEventListener('shareOpenFilesRoot', handleOpenRoot)
     return () => {
       window.removeEventListener('shareOpenFilesRoot', handleOpenRoot)
     }
-  }, [])
+  }, [navigateToFolder])
 
   useEffect(() => {
     let cancelled = false
@@ -1514,7 +1536,11 @@ export function ShareFilesBrowser({
     try {
       await onDeleteUploadFolder(pendingDeleteFolderPath)
       setPendingDeleteFolderPath(null)
-      setOpenFolderName(null)
+      // Don't force-navigate to root here. If the deleted folder is the one we're
+      // viewing, the cleanup effect resets openFolderName once it leaves sortedGroups.
+      // Forcing null while the parent still requests this folder makes the parent↔child
+      // folder-sync effects oscillate (openFolderName ⇄ requested) and trip React's
+      // "maximum update depth" (#185). Deleting a subfolder now keeps you in the parent.
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to delete folder')
     } finally {
@@ -1659,21 +1685,38 @@ export function ShareFilesBrowser({
     if (openFolder?.groupType !== 'uploads') return [] as DownloadableFile[]
     return [...filesInOpenFolder.filter((file) => file.type === 'upload-file')].sort(compareFileNameAsc)
   }, [openFolder?.groupType, filesInOpenFolder, compareFileNameAsc])
-  const nestedUploadFoldersInRoot = useMemo(
-    () => openUploadsRoot ? rootUploadGroups.filter((group) => group.name !== 'UPLOADS') : [],
-    [openUploadsRoot, rootUploadGroups]
-  )
+  // Immediate child folders of whichever uploads folder is currently open (the UPLOADS
+  // root or a nested folder). Groups are flat with hierarchical names, so a plain
+  // "everything except UPLOADS" list renders deep subfolders as flat siblings (e.g.
+  // "TEST" and "TEST/TEST 2" side by side at the root). Like a real file browser, show
+  // only the folders exactly one level below the open one.
+  const childUploadFolders = useMemo(() => {
+    if (!isUploadsContext) return [] as DownloadableGroup[]
+    const currentSegments = uploadsTargetFolderPath
+      ? uploadsTargetFolderPath.split('/').map((segment) => segment.trim()).filter(Boolean)
+      : []
+    const currentDepth = currentSegments.length
+    return rootUploadGroups.filter((group) => {
+      if (group.name === 'UPLOADS') return false
+      const relativePath = getUploadsFolderPathFromGroup(group.name)
+      if (!relativePath) return false
+      const segments = relativePath.split('/').map((segment) => segment.trim()).filter(Boolean)
+      // Exactly one level below the open folder, and sharing its full path as a prefix.
+      if (segments.length !== currentDepth + 1) return false
+      return currentSegments.every((segment, index) => segments[index] === segment)
+    })
+  }, [isUploadsContext, uploadsTargetFolderPath, rootUploadGroups, getUploadsFolderPathFromGroup])
 
-  // When the UPLOADS root view is open, ensure all subfolder group names are present in
-  // visibleFolderNames so the preview-tile effect fires for them. The IntersectionObserver
-  // handles this too, but there is a timing gap between card mount and the first observer
-  // callback that can leave the folders invisible to the effect on the first render pass.
+  // Ensure child folder group names are present in visibleFolderNames so the preview-tile
+  // effect fires for them. The IntersectionObserver handles this too, but there is a
+  // timing gap between card mount and the first observer callback that can leave the
+  // folders invisible to the effect on the first render pass.
   useEffect(() => {
-    if (!openUploadsRoot || nestedUploadFoldersInRoot.length === 0) return
+    if (childUploadFolders.length === 0) return
     setVisibleFolderNames((prev) => {
       const next = new Set(prev)
       let changed = false
-      for (const group of nestedUploadFoldersInRoot) {
+      for (const group of childUploadFolders) {
         if (!next.has(group.name)) {
           next.add(group.name)
           changed = true
@@ -1681,7 +1724,7 @@ export function ShareFilesBrowser({
       }
       return changed ? next : prev
     })
-  }, [openUploadsRoot, nestedUploadFoldersInRoot])
+  }, [childUploadFolders])
   const pendingUploadTransferByFileId = useMemo(() => {
     const map = new Map<string, TransferItem>()
     for (const transfer of transferItems) {
@@ -2148,6 +2191,10 @@ export function ShareFilesBrowser({
         onClick={() => {
           if (muteInactiveVideoVersion) return
           if (file.type === 'upload-file') return
+          if (file.type === 'video' && file.videoId && onOpenVideoVersion) {
+            onOpenVideoVersion(file, openFolder?.name || null)
+            return
+          }
           if (isImageFile) {
             openImageLightbox(file, imageList)
             return
@@ -2362,10 +2409,6 @@ export function ShareFilesBrowser({
     const folderPreview = folderPreviewByName?.[group.name] || null
     const folderPreviewTiles = folderPreviewTilesByName[group.name] || []
     const folderVideoPreviewUrl = folderPreviewPosterByName[group.name] || null
-    const leadPreview = folderPreviewTiles[0] || null
-    const sidePreviewTop = folderPreviewTiles[1] || null
-    const sidePreviewBottom = folderPreviewTiles[2] || null
-    const showVideoFolderPreview = !leadPreview && Boolean(folderVideoPreviewUrl) && group.groupType === 'uploads'
 
     return (
       <div
@@ -2378,7 +2421,7 @@ export function ShareFilesBrowser({
             ? 'border-2 border-primary/85 hover:border-primary'
             : 'border border-border hover:border-primary/45'
         )}
-        onDoubleClick={() => setOpenFolderName(group.name)}
+        onClick={() => navigateToFolder(group.name)}
         onDragOver={(event) => {
           if (group.groupType !== 'uploads') return
           if (!allowUploadDrop(event)) return
@@ -2399,94 +2442,17 @@ export function ShareFilesBrowser({
         }}
       >
         <div className="relative p-2.5 pb-2 bg-gradient-to-b from-muted/80 via-muted/45 to-background">
-          <div className="relative pt-2">
-            <div className="absolute left-3 top-0 h-2.5 w-16 rounded-t-md border border-b-0 border-primary/55 bg-primary/30" />
-            <div className="relative rounded-lg rounded-tl-sm border border-primary/50 bg-primary/20 p-1.5 shadow-inner shadow-black/10">
-              <div className="grid grid-cols-3 grid-rows-2 gap-1.5 aspect-[16/10] rounded-md overflow-hidden bg-primary/20">
-                {leadPreview ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={leadPreview}
-                      alt={group.name}
-                      className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
-                      loading="lazy"
-                      onError={() => {
-                        invalidateFolderPreviewTiles(group.name)
-                        requestPreviewTokenRefresh()
-                      }}
-                    />
-
-                    {sidePreviewTop ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={sidePreviewTop}
-                        alt=""
-                        aria-hidden="true"
-                        className="h-full w-full object-contain bg-black"
-                        loading="lazy"
-                        onError={() => {
-                          invalidateFolderPreviewTiles(group.name)
-                          requestPreviewTokenRefresh()
-                        }}
-                      />
-                    ) : (
-                      <div className="h-full w-full bg-primary/35" aria-hidden="true" />
-                    )}
-
-                    {sidePreviewBottom ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={sidePreviewBottom}
-                        alt=""
-                        aria-hidden="true"
-                        className="h-full w-full object-contain bg-black"
-                        loading="lazy"
-                        onError={() => {
-                          invalidateFolderPreviewTiles(group.name)
-                          requestPreviewTokenRefresh()
-                        }}
-                      />
-                    ) : (
-                      <div className="h-full w-full bg-primary/30" aria-hidden="true" />
-                    )}
-                  </>
-                ) : folderPreview ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={folderPreview}
-                      alt={group.name}
-                      className="col-span-2 row-span-2 h-full w-full object-contain bg-black"
-                      loading="lazy"
-                      onError={() => {
-                        invalidateFolderPreviewTiles(group.name)
-                        requestPreviewTokenRefresh()
-                      }}
-                    />
-                    <div className="h-full w-full bg-primary/35" aria-hidden="true" />
-                    <div className="h-full w-full bg-primary/30" aria-hidden="true" />
-                  </>
-                ) : showVideoFolderPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={folderVideoPreviewUrl || undefined}
-                    alt={group.name}
-                    className="col-span-3 row-span-2 h-full w-full object-contain bg-black"
-                    loading="lazy"
-                    onError={() => {
-                      invalidateFolderPreviewTiles(group.name)
-                      requestPreviewTokenRefresh()
-                    }}
-                  />
-                ) : (
-                  <div className="col-span-3 row-span-2 h-full w-full flex items-center justify-center text-primary/70">
-                    <Folder className="w-9 h-9" />
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          <FolderPreviewMosaic
+            label={group.name}
+            tiles={folderPreviewTiles}
+            fallbackPreview={folderPreview}
+            videoPoster={folderVideoPreviewUrl}
+            isUploads={group.groupType === 'uploads'}
+            onTileError={() => {
+              invalidateFolderPreviewTiles(group.name)
+              requestPreviewTokenRefresh()
+            }}
+          />
 
           {showVideoFolderApprovedBadge ? (
             <div className="absolute bottom-2 left-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[11px] leading-none text-white font-semibold tracking-wide">
@@ -2509,17 +2475,18 @@ export function ShareFilesBrowser({
                 if (el) el.indeterminate = someChecked && !allChecked
               }}
               onChange={(event) => toggleGroup(group, event.target.checked)}
+              onClick={(event) => event.stopPropagation()}
               className={cn('w-4 h-4', FILES_CHECKBOX_CLASS, hasSelectableFiles ? 'cursor-pointer' : 'cursor-not-allowed opacity-40')}
               aria-label={`Select files in ${displayGroupName}`}
             />
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setOpenFolderName(group.name)}
-          className="w-full text-left px-3 py-2.5"
-        >
+        {/* Not a <button>: this region contains the folder-actions dropdown trigger
+            (itself a <button>), and a button-in-button is invalid HTML — the browser
+            hoists the inner one out, desyncing React's tree from the DOM. The outer
+            card <div> already handles open-on-click, so a plain <div> is enough. */}
+        <div className="w-full text-left px-3 py-2.5">
           <div className="flex items-center justify-between gap-2 min-w-0">
             <div className="flex items-center gap-2 min-w-0">
               <Folder className="w-4 h-4 text-primary shrink-0" />
@@ -2579,7 +2546,7 @@ export function ShareFilesBrowser({
           <p className="text-xs text-muted-foreground mt-1.5">
             {groupFiles.length} Item{groupFiles.length === 1 ? '' : 's'}
           </p>
-        </button>
+        </div>
       </div>
     )
   }
@@ -3008,74 +2975,66 @@ export function ShareFilesBrowser({
                 </section>
               </>
             ) : (
-              <>
-                {openUploadsRoot && nestedUploadFoldersInRoot.length > 0 ? (
-                  <section className="space-y-2">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Folders</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {nestedUploadFoldersInRoot.map((group) => renderRootFolderCard(group))}
-                    </div>
-                  </section>
-                ) : null}
-
-                <section className={cn('space-y-2', openUploadsRoot && nestedUploadFoldersInRoot.length > 0 ? 'border-t border-border/70 pt-4' : '')}>
-                  <div className="px-1 flex items-center gap-2">
-                    <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
-                    <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors',
-                          uploadsThumbnailSize === 'small'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setUploadsThumbnailSize('small')}
-                      >
-                        Small
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
-                          uploadsThumbnailSize === 'default'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setUploadsThumbnailSize('default')}
-                      >
-                        Default
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
-                          uploadsThumbnailSize === 'large'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setUploadsThumbnailSize('large')}
-                      >
-                        Large
-                      </button>
-                    </div>
+              <section className="space-y-2">
+                <div className="px-1 flex items-center gap-2">
+                  <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
+                  <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
+                    <button
+                      type="button"
+                      className={cn(
+                        'px-2 py-1 text-[11px] font-semibold transition-colors',
+                        uploadsThumbnailSize === 'small'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-card text-muted-foreground hover:text-foreground'
+                      )}
+                      onClick={() => setUploadsThumbnailSize('small')}
+                    >
+                      Small
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                        uploadsThumbnailSize === 'default'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-card text-muted-foreground hover:text-foreground'
+                      )}
+                      onClick={() => setUploadsThumbnailSize('default')}
+                    >
+                      Default
+                    </button>
+                    <button
+                      type="button"
+                      className={cn(
+                        'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                        uploadsThumbnailSize === 'large'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-card text-muted-foreground hover:text-foreground'
+                      )}
+                      onClick={() => setUploadsThumbnailSize('large')}
+                    >
+                      Large
+                    </button>
                   </div>
-                  {openFolderUploadFiles.length > 0 ? (
-                    <div className={cn(
-                      'grid',
-                      uploadsThumbnailSize === 'large'
-                        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
-                        : uploadsThumbnailSize === 'default'
-                          ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3'
-                          : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
-                    )}>
-                      {openFolderUploadFiles.map((file) => renderOpenFolderFileCard(file, uploadsThumbnailSize === 'small', openFolderUploadFiles))}
-                    </div>
-                  ) : (
-                    <p className="px-1 text-xs text-muted-foreground italic">No uploaded files available.</p>
-                  )}
-                </section>
-              </>
+                </div>
+                {/* Unified file-browser grid: child folders and files share one grid,
+                    both sized by the Small/Default/Large toggle. Folders sort first. */}
+                {(childUploadFolders.length > 0 || openFolderUploadFiles.length > 0) ? (
+                  <div className={cn(
+                    'grid',
+                    uploadsThumbnailSize === 'large'
+                      ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
+                      : uploadsThumbnailSize === 'default'
+                        ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3'
+                        : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
+                  )}>
+                    {childUploadFolders.map((group) => renderRootFolderCard(group))}
+                    {openFolderUploadFiles.map((file) => renderOpenFolderFileCard(file, uploadsThumbnailSize === 'small', openFolderUploadFiles))}
+                  </div>
+                ) : (
+                  <p className="px-1 text-xs text-muted-foreground italic">This folder is empty.</p>
+                )}
+              </section>
             )}
           </div>
         )}
@@ -3504,7 +3463,7 @@ export function ShareFilesBrowser({
                   }
                 }}
                 onOpenFolder={() => {
-                  if (contextMenu.group) setOpenFolderName(contextMenu.group.name)
+                  if (contextMenu.group) navigateToFolder(contextMenu.group.name)
                 }}
                 onSelect={() => {
                   if (!contextMenu.file) return

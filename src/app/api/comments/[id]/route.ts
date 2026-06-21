@@ -61,7 +61,6 @@ export async function PATCH(
             companyName: true,
             hideFeedback: true,
             status: true,
-            guestMode: true,
             recipients: {
               where: { isPrimary: true },
               take: 1,

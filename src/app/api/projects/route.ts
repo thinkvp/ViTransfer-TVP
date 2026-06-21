@@ -82,7 +82,6 @@ export async function GET(request: NextRequest) {
         sharePassword: true,
         authMode: true,
         hideFeedback: true,
-        guestMode: true,
         previewResolutions: true,
         companyName: true,
         clientId: true,

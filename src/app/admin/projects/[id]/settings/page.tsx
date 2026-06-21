@@ -96,7 +96,6 @@ interface Project {
   sharePassword: string | null
   sharePasswordDecrypted: string | null
   authMode: string
-  guestMode: boolean
   globalAllowAuthenticatedProjectSwitching?: boolean
   previewResolutions: string
   watermarkEnabled: boolean
@@ -145,7 +144,6 @@ export default function ProjectSettingsPage() {
   const [maxClientUploadAllocationMB, setMaxClientUploadAllocationMB] = useState<number | ''>(1000)
   const [sharePassword, setSharePassword] = useState('')
   const [authMode, setAuthMode] = useState('PASSWORD')
-  const [guestMode, setGuestMode] = useState(false)
   const [useCustomSlug, setUseCustomSlug] = useState(false) // Toggle for custom slug
   const [customSlugValue, setCustomSlugValue] = useState('') // Store custom slug value
   const [previewResolutions, setPreviewResolutions] = useState<string[]>(['720p'])
@@ -171,7 +169,7 @@ export default function ProjectSettingsPage() {
     enableRevisions, maxRevisions, restrictCommentsToLatestVersion, hideFeedback,
     useFullTimecode, allowClientDeleteComments, allowClientUploadFiles,
     allowAuthenticatedProjectSwitching, maxClientUploadAllocationMB, sharePassword,
-    authMode, guestMode, useCustomSlug, customSlugValue,
+    authMode, useCustomSlug, customSlugValue,
     previewResolutions, watermarkEnabled, watermarkText, useCustomWatermark,
     timelinePreviewsEnabled, clientNotificationSchedule, clientNotificationTime,
     clientNotificationDay,
@@ -275,7 +273,6 @@ export default function ProjectSettingsPage() {
         setUseCustomWatermark(!!data.watermarkText)
         setTimelinePreviewsEnabled(data.timelinePreviewsEnabled ?? false)
         setAuthMode(data.authMode || 'PASSWORD')
-        setGuestMode(data.guestMode || false)
         setSharePassword(data.sharePassword || '')
 
         // Store original processing settings
@@ -374,13 +371,6 @@ export default function ProjectSettingsPage() {
     }
   }, [initialLoadComplete, savedSnapshot, currentSnapshot])
 
-  // Clear password when switching to a non-password mode (OTP or NONE)
-  useEffect(() => {
-    if (initialLoadComplete && (authMode === 'NONE' || authMode === 'OTP')) {
-      setSharePassword('')
-    }
-  }, [authMode, initialLoadComplete])
-
   // Reset active desktop section when video sections become unavailable
   useEffect(() => {
     const videoOnlySections = ['video-processing', 'revision-tracking', 'feedback']
@@ -461,7 +451,6 @@ export default function ProjectSettingsPage() {
         timelinePreviewsEnabled,
         sharePassword: sharePassword || null,
         authMode,
-        guestMode,
         clientNotificationSchedule,
         clientNotificationTime: clientNotificationSchedule === 'DAILY' ? clientNotificationTime : null,
         clientNotificationDay: null,
@@ -1373,7 +1362,7 @@ export default function ProjectSettingsPage() {
                   <div className="flex items-start gap-2 p-3 bg-warning-visible border-2 border-warning-visible rounded-md">
                     <span className="text-warning text-sm font-bold">!</span>
                     <p className="text-sm text-warning font-medium">
-                      Without authentication, anyone with the share link can access your project. {guestMode ? 'Guest mode limits access to videos only.' : 'Full access allows comments and approvals from anyone.'}
+                      Without authentication, anyone with the share link can access your project. Full access allows comments and approvals from anyone.
                     </p>
                   </div>
                 )}
@@ -1381,29 +1370,6 @@ export default function ProjectSettingsPage() {
 
               <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="guestMode">Guest Mode</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Limit access to videos only (no comments, approval, or project details)
-                    </p>
-                  </div>
-                  <Switch
-                    id="guestMode"
-                    checked={guestMode}
-                    onCheckedChange={setGuestMode}
-                  />
-                </div>
-
-                {authMode === 'NONE' && !guestMode && (
-                  <div className="flex items-start gap-2 p-3 bg-primary-visible border border-primary-visible rounded-md">
-                    <span className="text-primary text-sm font-bold">i</span>
-                    <p className="text-sm text-primary">
-                      <strong>Recommended:</strong> Enable Guest Mode for better security. Without it, anyone with the link can comment and approve videos.
-                    </p>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowAuthenticatedProjectSwitching">Allow authenticated clients to switch current projects</Label>
                     <p className="text-xs text-muted-foreground">
@@ -1422,15 +1388,6 @@ export default function ProjectSettingsPage() {
                     disabled={(project?.globalAllowAuthenticatedProjectSwitching ?? true) === false}
                   />
                 </div>
-
-                {authMode === 'NONE' && !guestMode && (
-                  <div className="flex items-start gap-2 p-2 bg-warning-visible/50 border border-warning-visible rounded-md">
-                    <span className="text-warning text-xs font-bold">!</span>
-                    <p className="text-xs text-warning font-medium">
-                      Guest mode is recommended with no authentication to prevent unauthorized comments and approvals.
-                    </p>
-                  </div>
-                )}
               </div>
 
               {(authMode === 'PASSWORD' || authMode === 'BOTH') && (
@@ -1827,26 +1784,13 @@ export default function ProjectSettingsPage() {
                     {authMode === 'NONE' && (
                       <div className="flex items-start gap-2 p-3 bg-warning-visible border-2 border-warning-visible rounded-md">
                         <span className="text-warning text-sm font-bold">!</span>
-                        <p className="text-sm text-warning font-medium">Without authentication, anyone with the share link can access your project. {guestMode ? 'Guest mode limits access to videos only.' : 'Full access allows comments and approvals from anyone.'}</p>
+                        <p className="text-sm text-warning font-medium">Without authentication, anyone with the share link can access your project. Full access allows comments and approvals from anyone.</p>
                       </div>
                     )}
                   </div>
 
                   <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
                     <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="guestMode-d">Guest Mode</Label>
-                        <p className="text-xs text-muted-foreground">Limit access to videos only (no comments, approval, or project details)</p>
-                      </div>
-                      <Switch id="guestMode-d" checked={guestMode} onCheckedChange={setGuestMode} />
-                    </div>
-                    {authMode === 'NONE' && !guestMode && (
-                      <div className="flex items-start gap-2 p-3 bg-primary-visible border border-primary-visible rounded-md">
-                        <span className="text-primary text-sm font-bold">i</span>
-                        <p className="text-sm text-primary"><strong>Recommended:</strong> Enable Guest Mode for better security. Without it, anyone with the link can comment and approve videos.</p>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between gap-4 pt-2 mt-2 border-t border-border">
                       <div className="space-y-0.5 flex-1">
                         <Label htmlFor="allowAuthenticatedProjectSwitching-d">Allow authenticated clients to switch current projects</Label>
                         <p className="text-xs text-muted-foreground">Password and OTP recipients can switch from this project to other current client projects and vice-versa when both projects allow it.</p>
@@ -1856,12 +1800,6 @@ export default function ProjectSettingsPage() {
                       </div>
                       <Switch id="allowAuthenticatedProjectSwitching-d" checked={allowAuthenticatedProjectSwitching} onCheckedChange={setAllowAuthenticatedProjectSwitching} disabled={(project?.globalAllowAuthenticatedProjectSwitching ?? true) === false} />
                     </div>
-                    {authMode === 'NONE' && !guestMode && (
-                      <div className="flex items-start gap-2 p-2 bg-warning-visible/50 border border-warning-visible rounded-md">
-                        <span className="text-warning text-xs font-bold">!</span>
-                        <p className="text-xs text-warning font-medium">Guest mode is recommended with no authentication to prevent unauthorized comments and approvals.</p>
-                      </div>
-                    )}
                   </div>
 
                   {(authMode === 'PASSWORD' || authMode === 'BOTH') && (

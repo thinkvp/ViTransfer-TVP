@@ -92,7 +92,10 @@ export type VideoAssetPreviewJob = {
   projectName: string
   pendingCount: number
   processingCount: number
+  /** Remaining work (pending + processing). The full wave size is doneCount + totalCount. */
   totalCount: number
+  /** Assets in this wave that have already finished (recently completed). */
+  doneCount: number
   /** Individual assets being processed, sorted processing-first then by filename. */
   assets: VideoAssetPreviewItem[]
 }

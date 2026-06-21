@@ -35,10 +35,10 @@ import {
 import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import Image from 'next/image'
-import VideoHoverPreview from '@/components/VideoHoverPreview'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import { ContextMenuItems } from '@/components/ShareFilesBrowser'
+import { FolderPreviewMosaic } from '@/components/FolderPreviewMosaic'
 import type { TransferItem, TransferSummary } from '@/lib/transfer-state'
 import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -187,6 +187,16 @@ interface VideoSidebarProps {
   hasApprovableVideos?: boolean
   /** Whether the desktop tab bar should be rendered inside the sidebar. */
   showDesktopTabBar?: boolean
+  /** Render an UPLOADS folder entry inside the VIEW layout (combined files view). */
+  showUploadsInView?: boolean
+  /** Called when the UPLOADS entry in the VIEW layout is clicked (toggles the Files browser). */
+  onUploadsSelect?: () => void
+  /** Up to 3 resolved preview thumbnail URLs for the UPLOADS folder mosaic. */
+  uploadsPreviewTiles?: string[]
+  /** Video poster URL for the UPLOADS folder mosaic when no image tiles exist. */
+  uploadsPreviewPoster?: string | null
+  /** Called when an UPLOADS mosaic thumbnail fails to load (token expiry → refresh). */
+  onUploadsPreviewError?: () => void
   /** Controlled desktop mode; when omitted, sidebar manages it internally. */
   desktopActiveTab?: 'for-review' | 'files'
   /** Controlled desktop mode setter. */
@@ -250,6 +260,11 @@ export default function VideoSidebar({
   onClearCompletedTransfers,
   hasApprovableVideos = false,
   showDesktopTabBar = true,
+  showUploadsInView = false,
+  onUploadsSelect,
+  uploadsPreviewTiles = [],
+  uploadsPreviewPoster = null,
+  onUploadsPreviewError,
   desktopActiveTab,
   onDesktopActiveTabChange,
   selectedFileIds,
@@ -993,14 +1008,6 @@ export default function VideoSidebar({
     const approvedVideo = group.videos.find((v: any) => v.approved === true)
     const displayVideo = approvedVideo || latestVideo
     const thumbnailUrl = displayVideo?.thumbnailUrl
-    const durationSeconds = typeof displayVideo?.duration === 'number' ? displayVideo.duration : undefined
-    const hasTimeline =
-      typeof displayVideo?.timelineVttUrl === 'string' && displayVideo.timelineVttUrl.length > 0 &&
-      typeof displayVideo?.timelineSpriteUrl === 'string' && displayVideo.timelineSpriteUrl.length > 0 &&
-      typeof durationSeconds === 'number' && durationSeconds > 0
-    const availableContentWidth = sidebarWidth - 48
-    const containerWidth = Math.max(120, availableContentWidth - 16)
-    const containerHeight = Math.round(containerWidth * 9 / 16)
 
     const downloadGroup = showDownloadFiles && downloadableFiles
       ? downloadableFiles.find(dg => dg.name === group.name)
@@ -1009,22 +1016,9 @@ export default function VideoSidebar({
       ? [...(downloadGroup.mainFile ? [downloadGroup.mainFile] : []), ...downloadGroup.subFiles]
       : []
 
-    const thumbnailEl = thumbnailUrl ? (
-      hasTimeline ? (
-        <VideoHoverPreview
-          thumbnailUrl={thumbnailUrl}
-          vttUrl={displayVideo.timelineVttUrl}
-          spriteBaseUrl={displayVideo.timelineSpriteUrl}
-          durationSeconds={durationSeconds!}
-          alt={group.name}
-          className="mx-auto rounded overflow-hidden"
-          style={{ width: containerWidth, height: containerHeight }}
-        />
-      ) : (
-        <div
-          className="bg-black rounded overflow-hidden flex items-center justify-center mx-auto relative"
-          style={{ width: containerWidth, height: containerHeight }}
-        >
+    const thumbnailEl = (
+      <div className="flex-shrink-0 w-16 h-9 rounded overflow-hidden bg-black flex items-center justify-center relative">
+        {thumbnailUrl ? (
           <Image
             src={thumbnailUrl}
             alt={group.name}
@@ -1033,30 +1027,21 @@ export default function VideoSidebar({
             unoptimized
             onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.visibility = 'hidden' }}
           />
-        </div>
-      )
-    ) : null
+        ) : (
+          <Play className="w-4 h-4 text-muted-foreground/50" />
+        )}
+      </div>
+    )
 
     const titleEl = (
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm leading-snug line-clamp-2 break-words">{group.name}</p>
-            {!showDownloadFiles && (
-              <p className="text-xs text-muted-foreground">
-                {hideApprovalGrouping && latestVideo?.versionLabel
-                  ? latestVideo.versionLabel
-                  : `${group.versionCount} ${group.versionCount === 1 ? 'version' : 'versions'}`}
-              </p>
-            )}
-          </div>
-        </div>
-        {isActive && !showDownloadFiles && (
-          hasApprovedVideo ? (
-            <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
-          ) : (
-            <Play className="w-4 h-4 shrink-0 text-primary" fill="currentColor" />
-          )
+      <div className="flex-1 min-w-0">
+        <p className="text-sm leading-snug line-clamp-2 break-words">{group.name}</p>
+        {!showDownloadFiles && (
+          <p className="text-xs text-muted-foreground">
+            {hideApprovalGrouping && latestVideo?.versionLabel
+              ? latestVideo.versionLabel
+              : `${group.versionCount} ${group.versionCount === 1 ? 'version' : 'versions'}`}
+          </p>
         )}
       </div>
     )
@@ -1073,7 +1058,7 @@ export default function VideoSidebar({
           <button
             onClick={() => onVideoSelect(group.name)}
             className={cn(
-              'w-full text-left p-3 flex flex-col gap-2',
+              'w-full text-left px-2 py-2 flex flex-row items-start gap-2',
               'hover:bg-accent hover:text-accent-foreground transition-colors',
               isActive ? 'text-primary font-medium' : 'text-foreground'
             )}
@@ -1105,7 +1090,7 @@ export default function VideoSidebar({
         key={group.name}
         onClick={() => onVideoSelect(group.name)}
         className={cn(
-          'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
+          'w-full text-left px-2 py-2 rounded-lg transition-all duration-200 flex flex-row items-start gap-2',
           'hover:bg-accent hover:text-accent-foreground',
           isActive
             ? 'bg-primary/10 text-primary font-medium border border-primary/20'
@@ -1114,6 +1099,13 @@ export default function VideoSidebar({
       >
         {thumbnailEl}
         {titleEl}
+        {isActive && (
+          hasApprovedVideo ? (
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-success mt-0.5" />
+          ) : (
+            <Play className="w-4 h-4 shrink-0 text-primary mt-0.5" fill="currentColor" />
+          )
+        )}
       </button>
     )
   }
@@ -1121,9 +1113,6 @@ export default function VideoSidebar({
   const renderAlbumButton = (a: typeof albumsList[0], showDownloadFiles = false) => {
     const isActive = activeAlbumId === a.id
     const previewUrl = (a as any)?.thumbnailPhotoUrl as string | null | undefined
-    const availableContentWidth = sidebarWidth - 48
-    const containerWidth = Math.max(120, availableContentWidth - 16)
-    const containerHeight = Math.round(containerWidth * 9 / 16)
 
     const downloadGroup = showDownloadFiles && downloadableFiles
       ? downloadableFiles.find(dg => dg.name === a.name)
@@ -1132,49 +1121,32 @@ export default function VideoSidebar({
       ? [...(downloadGroup.mainFile ? [downloadGroup.mainFile] : []), ...downloadGroup.subFiles]
       : []
 
-    const thumbnailEl = previewUrl ? (
-      <div
-        className="bg-black rounded overflow-hidden relative mx-auto"
-        style={{ width: containerWidth, height: containerHeight }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={previewUrl}
-          alt={a.name}
-          className="w-full h-full object-cover"
-          loading={isActive ? 'eager' : 'lazy'}
-          onError={(e) => {
-            // Hide the broken image so the placeholder shows through.
-            (e.currentTarget as HTMLImageElement).style.display = 'none'
-          }}
-        />
-        {/* Transparent placeholder — shown when the image errors or has no src. */}
-        <div
-          className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-muted to-muted-foreground pointer-events-none"
-          style={{ zIndex: -1 }}
-        >
-          <Images className="w-6 h-6 text-muted-foreground" />
-        </div>
-      </div>
-    ) : (
-      <div
-        className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center mx-auto"
-        style={{ width: containerWidth, height: containerHeight }}
-      >
-        <Images className="w-6 h-6 text-muted-foreground" />
+    const thumbnailEl = (
+      <div className="flex-shrink-0 w-16 h-9 rounded overflow-hidden relative bg-gradient-to-br from-muted to-muted-foreground/50 flex items-center justify-center">
+        {previewUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={previewUrl}
+            alt={a.name}
+            className="absolute inset-0 w-full h-full object-cover"
+            loading={isActive ? 'eager' : 'lazy'}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = 'none'
+            }}
+          />
+        )}
+        <Images className="w-4 h-4 text-muted-foreground/70 relative z-10" />
       </div>
     )
 
     const titleEl = (
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm leading-snug line-clamp-2 break-words">{a.name}</p>
-          {!showDownloadFiles && (
-            <p className="text-xs text-muted-foreground">
-              {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
-            </p>
-          )}
-        </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm leading-snug line-clamp-2 break-words">{a.name}</p>
+        {!showDownloadFiles && (
+          <p className="text-xs text-muted-foreground">
+            {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
+          </p>
+        )}
       </div>
     )
 
@@ -1190,7 +1162,7 @@ export default function VideoSidebar({
           <button
             onClick={() => onAlbumSelect?.(a.id)}
             className={cn(
-              'w-full text-left p-3 flex flex-col gap-2',
+              'w-full text-left px-2 py-2 flex flex-row items-start gap-2',
               'hover:bg-accent hover:text-accent-foreground transition-colors',
               isActive ? 'text-primary font-medium' : 'text-foreground'
             )}
@@ -1222,7 +1194,7 @@ export default function VideoSidebar({
         key={a.id}
         onClick={() => onAlbumSelect?.(a.id)}
         className={cn(
-          'w-full text-left p-3 rounded-lg transition-all duration-200 flex flex-col gap-2',
+          'w-full text-left px-2 py-2 rounded-lg transition-all duration-200 flex flex-row items-start gap-2',
           'hover:bg-accent hover:text-accent-foreground',
           isActive
             ? 'bg-primary/10 text-primary font-medium border border-primary/20'
@@ -1232,6 +1204,51 @@ export default function VideoSidebar({
         {thumbnailEl}
         {titleEl}
       </button>
+    )
+  }
+
+  // Combined files view: a single clickable UPLOADS folder rendered inside the VIEW
+  // layout. Clicking it opens UPLOADS in the Files browser (and toggles back to root).
+  const renderUploadsViewButton = () => {
+    const uploadGroups = (downloadableFiles ?? []).filter((group) => group.groupType === 'uploads')
+    const hasUploads = uploadGroups.length > 0
+    if (!hasUploads) return null
+    const isActive = String(activeFilesFolderName || '').trim().startsWith('UPLOADS')
+    const totalFileCount = uploadGroups.reduce((count, group) => {
+      return count + (group.mainFile ? 1 : 0) + group.subFiles.length
+    }, 0)
+    return (
+      <div className="mt-4 border-t border-border pt-3">
+        <div className="px-3 py-2 text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
+          <Upload className="w-3 h-3" />
+          Uploads
+        </div>
+        <button
+          type="button"
+          onClick={() => onUploadsSelect?.()}
+          className={cn(
+            'w-full text-left px-2 py-2 rounded-lg transition-all duration-200 flex flex-row items-start gap-2',
+            'hover:bg-accent hover:text-accent-foreground',
+            isActive ? 'bg-primary/10 text-primary font-medium border border-primary/20' : 'text-foreground'
+          )}
+        >
+          <div className="flex-shrink-0 w-20">
+            <FolderPreviewMosaic
+              label="UPLOADS"
+              tiles={uploadsPreviewTiles}
+              videoPoster={uploadsPreviewPoster}
+              isUploads
+              onTileError={onUploadsPreviewError}
+            />
+          </div>
+          <div className="flex-1 min-w-0 pt-2">
+            <p className="text-sm font-semibold leading-snug">UPLOADS</p>
+            <p className="text-xs text-muted-foreground">
+              {totalFileCount} {totalFileCount === 1 ? 'file' : 'files'}
+            </p>
+          </div>
+        </button>
+      </div>
     )
   }
 
@@ -1973,9 +1990,15 @@ export default function VideoSidebar({
                 <div className="overflow-y-auto overflow-x-hidden flex-1 mr-[5px]">
                   <nav className="p-3">
                     {flatAlphabeticalGroups.length > 0 && (
-                      <div className="space-y-1 mb-4">
-                        {flatAlphabeticalGroups.map(g => renderVideoButton(g))}
-                      </div>
+                      <>
+                        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                          <Play className="w-3 h-3" />
+                          Videos
+                        </div>
+                        <div className="space-y-1 mb-4">
+                          {flatAlphabeticalGroups.map(g => renderVideoButton(g))}
+                        </div>
+                      </>
                     )}
                     {shouldShowAlbums && (
                       <>
@@ -2098,7 +2121,13 @@ export default function VideoSidebar({
               {desktopActiveTabValue === 'for-review' && (
                 <div className="overflow-y-auto overflow-x-hidden flex-1 min-h-0 mr-[5px]">
                   <nav className="p-3">
-                    {/* FOR REVIEW videos — no heading, the tab label is enough */}
+                    {/* For Review heading */}
+                    {forReviewGroups.length > 0 && (
+                      <div className="px-3 py-2 text-xs font-semibold text-amber-500 uppercase tracking-wider flex items-center gap-2">
+                        <Play className="w-3 h-3" />
+                        For Review
+                      </div>
+                    )}
                     {forReviewGroups.length > 0 && (
                       <div className="space-y-1">
                         {forReviewGroups.map(g => renderVideoButton(g))}
@@ -2126,7 +2155,7 @@ export default function VideoSidebar({
                     {/* ALBUMS section */}
                     {hasAlbums && (
                       <div className="mt-4">
-                        <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 border-t border-border pt-3">
+                        <div className="px-3 py-2 text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2 border-t border-border pt-3">
                           <Images className="w-3 h-3" />
                           Albums
                         </div>
@@ -2135,6 +2164,9 @@ export default function VideoSidebar({
                         </div>
                       </div>
                     )}
+
+                    {/* UPLOADS folder (combined files view) */}
+                    {showUploadsInView && renderUploadsViewButton()}
                   </nav>
                 </div>
               )}
@@ -2632,6 +2664,35 @@ export default function VideoSidebar({
                   </button>
                 )
               })}
+
+              {/* Uploads (combined files view) */}
+              {showUploadsInView && (downloadableFiles ?? []).some((group) => group.groupType === 'uploads') && (() => {
+                const isActive = String(activeFilesFolderName || '').trim().startsWith('UPLOADS')
+                return (
+                  <button
+                    type="button"
+                    onClick={() => onUploadsSelect?.()}
+                    className={cn(
+                      'flex flex-col gap-2 flex-shrink-0 transition-all duration-200 w-[140px]',
+                      'rounded-lg p-2',
+                      isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
+                    )}
+                  >
+                    <FolderPreviewMosaic
+                      label="UPLOADS"
+                      tiles={uploadsPreviewTiles}
+                      videoPoster={uploadsPreviewPoster}
+                      isUploads
+                      onTileError={onUploadsPreviewError}
+                    />
+                    <div className="flex flex-col items-center">
+                      <p className="text-xs font-medium text-foreground text-center leading-snug">
+                        UPLOADS
+                      </p>
+                    </div>
+                  </button>
+                )
+              })()}
                 </div>
               </div>
             )}

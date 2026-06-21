@@ -459,12 +459,10 @@ export async function GET(
         const dlContentType = isThumbnail ? 'image/jpeg' : contentType
         presignedUrl = await s3GetPresignedDownloadUrl(filePath, 3600, sanitizedFilename, dlContentType)
       } else if (isThumbnail) {
-        // Thumbnails are rendered via <img> / CSS background-image, which are NOT
-        // subject to CORS — so we can hand the browser a presigned R2 URL directly
-        // instead of proxying every thumbnail's bytes through the app server. This
-        // offloads the transfer to R2 and cuts latency for VIEW/FILES preview grids.
-        // (Timeline VTT is fetched from JS and IS CORS-sensitive, so it stays proxied
-        // below.)
+        // Thumbnails, timeline VTT, and sprite images are all redirected to presigned
+        // R2 URLs — offloading the transfer to R2. VTT is fetched from JS (CORS-sensitive)
+        // but the R2 bucket has a CORS policy allowing GET from the app origin, so
+        // redirecting is safe.
         presignedUrl = await s3GetPresignedStreamUrl(filePath, 900, contentType)
         return NextResponse.redirect(presignedUrl, {
           status: 302,
@@ -474,34 +472,12 @@ export async function GET(
           },
         })
       } else if (isTimelineAsset || isAssetPreview) {
-        // Keep timeline VTT/sprite and asset-preview requests same-origin to avoid
-        // browser CORS issues when these assets are fetched from JS.
         presignedUrl = await s3GetPresignedStreamUrl(filePath, 300, contentType)
-
-        if (isAssetPreview) {
-          return NextResponse.redirect(presignedUrl, {
-            status: 302,
-            headers: {
-              'Cache-Control': 'no-store',
-              'Referrer-Policy': 'strict-origin-when-cross-origin',
-            },
-          })
-        }
-
-        const upstream = await fetch(presignedUrl, { cache: 'no-store' })
-        if (!upstream.ok || !upstream.body) {
-          return NextResponse.json({ error: 'Access denied' }, { status: 404 })
-        }
-
-        return new NextResponse(upstream.body, {
-          status: 200,
+        return NextResponse.redirect(presignedUrl, {
+          status: 302,
           headers: {
-            'Content-Type': contentType,
-            // Cacheable privately — see note on `cacheControl` in local mode below.
-            // Lets preloaded sprite sheets be reused instead of re-fetched (avoids
-            // black frames when scrubbing across sprite-file boundaries).
-            'Cache-Control': 'private, max-age=3600',
-            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': isAssetPreview ? 'no-store' : 'private, max-age=300',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
           },
         })
       } else {

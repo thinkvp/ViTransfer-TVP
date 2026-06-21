@@ -41,7 +41,7 @@ export async function POST(
 
     const project = await prisma.project.findUnique({
       where: { slug: token },
-      select: { id: true, sharePassword: true, authMode: true, guestMode: true },
+      select: { id: true, sharePassword: true, authMode: true },
     })
 
     if (!project) {
@@ -57,13 +57,6 @@ export async function POST(
 
     if (!accessCheck.authorized) {
       return accessCheck.errorResponse!
-    }
-
-    const { isGuest } = accessCheck
-
-    // Guests should not be able to create project recipients.
-    if (project.guestMode && isGuest) {
-      return NextResponse.json({ error: 'Guests cannot add recipients' }, { status: 403 })
     }
 
     const body = await request.json().catch(() => null)
@@ -130,7 +123,7 @@ export async function DELETE(
 
     const project = await prisma.project.findUnique({
       where: { slug: token },
-      select: { id: true, sharePassword: true, authMode: true, guestMode: true },
+      select: { id: true, sharePassword: true, authMode: true },
     })
 
     if (!project) {
@@ -146,12 +139,6 @@ export async function DELETE(
 
     if (!accessCheck.authorized) {
       return accessCheck.errorResponse!
-    }
-
-    const { isGuest } = accessCheck
-
-    if (project.guestMode && isGuest) {
-      return NextResponse.json({ error: 'Guests cannot delete recipients' }, { status: 403 })
     }
 
     const body = await request.json().catch(() => null)

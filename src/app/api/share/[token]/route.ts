@@ -39,7 +39,6 @@ export async function GET(
       where: { slug: token },
       select: {
         id: true,
-        guestMode: true,
         sharePassword: true,
         authMode: true,
       },
@@ -50,7 +49,6 @@ export async function GET(
     }
 
     const shareContext = await getShareContext(request)
-    const isGuest = !!shareContext?.guest
 
     // SECURITY: If user sent a bearer token but it failed verification (revoked, expired, invalid),
     // handle based on current authMode:
@@ -66,8 +64,7 @@ export async function GET(
         return NextResponse.json({
           error: 'Session expired or invalid. Please authenticate again.',
           requiresPassword: true,
-          authMode: projectMeta.authMode || 'PASSWORD',
-          guestMode: projectMeta.guestMode || false
+          authMode: projectMeta.authMode || 'PASSWORD'
         }, { status: 401 })
       }
     }
@@ -90,8 +87,6 @@ export async function GET(
     )
 
     if (!accessCheck.authorized) {
-      // IMPORTANT: verifyProjectAccess() returns a 401 errorResponse without guestMode.
-      // The share page UI needs guestMode on 401 to show the guest entry option.
       if (accessCheck.errorResponse?.status === 403) {
         const response = accessCheck.errorResponse
         response.headers.set('Cache-Control', 'no-store')
@@ -104,7 +99,6 @@ export async function GET(
           error: 'Authentication required',
           requiresPassword: true,
           authMode: projectMeta.authMode || 'PASSWORD',
-          guestMode: projectMeta.guestMode || false,
         },
         {
           status: 401,
@@ -127,8 +121,7 @@ export async function GET(
     }
 
     // Track share page access for projects with no authentication (authMode = NONE)
-    // Only track as NONE if guest mode is disabled; otherwise let guest endpoint track as GUEST
-    if (projectMeta.authMode === 'NONE' && !projectMeta.guestMode && !isAdmin) {
+    if (projectMeta.authMode === 'NONE' && !isAdmin) {
       // Use Redis for 30-minute deduplication
       const redis = getRedis()
       const ipAddress = getClientIpAddress(request)
@@ -152,17 +145,6 @@ export async function GET(
       }
     }
 
-    const hasShareSession = !!shareContext
-    // If guestMode is enabled, require guest token (restricted access)
-    // This applies to ALL authModes - guest restrictions are independent of auth requirements
-    if (projectMeta.guestMode && !isAdmin && !hasShareSession && !isGuest) {
-      return NextResponse.json({
-        error: 'Guest entry required',
-        requiresPassword: false,
-        authMode: projectMeta.authMode,
-        guestMode: true
-      }, { status: 401 })
-    }
 
     // Resolve preview availability and original file sizes from StoredFile
     const videoIds = project.videos.map((v: any) => v.id)
@@ -264,8 +246,7 @@ export async function GET(
     ])
 
     let allRecipients: Array<{ id: string; name: string | null; email: string | null; displayColor?: string | null }> = []
-    // Include recipients for all authenticated users (guest mode is the only restriction)
-    if (!isGuest) {
+    {
       const recipients = await getProjectRecipients(project.id)
       allRecipients = recipients
         .filter(r => r.id)
@@ -277,87 +258,41 @@ export async function GET(
         }))
     }
 
-    const sanitizedVideos = isGuest ? videosSanitizedBase.map(video => ({
-      id: video.id,
-      name: video.name,
-      version: video.version,
-      versionLabel: video.versionLabel,
-      duration: video.duration,
-      width: video.width,
-      height: video.height,
-      fps: video.fps,
-      status: video.status,
-      streamUrl480p: video.streamUrl480p,
-      streamUrl720p: video.streamUrl720p,
-      streamUrl1080p: video.streamUrl1080p,
-      downloadUrl: video.downloadUrl,
-      thumbnailUrl: video.thumbnailUrl,
-      hasThumbnail: video.hasThumbnail,
-    })) : videosSanitizedBase
-
-    const sanitizedVideosByName = isGuest ? Object.keys(sortedVideosByName).reduce((acc: any, name: string) => {
-      acc[name] = sortedVideosByName[name].map(video => ({
-        id: video.id,
-        name: video.name,
-        version: video.version,
-        versionLabel: video.versionLabel,
-        duration: video.duration,
-        width: video.width,
-        height: video.height,
-        fps: video.fps,
-        status: video.status,
-        streamUrl480p: video.streamUrl480p,
-        streamUrl720p: video.streamUrl720p,
-        streamUrl1080p: video.streamUrl1080p,
-        downloadUrl: video.downloadUrl,
-        thumbnailUrl: video.thumbnailUrl,
-        hasThumbnail: video.hasThumbnail,
-      }))
-      return acc
-    }, {}) : sortedVideosByName
-
-    const effectiveVideos = project.enableVideos === false ? [] : sanitizedVideos
-    const effectiveVideosByName = project.enableVideos === false ? {} : sanitizedVideosByName
+    const effectiveVideos = project.enableVideos === false ? [] : videosSanitizedBase
+    const effectiveVideosByName = project.enableVideos === false ? {} : sortedVideosByName
 
     const projectData = {
-      ...(isGuest ? {} : { id: project.id }),
+      id: project.id,
 
       title: project.title,
 
-      ...(isGuest ? {} : { status: project.status }),
-
-      guestMode: project.guestMode || false,
-      isGuest: isGuest,
+      status: project.status,
 
       enableVideos: project.enableVideos ?? true,
       enablePhotos: project.enablePhotos ?? false,
 
-      ...(!isGuest ? {
-        clientName: project.companyName || primaryRecipient?.name || 'Client',
-        clientEmail: primaryRecipient?.email || null,
-        companyName: project.companyName || null,
-        recipients: allRecipients,
-      } : {}),
+      clientName: project.companyName || primaryRecipient?.name || 'Client',
+      clientEmail: primaryRecipient?.email || null,
+      companyName: project.companyName || null,
+      recipients: allRecipients,
 
-      ...(isGuest ? {} : {
-        enableRevisions: project.enableRevisions,
-        maxRevisions: project.maxRevisions,
-        restrictCommentsToLatestVersion: project.restrictCommentsToLatestVersion,
-        hideFeedback: project.hideFeedback || project.status === 'SHARE_ONLY',
-        useFullTimecode: (project as any).useFullTimecode ?? false,
-        allowClientDeleteComments: project.allowClientDeleteComments,
-        enableClientUploads: project.enableClientUploads ?? true,
-        allowClientUploadFiles: project.allowClientUploadFiles,
-        previewResolutions: project.previewResolutions,
-        watermarkEnabled: project.watermarkEnabled,
-      }),
+      enableRevisions: project.enableRevisions,
+      maxRevisions: project.maxRevisions,
+      restrictCommentsToLatestVersion: project.restrictCommentsToLatestVersion,
+      hideFeedback: project.hideFeedback || project.status === 'SHARE_ONLY',
+      useFullTimecode: (project as any).useFullTimecode ?? false,
+      allowClientDeleteComments: project.allowClientDeleteComments,
+      enableClientUploads: project.enableClientUploads ?? true,
+      allowClientUploadFiles: project.allowClientUploadFiles,
+      previewResolutions: project.previewResolutions,
+      watermarkEnabled: project.watermarkEnabled,
 
       timelinePreviewsEnabled: project.timelinePreviewsEnabled,
 
       videos: effectiveVideos,
       videosByName: effectiveVideosByName,
 
-      ...(isGuest ? {} : { smtpConfigured }),
+      smtpConfigured,
 
       settings: {
         companyName: globalSettings?.companyName || 'Studio',
@@ -398,7 +333,7 @@ export async function GET(
         shareId: token,
         projectId: project.id,
         permissions: ['view', 'comment', 'download'],
-        guest: shareContext?.guest ?? false,
+        guest: false,
         sessionId,
         authMode: shareContext?.authMode ?? projectMeta.authMode,
         accessMethod: shareContext?.accessMethod ?? (projectMeta.authMode === 'NONE' ? 'NONE' : undefined),

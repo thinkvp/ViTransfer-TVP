@@ -124,6 +124,11 @@ interface VideoPlayerProps {
   // that lets the viewer toggle between Duration (MM:SS) and Timecode (HH:MM:SS:FF).
   // Typically enabled on the share page for client viewing.
   showTimeDisplayToggle?: boolean
+
+  // Optional: when provided (combined share files view), the approved-video
+  // Download button closes the player and returns the viewer to the Files browser
+  // instead of opening the asset-download modal.
+  onCloseVideo?: () => void
 }
 
 export default function VideoPlayer({
@@ -154,6 +159,7 @@ export default function VideoPlayer({
   mobileFullHeight = false,
   useFullTimecode = false, // Default to duration mode
   showTimeDisplayToggle = false, // Default: hide the toggle (admin view)
+  onCloseVideo,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [videoUrl, setVideoUrl] = useState<string>('')
@@ -924,12 +930,19 @@ export default function VideoPlayer({
     const video = selectedVideo
     if (!video?.id) return
 
-    // Share view: route users to Files and open the selected video's folder.
+    // Share view: route users back to the Files browser.
     if (!isAdmin && !isGuest) {
+      window.dispatchEvent(new CustomEvent('requestExitVideoFullscreen'))
+
+      // Combined files view: close the player and return to the Files browser.
+      if (onCloseVideo) {
+        onCloseVideo()
+        return
+      }
+
       const folderName = String((video as any)?.versionLabel || (video as any)?.name || '').trim()
       if (!folderName) return
 
-      window.dispatchEvent(new CustomEvent('requestExitVideoFullscreen'))
       window.dispatchEvent(
         new CustomEvent('shareOpenFilesForVideo', {
           detail: { folderName },
@@ -1450,7 +1463,7 @@ export default function VideoPlayer({
   // Handle seek to timestamp requests from comments
   useEffect(() => {
     const handleSeekToTime = (e: CustomEvent) => {
-      const { timestamp, videoId, videoVersion } = e.detail
+      const { timestamp, videoId, videoVersion, autoPlay } = e.detail
 
       // If the user is seeking to a timestamp, show actual video frames (not the poster overlay).
       setShowPosterOverlay(false)
@@ -1465,6 +1478,10 @@ export default function VideoPlayer({
             if (videoRef.current) {
               videoRef.current.currentTime = timestamp
               currentTimeRef.current = timestamp
+              if (autoPlay) {
+                setShowPosterOverlay(false)
+                void videoRef.current.play()
+              }
             }
           }, 500)
           return
@@ -1475,6 +1492,10 @@ export default function VideoPlayer({
       if (videoRef.current) {
         videoRef.current.currentTime = timestamp
         currentTimeRef.current = timestamp
+        if (autoPlay) {
+          setShowPosterOverlay(false)
+          void videoRef.current.play()
+        }
       }
     }
 
@@ -2000,7 +2021,6 @@ export default function VideoPlayer({
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
                 onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
-                crossOrigin="anonymous"
                 playsInline
                 preload={!isAdmin || hideDownloadButton ? 'auto' : 'metadata'}
                 onPointerDown={handleVideoPointerDown}

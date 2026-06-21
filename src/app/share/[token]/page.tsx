@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 
 export const dynamic = 'force-dynamic'
@@ -28,7 +28,7 @@ import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { useContentImageRefresh } from '@/hooks/useContentImageRefresh'
 import { cn } from '@/lib/utils'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
-import { getDownloadableFileKey } from '@/lib/downloadable-file-utils'
+import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import type { DownloadQueueItem } from '@/lib/download-queue'
 import { useDownloadTransfers } from '@/hooks/useDownloadTransfers'
 import { calculateTransferSummary, createTransferId, isTransferActive, type TransferItem } from '@/lib/transfer-state'
@@ -59,12 +59,8 @@ const UPLOAD_ACCESS_URL_CACHE_TTL_MS = 45 * 1000
 export default function SharePage() {
   const params = useParams()
   const searchParams = useSearchParams()
-  const pathname = usePathname()
   const router = useRouter()
   const token = params?.token as string
-
-  const wantsAutoGuest = typeof pathname === 'string' && pathname.endsWith('/guest')
-  const autoGuestAttemptedRef = useRef(false)
 
   // Parse URL parameters for video seeking
   const urlTimestamp = searchParams?.get('t') ? parseInt(searchParams.get('t')!, 10) : null
@@ -73,13 +69,12 @@ export default function SharePage() {
 
   const [isPasswordProtected, setIsPasswordProtected] = useState<boolean | null>(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [isGuest, setIsGuest] = useState(false)
   const [authMode, setAuthMode] = useState<string>('PASSWORD')
-  const [guestMode, setGuestMode] = useState(false)
   const [password, setPassword] = useState('')
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
   const [otpSent, setOtpSent] = useState(false)
+  const [showOtpHint, setShowOtpHint] = useState(false)
   const [loading, setLoading] = useState(false)
   const [sendingOtp, setSendingOtp] = useState(false)
   const [error, setError] = useState('')
@@ -100,7 +95,7 @@ export default function SharePage() {
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [downloadableFiles, setDownloadableFiles] = useState<DownloadableGroup[] | null>(null)
   const [hasApprovableVideos, setHasApprovableVideos] = useState(false)
-  const [desktopContentTab, setDesktopContentTab] = useState<'view' | 'files'>('view')
+  const [desktopContentTab, setDesktopContentTab] = useState<'view' | 'files'>('files')
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
   const [initialSeekTime, setInitialSeekTime] = useState<number | null>(null)
@@ -169,23 +164,13 @@ export default function SharePage() {
       try {
         const data = await response.json().catch(() => null)
         setAuthMode((data && typeof data === 'object' && 'authMode' in data) ? String((data as any).authMode || 'PASSWORD') : 'PASSWORD')
-        setGuestMode((data && typeof data === 'object' && 'guestMode' in data) ? Boolean((data as any).guestMode) : false)
       } catch {
         setAuthMode('PASSWORD')
-        setGuestMode(false)
       }
     } else {
       setAuthMode('PASSWORD')
-      setGuestMode(false)
     }
   }, [clearAllShareCaches, storageKey])
-
-  const availableFileCount = useMemo(() => {
-    return (downloadableFiles || []).reduce((total, group) => {
-      if (group.groupType === 'uploads') return total
-      return total + (group.mainFile ? 1 : 0) + group.subFiles.length
-    }, 0)
-  }, [downloadableFiles])
 
   const isUploadsFilesBrowse = desktopContentTab === 'files'
     && String(requestedFilesFolderName || '').trim().startsWith('UPLOADS')
@@ -272,6 +257,16 @@ export default function SharePage() {
       }
     })
   }, [])
+
+  // Show hint 15s after OTP is sent in case user didn't receive a code
+  useEffect(() => {
+    if (!otpSent) {
+      setShowOtpHint(false)
+      return
+    }
+    const timer = setTimeout(() => setShowOtpHint(true), 15000)
+    return () => clearTimeout(timer)
+  }, [otpSent])
 
   // Reset header version when active video changes
   useEffect(() => {
@@ -555,10 +550,6 @@ export default function SharePage() {
   }, [token, shareToken, isAdminSession, project, handleSessionExpired])
 
   const fetchDownloadableFiles = useCallback(async (tokenOverride?: string | null) => {
-    if (isGuest) {
-      setDownloadableFiles(null)
-      return
-    }
     const authToken = tokenOverride || shareToken
     if (!isAdminSession && !authToken) return
     try {
@@ -573,7 +564,7 @@ export default function SharePage() {
     } catch {
       // ignore
     }
-  }, [token, shareToken, isAdminSession, isGuest])
+  }, [token, shareToken, isAdminSession])
 
   const requestFilesRefresh = useCallback((force = false) => {
     if (desktopContentTab !== 'files') return
@@ -633,16 +624,12 @@ export default function SharePage() {
       const next = new Set(Array.from(prev).filter((key) => allKeys.has(key)))
       return next.size === prev.size ? prev : next
     })
-
-    if (downloadableFiles === null) {
-      setDesktopContentTab('view')
-    }
   }, [downloadableFiles])
 
   const fetchSwitchableProjects = useCallback(async (tokenOverride?: string | null) => {
     const authToken = tokenOverride || shareToken
 
-    if (!token || !project?.id || isGuest || isAdminSession) {
+    if (!token || !project?.id || isAdminSession) {
       setSwitchableProjects([])
       setSwitchProjectsError(null)
       return
@@ -686,7 +673,7 @@ export default function SharePage() {
     } finally {
       setSwitchProjectsLoading(false)
     }
-  }, [token, shareToken, project?.id, isGuest, isAdminSession, handleSessionExpired])
+  }, [token, shareToken, project?.id, isAdminSession, handleSessionExpired])
 
   const handleProjectSwitch = useCallback(async (targetProject: SwitchableProject) => {
     if (!shareToken || !token) return
@@ -809,7 +796,6 @@ export default function SharePage() {
             setProject(projectData)
             setIsPasswordProtected(!!projectData.recipients && projectData.recipients.length > 0)
             setIsAuthenticated(true)
-            setIsGuest(isAdminSession ? false : (projectData.isGuest || false))
 
             if (projectData.settings) {
               setCompanyName(projectData.settings.companyName || 'Studio')
@@ -865,10 +851,12 @@ export default function SharePage() {
       // Determine which video should be active
       if (!activeVideoName) {
         let videoNameToUse: string | null = null
+        let shouldOpenPlayer = false
 
-        // Priority 1: URL parameter for video name
+        // Priority 1: URL parameter for video name → deep link, open the player.
         if (urlVideoName && project.videosByName[urlVideoName]) {
           videoNameToUse = urlVideoName
+          shouldOpenPlayer = true
         }
         // Priority 2: Saved video name from recent approval
         else {
@@ -881,15 +869,18 @@ export default function SharePage() {
           }
         }
 
-        // Priority 3: First video
-        if (!videoNameToUse) {
-          videoNameToUse = videoNames[0]
-        }
+        // Nothing to auto-select — leave the sidebar unselected (Files at root).
+        if (!videoNameToUse) return
 
         setActiveVideoName(videoNameToUse)
 
         const videos = project.videosByName[videoNameToUse]
         setActiveVideosRaw(videos)
+
+        // Keep the sidebar highlight and Files browser folder in sync.
+        if (!shouldOpenPlayer) {
+          setRequestedFilesFolderName(videoNameToUse)
+        }
 
         // If URL specifies a version, calculate the index for initial selection
         if (urlVersion !== null && videos) {
@@ -903,6 +894,10 @@ export default function SharePage() {
         if (urlTimestamp !== null) {
           setInitialSeekTime(urlTimestamp)
         }
+
+        if (shouldOpenPlayer) {
+          setDesktopContentTab('view')
+        }
       } else {
         // Keep activeVideos in sync when project data refreshes (ensures updated approval status/thumbnails/tokens)
         const videos = project.videosByName[activeVideoName]
@@ -912,25 +907,6 @@ export default function SharePage() {
       }
     }
   }, [project?.videosByName, project?.enableVideos, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
-
-  // If there are no videos, auto-select the first album (alphabetically).
-  useEffect(() => {
-    if (activeAlbumId) return
-    if (project?.enablePhotos === false) return
-
-    const hasVideos =
-      project?.enableVideos !== false &&
-      project?.videosByName &&
-      Object.keys(project.videosByName).length > 0
-
-    if (hasVideos) return
-    if (!Array.isArray(albums) || albums.length === 0) return
-
-    const firstAlbumId = String(albums[0]?.id || '')
-    if (!firstAlbumId) return
-
-    setActiveAlbumId(firstAlbumId)
-  }, [activeAlbumId, albums, project?.enableVideos, project?.enablePhotos, project?.videosByName])
 
   // True when the project has at least one video or album to show in VIEW mode.
   const hasViewContent = useMemo(() => {
@@ -1086,7 +1062,6 @@ export default function SharePage() {
   }, [shareToken, isAdminSession, token])
 
   const resolveDownloadTarget = useCallback(async (file: DownloadableFile, signal?: AbortSignal): Promise<DownloadQueueItem | null> => {
-    if (isGuest) return null
     const authHeader: Record<string, string> = !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : {}
     try {
       let url: string
@@ -1127,7 +1102,7 @@ export default function SharePage() {
     } catch {
       return null
     }
-  }, [token, shareToken, isAdminSession, isGuest, getUploadAccessUrl])
+  }, [token, shareToken, isAdminSession, getUploadAccessUrl])
 
   const {
     transferItems,
@@ -1144,8 +1119,6 @@ export default function SharePage() {
   })
 
   const handleCreateUploadFolder = useCallback(async (parentPath: string, folderName: string) => {
-    if (isGuest) throw new Error('Guests cannot create folders')
-
     const authHeader: Record<string, string> = !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : {}
     const response = await apiFetch(`/api/share/${token}/uploads`, {
       method: 'POST',
@@ -1159,7 +1132,7 @@ export default function SharePage() {
     }
 
     await fetchDownloadableFiles()
-  }, [isGuest, isAdminSession, shareToken, token, fetchDownloadableFiles])
+  }, [isAdminSession, shareToken, token, fetchDownloadableFiles])
 
   const handleApproveVideo = useCallback(async (file: DownloadableFile) => {
     if (!file.videoId) throw new Error('Video ID is missing')
@@ -1199,7 +1172,6 @@ export default function SharePage() {
   }, [project?.id, isAdminSession, shareToken, markVideoApproved, fetchProjectData, fetchDownloadableFiles])
 
   const handleUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
-    if (isGuest) throw new Error('Guests cannot upload files')
     if (!Array.isArray(files) || files.length === 0) return
     uploadCancelRequestedRef.current = false
 
@@ -1660,7 +1632,6 @@ export default function SharePage() {
       throw firstFailure
     }
   }, [
-    isGuest,
     isAdminSession,
     shareToken,
     token,
@@ -1958,6 +1929,42 @@ export default function SharePage() {
     }
   }, [filePreviewByVideoId, getUploadAccessUrl, isAdminSession, requestFilesRefresh, shareToken])
 
+  // Resolve up to 3 preview thumbnails for the sidebar UPLOADS folder mosaic, so the
+  // entry matches the FILES browser root folder card. Mirrors ShareFilesBrowser's
+  // per-folder tile resolution but across all uploads groups.
+  const [uploadsPreviewTiles, setUploadsPreviewTiles] = useState<string[]>([])
+  useEffect(() => {
+    let cancelled = false
+    async function resolveUploadsTiles() {
+      const uploadGroups = (downloadableFilesWithOptimisticUploads || []).filter((group) => group.groupType === 'uploads')
+      if (uploadGroups.length === 0) {
+        setUploadsPreviewTiles([])
+        return
+      }
+      const candidates = uploadGroups
+        .flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
+        .filter((file) => {
+          const kind = getDownloadableFileKind(file)
+          return kind === 'image' || kind === 'video'
+        })
+        .slice(0, 12)
+
+      const urls: string[] = []
+      for (const file of candidates) {
+        const url = await resolveDownloadablePreviewUrl(file).catch(() => null)
+        if (typeof url === 'string' && url.length > 0 && !urls.includes(url)) {
+          urls.push(url)
+          if (urls.length >= 3) break
+        }
+      }
+      if (!cancelled) setUploadsPreviewTiles(urls)
+    }
+    void resolveUploadsTiles()
+    return () => { cancelled = true }
+    // Re-resolves whenever the files list refreshes (focus/visibility/interval), which
+    // also recovers expired preview tokens — so the mosaic needs no error-retry loop.
+  }, [downloadableFilesWithOptimisticUploads, resolveDownloadablePreviewUrl])
+
   const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
     if (file.type === 'upload-file' && file.uploadFileId) {
       const tokenizedUrls = await getUploadAccessUrl(file.uploadFileId)
@@ -2226,10 +2233,10 @@ export default function SharePage() {
     void fetchDownloadableFiles()
 
     // Refresh album list (sidebar album thumbnail URLs).
-    if (project?.slug && !isGuest) {
+    if (project?.slug) {
       void fetchAlbums(shareToken)
     }
-  }, [clearAllShareCaches, refreshViewVideoTokens, fetchDownloadableFiles, fetchAlbums, project?.slug, shareToken, isGuest])
+  }, [clearAllShareCaches, refreshViewVideoTokens, fetchDownloadableFiles, fetchAlbums, project?.slug, shareToken])
 
   // Global content-image error capture + proactive periodic token refresh + visibility-change refresh.
   useContentImageRefresh({
@@ -2254,17 +2261,36 @@ export default function SharePage() {
     }
   }, [isAdminSession, isAuthenticated, refreshViewVideoTokens, shareToken])
 
-  // Handle video selection
+  // Set a video as the active folder without toggling — used by the version-open
+  // path (opening a specific version from the Files browser), which then switches
+  // the right panel to the player.
+  const activateVideoFolder = (videoName: string) => {
+    setActiveAlbumId(null)
+    setActiveVideoName(videoName)
+    if (project?.videosByName?.[videoName]) {
+      setActiveVideosRaw(project.videosByName[videoName])
+    }
+  }
+
+  // Handle video selection from the sidebar. Selecting an item navigates the Files
+  // browser to that folder; selecting the already-active item deselects it back to
+  // the project root.
   const handleVideoSelect = (videoName: string) => {
-    if (!activeAlbumId && activeVideoName === videoName) return
     if (!confirmShareDraftNavigation()) return
+
+    const isAlreadyActive = !activeAlbumId && activeVideoName === videoName && desktopContentTab === 'files'
+    if (isAlreadyActive) {
+      setActiveVideoName('')
+      setActiveVideosRaw([])
+      setRequestedFilesFolderName(null)
+      return
+    }
     const wasInAlbum = !!activeAlbumId
     setActiveAlbumId(null)
     setActiveVideoName(videoName)
     setActiveVideosRaw(project.videosByName[videoName])
-    if (desktopContentTab === 'files') {
-      setRequestedFilesFolderName(videoName)
-    }
+    setRequestedFilesFolderName(videoName)
+    setDesktopContentTab('files')
     if (wasInAlbum && shareToken) {
       void fetch(`/api/share/${token}/activity`, {
         method: 'PATCH',
@@ -2275,15 +2301,20 @@ export default function SharePage() {
   }
 
   const handleAlbumSelect = (albumId: string) => {
-    if (activeAlbumId === albumId) return
     if (!confirmShareDraftNavigation()) return
     const album = albums.find((a: any) => String(a.id) === String(albumId))
+
+    const isAlreadyActive = activeAlbumId === albumId && desktopContentTab === 'files'
+    if (isAlreadyActive) {
+      setActiveAlbumId(null)
+      setRequestedFilesFolderName(null)
+      return
+    }
     setActiveVideoName('')
     setActiveVideosRaw([])
     setActiveAlbumId(albumId)
-    if (desktopContentTab === 'files') {
-      setRequestedFilesFolderName(String(album?.name || ''))
-    }
+    setRequestedFilesFolderName(String(album?.name || ''))
+    setDesktopContentTab('files')
     if (shareToken) {
       void fetch(`/api/share/${token}/activity`, {
         method: 'PATCH',
@@ -2293,6 +2324,52 @@ export default function SharePage() {
     }
   }
 
+  // Toggle the UPLOADS folder in the Files browser (UPLOADS ⇄ project root).
+  const handleUploadsSelect = () => {
+    if (!confirmShareDraftNavigation()) return
+    const isAlreadyActive = desktopContentTab === 'files'
+      && String(requestedFilesFolderName || '').trim().startsWith('UPLOADS')
+    if (isAlreadyActive) {
+      setRequestedFilesFolderName(null)
+      return
+    }
+    setActiveVideoName('')
+    setActiveVideosRaw([])
+    setActiveAlbumId(null)
+    setRequestedFilesFolderName('UPLOADS')
+    setDesktopContentTab('files')
+  }
+
+  // Files browser navigated to a folder (user clicked/opened it inside the right
+  // panel). Mirror that into the sidebar selection so the two stay correlated.
+  const handleFilesFolderChange = useCallback((folderName: string | null) => {
+    setRequestedFilesFolderName(folderName)
+    const name = String(folderName || '').trim()
+    if (!name || name.startsWith('UPLOADS')) {
+      setActiveVideoName('')
+      setActiveVideosRaw([])
+      setActiveAlbumId(null)
+      return
+    }
+    const album = albums.find((a: any) => String(a?.name || '') === name)
+    if (album) {
+      setActiveVideoName('')
+      setActiveVideosRaw([])
+      setActiveAlbumId(String(album.id))
+      return
+    }
+    if (project?.videosByName?.[name]) {
+      setActiveAlbumId(null)
+      setActiveVideoName(name)
+      setActiveVideosRaw(project.videosByName[name])
+      return
+    }
+    // Unknown folder (e.g. nested upload path) — clear the sidebar highlight.
+    setActiveVideoName('')
+    setActiveVideosRaw([])
+    setActiveAlbumId(null)
+  }, [albums, project?.videosByName])
+
   useEffect(() => {
     if (!project) return
     void fetchAlbums()
@@ -2300,12 +2377,8 @@ export default function SharePage() {
 
   useEffect(() => {
     if (!project || !isAuthenticated) return
-    if (isGuest) {
-      setDownloadableFiles(null)
-      return
-    }
     void fetchDownloadableFiles()
-  }, [project, isAuthenticated, isGuest, shareToken, fetchDownloadableFiles])
+  }, [project, isAuthenticated, shareToken, fetchDownloadableFiles])
 
   useEffect(() => {
     if (!project || !isAuthenticated) {
@@ -2379,7 +2452,6 @@ export default function SharePage() {
         }
 
         setIsAuthenticated(true)
-        setIsGuest(false)
 
         // Clear all caches tied to the previous (expired) session before fetching fresh data.
         clearAllShareCaches()
@@ -2415,7 +2487,6 @@ export default function SharePage() {
         }
         setPassword('')
         setIsAuthenticated(true)
-        setIsGuest(false)
 
         // Clear all caches tied to the previous (expired) session before fetching fresh data.
         clearAllShareCaches()
@@ -2431,55 +2502,6 @@ export default function SharePage() {
     }
   }
 
-  async function handleGuestEntry() {
-    setLoading(true)
-    setError('')
-
-    try {
-      const response = await fetch(`/api/share/${token}/guest`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        if (data.shareToken) {
-          setShareToken(data.shareToken)
-          saveShareToken(storageKey, data.shareToken)
-        }
-        setIsAuthenticated(true)
-        setIsGuest(true)
-
-        // Clear all caches tied to the previous (expired) session before fetching fresh data.
-        clearAllShareCaches()
-        await fetchProjectData(data.shareToken)
-        // Guest mode — downloadable files are intentionally null for guests.
-      } else {
-        setError('Unable to access as guest')
-      }
-    } catch (error) {
-      setError('An error occurred')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Auto-enter guest mode when the URL ends with /guest.
-  // This should behave like clicking the “Guest Access” button on the auth screen.
-  useEffect(() => {
-    if (!wantsAutoGuest) return
-    if (autoGuestAttemptedRef.current) return
-    if (isAdminSession) return
-    if (isPasswordProtected === null) return
-    if (isAuthenticated) return
-    if (!guestMode) return
-
-    autoGuestAttemptedRef.current = true
-    void handleGuestEntry()
-    // Intentionally omit handleGuestEntry from deps (not stable).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wantsAutoGuest, isAdminSession, isPasswordProtected, isAuthenticated, guestMode])
-
   // Show loading state
   if (isPasswordProtected === null) {
     return (
@@ -2491,19 +2513,6 @@ export default function SharePage() {
 
   // Show authentication prompt
   if (isPasswordProtected && !isAuthenticated) {
-    if (wantsAutoGuest && guestMode) {
-      return (
-        <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
-          <Card className="bg-card border-border w-full max-w-md">
-            <CardHeader className="text-center">
-              <CardTitle className="text-foreground">Accessing as guest…</CardTitle>
-              <p className="text-muted-foreground text-sm mt-2">Please wait.</p>
-            </CardHeader>
-          </Card>
-        </div>
-      )
-    }
-
     return (
       <div className="flex-1 min-h-0 bg-background flex items-center justify-center p-4">
         <Card className="bg-card border-border w-full max-w-md">
@@ -2536,10 +2545,6 @@ export default function SharePage() {
               {authMode === 'PASSWORD' && 'Please enter the password to continue.'}
               {authMode === 'OTP' && 'Enter your email to receive an access code.'}
               {authMode === 'BOTH' && 'Choose your preferred authentication method.'}
-              {authMode === 'NONE' && 'Guest access is required to continue.'}
-            </p>
-            <p className="text-xs text-muted-foreground mt-3 px-4">
-              This authentication is for those assigned to this project.
             </p>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -2654,6 +2659,13 @@ export default function SharePage() {
                         {loading ? 'Verifying...' : 'Verify'}
                       </Button>
                     </div>
+                    {showOtpHint && (
+                      <div className="mt-3 p-3 bg-warning-visible border border-warning-visible rounded-lg">
+                        <p className="text-xs text-warning leading-relaxed">
+                          Didn&apos;t receive a code? It&apos;s possible you haven&apos;t been added to this project. Please reach out to the person who gave you this link, and they can coordinate with us to get you access.
+                        </p>
+                      </div>
+                    )}
                   </form>
                 )}
               </div>
@@ -2664,32 +2676,6 @@ export default function SharePage() {
               <div className="p-3 bg-destructive-visible border border-destructive-visible rounded-lg">
                 <p className="text-sm text-destructive">{error}</p>
               </div>
-            )}
-
-            {/* Guest Entry Button - hide when OTP code is being entered */}
-            {guestMode && (
-              <>
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-border"></div>
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-card px-2 text-muted-foreground">Not assigned to this project?</span>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground text-center">
-                  Guest users do not have permissions to provide feedback or approve videos.
-                </p>
-                <Button
-                  type="button"
-                  size="default"
-                  onClick={handleGuestEntry}
-                  disabled={loading}
-                  className="w-full bg-warning text-white hover:bg-warning/90 shadow-elevation hover:shadow-elevation-lg hover:-translate-y-0.5 active:translate-y-0 active:shadow-elevation transition-all duration-200"
-                >
-                  Continue as Guest
-                </Button>
-              </>
             )}
           </CardContent>
         </Card>
@@ -2763,10 +2749,10 @@ export default function SharePage() {
     return !comment.videoId || activeVideoIds.has(comment.videoId)
   })
 
-  // Video-only mode: guest, share-only, or hidden feedback (no scrollable comments below).
+  // Video-only mode: share-only or hidden feedback (no scrollable comments below).
   // Use overflow-hidden on mobile so the flex layout constrains the video within the
   // viewport minus the mobile sidebar height, preventing the bottom from being clipped.
-  const isVideoOnlyShareMode = (project.hideFeedback || shareOnlyMode) || isGuest
+  const isVideoOnlyShareMode = project.hideFeedback || shareOnlyMode
 
   // Header breadcrumb computed values
   const activeAlbum = albums.find((a: any) => String(a.id) === activeAlbumId) || null
@@ -2912,71 +2898,7 @@ export default function SharePage() {
           </>
         )}
 
-        {downloadableFiles !== null && (
-          <div className="ml-auto hidden lg:flex items-stretch self-stretch gap-0 flex-shrink-0">
-            <span className="text-muted-foreground whitespace-nowrap hidden lg:inline flex-shrink-0 self-center px-2">Mode:</span>
-            <Button
-              type="button"
-              variant={desktopContentTab === 'view' ? 'default' : 'outline'}
-              size="default"
-              disabled={!hasViewContent}
-              className={cn(
-                'h-full rounded-none border-y-0 border-l border-r-0 px-4',
-                desktopContentTab !== 'view' &&
-                  'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
-              )}
-              onClick={() => setDesktopContentTab('view')}
-            >
-              VIEW
-            </Button>
-            <Button
-              type="button"
-              variant={desktopContentTab === 'files' ? 'default' : 'outline'}
-              size="default"
-              className={cn(
-                'h-full rounded-none border-y-0 border-l px-4',
-                desktopContentTab !== 'files' &&
-                  'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
-              )}
-              onClick={() => setDesktopContentTab('files')}
-            >
-              FILES ({availableFileCount})
-            </Button>
-          </div>
-        )}
       </div>
-
-      {downloadableFiles !== null && (
-        <div className="lg:hidden flex-shrink-0 my-2">
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant={desktopContentTab === 'view' ? 'default' : 'outline'}
-              size="sm"
-              disabled={!hasViewContent}
-              className={cn(
-                'w-full',
-                desktopContentTab !== 'view' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
-              )}
-              onClick={() => setDesktopContentTab('view')}
-            >
-              VIEW
-            </Button>
-            <Button
-              type="button"
-              variant={desktopContentTab === 'files' ? 'default' : 'outline'}
-              size="sm"
-              className={cn(
-                'w-full',
-                desktopContentTab !== 'files' && 'bg-primary/10 text-white border-primary/35 hover:bg-primary/16 hover:text-white'
-              )}
-              onClick={() => setDesktopContentTab('files')}
-            >
-              FILES ({availableFileCount})
-            </Button>
-          </div>
-        </div>
-      )}
 
       {/* Main content row: sidebar + content area */}
       <div className={cn(
@@ -2989,7 +2911,7 @@ export default function SharePage() {
         videosByName={sidebarVideosByName}
         activeVideoName={activeVideoName}
         onVideoSelect={handleVideoSelect}
-        hideApprovalGrouping={isGuest}
+        hideApprovalGrouping={false}
         albums={albums.map((a: any) => ({
           id: String(a.id),
           name: String(a.name || ''),
@@ -3003,7 +2925,7 @@ export default function SharePage() {
         className="w-64 flex-shrink-0"
         hasLogo={hasLogo}
         mainCompanyDomain={mainCompanyDomain}
-        downloadableFiles={isGuest ? null : downloadableFilesWithOptimisticUploads}
+        downloadableFiles={downloadableFilesWithOptimisticUploads}
         onDownloadFile={handleDownloadFile}
         onDownloadFiles={handleDownloadFiles}
         sharedDownloadProgress={downloadTransferSummary}
@@ -3015,8 +2937,10 @@ export default function SharePage() {
         onClearCompletedTransfers={clearCompletedTransfersCombined}
         hasApprovableVideos={hasApprovableVideos}
         showDesktopTabBar={false}
-        desktopActiveTab={desktopContentTab === 'files' ? 'files' : 'for-review'}
-        onDesktopActiveTabChange={(tab) => setDesktopContentTab(tab === 'files' ? 'files' : 'view')}
+        desktopActiveTab="for-review"
+        showUploadsInView={true}
+        onUploadsSelect={handleUploadsSelect}
+        uploadsPreviewTiles={uploadsPreviewTiles}
         selectedFileIds={selectedFileIds}
         onSelectedFileIdsChange={setSelectedFileIds}
         activeFilesFolderName={requestedFilesFolderName}
@@ -3025,13 +2949,13 @@ export default function SharePage() {
         onOpenVideoVersion={(file, folderName) => {
           if (file.type !== 'video' || !file.videoId) return
           if (folderName) {
-            handleVideoSelect(folderName)
+            activateVideoFolder(folderName)
           }
           setDesktopContentTab('view')
           setTimeout(() => {
             window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: file.videoId } }))
             window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: file.videoId } }))
-            window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null } }))
+            window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null, autoPlay: true } }))
           }, 0)
         }}
         onApproveVideo={handleApproveVideo}
@@ -3063,23 +2987,22 @@ export default function SharePage() {
               onOpenVideoVersion={(file, folderName) => {
                 if (file.type !== 'video' || !file.videoId) return
                 if (folderName) {
-                  handleVideoSelect(folderName)
+                  activateVideoFolder(folderName)
                 }
                 setDesktopContentTab('view')
                 setTimeout(() => {
                   window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId: file.videoId } }))
                   window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId: file.videoId } }))
-                  window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null } }))
+                  window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId: file.videoId, videoVersion: null, autoPlay: true } }))
                 }, 0)
               }}
               onDownloadFiles={handleDownloadFiles}
               sharedDownloadProgress={downloadTransferSummary}
               isSharedDownloadActive={hasActiveDownloadTransfers}
-              onCloseFilesView={() => setDesktopContentTab('view')}
               requestedOpenFolderName={requestedFilesFolderName}
               requestedOpenFileKey={requestedFilesFileKey}
               onOpenFileKeyHandled={() => setRequestedFilesFileKey(null)}
-              onOpenFolderNameChange={setRequestedFilesFolderName}
+              onOpenFolderNameChange={handleFilesFolderChange}
               folderPreviewByName={folderPreviewByName}
               resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
               resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
@@ -3088,7 +3011,7 @@ export default function SharePage() {
               shareSlug={token}
               shareToken={shareToken}
               transferItems={transferItemsCombined}
-              canUploadToProjects={Boolean(isAdminSession || (isAuthenticated && !isGuest && project?.allowClientUploadFiles && project?.enableClientUploads !== false))}
+              canUploadToProjects={Boolean(isAdminSession || (isAuthenticated && project?.allowClientUploadFiles && project?.enableClientUploads !== false))}
               canDeleteUploads={false}
               onCreateUploadFolder={handleCreateUploadFolder}
               onUploadFiles={handleUploadFiles}
@@ -3113,11 +3036,11 @@ export default function SharePage() {
             </Card>
           ) : (
             <div
-              className={`flex-1 min-h-0 ${((project.hideFeedback || project.status === 'SHARE_ONLY') || isGuest)
+              className={`flex-1 min-h-0 ${(project.hideFeedback || project.status === 'SHARE_ONLY')
                 ? 'flex flex-col w-full'
                 : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
             >
-              {((project.hideFeedback || project.status === 'SHARE_ONLY') || isGuest) ? (
+              {(project.hideFeedback || project.status === 'SHARE_ONLY') ? (
                 <div className="flex-1 min-h-0 flex flex-col">
                   <VideoPlayer
                     videos={readyVideos}
@@ -3125,20 +3048,21 @@ export default function SharePage() {
                     projectStatus={project.status}
                     defaultQuality={defaultQuality}
                     projectTitle={project.title}
-                    clientName={isGuest ? null : project.clientName}
+                    clientName={project.clientName}
                     isPasswordProtected={isPasswordProtected || false}
                     watermarkEnabled={project.watermarkEnabled}
                     activeVideoName={activeVideoName}
-                    onApprove={isGuest ? undefined : fetchProjectData}
+                    onApprove={fetchProjectData}
                     initialSeekTime={initialSeekTime}
                     initialVideoIndex={initialVideoIndex}
                     isAdmin={false}
-                    isGuest={isGuest}
+                    isGuest={false}
                     shareToken={shareToken}
                     commentsForTimeline={filteredComments}
                     hideDownloadButton={true}
                     useFullTimecode={Boolean(project?.useFullTimecode)}
                     showTimeDisplayToggle={true}
+                    onCloseVideo={() => setDesktopContentTab('files')}
                     fillContainer
                   />
                   {/* Video name + Company logo row — below video player on mobile */}
@@ -3183,6 +3107,7 @@ export default function SharePage() {
                     draftGuardRef.current = guard
                   }}
                   onApprove={fetchProjectData}
+                  onCloseVideo={() => setDesktopContentTab('files')}
                 />
               )}
 
@@ -3212,6 +3137,7 @@ function ShareFeedbackGrid({
   mainCompanyDomain,
   onDraftGuardChange,
   onApprove,
+  onCloseVideo,
 }: {
   project: any
   readyVideos: any[]
@@ -3229,6 +3155,7 @@ function ShareFeedbackGrid({
   mainCompanyDomain: string | null
   onDraftGuardChange?: (guard: DraftNavigationGuard | null) => void
   onApprove: () => void
+  onCloseVideo?: () => void
 }) {
   const logoSrc = '/api/branding/logo'
   const [isDesktop, setIsDesktop] = useState(false)
@@ -3491,6 +3418,7 @@ function ShareFeedbackGrid({
               disableFullscreenCommentsUI={commentsDisabled}
               useFullTimecode={Boolean(project?.useFullTimecode)}
               showTimeDisplayToggle={true}
+              onCloseVideo={onCloseVideo}
               fillContainer
               pinControlsToBottom={false}
             />
@@ -3569,7 +3497,6 @@ function ShareFeedbackGrid({
             <CommentSectionView
               projectId={project.id}
               projectSlug={shareSlug}
-              guestModeEnabled={Boolean(project.guestMode)}
               comments={serverComments as any}
               clientName={project.clientName}
               clientEmail={project.clientEmail}

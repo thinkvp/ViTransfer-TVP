@@ -39,7 +39,6 @@ type CommentWithReplies = Comment & {
 interface CommentSectionProps {
   projectId: string
   projectSlug?: string
-  guestModeEnabled?: boolean
   comments: CommentWithReplies[]
   clientName: string
   clientEmail?: string
@@ -84,7 +83,6 @@ function parseVideoFileSize(value: unknown): number | null {
 export function CommentSectionView({
   projectId,
   projectSlug,
-  guestModeEnabled = false,
   comments: initialComments,
   clientName,
   clientEmail,
@@ -232,7 +230,6 @@ export function CommentSectionView({
     setGuestLinkCheckedExisting(false)
     setGuestLinkMissing(false)
     setGuestLinkCopied(false)
-    setProjectGuestLinkCopied(false)
   }, [])
 
   useEffect(() => {
@@ -249,7 +246,6 @@ export function CommentSectionView({
   const [guestLinkUrl, setGuestLinkUrl] = useState<string | null>(null)
   const [guestLinkExpiresAt, setGuestLinkExpiresAt] = useState<string | null>(null)
   const [guestLinkCopied, setGuestLinkCopied] = useState(false)
-  const [projectGuestLinkCopied, setProjectGuestLinkCopied] = useState(false)
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
   const approvingRef = useRef(false)
@@ -268,14 +264,6 @@ export function CommentSectionView({
     if (typeof window === 'undefined') return
     setOrigin(window.location.origin)
   }, [])
-
-  const projectGuestUrl = (() => {
-    const resolvedOrigin = origin || (typeof window !== 'undefined' ? window.location.origin : null)
-    if (!resolvedOrigin) return null
-    const slug = typeof projectSlug === 'string' ? projectSlug.trim() : ''
-    if (!slug) return null
-    return new URL(`/share/${encodeURIComponent(slug)}/guest`, resolvedOrigin).toString()
-  })()
 
   const postGuestVideoLink = async (action: 'generate' | 'refreshExpiry') => {
     const response = isAdminView
@@ -402,17 +390,6 @@ export function CommentSectionView({
       await navigator.clipboard.writeText(guestLinkUrl)
       setGuestLinkCopied(true)
       setTimeout(() => setGuestLinkCopied(false), 1500)
-    } catch {
-      // ignore
-    }
-  }
-
-  const copyProjectGuestLink = async () => {
-    if (!projectGuestUrl) return
-    try {
-      await navigator.clipboard.writeText(projectGuestUrl)
-      setProjectGuestLinkCopied(true)
-      setTimeout(() => setProjectGuestLinkCopied(false), 1500)
     } catch {
       // ignore
     }
@@ -1041,8 +1018,8 @@ export function CommentSectionView({
     <>
       {fullscreenChatOverlay}
       <Card className={cn("bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden", cardClassName)} data-comment-section>
-        {(!hideVideoTitle || showVideoActions || guestModeEnabled) ? (
-        <CardHeader className={cn("border-b border-border flex-shrink-0 space-y-1", hideVideoTitle && !showVideoActions && !guestModeEnabled && "hidden")}>
+        {(!hideVideoTitle || showVideoActions) ? (
+        <CardHeader className={cn("border-b border-border flex-shrink-0 space-y-1", hideVideoTitle && !showVideoActions && "hidden")}>
         <div className="flex items-start gap-4">
           {!hideVideoTitle && (
           <div className="min-w-0 flex-1">
@@ -1103,18 +1080,15 @@ export function CommentSectionView({
               <Dialog open={guestLinkDialogOpen} onOpenChange={setGuestLinkDialogOpen}>
                 <DialogContent className="max-h-[85dvh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle>Guest Links</DialogTitle>
+                    <DialogTitle>Share Video</DialogTitle>
                     <DialogDescription>
-                      Share a video-only guest link, or a full project guest link when guest mode is enabled.
+                      View-only link for the currently selected video version. The viewer cannot access other videos, see or leave comments, approve videos or download videos.
                     </DialogDescription>
                   </DialogHeader>
 
                   <div className="mt-2 space-y-4">
                     <div className="rounded-md border border-border bg-muted/30 p-3">
                       <div className="text-sm font-medium text-foreground">Video-only link (expires in 14 days)</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        View-only link for the currently selected video version. The viewer cannot access other videos.
-                      </div>
 
                       <div className="mt-3 flex items-center gap-2">
                         {!guestLinkUrl && guestLinkCheckedExisting && guestLinkMissing ? (
@@ -1166,25 +1140,6 @@ export function CommentSectionView({
                       ) : null}
                     </div>
 
-                    {guestModeEnabled && projectGuestUrl ? (
-                      <div className="rounded-md border border-border bg-muted/30 p-3">
-                        <div className="text-sm font-medium text-foreground">Project guest link (expires at project completion)</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          Opens the full project in guest mode (videos only, no comments/approvals).
-                        </div>
-
-                        <div className="mt-3 flex items-center gap-2">
-                          <Button type="button" variant="outline" onClick={copyProjectGuestLink}>
-                            {projectGuestLinkCopied ? 'Copied' : 'Copy Project Guest Link'}
-                          </Button>
-                        </div>
-
-                        <div className="mt-3 rounded-md border border-border bg-background/50 p-3">
-                          <div className="text-xs text-muted-foreground mb-1">Share URL</div>
-                          <div className="text-sm break-all font-mono">{projectGuestUrl}</div>
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 </DialogContent>
               </Dialog>

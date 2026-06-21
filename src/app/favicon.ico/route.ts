@@ -16,5 +16,7 @@ export async function GET(request: NextRequest) {
     ? `/api/branding/favicon?v=${settings?.updatedAt ? new Date(settings.updatedAt).getTime() : 0}`
     : '/icon.svg'
 
-  return NextResponse.redirect(new URL(target, request.url), { status: 307 })
+  const host = request.headers.get('host') ?? request.nextUrl.host
+  const proto = request.headers.get('x-forwarded-proto') ?? request.nextUrl.protocol.replace(':', '')
+  return NextResponse.redirect(new URL(target, `${proto}://${host}`), { status: 307 })
 }

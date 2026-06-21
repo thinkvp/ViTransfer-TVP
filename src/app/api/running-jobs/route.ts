@@ -972,14 +972,33 @@ async function buildVideoAssetPreviewJobs({
       })
     }
 
-    const active = [...projectMap.values()].map((e) => ({
-      projectId: e.projectId,
-      projectName: e.projectName,
-      pendingCount: e.pendingCount,
-      processingCount: e.processingCount,
-      totalCount: e.pendingCount + e.processingCount,
-      assets: e.assets,
-    }))
+    // Count assets in each project's wave that have already finished recently.
+    // This gives a stable denominator (done + remaining) so the UI can show a
+    // real "X of Y processed" figure and a monotonic progress bar, rather than
+    // conflating the live concurrency count with completed work.
+    const doneByProject = new Map<string, number>()
+    for (const asset of recentlyReady) {
+      const pid = asset.video.projectId
+      doneByProject.set(pid, (doneByProject.get(pid) ?? 0) + 1)
+    }
+
+    const active = [...projectMap.values()].map((e) => {
+      const doneCount = doneByProject.get(e.projectId) ?? 0
+      const remainingCount = e.pendingCount + e.processingCount
+      return {
+        projectId: e.projectId,
+        projectName: e.projectName,
+        pendingCount: e.pendingCount,
+        processingCount: e.processingCount,
+        doneCount,
+        // `totalCount` is remaining work (pending + processing) — used for the
+        // active-items badge. The full wave size is `doneCount + totalCount`.
+        totalCount: remainingCount,
+        assets: e.assets,
+      }
+    })
+
+    const activeProjectIds = new Set(projectMap.keys())
 
     const completed = (() => {
       const completedByProject = new Map<string, {
@@ -1022,7 +1041,12 @@ async function buildVideoAssetPreviewJobs({
         entry.label = `${entry.assets.length} asset preview${entry.assets.length !== 1 ? 's' : ''}`
       }
 
-      return [...completedByProject.values()]
+      // Don't surface a "complete" summary for a project that still has preview
+      // work in flight — otherwise it shows a periodically-updating "N asset
+      // previews complete" row alongside the active progress row. Once the wave
+      // fully finishes the project drops out of `active` and the completion
+      // surfaces (here and via the client-side disappearance detector).
+      return [...completedByProject.values()].filter((e) => !activeProjectIds.has(e.projectId))
     })()
 
     return { active, completed }

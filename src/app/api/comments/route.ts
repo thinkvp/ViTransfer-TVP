@@ -67,7 +67,6 @@ export async function GET(request: NextRequest) {
         companyName: true,
         hideFeedback: true,
         status: true,
-        guestMode: true,
       }
     })
 
@@ -90,11 +89,7 @@ export async function GET(request: NextRequest) {
       return accessCheck.errorResponse!
     }
 
-    const { isAdmin, isAuthenticated, isGuest } = accessCheck
-
-    if (project.guestMode && isGuest) {
-      return NextResponse.json([], { headers: noStoreHeaders })
-    }
+    const { isAdmin, isAuthenticated } = accessCheck
 
     // Get primary recipient for author name fallback
     const primaryRecipient = await getPrimaryRecipient(projectId)

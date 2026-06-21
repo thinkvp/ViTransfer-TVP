@@ -35,7 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const projectMeta = await prisma.project.findUnique({
     where: { slug: token },
-    select: { id: true, sharePassword: true, authMode: true, guestMode: true, status: true, enablePhotos: true },
+    select: { id: true, sharePassword: true, authMode: true, status: true, enablePhotos: true },
   })
 
   if (!projectMeta) return NextResponse.json({ error: 'Not found' }, { status: 404 })
