@@ -276,7 +276,8 @@ export default function AdminVideoManager({
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {(() => {
                   const isReprocessing = reprocessingGroups.has(groupName)
-                  const canReprocess = projectStatus !== 'APPROVED' && projectStatus !== 'CLOSED'
+                  // Approved projects can still be reprocessed (server only blocks CLOSED).
+                  const canReprocess = projectStatus !== 'CLOSED'
                   const hasError = hasFailed
                   const hasBusy = hasUploading || hasProcessing || hasQueued
                   // Status accent: red for error, orange for busy, neutral border when healthy.

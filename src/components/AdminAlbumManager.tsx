@@ -558,7 +558,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 {(() => {
                   const isReprocessing = reprocessingAlbumIds.has(album.id)
-                  const canReprocess = projectStatus !== 'APPROVED' && projectStatus !== 'CLOSED'
+                  // Approved projects can still be reprocessed (server only blocks CLOSED).
+                  const canReprocess = projectStatus !== 'CLOSED'
                   const hasError = album.status === 'ERROR'
                   const hasBusy = album.status === 'UPLOADING' || album.status === 'PROCESSING'
                   // Status accent: red for error, orange for busy, neutral border when healthy.
