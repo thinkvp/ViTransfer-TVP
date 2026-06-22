@@ -1,3 +1,6 @@
+/** Mirrors the Prisma `VideoStatus` enum (hand-written to avoid a runtime import). */
+export type VideoStatus = 'UPLOADING' | 'QUEUED' | 'PROCESSING' | 'READY' | 'ERROR'
+
 /**
  * Shared client-side shape of a project video as delivered by the API.
  *
@@ -42,4 +45,12 @@ export interface Video {
   timelineSpriteUrl?: string | null
   originalFileName?: string
   originalFileSize?: string // stringified number
+
+  // Admin / processing / analytics (admin views only, e.g. VideoList)
+  projectId?: string
+  status?: VideoStatus
+  processingProgress?: number
+  processingError?: string | null
+  viewCount?: number
+  downloadCount?: number
 }

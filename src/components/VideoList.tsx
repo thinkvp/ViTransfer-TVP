@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useEffect } from 'react'
-import { Video } from '@prisma/client'
+import type { Video } from '@/types/video'
 import { formatDuration, formatFileSize } from '@/lib/utils'
 import { Progress } from './ui/progress'
 import { Button } from './ui/button'
@@ -177,7 +177,7 @@ export default function VideoList({
 
     // Optimistically update UI
     setVideos(prev => prev.map(v =>
-      v.id === videoId ? ({ ...(v as any), allowApproval: nextAllowApproval } as any) : v
+      v.id === videoId ? ({ ...v, allowApproval: nextAllowApproval } as any) : v
     ))
 
     try {
@@ -186,7 +186,7 @@ export default function VideoList({
     } catch (error) {
       // Revert optimistic update
       setVideos(prev => prev.map(v =>
-        v.id === videoId ? ({ ...(v as any), allowApproval: previous } as any) : v
+        v.id === videoId ? ({ ...v, allowApproval: previous } as any) : v
       ))
       toast.error('Failed to update approval setting')
     } finally {
@@ -409,15 +409,15 @@ export default function VideoList({
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleToggleApproval(video.id, (video as any).approved || false)}
+                    onClick={() => handleToggleApproval(video.id, video.approved || false)}
                     disabled={approvingId === video.id}
-                    className={(video as any).approved
+                    className={video.approved
                       ? "text-warning hover:text-warning hover:bg-warning-visible"
                       : "text-success hover:text-success hover:bg-success-visible"
                     }
-                    title={(video as any).approved ? "Unapprove video" : "Approve video"}
+                    title={video.approved ? "Unapprove video" : "Approve video"}
                   >
-                    {(video as any).approved ? (
+                    {video.approved ? (
                       <XCircle className="w-4 h-4" />
                     ) : (
                       <CheckCircle2 className="w-4 h-4" />
@@ -479,11 +479,11 @@ export default function VideoList({
                   title="Download video"
                   className="text-sm font-medium text-foreground hover:underline flex-1 min-w-0 truncate text-left disabled:opacity-50"
                 >
-                  {(video as any).originalFileName || video.name}
+                  {video.originalFileName || video.name}
                 </button>
               ) : (
-                <p className="text-sm text-muted-foreground flex-1 min-w-0 truncate" title={(video as any).originalFileName || video.name}>
-                  {(video as any).originalFileName || video.name}
+                <p className="text-sm text-muted-foreground flex-1 min-w-0 truncate" title={video.originalFileName || video.name}>
+                  {video.originalFileName || video.name}
                 </p>
               )}
 
@@ -491,26 +491,26 @@ export default function VideoList({
                 {video.status === 'READY' && (
                   <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
                     <span className="inline-flex items-center gap-1">
-                      {Number((video as any).viewCount || 0).toLocaleString()}
+                      {Number(video.viewCount || 0).toLocaleString()}
                       <Eye className="w-3 h-3" />
                     </span>
                     <span className="inline-flex items-center gap-1">
-                      {Number((video as any).downloadCount || 0).toLocaleString()}
+                      {Number(video.downloadCount || 0).toLocaleString()}
                       <Download className="w-3 h-3" />
                     </span>
                   </div>
                 )}
-                {(video as any).approved && (
+                {video.approved && (
                   <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-success-visible text-success border-2 border-success-visible">
                     Approved
                   </span>
                 )}
 
-                {isAdmin && video.status === 'READY' && !(video as any).approved && (
+                {isAdmin && video.status === 'READY' && !video.approved && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground whitespace-nowrap">Approvable?</span>
                     <Checkbox
-                      checked={Boolean((video as any).allowApproval)}
+                      checked={Boolean(video.allowApproval)}
                       onCheckedChange={(checked) => handleToggleAllowApproval(video.id, Boolean(checked))}
                       disabled={!effectiveCanManageAllowApproval || savingAllowApprovalId === video.id}
                       aria-label="Approvable"
@@ -535,7 +535,7 @@ export default function VideoList({
           {video.status === 'PROCESSING' && (
             <div className="space-y-1">
               {(() => {
-                const rawProg = (video as any).processingProgress ?? 0
+                const rawProg = video.processingProgress ?? 0
                 const pct = Math.min(99, Math.round(rawProg < 1 ? rawProg * 100 : rawProg))
                 return (
                   <>
@@ -578,7 +578,7 @@ export default function VideoList({
                 <div className="sm:hidden">
                   <p className="text-muted-foreground">Views</p>
                   <p className="font-medium inline-flex items-center gap-1">
-                    {Number((video as any).viewCount || 0).toLocaleString()}
+                    {Number(video.viewCount || 0).toLocaleString()}
                     <Eye className="w-3 h-3 text-muted-foreground" />
                   </p>
                 </div>
@@ -590,12 +590,12 @@ export default function VideoList({
                 </div>
                 <div>
                   <p className="text-muted-foreground">Size</p>
-                  <p className="font-medium">{formatFileSize(Number((video as any).originalFileSize || 0))}</p>
+                  <p className="font-medium">{formatFileSize(Number(video.originalFileSize || 0))}</p>
                 </div>
                 <div className="sm:hidden">
                   <p className="text-muted-foreground">Downloads</p>
                   <p className="font-medium inline-flex items-center gap-1">
-                    {Number((video as any).downloadCount || 0).toLocaleString()}
+                    {Number(video.downloadCount || 0).toLocaleString()}
                     <Download className="w-3 h-3 text-muted-foreground" />
                   </p>
                 </div>
@@ -638,7 +638,7 @@ export default function VideoList({
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
-                      onClick={() => handleStartEditNotes(video.id, ((video as any).videoNotes as string) || '')}
+                      onClick={() => handleStartEditNotes(video.id, (video.videoNotes as string) || '')}
                       title="Edit version notes"
                     >
                       <Pencil className="w-3 h-3" />
@@ -661,8 +661,8 @@ export default function VideoList({
                 </div>
               ) : (
                 <p className="text-sm mt-1 whitespace-pre-wrap">
-                  {(((video as any).videoNotes as string) || '').trim() ? (
-                    (video as any).videoNotes
+                  {((video.videoNotes as string) || '').trim() ? (
+                    video.videoNotes
                   ) : (
                     <span className="text-muted-foreground">No notes</span>
                   )}
@@ -693,7 +693,7 @@ export default function VideoList({
                 videoId={video.id}
                 videoName={video.name}
                 versionLabel={video.versionLabel}
-                projectId={video.projectId}
+                projectId={video.projectId!}
                 canManage={effectiveCanManageAllowApproval}
                 onAssetDeleted={() => {
                   setAssetRefreshTrigger(prev => prev + 1)
