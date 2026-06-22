@@ -90,6 +90,7 @@ const updateProjectSchema = z.object({
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
   enableVideos: z.boolean().optional(),
   enablePhotos: z.boolean().optional(),
+  enableUploads: z.boolean().optional(),
   clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']).optional(),
   clientNotificationTime: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
   clientNotificationDay: z.number().int().min(0).max(6).nullable().optional(),
@@ -140,6 +141,7 @@ export async function GET(
             select: {
               videos: true,
               albums: true,
+              shareUploadFiles: true,
             },
           },
           assignedUsers: {
@@ -612,6 +614,20 @@ export async function PATCH(
         }
       }
       updateData.enablePhotos = next
+    }
+
+    if (validatedBody.enableUploads !== undefined) {
+      const next = Boolean(validatedBody.enableUploads)
+      if (!next) {
+        const existingUploads = await prisma.shareUploadFile.count({ where: { projectId: id } })
+        if (existingUploads > 0) {
+          return NextResponse.json(
+            { error: 'Remove existing uploaded files to disable Uploads in this project' },
+            { status: 400 }
+          )
+        }
+      }
+      updateData.enableUploads = next
     }
 
     if (validatedBody.slug !== undefined) {

@@ -752,6 +752,14 @@ export default function VideoSidebar({
 
   const canOpenProjectSwitcher = showProjectSwitcher && typeof onProjectSwitcherOpen === 'function'
 
+  // Desktop sidebar thumbnails scale up as the sidebar is widened; the current
+  // sizes are the floor. Base width 256px → 64px video/album thumbnail (w-16).
+  // Video/album thumbnails stay 16:9; the uploads mosaic shares the same width.
+  const thumbnailScale = Math.max(1, sidebarWidth / 256)
+  const videoThumbnailWidth = Math.round(64 * thumbnailScale)
+  const videoThumbnailHeight = Math.round((videoThumbnailWidth * 9) / 16)
+  const uploadsThumbnailWidth = videoThumbnailWidth
+
   // Desktop sidebar: computed groups and render helpers (mobile section is unchanged)
   const forReviewGroups = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true)))
   const approvedGroups = sortedVideoGroups(videoGroups.filter(g => g.videos.some((v: any) => v.approved === true)))
@@ -1017,7 +1025,10 @@ export default function VideoSidebar({
       : []
 
     const thumbnailEl = (
-      <div className="flex-shrink-0 w-16 h-9 rounded overflow-hidden bg-black flex items-center justify-center relative">
+      <div
+        className="flex-shrink-0 rounded overflow-hidden bg-black flex items-center justify-center relative"
+        style={{ width: videoThumbnailWidth, height: videoThumbnailHeight }}
+      >
         {thumbnailUrl ? (
           <Image
             src={thumbnailUrl}
@@ -1122,7 +1133,10 @@ export default function VideoSidebar({
       : []
 
     const thumbnailEl = (
-      <div className="flex-shrink-0 w-16 h-9 rounded overflow-hidden relative bg-gradient-to-br from-muted to-muted-foreground/50 flex items-center justify-center">
+      <div
+        className="flex-shrink-0 rounded overflow-hidden relative bg-gradient-to-br from-muted to-muted-foreground/50 flex items-center justify-center"
+        style={{ width: videoThumbnailWidth, height: videoThumbnailHeight }}
+      >
         {previewUrl && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -1232,7 +1246,7 @@ export default function VideoSidebar({
             isActive ? 'bg-primary/10 text-primary font-medium border border-primary/20' : 'text-foreground'
           )}
         >
-          <div className="flex-shrink-0 w-20">
+          <div className="flex-shrink-0" style={{ width: uploadsThumbnailWidth }}>
             <FolderPreviewMosaic
               label="UPLOADS"
               tiles={uploadsPreviewTiles}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
@@ -74,6 +74,13 @@ export async function GET(
 
   const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `guest:${Date.now()}`)
 
+  // S3 mode: presign thumbnails directly so the gallery grid loads each <img> from R2
+  // without proxying through /api/content/photo. The token is still minted below for the
+  // full-size, preview and download URLs (used on demand in the lightbox).
+  const directThumbUrls = await presignAlbumPhotoThumbnailUrls(
+    album.photos.filter((p) => p.thumbnailStatus === 'READY').map((p) => p.id),
+  )
+
   const photos = await Promise.all(
     album.photos.map(async (p) => {
       const tokenValue = await generateAlbumPhotoAccessToken({
@@ -90,7 +97,7 @@ export async function GET(
         fileSize: '0', // From StoredFile if needed
         createdAt: p.createdAt,
         url: `/api/content/photo/${tokenValue}`,
-        thumbnailUrl: `/api/content/photo/${tokenValue}?variant=thumbnail`,
+        thumbnailUrl: directThumbUrls.get(p.id) ?? `/api/content/photo/${tokenValue}?variant=thumbnail`,
         previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
         downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
         socialDownloadUrl: `/api/content/photo/${tokenValue}?download=true&variant=social`,

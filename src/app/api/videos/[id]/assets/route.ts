@@ -7,9 +7,10 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
+import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetPreviewStoragePath, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -105,8 +106,9 @@ export async function GET(
 
         // Resolve file sizes from StoredFile
     const assetIds = assets.map(a => a.id)
-    const storedSizes = assetIds.length > 0 ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true } }) : []
+    const storedSizes = assetIds.length > 0 ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true, storagePath: true } }) : []
     const sizeByAssetId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
+    const origPathByAssetId = new Map(storedSizes.map(s => [s.entityId, s.storagePath as string]))
 
     // Resolve current thumbnail path from StoredFile
     const thumbnailRecord = await prisma.storedFile.findUnique({
@@ -121,14 +123,23 @@ export async function GET(
     const imageExtensions = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif']
     const videoExtensions = ['mp4', 'mov', 'm4v', 'avi', 'mkv', 'webm', 'mxf']
     const previewImageStored = assetIds.length > 0
-      ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['PREVIEW_IMAGE'], select: { entityId: true } })
+      ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['PREVIEW_IMAGE'], select: { entityId: true, storagePath: true } })
       : []
     const hasPreviewImage = new Set(previewImageStored.map((s) => s.entityId))
+    const previewImagePathByAssetId = new Map(previewImageStored.map((s) => [s.entityId, s.storagePath as string]))
 
     // 2-hour TTL matches the download-token route so thumbnails outlive a normal session window.
     const DOWNLOAD_TOKEN_TTL = 2 * 60 * 60
     const sessionId = accessCheck.shareTokenSessionId
       || (accessCheck.isAdmin ? `admin:${Date.now()}` : `guest:${Date.now()}`)
+
+    // S3 mode: presign the generated preview image directly so each asset tile loads from R2,
+    // skipping the /api/content round-trip (token + DB + existence HEAD + redirect) per asset.
+    // Mirrors the content route's assetPreview path resolution: image assets use the stored
+    // PREVIEW_IMAGE path; video assets use the computed preview-image path.
+    const s3 = isS3Mode()
+    const projectStoragePath = project.storagePath
+      || buildProjectStorageRoot((project as any).companyName || 'Client', project.title)
 
     const thumbnailUrlByAssetId = new Map<string, string>()
     await Promise.all(
@@ -141,6 +152,33 @@ export async function GET(
         const isVideo = ft.startsWith('video/') || videoExtensions.includes(ext)
         const hasReadyPreview = asset.previewStatus === 'READY' && (isVideo || hasPreviewImage.has(asset.id))
         if (!((isImage || isVideo) && hasReadyPreview)) return
+
+        if (s3) {
+          let previewPath: string | null = null
+          if (isVideo) {
+            const origPath = origPathByAssetId.get(asset.id)
+            if (origPath) {
+              previewPath = buildVideoAssetPreviewStoragePath(
+                projectStoragePath,
+                video.storageFolderName || video.name,
+                video.versionLabel,
+                origPath,
+                '.jpg',
+              )
+            }
+          } else {
+            previewPath = previewImagePathByAssetId.get(asset.id) ?? null
+          }
+          if (previewPath) {
+            try {
+              thumbnailUrlByAssetId.set(asset.id, await s3GetPresignedStreamUrl(previewPath, DOWNLOAD_TOKEN_TTL, 'image/jpeg'))
+              return
+            } catch {
+              // Fall through to the token URL below.
+            }
+          }
+        }
+
         try {
           const token = await generateVideoAccessToken(videoId, project.id, 'asset-download', request, sessionId, DOWNLOAD_TOKEN_TTL)
           thumbnailUrlByAssetId.set(asset.id, `/api/content/${token}?assetId=${asset.id}&assetPreview=1`)

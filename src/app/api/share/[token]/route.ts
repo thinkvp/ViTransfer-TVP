@@ -12,6 +12,7 @@ import { getClientIpAddress } from '@/lib/utils'
 import crypto from 'crypto'
 import { getStoredFileRecords } from '@/lib/stored-file'
 import { generateVideoAccessToken } from '@/lib/video-access'
+import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 export const runtime = 'nodejs'
 
 
@@ -148,17 +149,21 @@ export async function GET(
 
     // Resolve preview availability and original file sizes from StoredFile
     const videoIds = project.videos.map((v: any) => v.id)
-    const storedPreviews = videoIds.length > 0 ? await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'], select: { entityId: true, fileRole: true, fileSize: true, fileName: true } }) : []
+    const storedPreviews = videoIds.length > 0 ? await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'], select: { entityId: true, fileRole: true, fileSize: true, fileName: true, storagePath: true } }) : []
 
     const previewMap = new Map<string, Set<string>>()
     const sizeMap = new Map<string, number>()
     const nameMap = new Map<string, string>()
+    const thumbPathByVideoId = new Map<string, string>()
     for (const s of storedPreviews) {
       if (!previewMap.has(s.entityId)) previewMap.set(s.entityId, new Set())
       previewMap.get(s.entityId)!.add(s.fileRole)
       if (s.fileRole === 'ORIGINAL') {
         if (s.fileSize != null) sizeMap.set(s.entityId, Number(s.fileSize))
         if (s.fileName) nameMap.set(s.entityId, s.fileName)
+      }
+      if (s.fileRole === 'THUMBNAIL' && s.storagePath) {
+        thumbPathByVideoId.set(s.entityId, s.storagePath)
       }
     }
 
@@ -171,8 +176,23 @@ export async function GET(
     const thumbnailUrlByVideoId = new Map<string, string>()
     if (project.enableVideos !== false) {
       const videosWithThumb = project.videos.filter((v: any) => previewMap.get(v.id)?.has('THUMBNAIL'))
+      const s3 = isS3Mode()
       await Promise.all(
         videosWithThumb.map(async (v: any) => {
+          // S3 mode: presign the thumbnail directly so the client renders preview tiles
+          // straight from R2, with no /api/content round-trip + 302 redirect per video.
+          if (s3) {
+            const thumbPath = thumbPathByVideoId.get(v.id)
+            if (thumbPath) {
+              try {
+                thumbnailUrlByVideoId.set(v.id, await s3GetPresignedStreamUrl(thumbPath, 14400, 'image/jpeg'))
+                return
+              } catch (error) {
+                console.error('[SHARE] Failed to presign thumbnail URL', { videoId: v.id, error })
+                // Fall through to token minting.
+              }
+            }
+          }
           try {
             const thumbToken = await generateVideoAccessToken(v.id, projectMeta.id, 'thumbnail', request, thumbnailSessionId)
             if (thumbToken) thumbnailUrlByVideoId.set(v.id, `/api/content/${thumbToken}`)
@@ -270,6 +290,7 @@ export async function GET(
 
       enableVideos: project.enableVideos ?? true,
       enablePhotos: project.enablePhotos ?? false,
+      enableUploads: project.enableUploads ?? true,
 
       clientName: project.companyName || primaryRecipient?.name || 'Client',
       clientEmail: primaryRecipient?.email || null,

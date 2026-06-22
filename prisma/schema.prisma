@@ -245,6 +245,7 @@ model Project {
   // Project Type
   enableVideos Boolean @default(true)
   enablePhotos Boolean @default(false)
+  enableUploads Boolean @default(true)  // Master switch for the UPLOADS folder; when false it is hidden from admins and clients
 
   // Revision tracking (optional)
   enableRevisions Boolean @default(false)

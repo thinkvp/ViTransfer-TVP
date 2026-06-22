@@ -130,8 +130,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   // Check the target file exists before streaming.
   if (isS3Mode()) {
-    const exists = await s3FileExists(storagePath)
-    if (!exists) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+    // Inline image serving skips the existence HEAD — a missing object simply 404s from R2 on
+    // the redirect, the same outcome without an extra S3 round-trip. Downloads keep the check
+    // so a missing file surfaces as a clean app-level 404.
+    if (isDownload) {
+      const exists = await s3FileExists(storagePath)
+      if (!exists) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+    }
   } else {
     const fullPath = getFilePath(storagePath)
     if (!existsSync(fullPath)) return NextResponse.json({ error: 'Access denied' }, { status: 404 })

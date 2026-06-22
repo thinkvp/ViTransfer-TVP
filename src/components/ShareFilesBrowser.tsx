@@ -2317,8 +2317,8 @@ export function ShareFilesBrowser({
               ) : null}
 
               {showForReviewBadge ? (
-                <div className="absolute bottom-2 left-2 rounded bg-amber-500/95 px-1.5 py-0.5 text-[11px] leading-none text-black font-semibold tracking-wide">
-                  FOR REVIEW
+                <div className="absolute bottom-2 left-2 rounded bg-primary px-1.5 py-0.5 text-[11px] leading-none text-primary-foreground font-semibold tracking-wide">
+                  LATEST
                 </div>
               ) : null}
             </div>

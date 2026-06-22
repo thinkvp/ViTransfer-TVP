@@ -29,7 +29,10 @@ export function FolderPreviewMosaic({
 
   return (
     <div className="relative pt-2">
-      <div className="absolute left-3 top-0 h-2.5 w-16 rounded-t-md border border-b-0 border-primary/55 bg-primary/30" />
+      {/* Folder tab sized as a fraction of the card so it scales with the
+          mosaic width (sidebar resize + FILES grid breakpoints) instead of a
+          fixed width that overflows narrow folders. */}
+      <div className="absolute left-[5%] top-0 h-2.5 w-[30%] rounded-t-md border border-b-0 border-primary/55 bg-primary/30" />
       <div className="relative rounded-lg rounded-tl-sm border border-primary/50 bg-primary/20 p-1.5 shadow-inner shadow-black/10">
         <div className="grid grid-cols-3 grid-rows-2 gap-1.5 aspect-[16/10] rounded-md overflow-hidden bg-primary/20">
           {leadPreview ? (

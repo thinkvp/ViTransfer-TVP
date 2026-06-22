@@ -204,8 +204,10 @@ export async function PATCH(request: NextRequest) {
           for (const asset of groupAssets) {
             const assetVideo = groupByVideoId.get(asset.videoId)
             if (!assetVideo) continue
-            // StoredFile handles path rebasing
+            // StoredFile handles path rebasing — both the main folder and the .previews mirror,
+            // since asset thumbnails/previews live under .previews/videos/{folder}/.
             await renameStoredPaths('VIDEO_ASSET', [asset.id], oldVideoStorageRoot, newVideoStorageRoot)
+            await renameStoredPaths('VIDEO_ASSET', [asset.id], oldVideoPreviewRoot, newVideoPreviewRoot)
           }
         }
       })

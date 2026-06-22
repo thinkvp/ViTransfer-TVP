@@ -104,17 +104,27 @@ export default function AdminVideoManager({
     let cancelled = false
     ;(async () => {
       try {
-        const res = await apiPost<{ results?: Record<string, string> }>('/api/admin/video-token/batch', {
+        const res = await apiPost<{ results?: Record<string, string>; directUrls?: Record<string, string> }>('/api/admin/video-token/batch', {
           projectId,
           sessionId: sessionIdRef.current,
           items,
         })
         if (cancelled) return
         const results = res?.results || {}
+        const directUrls = res?.directUrls || {}
         const next: Record<string, string> = {}
-        for (const [pairKey, token] of Object.entries(results)) {
+        // Prefer a presigned R2 URL (S3 mode) so the <img> loads straight from R2;
+        // fall back to the /api/content proxy URL (local storage, or if presigning failed).
+        const pairKeys = new Set([...Object.keys(results), ...Object.keys(directUrls)])
+        for (const pairKey of pairKeys) {
           const videoId = pairKey.split(':')[0]
-          if (typeof token === 'string' && token) next[videoId] = `/api/content/${token}`
+          const direct = directUrls[pairKey]
+          const token = results[pairKey]
+          if (typeof direct === 'string' && direct) {
+            next[videoId] = direct
+          } else if (typeof token === 'string' && token) {
+            next[videoId] = `/api/content/${token}`
+          }
         }
         if (Object.keys(next).length > 0) {
           setThumbUrlByVideoId((prev) => ({ ...prev, ...next }))

@@ -184,6 +184,12 @@ export default function VideoPlayer({
   const streamErrorRecoveryRef = useRef<string | null>(null)
   const [videoAspectRatio, setVideoAspectRatio] = useState<number>(DEFAULT_ASPECT_RATIO)
   const [showPosterOverlay, setShowPosterOverlay] = useState(true)
+  // When a video is opened via a folder click that requests autoplay, we hold the
+  // target videoId here so the freshly-mounted <video> element can start playback as
+  // soon as it can (onCanPlay) — and so the poster/thumbnail is never shown, even
+  // briefly, before the first frame. The paired ref carries the seek time (usually 0).
+  const autoPlayRequestRef = useRef<string | null>(null)
+  const autoPlaySeekRef = useRef<number>(0)
 
   const [canShowTimelineHover, setCanShowTimelineHover] = useState(true)
   const [isMobileViewport, setIsMobileViewport] = useState(false)
@@ -508,7 +514,10 @@ export default function VideoPlayer({
   useEffect(() => {
     setIsPlaying(false)
     setTimelineHover((prev) => ({ ...prev, visible: false }))
-    setShowPosterOverlay(true)
+    // Keep the poster hidden when this video was opened with an autoplay request, so the
+    // thumbnail never flashes before the first frame. Otherwise reset to the default
+    // (poster shown until the user presses play).
+    setShowPosterOverlay(autoPlayRequestRef.current !== selectedVideo?.id)
     const w = selectedVideoWidth
     const h = selectedVideoHeight
     if (
@@ -1407,6 +1416,25 @@ export default function VideoPlayer({
     rangeFramePreviewOriginalPlayheadRef.current = null
   }
 
+  // Start playback for an autoplay request. The folder click is a user gesture, so an
+  // unmuted play() normally succeeds; if the browser still blocks it (e.g. transient
+  // activation expired while the source loaded), fall back to a muted autoplay so the
+  // video reliably starts. The user can re-enable sound with the existing volume control.
+  const startAutoPlay = async (video: HTMLVideoElement) => {
+    setShowPosterOverlay(false)
+    try {
+      await video.play()
+    } catch {
+      try {
+        video.muted = true
+        setIsMuted(true)
+        await video.play()
+      } catch {
+        // Give up silently; the element is left paused with controls available.
+      }
+    }
+  }
+
   // Handle initial seek from URL parameters (only once on mount)
   useEffect(() => {
     if (initialSeekTime !== null && videoRef.current && videoUrl && !hasInitiallySeenRef.current) {
@@ -1474,6 +1502,11 @@ export default function VideoPlayer({
     const handleSeekToTime = (e: CustomEvent) => {
       const { timestamp, videoId, videoVersion, autoPlay } = e.detail
 
+      // Autoplay only applies in the responsive/mobile layout (below the lg breakpoint).
+      // On desktop we keep the previous behaviour: switch to the video and show its poster
+      // until the user presses play.
+      const effectiveAutoPlay = Boolean(autoPlay) && !isLgViewport
+
       // If the user is seeking to a timestamp, show actual video frames (not the poster overlay).
       setShowPosterOverlay(false)
 
@@ -1481,18 +1514,23 @@ export default function VideoPlayer({
       if (videoId && videoId !== selectedVideo.id) {
         const targetVideoIndex = displayVideos.findIndex(v => v.id === videoId)
         if (targetVideoIndex !== -1) {
+          if (effectiveAutoPlay) {
+            // Record the intent so the newly-mounted <video> element starts playback
+            // from its onCanPlay handler, rather than racing a fixed timeout. This also
+            // keeps the poster suppressed for the whole switch (see the selection effect).
+            autoPlayRequestRef.current = videoId
+            autoPlaySeekRef.current = timestamp
+          }
           setSelectedVideoIndex(targetVideoIndex)
-          // Wait for video to load before seeking
-          setTimeout(() => {
-            if (videoRef.current) {
-              videoRef.current.currentTime = timestamp
-              currentTimeRef.current = timestamp
-              if (autoPlay) {
-                setShowPosterOverlay(false)
-                void videoRef.current.play()
+          if (!effectiveAutoPlay) {
+            // Wait for video to load before seeking
+            setTimeout(() => {
+              if (videoRef.current) {
+                videoRef.current.currentTime = timestamp
+                currentTimeRef.current = timestamp
               }
-            }
-          }, 500)
+            }, 500)
+          }
           return
         }
       }
@@ -1501,9 +1539,9 @@ export default function VideoPlayer({
       if (videoRef.current) {
         videoRef.current.currentTime = timestamp
         currentTimeRef.current = timestamp
-        if (autoPlay) {
+        if (effectiveAutoPlay) {
           setShowPosterOverlay(false)
-          void videoRef.current.play()
+          void startAutoPlay(videoRef.current)
         }
       }
     }
@@ -1512,7 +1550,7 @@ export default function VideoPlayer({
     return () => {
       window.removeEventListener('seekToTime' as any, handleSeekToTime as EventListener)
     }
-  }, [selectedVideo.id, displayVideos])
+  }, [selectedVideo.id, displayVideos, isLgViewport])
 
   // Pause video when user starts typing a comment
   useEffect(() => {
@@ -1976,9 +2014,31 @@ export default function VideoPlayer({
                 key={selectedVideo?.id}
                 ref={videoRef}
                 src={videoUrl}
-                poster={(selectedVideo as any).thumbnailUrl || undefined}
+                // Show the thumbnail (custom if set, otherwise the default) as the native
+                // poster on first load. Only suppress it when an autoplay request is pending
+                // for this video (responsive/mobile folder click) so it never flashes before
+                // the first frame. Desktop keeps the poster until the user presses play.
+                poster={autoPlayRequestRef.current === (selectedVideo as any)?.id ? undefined : ((selectedVideo as any).thumbnailUrl || undefined)}
                 className="w-full h-full"
                 onTimeUpdate={handleTimeUpdate}
+                onCanPlay={(e) => {
+                  // Fulfil a pending folder-click autoplay request as soon as the new
+                  // source can play, seeking to the requested time first (usually 0).
+                  if (autoPlayRequestRef.current && autoPlayRequestRef.current === (selectedVideo as any)?.id) {
+                    autoPlayRequestRef.current = null
+                    const el = e.currentTarget
+                    const seek = autoPlaySeekRef.current || 0
+                    try {
+                      if (seek > 0) {
+                        el.currentTime = seek
+                        currentTimeRef.current = seek
+                      }
+                    } catch {
+                      // ignore seek failures
+                    }
+                    void startAutoPlay(el)
+                  }
+                }}
                 onError={() => {
                   // A failed source (commonly an expired /api/content stream token) leaves the
                   // element unplayable even on a manual retry. Ask the parent to re-mint tokens,

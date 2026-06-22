@@ -246,6 +246,7 @@ export async function POST(request: NextRequest) {
       authMode,
       enableVideos,
       enablePhotos,
+      enableUploads,
       enableRevisions,
       maxRevisions,
       restrictCommentsToLatestVersion,
@@ -256,6 +257,7 @@ export async function POST(request: NextRequest) {
 
     const finalEnableVideos = enableVideos !== undefined ? Boolean(enableVideos) : true
     const finalEnablePhotos = enablePhotos !== undefined ? Boolean(enablePhotos) : false
+    const finalEnableUploads = enableUploads !== undefined ? Boolean(enableUploads) : true
 
     const requestedAssignmentsRaw: Array<{ userId: string; receiveNotifications: boolean }> =
       Array.isArray((validation.data as any).assignedUsers)
@@ -474,6 +476,7 @@ export async function POST(request: NextRequest) {
           storagePath: projectStoragePath,
           enableVideos: finalEnableVideos,
           enablePhotos: finalEnablePhotos,
+          enableUploads: finalEnableUploads,
           sharePassword: encryptedSharePassword,
           authMode: resolvedAuthMode,
           enableRevisions: isShareOnly ? false : (enableRevisions || false),

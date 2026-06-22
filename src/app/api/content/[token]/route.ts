@@ -443,10 +443,18 @@ export async function GET(
     // S3 mode: redirect to presigned R2 URL — no local file access needed
     // ---------------------------------------------------------------------------
     if (isS3Mode()) {
-      const fileExists = await s3FileExists(filePath)
-      if (!fileExists) {
-        // File not found — no canonical fallback (StoredFile is the canonical path now)
-        return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+      // Small derived preview files (thumbnails, timeline VTT/sprites, asset previews) are
+      // latency-sensitive and requested in bulk. Skip the existence HEAD for them — a missing
+      // object simply 404s from R2 on the redirect, the same visual outcome without an extra
+      // S3 round-trip. Keep the check for downloads and full video streams, where a clean 404
+      // matters and the relative cost of one HEAD is negligible.
+      const skipExistsCheck = isThumbnail || isTimelineAsset || isAssetPreview
+      if (!skipExistsCheck) {
+        const fileExists = await s3FileExists(filePath)
+        if (!fileExists) {
+          // File not found — no canonical fallback (StoredFile is the canonical path now)
+          return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+        }
       }
 
       let presignedUrl: string

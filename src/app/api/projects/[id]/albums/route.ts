@@ -6,7 +6,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { allocateUniqueStorageName } from '@/lib/project-storage-paths'
 import { getStoredFileRecords } from '@/lib/stored-file'
 import { asNumberBigInt } from '@/lib/utils'
-import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -90,13 +90,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // token generator's Redis cache is reused across list refreshes.
   const adminSessionId = `admin:${auth.id}`
 
+  // S3 mode: presign the cover thumbnails directly so each album card's <img> loads from
+  // R2 without an /api/content/photo round-trip. Falls back to a token URL otherwise.
+  const coverPhotoIds = albums
+    .map((a) => (a as any)?.photos?.[0]?.id as string | undefined)
+    .filter((pid): pid is string => Boolean(pid))
+  const directCoverUrls = await presignAlbumPhotoThumbnailUrls(coverPhotoIds)
+
   const albumsSafe = await Promise.all(
     albums.map(async (a) => {
       const sizes = zipSizeByAlbum.get(a.id)
       const firstPhotoId = (a as any)?.photos?.[0]?.id as string | undefined
 
-      let coverThumbnailUrl: string | null = null
-      if (firstPhotoId) {
+      let coverThumbnailUrl: string | null = firstPhotoId ? (directCoverUrls.get(firstPhotoId) ?? null) : null
+      if (firstPhotoId && !coverThumbnailUrl) {
         try {
           const tokenValue = await generateAlbumPhotoAccessToken({
             photoId: firstPhotoId,

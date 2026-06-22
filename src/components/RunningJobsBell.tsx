@@ -520,19 +520,24 @@ function normalizeProcessing(
       ? ` (${job.allocatedThreads}/${job.threadBudget} threads)`
       : ''
 
-  const kind: JobKind =
-    job.versionLabel === 'asset' ? 'asset-timeline'
-    : job.versionLabel === 'upload' ? 'upload-timeline'
-    : 'transcode'
+  const sublabel = job.versionLabel || undefined
 
-  const sublabel =
-    job.versionLabel && job.versionLabel !== 'asset' && job.versionLabel !== 'upload'
-      ? job.versionLabel : undefined
+  // Composite: this version's assets (preview + timeline) are folded in. The
+  // server already rolled transcode + assets into processingProgress; here we
+  // just surface a combined status line and count assets toward the item total.
+  const assets = job.assets ?? []
+  const assetTotal = job.assetTotal ?? 0
+  const assetDone = job.assetDone ?? 0
+  const hasAssets = assetTotal > 0
+
+  const transcodeText = job.processingPhase ? `${phaseLabel}${threadBadge}` : ''
+  const assetText = hasAssets ? `${assetDone}/${assetTotal} asset${assetTotal === 1 ? '' : 's'}` : ''
+  const activeStatusLine = [transcodeText, assetText].filter(Boolean).join(' · ') || phaseLabel || 'Processing'
 
   return {
-    key: `${kind}:${job.id}`,
-    itemCount: 1,
-    kind,
+    key: `transcode:${job.id}`,
+    itemCount: 1 + assetTotal,
+    kind: 'transcode',
     projectId: job.projectId,
     projectName: job.projectName,
     label: job.videoName,
@@ -541,9 +546,7 @@ function normalizeProcessing(
     status: isQueued ? 'queued' : 'active',
     progress: isQueued ? 0 : progressPercent,
     indeterminate: false,
-    statusLine: isQueued
-      ? 'Queued for processing'
-      : `${phaseLabel}${threadBadge}`,
+    statusLine: isQueued ? 'Queued for processing' : activeStatusLine,
     statusLineRight: !isQueued && progressPercent > 0 ? `${progressPercent}%` : undefined,
     completedAt: 0,
     canClear: isQueued && !!onClear,
@@ -551,6 +554,9 @@ function normalizeProcessing(
     canDismiss: false,
     canPause: false,
     canResume: false,
+    subItems: assets.length > 0
+      ? assets.map((a) => ({ key: a.id, label: a.fileName, status: a.status }))
+      : undefined,
   }
 }
 
@@ -660,20 +666,20 @@ function normalizeFolderRename(
 }
 
 function normalizeVideoAssetPreview(job: VideoAssetPreviewJob): UnifiedJob {
+  // This channel now carries the per-project UPLOADS wave (video assets moved
+  // into their version's transcode composite). Progress is measured against
+  // completed work so it climbs monotonically across the whole wave.
   const isProcessing = job.processingCount > 0
-  // Full wave size = already-done + remaining (pending + processing). Progress
-  // is measured against completed work so it climbs monotonically, instead of
-  // dividing the live concurrency count by an ever-shrinking remaining count.
   const waveTotal = job.doneCount + job.totalCount
   const progress = waveTotal > 0 ? Math.round((job.doneCount / waveTotal) * 100) : 0
 
   return {
-    key: `asset-preview:${job.projectId}`,
+    key: `upload:${job.projectId}`,
     itemCount: job.totalCount,
-    kind: 'asset-preview',
+    kind: 'upload',
     projectId: job.projectId,
     projectName: job.projectName,
-    label: `${waveTotal} asset preview${waveTotal !== 1 ? 's' : ''}`,
+    label: `${waveTotal} upload${waveTotal !== 1 ? 's' : ''}`,
     detail: job.projectName,
     status: isProcessing ? 'active' : 'queued',
     progress: isProcessing ? Math.max(progress, 5) : 0,
@@ -686,10 +692,10 @@ function normalizeVideoAssetPreview(job: VideoAssetPreviewJob): UnifiedJob {
     canDismiss: false,
     canPause: false,
     canResume: false,
+    // Uploads have no parent video — show just the filename (capped server-side).
     subItems: job.assets.map((a) => ({
       key: a.id,
       label: a.fileName,
-      sublabel: `${a.videoName}${a.versionLabel ? ` ${a.versionLabel}` : ''}`,
       status: a.status === 'PROCESSING' ? 'active' : 'queued' as const,
     })),
   }
@@ -731,7 +737,7 @@ function normalizeCompletedServerJob(
     job.type === 'processing' ? 'Processing complete'
     : job.type === 'albumZip' ? 'ZIP build complete'
     : job.type === 'albumThumbnail' ? 'Thumbnails complete'
-    : job.type === 'videoAssetPreview' ? 'Asset previews complete'
+    : job.type === 'videoAssetPreview' ? 'Uploads complete'
     : job.type === 'albumSocial' ? 'Social copies complete'
     : 'Folder rename complete'
 
@@ -739,7 +745,7 @@ function normalizeCompletedServerJob(
     job.type === 'processing' ? 'Processing failed'
     : job.type === 'albumZip' ? 'ZIP build failed'
     : job.type === 'albumThumbnail' ? 'Thumbnails failed'
-    : job.type === 'videoAssetPreview' ? 'Asset previews failed'
+    : job.type === 'videoAssetPreview' ? 'Uploads failed'
     : job.type === 'albumSocial' ? 'Social copies failed'
     : 'Folder rename failed'
 
@@ -747,7 +753,7 @@ function normalizeCompletedServerJob(
     job.type === 'processing' ? 'transcode'
     : job.type === 'albumZip' ? 'zip'
     : job.type === 'albumThumbnail' ? 'thumbnail'
-    : job.type === 'videoAssetPreview' ? 'asset-preview'
+    : job.type === 'videoAssetPreview' ? 'upload'
     : job.type === 'albumSocial' ? 'social'
     : 'rename'
 

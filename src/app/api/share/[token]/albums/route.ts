@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { storedFileExists, getStoredFileRecords } from '@/lib/stored-file'
 
@@ -77,6 +77,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const albumsNeedingThumbnailBackfill = new Set<string>()
 
+  // S3 mode: presign the cover thumbnails directly so each album card's <img> loads from
+  // R2 without an /api/content/photo round-trip. Falls back to a token URL otherwise.
+  const coverPhotoIds = albums
+    .map((a) => ((a as any)?.photos?.[0] as { id: string } | undefined)?.id)
+    .filter((pid): pid is string => Boolean(pid))
+  const directCoverUrls = await presignAlbumPhotoThumbnailUrls(coverPhotoIds)
+
   const albumsSafe = await Promise.all(
     albums.map(async (a) => {
       const firstPhoto = (a as any)?.photos?.[0] as { id: string; thumbnailStatus: string } | undefined
@@ -91,14 +98,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           if (!thumbExists) {
             albumsNeedingThumbnailBackfill.add(a.id)
           }
-          const tokenValue = await generateAlbumPhotoAccessToken({
-            photoId: firstPhotoId,
-            albumId: a.id,
-            projectId: a.projectId,
-            request,
-            sessionId,
-          })
-          thumbnailPhotoUrl = `/api/content/photo/${tokenValue}?variant=thumbnail`
+
+          const directCover = directCoverUrls.get(firstPhotoId)
+          if (directCover) {
+            thumbnailPhotoUrl = directCover
+          } else {
+            const tokenValue = await generateAlbumPhotoAccessToken({
+              photoId: firstPhotoId,
+              albumId: a.id,
+              projectId: a.projectId,
+              request,
+              sessionId,
+            })
+            thumbnailPhotoUrl = `/api/content/photo/${tokenValue}?variant=thumbnail`
+          }
         } catch {
           // ignore
         }

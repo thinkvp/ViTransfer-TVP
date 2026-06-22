@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireAnyActionAccess } from '@/lib/rbac-api'
 import { getStoredFileRecords } from '@/lib/stored-file'
+import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -105,33 +106,58 @@ export async function POST(request: NextRequest) {
   })
   const validVideoIds = new Set(videos.map((v) => v.id))
 
-  // Resolve available file roles for every video in one query.
+  // Resolve available file roles (and thumbnail storage paths) for every video in one query.
   const storedFiles = await getStoredFileRecords('VIDEO', videoIds, {
-    select: { entityId: true, fileRole: true },
+    select: { entityId: true, fileRole: true, storagePath: true },
   })
   const rolesByVideoId = new Map<string, Set<string>>()
+  const thumbnailPathByVideoId = new Map<string, string>()
   for (const f of storedFiles) {
     if (!rolesByVideoId.has(f.entityId)) rolesByVideoId.set(f.entityId, new Set())
     rolesByVideoId.get(f.entityId)!.add(f.fileRole)
+    if (f.fileRole === 'THUMBNAIL' && f.storagePath) {
+      thumbnailPathByVideoId.set(f.entityId, f.storagePath)
+    }
   }
 
   const results: Record<string, string> = {}
+  // S3 mode: hand back presigned R2 URLs for thumbnails so the admin grid loads each
+  // <img> directly from R2 — skipping the per-thumbnail round-trip through /api/content
+  // (token verify + DB lookups + existence HEAD + 302 redirect). Tokens are still minted
+  // below for backward compatibility with callers that proxy via /api/content.
+  const directUrls: Record<string, string> = {}
+  const s3 = isS3Mode()
 
   await Promise.all(
     items.map(async (it: { videoId: string; quality: string }) => {
       if (!validVideoIds.has(it.videoId)) return
       const roles = rolesByVideoId.get(it.videoId) ?? new Set<string>()
       if (!canIssueAdminVideoToken(roles, it.quality)) return
+
+      const pairKey = `${it.videoId}:${it.quality}`
+
+      if (s3 && it.quality === 'thumbnail') {
+        const thumbPath = thumbnailPathByVideoId.get(it.videoId)
+        if (thumbPath) {
+          try {
+            // 4h validity so a presigned URL cached in the grid for an open page doesn't expire.
+            directUrls[pairKey] = await s3GetPresignedStreamUrl(thumbPath, 14400, 'image/jpeg')
+          } catch (error) {
+            console.error('[API] Failed to presign thumbnail URL (batch)', { videoId: it.videoId, error })
+          }
+        }
+      }
+
       try {
         const token = await generateVideoAccessToken(it.videoId, projectId, it.quality, request, sessionId)
-        if (token) results[`${it.videoId}:${it.quality}`] = token
+        if (token) results[pairKey] = token
       } catch (error) {
         console.error('[API] Failed to mint admin video token (batch)', { videoId: it.videoId, quality: it.quality, error })
       }
     }),
   )
 
-  const response = NextResponse.json({ results })
+  const response = NextResponse.json({ results, directUrls })
   response.headers.set('Cache-Control', 'no-store')
   response.headers.set('Pragma', 'no-cache')
   return response

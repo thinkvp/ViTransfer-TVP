@@ -5,10 +5,9 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
 import { getCpuAllocation, loadCpuConfigOverrides } from '@/lib/cpu-config'
 import { getRedis } from '@/lib/redis'
-import { getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoThumbnailQueue, getFolderRenameQueue } from '@/lib/queue'
+import { getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoThumbnailQueue, getFolderRenameQueue, getShareUploadPreviewQueue, getAssetTimelineQueue, getUploadTimelineQueue } from '@/lib/queue'
 import { getAlbumZipJobId, type AlbumZipVariant } from '@/lib/album-photo-zip'
 import { getAlbumThumbnailQueueJobId } from '@/lib/album-photo-thumbnail'
-import { getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -54,6 +53,7 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         name: true,
+        version: true,
         versionLabel: true,
         status: true,
         processingProgress: true,
@@ -68,139 +68,362 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'asc' },
     })
 
-    const videoIds = new Set(videos.map((video) => video.id))
-    const queueStatusByVideoId = new Map<string, 'QUEUED' | 'PROCESSING'>()
-
-    if (videoIds.size > 0) {
-      const videoQueue = getVideoQueue()
-      const [activeJobs, queuedJobs] = await Promise.all([
-        videoQueue.getJobs(['active']),
-        videoQueue.getJobs(['waiting', 'prioritized', 'delayed']),
-      ])
-
-      for (const job of activeJobs) {
-        const queuedVideoId = job.data?.videoId
-        if (queuedVideoId && videoIds.has(queuedVideoId)) {
-          queueStatusByVideoId.set(queuedVideoId, 'PROCESSING')
-        }
-      }
-
-      for (const job of queuedJobs) {
-        const queuedVideoId = job.data?.videoId
-        if (queuedVideoId && videoIds.has(queuedVideoId) && !queueStatusByVideoId.has(queuedVideoId)) {
-          queueStatusByVideoId.set(queuedVideoId, 'QUEUED')
-        }
-      }
-    }
-
-    const resolvedJobs = videos.map((video) => {
-      const processingPhase = video.processingPhase ?? null
-      const queueStatus = queueStatusByVideoId.get(video.id)
-
-      let status = video.status
-      if (queueStatus) {
-        status = queueStatus
-      } else if (video.status === 'READY' && processingPhase) {
-        // queueStatus is known falsy in this branch (handled above).
-        status = (video.processingProgress ?? 0) > 0 ? 'PROCESSING' : 'QUEUED'
-      }
-
-      return {
-        id: video.id,
-        projectId: video.projectId,
-        projectName: video.project.title,
-        videoName: video.name,
-        versionLabel: video.versionLabel,
-        status,
-        processingProgress: status === 'QUEUED' ? 0 : (video.processingProgress ?? 0),
-        processingPhase,
-      }
-    })
-
-    // Also include asset and upload timeline jobs.
-    // Scope to projects the user may see, matching the visibility rules applied
-    // to every other query in this route (system admins see all; others only
-    // their assigned projects, filtered by allowed project statuses).
+    // Visibility filter reused by the queries below (system admins see all;
+    // others only their assigned projects, filtered by allowed project statuses).
     const projectVisibilityFilter = {
       status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
       ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
     }
 
-    const [assetJobs, uploadJobs] = await Promise.all([
-      prisma.videoAsset.findMany({
-        where: { processingPhase: { not: null }, video: { project: projectVisibilityFilter } },
-        select: { id: true, fileName: true, processingPhase: true, processingProgress: true,
-          video: { select: { id: true, name: true, projectId: true, project: { select: { title: true } } } },
-        },
-      }),
-      prisma.shareUploadFile.findMany({
-        where: { processingPhase: { not: null }, project: projectVisibilityFilter },
-        select: { id: true, fileName: true, processingPhase: true, processingProgress: true,
-          projectId: true, project: { select: { title: true } },
-        },
-      }),
+    // -----------------------------------------------------------------------
+    // Read every queue that feeds a video-version composite or the uploads wave
+    // in one shot: video transcode, asset/upload previews, and both timeline
+    // queues. The queues are the authoritative record of in-flight work — a
+    // video version's entry rolls up its transcode + its assets' previews +
+    // timelines, and uploads roll up into one per-project wave.
+    // -----------------------------------------------------------------------
+    const videoQueue = getVideoQueue()
+    const previewQueue = getShareUploadPreviewQueue()
+    const assetTimelineQueue = getAssetTimelineQueue()
+    const uploadTimelineQueue = getUploadTimelineQueue()
+    const previewCutoff = Date.now() - 30 * 60 * 1000
+
+    const [
+      vActiveJobs, vWaitingJobs,
+      pActiveJobs, pWaitingJobs, pCompletedJobs,
+      atActiveJobs, atWaitingJobs,
+      utActiveJobs, utWaitingJobs,
+    ] = await Promise.all([
+      videoQueue.getJobs(['active']),
+      videoQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      previewQueue.getJobs(['active']),
+      previewQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      previewQueue.getJobs(['completed']),
+      assetTimelineQueue.getJobs(['active']),
+      assetTimelineQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      uploadTimelineQueue.getJobs(['active']),
+      uploadTimelineQueue.getJobs(['waiting', 'prioritized', 'delayed']),
     ])
 
-    const extraJobs = [
-      ...assetJobs.map((a) => ({
-        id: a.id,
-        projectId: a.video.projectId,
-        projectName: a.video.project.title,
-        videoName: `${a.video.name} / ${a.fileName}`,
-        versionLabel: 'asset',
-        status: (a.processingProgress ?? 0) > 0 ? 'PROCESSING' as const : 'QUEUED' as const,
-        processingProgress: a.processingProgress ?? 0,
-        processingPhase: a.processingPhase,
-      })),
-      ...uploadJobs.map((u) => ({
-        id: u.id,
-        projectId: u.projectId,
-        projectName: u.project.title,
-        videoName: u.fileName,
-        versionLabel: 'upload',
-        status: (u.processingProgress ?? 0) > 0 ? 'PROCESSING' as const : 'QUEUED' as const,
-        processingProgress: u.processingProgress ?? 0,
-        processingPhase: u.processingPhase,
-      })),
-    ]
+    // Transcode leg state per video (PROCESSING wins over QUEUED).
+    const queueStatusByVideoId = new Map<string, 'QUEUED' | 'PROCESSING'>()
+    for (const job of vActiveJobs) {
+      const id = job.data?.videoId
+      if (id) queueStatusByVideoId.set(id, 'PROCESSING')
+    }
+    for (const job of vWaitingJobs) {
+      const id = job.data?.videoId
+      if (id && !queueStatusByVideoId.has(id)) queueStatusByVideoId.set(id, 'QUEUED')
+    }
 
-    const allJobs = [...resolvedJobs, ...extraJobs]
+    // Per-record leg state from the preview + timeline queues. 'active' beats 'pending'.
+    type LegState = 'active' | 'pending'
+    const noteLeg = (map: Map<string, LegState>, id: unknown, state: LegState) => {
+      if (typeof id !== 'string' || !id) return
+      if (state === 'active' || !map.has(id)) map.set(id, state)
+    }
+    const assetPreviewLeg = new Map<string, LegState>()
+    const uploadPreviewLeg = new Map<string, LegState>()
+    const assetTimelineLeg = new Map<string, LegState>()
+    const uploadTimelineLeg = new Map<string, LegState>()
+    for (const job of pActiveJobs) {
+      if (job.data?.type === 'videoAsset') noteLeg(assetPreviewLeg, job.data.recordId, 'active')
+      else if (job.data?.type === 'shareUploadFile') noteLeg(uploadPreviewLeg, job.data.recordId, 'active')
+    }
+    for (const job of pWaitingJobs) {
+      if (job.data?.type === 'videoAsset') noteLeg(assetPreviewLeg, job.data.recordId, 'pending')
+      else if (job.data?.type === 'shareUploadFile') noteLeg(uploadPreviewLeg, job.data.recordId, 'pending')
+    }
+    for (const job of atActiveJobs) noteLeg(assetTimelineLeg, job.data?.assetId, 'active')
+    for (const job of atWaitingJobs) noteLeg(assetTimelineLeg, job.data?.assetId, 'pending')
+    for (const job of utActiveJobs) noteLeg(uploadTimelineLeg, job.data?.uploadFileId, 'active')
+    for (const job of utWaitingJobs) noteLeg(uploadTimelineLeg, job.data?.uploadFileId, 'pending')
+
+    // Recently-completed previews give a stable "done" denominator for the wave
+    // (retained 1h > 30-min window; counts jobs that finished between polls).
+    const assetPreviewDone = new Map<string, number>()
+    const uploadPreviewDone = new Map<string, number>()
+    for (const job of pCompletedJobs) {
+      const finishedOn = job.finishedOn
+      const recordId = job.data?.recordId
+      if (typeof recordId !== 'string' || !finishedOn || finishedOn < previewCutoff) continue
+      const map = job.data?.type === 'videoAsset' ? assetPreviewDone
+        : job.data?.type === 'shareUploadFile' ? uploadPreviewDone : null
+      if (!map) continue
+      const prev = map.get(recordId)
+      if (!prev || finishedOn > prev) map.set(recordId, finishedOn)
+    }
+
+    // Combine a record's preview + timeline legs into a single status.
+    const combineLegs = (
+      previewState: LegState | undefined,
+      timelineState: LegState | undefined,
+      doneAt: number | undefined,
+    ): 'active' | 'queued' | 'done' | null => {
+      if (previewState === 'active' || timelineState === 'active') return 'active'
+      if (previewState === 'pending' || timelineState === 'pending') return 'queued'
+      if (doneAt) return 'done'
+      return null
+    }
+
+    // ---- Video-version composites ------------------------------------------
+    // Assets in flight (or recently done) pull in their parent video version,
+    // even when that version's own transcode has already finished — so the
+    // entry persists until transcode + all its assets are complete.
+    const candidateAssetIds = new Set<string>([
+      ...assetPreviewLeg.keys(),
+      ...assetTimelineLeg.keys(),
+      ...assetPreviewDone.keys(),
+    ])
+    const assetRows = candidateAssetIds.size > 0
+      ? await prisma.videoAsset.findMany({
+          where: { id: { in: [...candidateAssetIds] }, video: { project: projectVisibilityFilter } },
+          select: { id: true, fileName: true, videoId: true },
+        })
+      : []
+
+    const assetsByVideo = new Map<string, Array<{ id: string; fileName: string; status: 'active' | 'queued' | 'done' }>>()
+    for (const a of assetRows) {
+      const status = combineLegs(assetPreviewLeg.get(a.id), assetTimelineLeg.get(a.id), assetPreviewDone.get(a.id))
+      if (!status) continue
+      const arr = assetsByVideo.get(a.videoId) ?? []
+      arr.push({ id: a.id, fileName: a.fileName, status })
+      assetsByVideo.set(a.videoId, arr)
+    }
+
+    // `videos` (fetched above) are the transcode-in-flight candidates; pull in any
+    // additional videos that only have asset work running.
+    const transcodeVideoIds = new Set(videos.map((v) => v.id))
+    const extraVideoIds = [...assetsByVideo.keys()].filter((id) => !transcodeVideoIds.has(id))
+    const extraVideos = extraVideoIds.length > 0
+      ? await prisma.video.findMany({
+          where: { id: { in: extraVideoIds }, project: projectVisibilityFilter },
+          select: {
+            id: true, name: true, version: true, versionLabel: true, status: true,
+            processingProgress: true, processingPhase: true, projectId: true,
+            project: { select: { title: true } },
+          },
+        })
+      : []
+    const allCompositeVideos = [...videos, ...extraVideos]
+
+    const assetStatusRank = { active: 0, queued: 1, done: 2 }
+    const composites = allCompositeVideos
+      .map((video) => {
+        const processingPhase = video.processingPhase ?? null
+        const queueStatus = queueStatusByVideoId.get(video.id)
+        let transcodeStatus: 'QUEUED' | 'PROCESSING' | 'DONE'
+        if (queueStatus) transcodeStatus = queueStatus
+        else if (video.status === 'QUEUED') transcodeStatus = 'QUEUED'
+        else if (video.status === 'PROCESSING') transcodeStatus = 'PROCESSING'
+        else if (video.status === 'READY' && processingPhase) transcodeStatus = (video.processingProgress ?? 0) > 0 ? 'PROCESSING' : 'QUEUED'
+        else transcodeStatus = 'DONE'
+
+        const transcodeInWave = transcodeStatus === 'QUEUED' || transcodeStatus === 'PROCESSING'
+
+        const assets = (assetsByVideo.get(video.id) ?? []).slice().sort(
+          (a, b) => assetStatusRank[a.status] - assetStatusRank[b.status] || a.fileName.localeCompare(b.fileName),
+        )
+        const assetActive = assets.filter((a) => a.status === 'active').length
+        const assetPending = assets.filter((a) => a.status === 'queued').length
+        const assetDone = assets.filter((a) => a.status === 'done').length
+        const assetTotal = assets.length
+
+        // Nothing in flight → it has finished; let it surface as a completion
+        // (the client detects the disappearance from the active list).
+        if (!transcodeInWave && assetActive + assetPending === 0) return null
+
+        const status: 'QUEUED' | 'PROCESSING' =
+          transcodeStatus === 'PROCESSING' || assetActive > 0 ? 'PROCESSING' : 'QUEUED'
+
+        const totalUnits = (transcodeInWave ? 1 : 0) + assetTotal
+        const doneUnits =
+          (transcodeInWave && transcodeStatus === 'PROCESSING' ? (video.processingProgress ?? 0) / 100 : 0) + assetDone
+        const processingProgress = status === 'QUEUED' || totalUnits === 0
+          ? 0
+          : Math.round((doneUnits / totalUnits) * 100)
+
+        return {
+          id: video.id,
+          projectId: video.projectId,
+          projectName: video.project.title,
+          videoName: video.name,
+          // Always surface a version label; fall back to v{version} for blank
+          // (older/imported) rows, matching the worker/delete paths.
+          versionLabel: video.versionLabel || `v${video.version}`,
+          status,
+          processingProgress,
+          // Phase drives the transcode-side label; null once only assets remain.
+          processingPhase: transcodeInWave ? processingPhase : null,
+          transcodeInWave,
+          assets,
+          assetTotal,
+          assetActive,
+          assetPending,
+          assetDone,
+        }
+      })
+      .filter((j): j is NonNullable<typeof j> => j !== null)
+
+    const compositeVideoIdSet = new Set(composites.map((j) => j.id))
 
     await loadCpuConfigOverrides(getRedis())
     const alloc = getCpuAllocation()
-    const activeProcessingCount = allJobs.filter((job) => job.status === 'PROCESSING').length
     const configuredThreadPool = alloc.maxThreadsUsedEstimate
+    const activeTranscodeCount = composites.filter(
+      (j) => j.transcodeInWave && j.status === 'PROCESSING' && j.processingPhase !== 'thumbnail',
+    ).length
 
     let dynamicThreadsPerJob: number
-    if (!alloc.dynamicThreadAllocation || activeProcessingCount === 0) {
-      // Dynamic scaling is off or no active jobs — use the static baseline
+    if (!alloc.dynamicThreadAllocation || activeTranscodeCount === 0) {
       dynamicThreadsPerJob = alloc.ffmpegThreadsPerJob
     } else {
-      // Scale up when fewer jobs are active, capped at the configured FFmpeg pool
       dynamicThreadsPerJob = Math.max(
         1,
-        Math.min(Math.floor(configuredThreadPool / activeProcessingCount), configuredThreadPool),
+        Math.min(Math.floor(configuredThreadPool / activeTranscodeCount), configuredThreadPool),
       )
     }
 
-    const jobs = allJobs.map((job) => {
-      const isActive = job.status === 'PROCESSING'
-
+    const jobs = composites.map((job) => {
       let allocatedThreads: number | null = null
-      if (isActive) {
+      if (job.transcodeInWave && job.status === 'PROCESSING') {
         allocatedThreads = job.processingPhase === 'thumbnail'
           ? alloc.timelineThreadsPerJob
           : dynamicThreadsPerJob
       }
-
       return {
-        ...job,
+        id: job.id,
+        projectId: job.projectId,
+        projectName: job.projectName,
+        videoName: job.videoName,
+        versionLabel: job.versionLabel,
+        status: job.status,
+        processingProgress: job.processingProgress,
+        processingPhase: job.processingPhase,
         allocatedThreads,
         threadBudget: allocatedThreads ? configuredThreadPool : null,
+        // Composite asset rollup (preview + timeline legs per asset).
+        assets: job.assets,
+        assetTotal: job.assetTotal,
+        assetActive: job.assetActive,
+        assetPending: job.assetPending,
+        assetDone: job.assetDone,
       }
     })
 
+    // ---- Uploads wave (one composite entry per project) --------------------
+    // Reuses the (legacy-named) `videoAssetPreviewJobs` response channel: video
+    // assets now live inside their version's composite above, freeing this
+    // channel for the UPLOADS area, which has no sub-entity to attach to.
+    const candidateUploadIds = new Set<string>([
+      ...uploadPreviewLeg.keys(),
+      ...uploadTimelineLeg.keys(),
+      ...uploadPreviewDone.keys(),
+    ])
+    const uploadRows = candidateUploadIds.size > 0
+      ? await prisma.shareUploadFile.findMany({
+          where: { id: { in: [...candidateUploadIds] }, project: projectVisibilityFilter },
+          select: { id: true, fileName: true, projectId: true, project: { select: { title: true } } },
+        })
+      : []
+
+    const uploadProjectMap = new Map<string, {
+      projectId: string
+      projectName: string
+      pendingCount: number
+      processingCount: number
+      doneCount: number
+      latestDoneAt: number
+      activeFiles: Array<{ id: string; fileName: string; status: 'active' | 'queued' }>
+    }>()
+    for (const u of uploadRows) {
+      const status = combineLegs(uploadPreviewLeg.get(u.id), uploadTimelineLeg.get(u.id), uploadPreviewDone.get(u.id))
+      if (!status) continue
+      let entry = uploadProjectMap.get(u.projectId)
+      if (!entry) {
+        entry = { projectId: u.projectId, projectName: u.project.title, pendingCount: 0, processingCount: 0, doneCount: 0, latestDoneAt: 0, activeFiles: [] }
+        uploadProjectMap.set(u.projectId, entry)
+      }
+      if (status === 'active') { entry.processingCount++; entry.activeFiles.push({ id: u.id, fileName: u.fileName, status: 'active' }) }
+      else if (status === 'queued') { entry.pendingCount++; entry.activeFiles.push({ id: u.id, fileName: u.fileName, status: 'queued' }) }
+      else { entry.doneCount++; entry.latestDoneAt = Math.max(entry.latestDoneAt, uploadPreviewDone.get(u.id) ?? 0) }
+    }
+
+    // An uploads area can hold 100+ files — cap sub-items, keep true counts.
+    const UPLOAD_SUBITEM_CAP = 8
+    const uploadsJobs = {
+      active: [...uploadProjectMap.values()]
+        .filter((e) => e.pendingCount + e.processingCount > 0)
+        .map((e) => {
+          const sorted = e.activeFiles.sort(
+            (a, b) => (a.status === b.status ? a.fileName.localeCompare(b.fileName) : a.status === 'active' ? -1 : 1),
+          )
+          return {
+            projectId: e.projectId,
+            projectName: e.projectName,
+            pendingCount: e.pendingCount,
+            processingCount: e.processingCount,
+            doneCount: e.doneCount,
+            totalCount: e.pendingCount + e.processingCount,
+            assets: sorted.slice(0, UPLOAD_SUBITEM_CAP).map((f) => ({
+              id: f.id, fileName: f.fileName, videoName: '', versionLabel: null,
+              status: f.status === 'active' ? 'PROCESSING' as const : 'PENDING' as const,
+            })),
+          }
+        }),
+      completed: [...uploadProjectMap.values()]
+        .filter((e) => e.pendingCount + e.processingCount === 0 && e.doneCount > 0)
+        .map((e) => ({
+          id: e.projectId,
+          type: 'videoAssetPreview' as const,
+          label: `${e.doneCount} upload${e.doneCount !== 1 ? 's' : ''}`,
+          sublabel: e.projectName,
+          projectName: e.projectName,
+          projectId: e.projectId,
+          completedAt: e.latestDoneAt || Date.now(),
+        })),
+    }
+
     const recentCompletionCutoff = new Date(Date.now() - 30 * 60 * 1000)
+
+    // -----------------------------------------------------------------------
+    // Accurate "recently finished" detection for video processing.
+    //
+    // Inferring completion from Video.updatedAt is unreliable: ANY mutation
+    // (rename, approval toggle, notes edit, allowApproval) bumps updatedAt, so a
+    // long-finished READY video would resurface as a phantom "Processing
+    // complete" for 30 minutes after an unrelated edit. Instead, use the
+    // video-processing queue's completed set as the authoritative signal — a
+    // completed BullMQ job only exists for a real processing run. Completed jobs
+    // are retained for 1h (see queue.ts), comfortably longer than the 30-min UI
+    // window, and carry finishedOn for an accurate completion time.
+    // -----------------------------------------------------------------------
+    // The same reasoning applies to failures: a video's status stays ERROR until
+    // it is reprocessed, so `status:ERROR + updatedAt` would resurface a stale
+    // failure after any edit. The queue's failed set (retained 24h) carries the
+    // real finishedOn of the last failed run.
+    const recentlyCompletedVideoFinishedAt = new Map<string, number>()
+    const recentlyFailedVideoFinishedAt = new Map<string, number>()
+    const recordLatest = (map: Map<string, number>, videoId: unknown, finishedOn: number | undefined) => {
+      if (typeof videoId !== 'string' || !finishedOn || finishedOn < recentCompletionCutoff.getTime()) return
+      const existing = map.get(videoId)
+      if (!existing || finishedOn > existing) map.set(videoId, finishedOn)
+    }
+    try {
+      const videoQueue = getVideoQueue()
+      const [completedVideoJobs, failedVideoJobs] = await Promise.all([
+        videoQueue.getJobs(['completed']),
+        videoQueue.getJobs(['failed']),
+      ])
+      for (const job of completedVideoJobs) recordLatest(recentlyCompletedVideoFinishedAt, job.data?.videoId, job.finishedOn)
+      for (const job of failedVideoJobs) recordLatest(recentlyFailedVideoFinishedAt, job.data?.videoId, job.finishedOn)
+    } catch (err) {
+      console.error('[running-jobs] video-queue completion lookup failed:', err)
+    }
+    // A video whose transcode finished but whose assets are still generating is
+    // still an active composite — don't also surface it as "complete" yet.
+    const recentlyCompletedVideoIds = [...recentlyCompletedVideoFinishedAt.keys()].filter((id) => !compositeVideoIdSet.has(id))
+    const recentlyFailedVideoIds = [...recentlyFailedVideoFinishedAt.keys()]
 
     // -----------------------------------------------------------------------
     // Run remaining queries in parallel.  Each promise has its own .catch()
@@ -212,56 +435,56 @@ export async function GET(request: NextRequest) {
       albumZipJobs,
       albumThumbnailJobs,
       folderRenameJobs,
-      videoAssetPreviewJobs,
       albumSocialJobs,
     ] = await Promise.all([
       prisma.video.findMany({
         where: {
           status: 'READY', processingPhase: null, processingProgress: 100,
-          updatedAt: { gte: recentCompletionCutoff },
+          // Authoritative completion signal — only videos with a recent completed
+          // queue job, not anything merely updated recently (see above).
+          id: { in: recentlyCompletedVideoIds },
           project: {
             status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
             ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
           },
         },
-        select: { id: true, name: true, versionLabel: true, projectId: true, updatedAt: true, project: { select: { title: true } } },
-        orderBy: { updatedAt: 'desc' },
+        select: { id: true, name: true, version: true, versionLabel: true, projectId: true, updatedAt: true, project: { select: { title: true } } },
       }).catch((err) => { console.error('[running-jobs] completed-processing query failed:', err); return [] }),
       prisma.video.findMany({
         where: {
           status: 'ERROR',
-          updatedAt: { gte: recentCompletionCutoff },
+          // Authoritative failure signal — only videos with a recent failed queue
+          // job, not anything merely updated recently (see above).
+          id: { in: recentlyFailedVideoIds },
           project: {
             status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
             ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId: authResult.id } } }),
           },
         },
-        select: { id: true, name: true, versionLabel: true, projectId: true, updatedAt: true, project: { select: { title: true } } },
-        orderBy: { updatedAt: 'desc' },
+        select: { id: true, name: true, version: true, versionLabel: true, projectId: true, updatedAt: true, project: { select: { title: true } } },
       }).catch((err) => { console.error('[running-jobs] errored-processing query failed:', err); return [] }),
       buildAlbumZipJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-zip builder failed:', err); return { active: [], completed: [] } }),
       buildAlbumThumbnailJobs().catch((err) => { console.error('[running-jobs] album-thumbnail builder failed:', err); return { active: [], completed: [] } }),
       buildFolderRenameJobs().catch((err) => { console.error('[running-jobs] folder-rename builder failed:', err); return { active: [], completed: [] } }),
-      buildVideoAssetPreviewJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] video-asset-preview builder failed:', err); return { active: [], completed: [] } }),
       buildAlbumSocialJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-social builder failed:', err); return { active: [], completed: [] } }),
     ])
 
     const completedProcessingJobs = completedProcessingVideos.map((video) => ({
       id: video.id,
       type: 'processing' as const,
-      label: video.name + (video.versionLabel ? ` ${video.versionLabel}` : ''),
+      label: `${video.name} ${video.versionLabel || `v${video.version}`}`,
       sublabel: video.project.title,
       projectId: video.projectId,
-      completedAt: video.updatedAt.getTime(),
+      completedAt: recentlyCompletedVideoFinishedAt.get(video.id) ?? video.updatedAt.getTime(),
     }))
 
     const erroredProcessingJobs = erroredProcessingVideos.map((video) => ({
       id: video.id,
       type: 'processing' as const,
-      label: video.name + (video.versionLabel ? ` ${video.versionLabel}` : ''),
+      label: `${video.name} ${video.versionLabel || `v${video.version}`}`,
       sublabel: video.project.title,
       projectId: video.projectId,
-      completedAt: video.updatedAt.getTime(),
+      completedAt: recentlyFailedVideoFinishedAt.get(video.id) ?? video.updatedAt.getTime(),
       error: true,
     }))
 
@@ -272,7 +495,9 @@ export async function GET(request: NextRequest) {
       albumZipJobs,
       albumThumbnailJobs,
       folderRenameJobs,
-      videoAssetPreviewJobs,
+      // Legacy channel name — now carries the per-project UPLOADS wave (video
+      // assets moved into their version's composite in `jobs`).
+      videoAssetPreviewJobs: uploadsJobs,
       albumSocialJobs,
     })
   } catch (err: any) {
@@ -496,9 +721,10 @@ async function buildAlbumZipJobs({
 
   try {
     const albumZipQueue = getAlbumPhotoZipQueue()
-    const [activeZipQueueJobs, waitingZipQueueJobs] = await Promise.all([
+    const [activeZipQueueJobs, waitingZipQueueJobs, completedZipQueueJobs] = await Promise.all([
       albumZipQueue.getJobs(['active']),
       albumZipQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      albumZipQueue.getJobs(['completed']),
     ])
 
     // Map albumId:variant → status
@@ -523,12 +749,30 @@ async function buildAlbumZipJobs({
       }
     }
 
-    // Fetch album details for active jobs
+    // Authoritative completion signal: a completed BullMQ zip job (retained 1h,
+    // longer than the 30-min window) carries albumId+variant+finishedOn. This
+    // replaces inferring completion from album.updatedAt, which bumps on any
+    // album edit (rename, reorder, settings) and produced phantom "ZIP complete".
+    const completedZipFinishedAt = new Map<string, number>() // `${albumId}:${variant}` → finishedOn
+    const completedAlbumIds = new Set<string>()
+    for (const qj of completedZipQueueJobs) {
+      const { albumId, variant } = qj.data ?? {}
+      const finishedOn = qj.finishedOn
+      if (albumId && variant && finishedOn && finishedOn >= cutoff.getTime()) {
+        const key = `${albumId}:${variant}`
+        const existing = completedZipFinishedAt.get(key)
+        if (!existing || finishedOn > existing) completedZipFinishedAt.set(key, finishedOn)
+        completedAlbumIds.add(albumId)
+      }
+    }
+
+    // Fetch album details for both active and recently-completed jobs in one query.
+    const neededAlbumIds = new Set<string>([...activeAlbumIds, ...completedAlbumIds])
     let albums: Array<{ id: string; name: string; projectId: string; project: { title: string } }> = []
-    if (activeAlbumIds.size > 0) {
+    if (neededAlbumIds.size > 0) {
       albums = await prisma.album.findMany({
         where: {
-          id: { in: [...activeAlbumIds] },
+          id: { in: [...neededAlbumIds] },
           project: {
             status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
             ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
@@ -543,6 +787,7 @@ async function buildAlbumZipJobs({
         orderBy: { createdAt: 'asc' },
       })
     }
+    const albumById = new Map(albums.map((a) => [a.id, a] as const))
 
     const active: Array<{
       id: string
@@ -571,38 +816,10 @@ async function buildAlbumZipJobs({
       }
     }
 
-    // Detect recently completed ZIPs: albums with non-zero ZIP sizes updated recently
-    // that are NOT currently in the active BullMQ set.
-    const recentlyUpdatedAlbums = await prisma.album.findMany({
-      where: {
-        updatedAt: { gte: cutoff },
-        project: {
-          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-          ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
-        },
-      },
-      select: {
-        id: true,
-        name: true,
-        projectId: true,
-        project: { select: { title: true } },
-        updatedAt: true,
-      },
-      orderBy: { updatedAt: 'desc' },
-      take: 50,
-    })
-
-    // Check StoredFile for ZIP sizes (legacy album columns dropped)
-    const albumIds = recentlyUpdatedAlbums.map(a => a.id)
-    const albumZipSizes = albumIds.length > 0 ? await getStoredFileRecords('ALBUM', albumIds, { fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'], select: { entityId: true, fileRole: true, fileSize: true } }) : []
-    const zipSizeByAlbum = new Map<string, { full: bigint; social: bigint }>()
-    for (const az of albumZipSizes) {
-      let entry = zipSizeByAlbum.get(az.entityId)
-      if (!entry) { entry = { full: BigInt(0), social: BigInt(0) }; zipSizeByAlbum.set(az.entityId, entry) }
-      if (az.fileRole === 'ZIP_FULL') entry.full = az.fileSize ?? BigInt(0)
-      else if (az.fileRole === 'ZIP_SOCIAL') entry.social = az.fileSize ?? BigInt(0)
-    }
-
+    // Build completed entries straight from the completed queue jobs. The job
+    // payload tells us the exact album+variant, so no StoredFile size probe or
+    // updatedAt heuristic is needed. Skip variants still active (a fresh rebuild
+    // in flight takes precedence over a prior completion).
     const activeAlbumVariantSet = new Set(active.map((j) => `${j.albumId}:${j.variant}`))
 
     const completed: Array<{
@@ -614,22 +831,20 @@ async function buildAlbumZipJobs({
       completedAt: number
     }> = []
 
-    for (const album of recentlyUpdatedAlbums) {
-      const sizes = zipSizeByAlbum.get(album.id) ?? { full: BigInt(0), social: BigInt(0) }
-      for (const variant of ['full', 'social'] as const) {
-        const size = variant === 'full' ? sizes.full : sizes.social
-        if (size > 0 && !activeAlbumVariantSet.has(`${album.id}:${variant}`)) {
-          const variantLabel = variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
-          completed.push({
-            id: `${album.id}:${variant}`,
-            type: 'albumZip',
-            label: album.name,
-            sublabel: `${album.project.title} · ${variantLabel} complete`,
-            projectId: album.projectId,
-            completedAt: album.updatedAt.getTime(),
-          })
-        }
-      }
+    for (const [key, finishedOn] of completedZipFinishedAt) {
+      if (activeAlbumVariantSet.has(key)) continue
+      const [albumId, variant] = key.split(':') as [string, 'full' | 'social']
+      const album = albumById.get(albumId)
+      if (!album) continue // not visible to this user, or deleted
+      const variantLabel = variant === 'full' ? 'Full Res ZIP' : 'Social Sized ZIP'
+      completed.push({
+        id: key,
+        type: 'albumZip',
+        label: album.name,
+        sublabel: `${album.project.title} · ${variantLabel} complete`,
+        projectId: album.projectId,
+        completedAt: finishedOn,
+      })
     }
 
     return { active, completed }
@@ -855,204 +1070,6 @@ async function buildFolderRenameJobs() {
   ]
 
   return { active, completed }
-}
-
-// -----------------------------------------------------------------------
-// Video Asset Preview jobs helper
-// -----------------------------------------------------------------------
-
-async function buildVideoAssetPreviewJobs({
-  isSystemAdmin,
-  userId,
-  allowedStatuses,
-}: {
-  isSystemAdmin: boolean
-  userId: string
-  allowedStatuses: string[]
-}) {
-  try {
-    const cutoff = new Date(Date.now() - 30 * 60 * 1000)
-
-    const [activeAssets, recentlyReady] = await Promise.all([
-      prisma.videoAsset.findMany({
-        where: {
-          previewStatus: { in: ['PENDING', 'PROCESSING'] },
-          video: {
-            project: {
-              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-              ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
-            },
-          },
-        },
-        select: {
-          id: true,
-          fileName: true,
-          previewStatus: true,
-          video: {
-            select: {
-              name: true,
-              versionLabel: true,
-              projectId: true,
-              project: { select: { title: true } },
-            },
-          },
-        },
-      }),
-      prisma.videoAsset.findMany({
-        where: {
-          previewStatus: 'READY',
-          previewGeneratedAt: { gte: cutoff },
-          video: {
-            project: {
-              status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
-              ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
-            },
-          },
-        },
-        select: {
-          id: true,
-          fileName: true,
-          previewGeneratedAt: true,
-          video: {
-            select: {
-              name: true,
-              versionLabel: true,
-              projectId: true,
-              project: { select: { title: true } },
-            },
-          },
-        },
-        orderBy: { previewGeneratedAt: 'desc' },
-      }),
-    ])
-
-    const projectMap = new Map<string, {
-      projectId: string
-      projectName: string
-      pendingCount: number
-      processingCount: number
-      assets: Array<{
-        id: string
-        fileName: string
-        videoName: string
-        versionLabel: string | null
-        status: 'PENDING' | 'PROCESSING'
-      }>
-    }>()
-
-    for (const asset of activeAssets) {
-      const projectId = asset.video.projectId
-      if (!projectMap.has(projectId)) {
-        projectMap.set(projectId, {
-          projectId,
-          projectName: asset.video.project.title,
-          pendingCount: 0,
-          processingCount: 0,
-          assets: [],
-        })
-      }
-      const entry = projectMap.get(projectId)!
-      const status = asset.previewStatus as 'PENDING' | 'PROCESSING'
-      if (status === 'PENDING') entry.pendingCount++
-      else entry.processingCount++
-      entry.assets.push({
-        id: asset.id,
-        fileName: asset.fileName,
-        videoName: asset.video.name,
-        versionLabel: asset.video.versionLabel,
-        status,
-      })
-    }
-
-    // Sort assets within each project: processing first, then pending
-    for (const entry of projectMap.values()) {
-      entry.assets.sort((a, b) => {
-        if (a.status !== b.status) return a.status === 'PROCESSING' ? -1 : 1
-        return a.fileName.localeCompare(b.fileName)
-      })
-    }
-
-    // Count assets in each project's wave that have already finished recently.
-    // This gives a stable denominator (done + remaining) so the UI can show a
-    // real "X of Y processed" figure and a monotonic progress bar, rather than
-    // conflating the live concurrency count with completed work.
-    const doneByProject = new Map<string, number>()
-    for (const asset of recentlyReady) {
-      const pid = asset.video.projectId
-      doneByProject.set(pid, (doneByProject.get(pid) ?? 0) + 1)
-    }
-
-    const active = [...projectMap.values()].map((e) => {
-      const doneCount = doneByProject.get(e.projectId) ?? 0
-      const remainingCount = e.pendingCount + e.processingCount
-      return {
-        projectId: e.projectId,
-        projectName: e.projectName,
-        pendingCount: e.pendingCount,
-        processingCount: e.processingCount,
-        doneCount,
-        // `totalCount` is remaining work (pending + processing) — used for the
-        // active-items badge. The full wave size is `doneCount + totalCount`.
-        totalCount: remainingCount,
-        assets: e.assets,
-      }
-    })
-
-    const activeProjectIds = new Set(projectMap.keys())
-
-    const completed = (() => {
-      const completedByProject = new Map<string, {
-        id: string
-        type: 'videoAssetPreview'
-        label: string
-        sublabel: string
-        projectId: string
-        completedAt: number
-        assets: Array<{ id: string; fileName: string; videoName: string; versionLabel: string | null; status: 'PENDING' | 'PROCESSING' }>
-      }>()
-
-      for (const asset of recentlyReady) {
-        const projectId = asset.video.projectId
-        if (!completedByProject.has(projectId)) {
-          completedByProject.set(projectId, {
-            id: projectId,
-            type: 'videoAssetPreview',
-            label: 'Asset previews',
-            sublabel: asset.video.project.title,
-            projectId,
-            completedAt: (asset.previewGeneratedAt ?? new Date()).getTime(),
-            assets: [],
-          })
-        }
-        const entry = completedByProject.get(projectId)!
-        entry.completedAt = Math.max(entry.completedAt, (asset.previewGeneratedAt ?? new Date()).getTime())
-        entry.assets.push({
-          id: asset.id,
-          fileName: asset.fileName,
-          videoName: asset.video.name,
-          versionLabel: asset.video.versionLabel,
-          status: 'PROCESSING', // For completed entries, the status is just for display — we use it for the dot color but all are done
-        })
-      }
-
-      // Sort assets within each project by filename
-      for (const entry of completedByProject.values()) {
-        entry.assets.sort((a, b) => a.fileName.localeCompare(b.fileName))
-        entry.label = `${entry.assets.length} asset preview${entry.assets.length !== 1 ? 's' : ''}`
-      }
-
-      // Don't surface a "complete" summary for a project that still has preview
-      // work in flight — otherwise it shows a periodically-updating "N asset
-      // previews complete" row alongside the active progress row. Once the wave
-      // fully finishes the project drops out of `active` and the completion
-      // surfaces (here and via the client-side disappearance detector).
-      return [...completedByProject.values()].filter((e) => !activeProjectIds.has(e.projectId))
-    })()
-
-    return { active, completed }
-  } catch {
-    return { active: [], completed: [] }
-  }
 }
 
 // -----------------------------------------------------------------------

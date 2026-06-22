@@ -78,6 +78,7 @@ export default function NewProjectPage() {
 
   const [enableVideos, setEnableVideos] = useState(true)
   const [enablePhotos, setEnablePhotos] = useState(false)
+  const [enableUploads, setEnableUploads] = useState(false)
   const [projectTypeError, setProjectTypeError] = useState('')
 
   const [createClientOpen, setCreateClientOpen] = useState(false)
@@ -241,6 +242,7 @@ export default function NewProjectPage() {
       clientId: selectedClientId,
       enableVideos,
       enablePhotos,
+      enableUploads,
       assignedUsers: assignedUsers.map((u) => ({
         userId: u.id,
         receiveNotifications: u.receiveNotifications !== false,
@@ -364,7 +366,7 @@ export default function NewProjectPage() {
 
               <div className="space-y-2">
                 <Label>Project Type</Label>
-                <div className="grid grid-cols-2 gap-x-12 gap-y-2">
+                <div className="grid grid-cols-3 gap-x-8 gap-y-2">
                   <label className="inline-flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -382,6 +384,15 @@ export default function NewProjectPage() {
                       className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                     />
                     Photo
+                  </label>
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={enableUploads}
+                      onChange={(e) => setEnableUploads(e.target.checked)}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    Uploads
                   </label>
                 </div>
                 {projectTypeError && <p className="text-sm text-destructive">{projectTypeError}</p>}

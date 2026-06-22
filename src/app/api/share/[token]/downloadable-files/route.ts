@@ -57,7 +57,7 @@ export async function GET(
 
   const projectMeta = await prisma.project.findUnique({
     where: { slug: token },
-    select: { id: true, sharePassword: true, authMode: true, enableClientUploads: true },
+    select: { id: true, sharePassword: true, authMode: true, enableUploads: true, enableClientUploads: true },
   })
 
   if (!projectMeta) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -445,8 +445,11 @@ export async function GET(
     )
   }
 
-  // If client uploads are disabled for clients, omit UPLOADS groups for non-admin sessions.
-  const showUploads = accessCheck.isAdmin || (projectMeta.enableClientUploads !== false)
+  // The Uploads project type is the master switch: when off, the UPLOADS folder is
+  // hidden from everyone (admins included). When on, clients only see it if client
+  // uploads are enabled for the project; admins always see it.
+  const showUploads = projectMeta.enableUploads !== false &&
+    (accessCheck.isAdmin || projectMeta.enableClientUploads !== false)
   const result: DownloadableFilesResult = {
     groups: [...videoGroups, ...albumGroups, ...(showUploads ? uploadGroups : [])],
     hasApprovableVideos: approvableCount > 0,

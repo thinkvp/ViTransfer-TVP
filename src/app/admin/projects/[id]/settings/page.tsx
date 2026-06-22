@@ -83,7 +83,8 @@ interface Project {
   clientId?: string | null
   enableVideos?: boolean
   enablePhotos?: boolean
-  _count?: { videos: number; albums: number }
+  enableUploads?: boolean
+  _count?: { videos: number; albums: number; shareUploadFiles: number }
   enableRevisions: boolean
   maxRevisions: number
   restrictCommentsToLatestVersion: boolean
@@ -128,6 +129,7 @@ export default function ProjectSettingsPage() {
   const [companyName, setCompanyName] = useState('')
   const [enableVideos, setEnableVideos] = useState(true)
   const [enablePhotos, setEnablePhotos] = useState(false)
+  const [enableUploads, setEnableUploads] = useState(true)
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null)
   const [clientSuggestions, setClientSuggestions] = useState<Array<{ id: string; name: string }>>([])
   const clientSearchRef = useRef<HTMLDivElement>(null)
@@ -165,7 +167,7 @@ export default function ProjectSettingsPage() {
   // Unsaved changes tracking
   const [savedSnapshot, setSavedSnapshot] = useState('')
   const currentSnapshot = JSON.stringify({
-    title, description, companyName, enableVideos, enablePhotos, selectedClientId,
+    title, description, companyName, enableVideos, enablePhotos, enableUploads, selectedClientId,
     enableRevisions, maxRevisions, restrictCommentsToLatestVersion, hideFeedback,
     useFullTimecode, allowClientDeleteComments, allowClientUploadFiles,
     allowAuthenticatedProjectSwitching, maxClientUploadAllocationMB, sharePassword,
@@ -251,6 +253,7 @@ export default function ProjectSettingsPage() {
         setCompanyName(data.companyName || '')
         setEnableVideos(data.enableVideos !== false)
         setEnablePhotos(data.enablePhotos === true)
+        setEnableUploads(data.enableUploads !== false)
         setSelectedClientId(data.clientId || null)
         setEnableRevisions(data.enableRevisions)
         setMaxRevisions(data.maxRevisions)
@@ -433,6 +436,7 @@ export default function ProjectSettingsPage() {
         clientId: selectedClientId,
         enableVideos,
         enablePhotos,
+        enableUploads,
         enableRevisions,
         maxRevisions: enableRevisions ? finalMaxRevisions : 0,
         restrictCommentsToLatestVersion,
@@ -741,7 +745,7 @@ export default function ProjectSettingsPage() {
 
                 <div className="space-y-2">
                   <Label>Project Type</Label>
-                  <div className="grid grid-cols-2 gap-x-12 gap-y-1">
+                  <div className="grid grid-cols-3 gap-x-8 gap-y-1">
                     <div className="min-w-0">
                       <label className="inline-flex items-center gap-2 text-sm">
                         <input
@@ -774,6 +778,24 @@ export default function ProjectSettingsPage() {
                       {(project?._count?.albums ?? 0) > 0 && (
                         <p className="text-xs text-muted-foreground mt-1">
                           Remove existing albums to disable them in this project.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="min-w-0">
+                      <label className="inline-flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={enableUploads}
+                          onChange={(e) => setEnableUploads(e.target.checked)}
+                          disabled={(project?._count?.shareUploadFiles ?? 0) > 0 && enableUploads}
+                          className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60"
+                        />
+                        Uploads
+                      </label>
+                      {(project?._count?.shareUploadFiles ?? 0) > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Remove existing uploaded files to disable Uploads in this project.
                         </p>
                       )}
                     </div>
@@ -1245,7 +1267,7 @@ export default function ProjectSettingsPage() {
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="enableClientUploads">Enable Share Page Uploads for clients</Label>
                     <p className="text-xs text-muted-foreground">
-                      Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients (admins always see it).
+                      Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients but stays visible to admins (as long as the Uploads project type is enabled).
                     </p>
                   </div>
                   <Switch
@@ -1485,7 +1507,7 @@ export default function ProjectSettingsPage() {
 
                     <div className="space-y-2">
                       <Label>Project Type</Label>
-                      <div className="grid grid-cols-2 gap-x-12 gap-y-1">
+                      <div className="grid grid-cols-3 gap-x-8 gap-y-1">
                         <div className="min-w-0">
                           <label className="inline-flex items-center gap-2 text-sm">
                             <input type="checkbox" checked={enableVideos} onChange={(e) => setEnableVideos(e.target.checked)} disabled={(project?._count?.videos ?? 0) > 0 && enableVideos} className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60" />
@@ -1499,6 +1521,13 @@ export default function ProjectSettingsPage() {
                             Photo
                           </label>
                           {(project?._count?.albums ?? 0) > 0 && <p className="text-xs text-muted-foreground mt-1">Remove existing albums to disable them in this project.</p>}
+                        </div>
+                        <div className="min-w-0">
+                          <label className="inline-flex items-center gap-2 text-sm">
+                            <input type="checkbox" checked={enableUploads} onChange={(e) => setEnableUploads(e.target.checked)} disabled={(project?._count?.shareUploadFiles ?? 0) > 0 && enableUploads} className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60" />
+                            Uploads
+                          </label>
+                          {(project?._count?.shareUploadFiles ?? 0) > 0 && <p className="text-xs text-muted-foreground mt-1">Remove existing uploaded files to disable Uploads in this project.</p>}
                         </div>
                       </div>
                     </div>
@@ -1728,7 +1757,7 @@ export default function ProjectSettingsPage() {
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
                         <Label htmlFor="enableClientUploads-d">Enable Share Page Uploads for clients</Label>
-                        <p className="text-xs text-muted-foreground">Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients (admins always see it).</p>
+                        <p className="text-xs text-muted-foreground">Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients but stays visible to admins (as long as the Uploads project type is enabled).</p>
                       </div>
                       <Switch id="enableClientUploads-d" checked={enableClientUploads} onCheckedChange={setEnableClientUploads} />
                     </div>

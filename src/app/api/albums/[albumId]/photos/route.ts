@@ -8,7 +8,7 @@ import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildAlbumPhotoStoragePath, buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
-import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -94,24 +94,34 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // lets the token generator reuse its Redis cache across refreshes. The content route
   // gracefully falls back (social/original) when a dedicated thumbnail isn't ready.
   const adminSessionId = `admin:${auth.id}`
+  const readyPhotos = photos.filter((p) => p.status === 'READY')
+  // S3 mode: presign thumbnails directly so each grid <img> loads from R2 with no
+  // /api/content/photo round-trip. Photos without a ready thumbnail fall through to a
+  // token URL, which serves the social/original fallback.
+  const directThumbUrls = await presignAlbumPhotoThumbnailUrls(
+    readyPhotos.filter((p) => p.thumbnailStatus === 'READY').map((p) => p.id),
+  )
   const thumbnailUrlByPhotoId = new Map<string, string>()
   await Promise.all(
-    photos
-      .filter((p) => p.status === 'READY')
-      .map(async (p) => {
-        try {
-          const tokenValue = await generateAlbumPhotoAccessToken({
-            photoId: p.id,
-            albumId,
-            projectId: album.projectId,
-            request,
-            sessionId: adminSessionId,
-          })
-          thumbnailUrlByPhotoId.set(p.id, `/api/content/photo/${tokenValue}?variant=thumbnail`)
-        } catch {
-          // Best-effort; the UI falls back to a placeholder tile.
-        }
-      })
+    readyPhotos.map(async (p) => {
+      const direct = directThumbUrls.get(p.id)
+      if (direct) {
+        thumbnailUrlByPhotoId.set(p.id, direct)
+        return
+      }
+      try {
+        const tokenValue = await generateAlbumPhotoAccessToken({
+          photoId: p.id,
+          albumId,
+          projectId: album.projectId,
+          request,
+          sessionId: adminSessionId,
+        })
+        thumbnailUrlByPhotoId.set(p.id, `/api/content/photo/${tokenValue}?variant=thumbnail`)
+      } catch {
+        // Best-effort; the UI falls back to a placeholder tile.
+      }
+    })
   )
 
   return NextResponse.json({

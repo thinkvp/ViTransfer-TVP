@@ -264,7 +264,14 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
         // Preview/timeline files live under .previews/videos/ — rebase those paths too
         await renameStoredPaths('VIDEO', vgVideoIds, oldPreviewPrefix, newPreviewPrefix)
       }
-      if (vgAssetIds.length > 0) await renameStoredPaths('VIDEO_ASSET', vgAssetIds, effectiveOldPrefix, renameJob.newPrefix)
+      if (vgAssetIds.length > 0) {
+        await renameStoredPaths('VIDEO_ASSET', vgAssetIds, effectiveOldPrefix, renameJob.newPrefix)
+        // Asset preview/thumbnail derivatives live under .previews/videos/{folder}/{version}/assets/.
+        // The preview tree was physically moved above, so rebase the asset StoredFile preview paths
+        // too — mirroring the VIDEO_VERSION branch. Without this, asset thumbnails 404 after a rename
+        // because their StoredFile rows still point at the old (now-empty) preview prefix.
+        await renameStoredPaths('VIDEO_ASSET', vgAssetIds, oldPreviewPrefix, newPreviewPrefix)
+      }
     } else if (renameJob.entityType === 'ALBUM') {
       // entityId = albumId; update album + photo paths
       // oldPrefix / newPrefix = {proj}/albums/{folder}

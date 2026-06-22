@@ -158,6 +158,7 @@ export const createProjectSchema = z.object({
   ,
   enableVideos: z.boolean().optional(),
   enablePhotos: z.boolean().optional(),
+  enableUploads: z.boolean().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 })
 
@@ -187,7 +188,8 @@ export const updateProjectSchema = z.object({
   previewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
   watermarkText: safeStringSchema(0, 100).optional(),
   enableVideos: z.boolean().optional(),
-  enablePhotos: z.boolean().optional()
+  enablePhotos: z.boolean().optional(),
+  enableUploads: z.boolean().optional()
 })
 
 // ============================================================================

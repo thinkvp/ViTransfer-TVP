@@ -292,9 +292,16 @@ export default function AdminSharePage() {
       }
       const data = await response.json().catch(() => ({}))
       const results = (data && typeof (data as any).results === 'object' && (data as any).results) ? (data as any).results : {}
+      // S3 mode returns presigned R2 URLs for thumbnails in `directUrls`; prefer those so the
+      // <img> loads straight from R2. Callers detect a full URL (http…) vs a raw token.
+      const directUrls = (data && typeof (data as any).directUrls === 'object' && (data as any).directUrls) ? (data as any).directUrls : {}
       for (const [pairKey, e] of entries) {
+        const direct = directUrls[pairKey]
         const token = results[pairKey]
-        e.resolve(typeof token === 'string' && token ? token : null)
+        const value = (typeof direct === 'string' && direct)
+          ? direct
+          : (typeof token === 'string' && token ? token : null)
+        e.resolve(value)
       }
     } catch {
       for (const [, e] of entries) e.resolve(null)
@@ -392,7 +399,7 @@ export default function AdminSharePage() {
             let thumbnailUrl = sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null
             if (!thumbnailUrl && video.thumbnailPath) {
               const thumbToken = await getAdminVideoToken(video.id, 'thumbnail')
-              thumbnailUrl = thumbToken ? `/api/content/${thumbToken}` : null
+              thumbnailUrl = thumbToken ? (thumbToken.startsWith('http') ? thumbToken : `/api/content/${thumbToken}`) : null
             }
 
             let timelineVttUrl = null
@@ -459,7 +466,7 @@ export default function AdminSharePage() {
             let thumbnailUrl = null
             if (video.thumbnailPath) {
               const thumbToken = await getAdminVideoToken(video.id, 'thumbnail')
-              thumbnailUrl = thumbToken ? `/api/content/${thumbToken}` : null
+              thumbnailUrl = thumbToken ? (thumbToken.startsWith('http') ? thumbToken : `/api/content/${thumbToken}`) : null
             }
 
             let timelineVttUrl = null

@@ -48,6 +48,13 @@ export type ProcessingJob = {
   processingPhase: string | null
   allocatedThreads: number | null
   threadBudget: number | null
+  // Composite rollup: this video version's assets (preview + timeline legs),
+  // folded into the version entry. Empty/absent for a plain transcode.
+  assets?: { id: string; fileName: string; status: 'active' | 'queued' | 'done' }[]
+  assetTotal?: number
+  assetActive?: number
+  assetPending?: number
+  assetDone?: number
 }
 
 /** Album ZIP generation job (polled from BullMQ via server). */
@@ -748,7 +755,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                   newCompleted.push({
                     id: prevId,
                     type: 'processing',
-                    label: prev.videoName,
+                    label: prev.versionLabel ? `${prev.videoName} ${prev.versionLabel}` : prev.videoName,
                     sublabel: prev.projectName,
                     projectName: prev.projectName,
                     projectId: prev.projectId,
@@ -905,7 +912,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
                   newCompleted.push({
                     id: prevId,
                     type: 'videoAssetPreview',
-                    label: 'Asset previews',
+                    // This channel now carries the per-project UPLOADS wave.
+                    label: 'Uploads',
                     sublabel: prev.projectName,
                     projectName: prev.projectName,
                     projectId: prev.projectId,
@@ -1248,9 +1256,13 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   // ------ derived ------
 
   const uploadActiveCount = uploads.filter((u) => u.status === 'queued' || u.status === 'uploading' || u.status === 'paused').length
+  // Assets folded into video-version composites still count as individual items
+  // for the badge (the composite itself counts once via processingJobs.length).
+  const processingAssetItems = processingJobs.reduce((sum, j) => sum + (j.assetActive ?? 0) + (j.assetPending ?? 0), 0)
   const groupedItemCount =
     videoAssetPreviewJobs.reduce((sum, j) => sum + j.totalCount, 0) +
-    albumSocialJobs.reduce((sum, j) => sum + j.totalCount, 0)
+    albumSocialJobs.reduce((sum, j) => sum + j.totalCount, 0) +
+    processingAssetItems
 
   const totalActiveCount =
     uploadActiveCount +

@@ -200,7 +200,7 @@ export function VideoProcessingSettingsSection({
               <div className="space-y-0.5">
                 <Label htmlFor="defaultEnableClientUploads">Enable Share Page Uploads for clients</Label>
                 <p className="text-xs text-muted-foreground">
-                  Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients (admins always see it).
+                  Show the UPLOADS folder to authenticated clients in the FILES mode of the Share page. When disabled, the UPLOADS section is hidden from clients but stays visible to admins (as long as the Uploads project type is enabled).
                 </p>
               </div>
               <Switch
