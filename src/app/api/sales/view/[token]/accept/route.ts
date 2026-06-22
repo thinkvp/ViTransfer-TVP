@@ -109,7 +109,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
         // Keep the public share snapshot in sync with canonical status.
         try {
-          await upsertSalesDocumentShareForDoc(tx as any, {
+          await upsertSalesDocumentShareForDoc(tx, {
             type: 'QUOTE',
             doc,
             clientId: String((updated as any).clientId || ''),

@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params
 
-  const item = await (prisma as any).quickBooksPaymentImport.findUnique({
+  const item = await prisma.quickBooksPaymentImport.findUnique({
     where: { id },
     select: {
       id: true,

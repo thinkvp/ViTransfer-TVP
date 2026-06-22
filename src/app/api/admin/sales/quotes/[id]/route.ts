@@ -116,7 +116,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
       // Keep the public sales share snapshot in sync with edits.
       try {
-        await upsertSalesDocumentShareForDoc(tx as any, {
+        await upsertSalesDocumentShareForDoc(tx, {
           type: 'QUOTE',
           doc: salesQuoteFromDb(next as any),
           clientId: next.clientId,

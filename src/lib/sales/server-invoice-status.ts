@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client'
 import type { InvoiceStatus } from '@/lib/sales/types'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
@@ -12,7 +13,7 @@ function addDaysLocal(d: Date, days: number): Date {
   return out
 }
 
-async function getSalesTaxRatePercent(tx: any): Promise<number> {
+async function getSalesTaxRatePercent(tx: Prisma.TransactionClient): Promise<number> {
   const row = await tx.salesSettings.upsert({
     where: { id: 'default' },
     create: { id: 'default' },
@@ -24,7 +25,7 @@ async function getSalesTaxRatePercent(tx: any): Promise<number> {
 }
 
 export async function recomputeInvoiceStoredStatus(
-  tx: any,
+  tx: Prisma.TransactionClient,
   invoiceId: string,
   opts?: { createdByUserId?: string | null; nowMs?: number }
 ): Promise<{ status: InvoiceStatus; paidCents: number; totalCents: number } | null> {

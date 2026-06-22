@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import crypto from 'crypto'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
@@ -53,16 +54,16 @@ function firstCurrencyFromCsv(value: unknown, fallback: string = 'AUD'): string 
   return first && /^[A-Z]{3}$/.test(first) ? first : fallback
 }
 
-async function computeInvoicePaidAtYmdForExpiry(tx: typeof prisma, invoiceId: string): Promise<string | null> {
+async function computeInvoicePaidAtYmdForExpiry(tx: Prisma.TransactionClient, invoiceId: string): Promise<string | null> {
   const id = String(invoiceId || '').trim()
   if (!id) return null
 
-  const paymentsAgg = await (tx as any).salesPayment.aggregate({
+  const paymentsAgg = await tx.salesPayment.aggregate({
     where: { invoiceId: id, excludeFromInvoiceBalance: false },
     _max: { paymentDate: true },
   }).catch(() => null)
 
-  const stripeAgg = await (tx as any).salesInvoiceStripePayment.aggregate({
+  const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
     where: { invoiceDocId: id },
     _max: { createdAt: true },
   }).catch(() => null)
@@ -370,7 +371,7 @@ export async function POST(request: NextRequest) {
         const now = new Date()
 
         if (share.type === 'QUOTE') {
-          const current = await (tx as any).salesQuote.findUnique({ where: { id: share.docId } })
+          const current = await tx.salesQuote.findUnique({ where: { id: share.docId } })
           if (!current) return
 
           const nextSentAt = current.sentAt ?? now
@@ -380,7 +381,7 @@ export async function POST(request: NextRequest) {
           if (!shouldUpdate) return
 
           const nextVersion = Number(current.version) + 1
-          const next = await (tx as any).salesQuote.update({
+          const next = await tx.salesQuote.update({
             where: { id: share.docId },
             data: {
               status: nextStatus,
@@ -389,7 +390,7 @@ export async function POST(request: NextRequest) {
             },
           })
 
-          await (tx as any).salesQuoteRevision.create({
+          await tx.salesQuoteRevision.create({
             data: {
               quoteId: next.id,
               version: next.version,
@@ -400,7 +401,7 @@ export async function POST(request: NextRequest) {
 
           // Best-effort sync for the public share snapshot.
           try {
-            await upsertSalesDocumentShareForDoc(tx as any, {
+            await upsertSalesDocumentShareForDoc(tx, {
               type: 'QUOTE',
               doc: salesQuoteFromDb(next as any),
               clientId: next.clientId,
@@ -413,7 +414,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (share.type === 'INVOICE') {
-          const current = await (tx as any).salesInvoice.findUnique({ where: { id: share.docId } })
+          const current = await tx.salesInvoice.findUnique({ where: { id: share.docId } })
           if (!current) return
 
           const nextSentAt = current.sentAt ?? now
@@ -423,7 +424,7 @@ export async function POST(request: NextRequest) {
           if (!shouldUpdate) return
 
           const nextVersion = Number(current.version) + 1
-          const next = await (tx as any).salesInvoice.update({
+          const next = await tx.salesInvoice.update({
             where: { id: share.docId },
             data: {
               status: nextStatus,
@@ -432,7 +433,7 @@ export async function POST(request: NextRequest) {
             },
           })
 
-          await (tx as any).salesInvoiceRevision.create({
+          await tx.salesInvoiceRevision.create({
             data: {
               invoiceId: next.id,
               version: next.version,
@@ -444,10 +445,10 @@ export async function POST(request: NextRequest) {
           // Best-effort sync for the public share snapshot.
           try {
             const invoicePaidAtYmd = next.status === 'PAID'
-              ? await computeInvoicePaidAtYmdForExpiry(tx as any, next.id)
+              ? await computeInvoicePaidAtYmdForExpiry(tx, next.id)
               : null
 
-            await upsertSalesDocumentShareForDoc(tx as any, {
+            await upsertSalesDocumentShareForDoc(tx, {
               type: 'INVOICE',
               doc: salesInvoiceFromDb(next as any),
               clientId: next.clientId,

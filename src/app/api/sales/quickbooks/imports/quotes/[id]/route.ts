@@ -11,7 +11,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { id } = await params
 
-  const item = await (prisma as any).quickBooksEstimateImport.findUnique({
+  const item = await prisma.quickBooksEstimateImport.findUnique({
     where: { id },
   })
 

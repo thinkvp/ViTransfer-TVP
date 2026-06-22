@@ -5,7 +5,7 @@ const INTEGRATION_ID = 'default'
 
 export async function getStoredQuickBooksRefreshToken(): Promise<string | null> {
   try {
-    const row = await (prisma as any).quickBooksIntegration.findUnique({
+    const row = await prisma.quickBooksIntegration.findUnique({
       where: { id: INTEGRATION_ID },
       select: { refreshTokenEncrypted: true },
     })
@@ -27,7 +27,7 @@ export async function storeQuickBooksRefreshToken(refreshToken: string): Promise
   try {
     const encrypted = encrypt(token)
 
-    await (prisma as any).quickBooksIntegration.upsert({
+    await prisma.quickBooksIntegration.upsert({
       where: { id: INTEGRATION_ID },
       create: {
         id: INTEGRATION_ID,

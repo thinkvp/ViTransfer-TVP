@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      const existing = await (prisma as any).quickBooksEstimateImport.findUnique({
+      const existing = await prisma.quickBooksEstimateImport.findUnique({
         where: { qboId },
         select: { id: true },
       })
@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        await (prisma as any).quickBooksEstimateImport.create({ data })
+        await prisma.quickBooksEstimateImport.create({ data })
         created += 1
       } catch (e: any) {
         // If another pull created it concurrently, count as skipped.

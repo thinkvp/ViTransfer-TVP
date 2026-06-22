@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   )
   if (rateLimitResult) return rateLimitResult
 
-  const row = await (prisma as any).salesReminderSettings
+  const row = await prisma.salesReminderSettings
     .findUnique({ where: { id: 'default' } })
     .catch(() => null)
 
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
 
   const input = parsed.data
 
-  await (prisma as any).salesReminderSettings.upsert({
+  await prisma.salesReminderSettings.upsert({
     where: { id: 'default' },
     create: {
       id: 'default',
@@ -84,6 +84,6 @@ export async function POST(request: NextRequest) {
     },
   })
 
-  const row = await (prisma as any).salesReminderSettings.findUnique({ where: { id: 'default' } })
+  const row = await prisma.salesReminderSettings.findUnique({ where: { id: 'default' } })
   return NextResponse.json({ ok: true, ...normalizeRow(row) })
 }

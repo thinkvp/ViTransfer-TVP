@@ -88,7 +88,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // For single non-reconcile invoice: check it's not already fully paid
   if (!isMultiInvoice && !reconcile) {
     const invoice = invoices[0]
-    const invoiceBalance = await recomputeInvoiceStoredStatus(prisma as any, invoice.id, { createdByUserId: authResult.id })
+    const invoiceBalance = await recomputeInvoiceStoredStatus(prisma, invoice.id, { createdByUserId: authResult.id })
     if (invoiceBalance && invoiceBalance.totalCents > 0 && invoiceBalance.paidCents >= invoiceBalance.totalCents) {
       return NextResponse.json({ error: 'Invoice is already fully paid' }, { status: 409 })
     }
@@ -192,7 +192,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             bankTransactionId: id,
           } as any,
         })
-        await recomputeInvoiceStoredStatus(tx as any, alloc.invoiceId, { createdByUserId: authResult.id })
+        await recomputeInvoiceStoredStatus(tx, alloc.invoiceId, { createdByUserId: authResult.id })
       }
 
       // Match the bank transaction (no primary invoicePaymentId for multi-invoice)
@@ -250,7 +250,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     if (!reconcile) {
-      await recomputeInvoiceStoredStatus(tx as any, invoice.id, { createdByUserId: authResult.id })
+      await recomputeInvoiceStoredStatus(tx, invoice.id, { createdByUserId: authResult.id })
     }
 
     return tx.bankTransaction.update({

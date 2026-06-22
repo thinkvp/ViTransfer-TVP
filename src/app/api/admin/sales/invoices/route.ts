@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
     // Create the public sales share token immediately so Views & Tracking
     // is available even before the first email is sent.
     try {
-      await upsertSalesDocumentShareForDoc(tx as any, {
+      await upsertSalesDocumentShareForDoc(tx, {
         type: 'INVOICE',
         doc: salesInvoiceFromDb(row as any),
         clientId: row.clientId,

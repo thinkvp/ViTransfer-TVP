@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
     })
     const orphaned = stuckInvoices.filter((inv: any) => inv._count.payments === 0)
     for (const inv of orphaned) {
-      await recomputeInvoiceStoredStatus(prisma as any, inv.id, { createdByUserId: authResult.id })
+      await recomputeInvoiceStoredStatus(prisma, inv.id, { createdByUserId: authResult.id })
     }
   } catch {
     // Best-effort only — never fail the main query over this

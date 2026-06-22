@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
 
     if (didInsert) {
       // Keep stored invoice status and any active public share snapshot in sync.
-      await recomputeInvoiceStoredStatus(prisma as any, String(docId), { createdByUserId: null, nowMs }).catch(() => null)
+      await recomputeInvoiceStoredStatus(prisma, String(docId), { createdByUserId: null, nowMs }).catch(() => null)
     }
 
     // Best-effort: mark the public invoice snapshot as paid.

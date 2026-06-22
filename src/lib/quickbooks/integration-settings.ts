@@ -22,7 +22,7 @@ const DEFAULTS: QuickBooksDailyPullSettings = {
 
 export async function getQuickBooksDailyPullSettings(): Promise<QuickBooksDailyPullSettings> {
   try {
-    const row = await (prisma as any).quickBooksIntegration.findUnique({
+    const row = await prisma.quickBooksIntegration.findUnique({
       where: { id: INTEGRATION_ID },
       select: {
         dailyPullEnabled: true,
@@ -61,7 +61,7 @@ export async function saveQuickBooksDailyPullSettings(patch: Partial<Pick<QuickB
   if (typeof nextLookback === 'number' && Number.isFinite(nextLookback)) update.pullLookbackDays = nextLookback
 
   try {
-    await (prisma as any).quickBooksIntegration.upsert({
+    await prisma.quickBooksIntegration.upsert({
       where: { id: INTEGRATION_ID },
       create: {
         id: INTEGRATION_ID,
@@ -85,7 +85,7 @@ export async function recordQuickBooksDailyPullAttempt(result: {
   message: string | null
 }): Promise<void> {
   try {
-    await (prisma as any).quickBooksIntegration.upsert({
+    await prisma.quickBooksIntegration.upsert({
       where: { id: INTEGRATION_ID },
       create: {
         id: INTEGRATION_ID,

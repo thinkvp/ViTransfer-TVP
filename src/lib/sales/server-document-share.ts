@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { salesSettingsFromDb } from '@/lib/sales/db-mappers'
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
@@ -47,8 +48,8 @@ function computeExpiresAt(input: {
   return addDaysLocal(endOfDayLocal(paidAt), 30)
 }
 
-async function getSalesSettingsJson(tx: typeof prisma): Promise<SalesSettings> {
-  const row = await (tx as any).salesSettings.upsert({
+async function getSalesSettingsJson(tx: Prisma.TransactionClient): Promise<SalesSettings> {
+  const row = await tx.salesSettings.upsert({
     where: { id: 'default' },
     create: { id: 'default' },
     update: {},
@@ -56,7 +57,7 @@ async function getSalesSettingsJson(tx: typeof prisma): Promise<SalesSettings> {
   return salesSettingsFromDb(row as any)
 }
 
-export async function upsertSalesDocumentShareForDoc(tx: typeof prisma, input: {
+export async function upsertSalesDocumentShareForDoc(tx: Prisma.TransactionClient, input: {
   type: 'QUOTE' | 'INVOICE'
   doc: SalesQuote | SalesInvoice
   clientId: string
@@ -74,13 +75,13 @@ export async function upsertSalesDocumentShareForDoc(tx: typeof prisma, input: {
 
   const settingsJson = await getSalesSettingsJson(tx)
 
-  const client = await (tx as any).client.findFirst({
+  const client = await tx.client.findFirst({
     where: { id: input.clientId, deletedAt: null },
     select: { name: true },
   }).catch(() => null)
 
   const project = input.projectId
-    ? await (tx as any).project.findFirst({ where: { id: input.projectId }, select: { title: true } }).catch(() => null)
+    ? await tx.project.findFirst({ where: { id: input.projectId }, select: { title: true } }).catch(() => null)
     : null
 
   const expiresAt = computeExpiresAt({
@@ -89,7 +90,7 @@ export async function upsertSalesDocumentShareForDoc(tx: typeof prisma, input: {
     invoicePaidAtYmd: input.invoicePaidAtYmd ?? null,
   })
 
-  const existing = await (tx as any).salesDocumentShare.findUnique({
+  const existing = await tx.salesDocumentShare.findUnique({
     where: { type_docId: { type: input.type, docId } },
     select: { token: true, revokedAt: true },
   }).catch(() => null)
@@ -97,7 +98,7 @@ export async function upsertSalesDocumentShareForDoc(tx: typeof prisma, input: {
   let token = existing?.token
   if (!token || existing?.revokedAt) token = randomToken()
 
-  const record = await (tx as any).salesDocumentShare.upsert({
+  const record = await tx.salesDocumentShare.upsert({
     where: { type_docId: { type: input.type, docId } },
     create: {
       token,

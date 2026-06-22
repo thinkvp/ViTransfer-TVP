@@ -33,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   const { id } = await params
 
-  const roleDelegate = (prisma as any).role
+  const roleDelegate = prisma.role
   const existing = await roleDelegate.findUnique({
     where: { id },
     select: { id: true, isSystemAdmin: true },
@@ -104,7 +104,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   const { id } = await params
 
-  const roleDelegate = (prisma as any).role
+  const roleDelegate = prisma.role
   const role = await roleDelegate.findUnique({
     where: { id },
     select: { id: true, isSystemAdmin: true, _count: { select: { users: true } } },

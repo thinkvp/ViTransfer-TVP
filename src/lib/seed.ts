@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client'
 import { prisma } from './db'
 import { hashPassword } from './encryption'
 import { redactEmailForLogs } from './log-sanitization'
@@ -98,7 +99,7 @@ export async function ensureDefaultAdmin() {
     const adminUsername = process.env.ADMIN_USERNAME || adminEmail.split('@')[0]
     const hashedPassword = await hashPassword(adminPassword)
 
-      const roleDelegate = (prisma as any).role
+      const roleDelegate = prisma.role
       const adminRole = await roleDelegate.findFirst({
         where: { isSystemAdmin: true },
         select: { id: true },
@@ -109,7 +110,7 @@ export async function ensureDefaultAdmin() {
           data: {
             name: 'Admin',
             isSystemAdmin: true,
-            permissions: adminAllPermissions(),
+            permissions: adminAllPermissions() as unknown as Prisma.InputJsonValue,
           },
           select: { id: true },
         }).catch(() => null))?.id

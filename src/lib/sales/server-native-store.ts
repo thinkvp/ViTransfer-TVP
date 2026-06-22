@@ -109,7 +109,7 @@ function normalizeStoreData(input: unknown): SalesNativeStoreData {
 }
 
 async function getOrCreateDefaultStoreRow() {
-  return (prisma as any).salesNativeStore.upsert({
+  return prisma.salesNativeStore.upsert({
     where: { id: 'default' },
     create: { id: 'default', data: defaultStoreData() as unknown as Prisma.InputJsonValue },
     update: {},
@@ -119,7 +119,7 @@ async function getOrCreateDefaultStoreRow() {
 
 async function saveDefaultStoreData(data: SalesNativeStoreData): Promise<{ updatedAt: string }> {
   const jsonData = data as unknown as Prisma.InputJsonValue
-  const updated = await (prisma as any).salesNativeStore.upsert({
+  const updated = await prisma.salesNativeStore.upsert({
     where: { id: 'default' },
     create: { id: 'default', data: jsonData },
     update: { data: jsonData },

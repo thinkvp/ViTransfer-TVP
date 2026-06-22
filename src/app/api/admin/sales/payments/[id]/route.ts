@@ -46,7 +46,7 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
       await tx.salesPayment.delete({ where: { id } })
 
       if (payment?.invoiceId) {
-        await recomputeInvoiceStoredStatus(tx as any, payment.invoiceId, { createdByUserId: authResult.id })
+        await recomputeInvoiceStoredStatus(tx, payment.invoiceId, { createdByUserId: authResult.id })
       }
     })
 

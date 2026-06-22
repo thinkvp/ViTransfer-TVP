@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
     )
 
     const invoiceImports = allAppliedInvoiceQboIds.length
-      ? await (prisma as any).quickBooksInvoiceImport.findMany({
+      ? await prisma.quickBooksInvoiceImport.findMany({
           where: { qboId: { in: allAppliedInvoiceQboIds } },
           select: { id: true, qboId: true, customerQboId: true },
         })
@@ -230,7 +230,7 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      const existing = await (prisma as any).quickBooksPaymentImport.findUnique({
+      const existing = await prisma.quickBooksPaymentImport.findUnique({
         where: { qboId },
         select: { id: true },
       })
@@ -257,7 +257,7 @@ export async function POST(request: NextRequest) {
 
       let savedId: string
       try {
-        const saved = await (prisma as any).quickBooksPaymentImport.create({
+        const saved = await prisma.quickBooksPaymentImport.create({
           data,
           select: { id: true },
         })
@@ -274,7 +274,7 @@ export async function POST(request: NextRequest) {
 
       for (const row of appliedMatched) {
         const invoiceImportId = invoiceImportIdByQboId.get(row.invoiceQboId) ?? null
-        await (prisma as any).quickBooksPaymentAppliedInvoice.create({
+        await prisma.quickBooksPaymentAppliedInvoice.create({
           data: {
             paymentImportId: savedId,
             invoiceQboId: row.invoiceQboId,

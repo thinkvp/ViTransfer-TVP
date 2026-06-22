@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import type { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
@@ -23,7 +24,7 @@ const patchSchema = z.object({
   remindersEnabled: z.boolean().optional(),
 })
 
-async function computeInvoicePaidAtYmdForExpiry(tx: any, invoiceId: string): Promise<string | null> {
+async function computeInvoicePaidAtYmdForExpiry(tx: Prisma.TransactionClient, invoiceId: string): Promise<string | null> {
   const id = String(invoiceId || '').trim()
   if (!id) return null
 
@@ -145,10 +146,10 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
       // IMPORTANT: Preserve expiry for paid invoices by deriving paidAt from payment records.
       try {
         const invoicePaidAtYmd = next.status === 'PAID'
-          ? await computeInvoicePaidAtYmdForExpiry(tx as any, next.id)
+          ? await computeInvoicePaidAtYmdForExpiry(tx, next.id)
           : null
 
-        await upsertSalesDocumentShareForDoc(tx as any, {
+        await upsertSalesDocumentShareForDoc(tx, {
           type: 'INVOICE',
           doc: salesInvoiceFromDb(next as any),
           clientId: next.clientId,

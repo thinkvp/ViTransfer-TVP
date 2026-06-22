@@ -70,7 +70,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         if (payment.invoiceId) invoiceIdsToRecompute.add(payment.invoiceId)
       }
       for (const invoiceId of invoiceIdsToRecompute) {
-        await recomputeInvoiceStoredStatus(tx as any, invoiceId, { createdByUserId: authResult.id })
+        await recomputeInvoiceStoredStatus(tx, invoiceId, { createdByUserId: authResult.id })
       }
     }
 

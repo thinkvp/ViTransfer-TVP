@@ -35,7 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { token } = await params
 
-  const link = await (prisma as any).guestVideoShareLink.findUnique({
+  const link = await prisma.guestVideoShareLink.findUnique({
     where: { token },
     select: {
       token: true,

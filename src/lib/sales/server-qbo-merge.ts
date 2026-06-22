@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { salesInvoiceFromDb, salesQuoteFromDb, salesSettingsFromDb } from '@/lib/sales/db-mappers'
 import { sumLineItemsTotal } from '@/lib/sales/money'
@@ -63,8 +64,8 @@ function coerceNonEmptyString(value: unknown): string | null {
   return s ? s : null
 }
 
-async function getSalesSettings(tx: typeof prisma): Promise<SalesSettings> {
-  const row = await (tx as any).salesSettings.upsert({
+async function getSalesSettings(tx: Prisma.TransactionClient): Promise<SalesSettings> {
+  const row = await tx.salesSettings.upsert({
     where: { id: 'default' },
     create: { id: 'default' },
     update: {},
@@ -78,7 +79,7 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
   let skippedMissingClient = 0
 
   await prisma.$transaction(async (tx) => {
-    const settings = await getSalesSettings(tx as any)
+    const settings = await getSalesSettings(tx)
 
     for (const q of Array.isArray(nativeQuotes) ? nativeQuotes : []) {
       const qboId = typeof q?.qboId === 'string' ? q.qboId : ''
@@ -105,9 +106,9 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
       const docTaxEnabled = qboRate !== null ? qboHasTax : ((settings as any).taxEnabled !== false)
       const terms = coerceNonEmptyString(q?.customerMemo) ?? (settings as any).defaultTerms
 
-      const existing = await (tx as any).salesQuote.findUnique({ where: { qboId } })
+      const existing = await tx.salesQuote.findUnique({ where: { qboId } })
       if (!existing) {
-        const created = await (tx as any).salesQuote.create({
+        const created = await tx.salesQuote.create({
           data: {
             quoteNumber: docNumber,
             status: 'OPEN',
@@ -128,7 +129,7 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
           },
         })
 
-        await (tx as any).salesQuoteRevision.create({
+        await tx.salesQuoteRevision.create({
           data: {
             quoteId: created.id,
             version: created.version,
@@ -138,7 +139,7 @@ export async function mergeQboQuotesIntoSalesTables(nativeQuotes: any[]): Promis
         })
 
         try {
-          await upsertSalesDocumentShareForDoc(tx as any, {
+          await upsertSalesDocumentShareForDoc(tx, {
             type: 'QUOTE',
             doc: salesQuoteFromDb(created as any),
             clientId,
@@ -166,7 +167,7 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
   let skippedMissingClient = 0
 
   await prisma.$transaction(async (tx) => {
-    const settings = await getSalesSettings(tx as any)
+    const settings = await getSalesSettings(tx)
 
     for (const inv of Array.isArray(nativeInvoices) ? nativeInvoices : []) {
       const qboId = typeof inv?.qboId === 'string' ? inv.qboId : ''
@@ -191,9 +192,9 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
       const docTaxEnabled = qboRate !== null ? qboHasTax : ((settings as any).taxEnabled !== false)
       const terms = coerceNonEmptyString(inv?.customerMemo) ?? (settings as any).defaultTerms
 
-      const existing = await (tx as any).salesInvoice.findUnique({ where: { qboId } })
+      const existing = await tx.salesInvoice.findUnique({ where: { qboId } })
       if (!existing) {
-        const created = await (tx as any).salesInvoice.create({
+        const created = await tx.salesInvoice.create({
           data: {
             invoiceNumber: docNumber,
             status: 'OPEN',
@@ -213,7 +214,7 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
           },
         })
 
-        await (tx as any).salesInvoiceRevision.create({
+        await tx.salesInvoiceRevision.create({
           data: {
             invoiceId: created.id,
             version: created.version,
@@ -223,7 +224,7 @@ export async function mergeQboInvoicesIntoSalesTables(nativeInvoices: any[]): Pr
         })
 
         try {
-          await upsertSalesDocumentShareForDoc(tx as any, {
+          await upsertSalesDocumentShareForDoc(tx, {
             type: 'INVOICE',
             doc: salesInvoiceFromDb(created as any),
             clientId,
@@ -261,7 +262,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
   await prisma.$transaction(async (tx) => {
     const touchedInvoiceIds = new Set<string>()
 
-    const settings = await getSalesSettings(tx as any)
+    const settings = await getSalesSettings(tx)
     const taxRatePercent = Number.isFinite(Number((settings as any).taxRatePercent)) ? Number((settings as any).taxRatePercent) : 10
 
     const invoiceQboIds = Array.from(
@@ -273,7 +274,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
     )
 
     const invoices = invoiceQboIds.length
-      ? await (tx as any).salesInvoice.findMany({
+      ? await tx.salesInvoice.findMany({
           where: { qboId: { in: invoiceQboIds } },
           select: { id: true, qboId: true, clientId: true, itemsJson: true },
         })
@@ -291,7 +292,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
     }
 
     const stripePayments = (invoiceIds.length
-      ? await (tx as any).salesInvoiceStripePayment.findMany({
+      ? await tx.salesInvoiceStripePayment.findMany({
           where: { invoiceDocId: { in: invoiceIds } },
           select: { invoiceDocId: true, invoiceAmountCents: true },
           take: 5000,
@@ -307,7 +308,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
     }, {} as Record<string, number>)
 
     const localPayments = (invoiceIds.length
-      ? await (tx as any).salesPayment.findMany({
+      ? await tx.salesPayment.findMany({
           where: { invoiceId: { in: invoiceIds }, excludeFromInvoiceBalance: false },
           select: { invoiceId: true, amountCents: true },
           take: 20000,
@@ -356,7 +357,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
       const reference = typeof p?.reference === 'string' ? p.reference : `QBO-PAY-${paymentQboId}`
       const clientId = typeof p?.clientId === 'string' && p.clientId ? p.clientId : inv.clientId
 
-      const existing = await (tx as any).salesPayment.findUnique({ where: { qboId }, select: { id: true } })
+      const existing = await tx.salesPayment.findUnique({ where: { qboId }, select: { id: true } })
       if (existing) {
         continue
       }
@@ -376,7 +377,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
         ? ensurePrefix(reference, 'QB (reconciled): ')
         : reference
 
-      const data = {
+      const data: Prisma.SalesPaymentUncheckedCreateInput = {
         source: 'QUICKBOOKS',
         paymentDate,
         amountCents: Math.max(0, Math.trunc(amountCents)),
@@ -388,7 +389,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
         qboId,
       }
 
-      await (tx as any).salesPayment.create({ data })
+      await tx.salesPayment.create({ data })
       ingested += 1
 
       if (!excludeFromInvoiceBalance) {
@@ -397,7 +398,7 @@ export async function mergeQboPaymentsIntoSalesTables(nativePayments: Array<{
     }
 
     for (const invoiceId of touchedInvoiceIds) {
-      await recomputeInvoiceStoredStatus(tx as any, invoiceId, { createdByUserId: null })
+      await recomputeInvoiceStoredStatus(tx, invoiceId, { createdByUserId: null })
     }
   })
 

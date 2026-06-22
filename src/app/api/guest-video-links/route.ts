@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
   const ctx = await requireGuestVideoLinkContext(request, { projectId, videoId })
   if (!ctx.ok) return ctx.response
 
-  const row = await (prisma as any).guestVideoShareLink.findUnique({
+  const row = await prisma.guestVideoShareLink.findUnique({
     where: { projectId_videoId: { projectId: ctx.project.id, videoId: ctx.video.id } },
     select: { token: true, expiresAt: true },
   })
@@ -176,13 +176,13 @@ export async function POST(request: NextRequest) {
   // action:
   // - generate: rotate token + reset expiry
   // - refreshExpiry: keep token (if exists) + reset expiry
-  const existing = await (prisma as any).guestVideoShareLink.findUnique({
+  const existing = await prisma.guestVideoShareLink.findUnique({
     where: { projectId_videoId: { projectId: ctx.project.id, videoId: ctx.video.id } },
     select: { token: true },
   })
 
   if (action === 'refreshExpiry' && existing) {
-    const row = await (prisma as any).guestVideoShareLink.update({
+    const row = await prisma.guestVideoShareLink.update({
       where: { projectId_videoId: { projectId: ctx.project.id, videoId: ctx.video.id } },
       data: { expiresAt },
       select: { token: true, expiresAt: true },
@@ -214,7 +214,7 @@ export async function POST(request: NextRequest) {
   for (let attempt = 0; attempt < 5; attempt++) {
     const token = randomToken()
     try {
-      const row = await (prisma as any).guestVideoShareLink.upsert({
+      const row = await prisma.guestVideoShareLink.upsert({
         where: { projectId_videoId: { projectId: ctx.project.id, videoId: ctx.video.id } },
         create: {
           token,

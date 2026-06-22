@@ -381,7 +381,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       const invoiceId = txn.invoicePayment.invoiceId
       await tx.salesPayment.delete({ where: { id: txn.invoicePayment.id } })
       if (invoiceId) {
-        await recomputeInvoiceStoredStatus(tx as any, invoiceId, { createdByUserId: authResult.id })
+        await recomputeInvoiceStoredStatus(tx, invoiceId, { createdByUserId: authResult.id })
       }
     }
     // Delete AccountingAttachment records for this transaction (CASCADE won't fire on UPDATE)

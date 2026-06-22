@@ -48,9 +48,9 @@ export async function GET(request: NextRequest) {
     try {
       await prisma.$transaction(async (tx) => {
         if (docType === 'INVOICE') {
-          const invoice = await (tx as any).salesInvoice.findUnique({ where: { id: docId } })
+          const invoice = await tx.salesInvoice.findUnique({ where: { id: docId } })
           if (!invoice) return
-          await upsertSalesDocumentShareForDoc(tx as any, {
+          await upsertSalesDocumentShareForDoc(tx, {
             type: 'INVOICE',
             doc: salesInvoiceFromDb(invoice as any),
             clientId: invoice.clientId,
@@ -59,9 +59,9 @@ export async function GET(request: NextRequest) {
           return
         }
 
-        const quote = await (tx as any).salesQuote.findUnique({ where: { id: docId } })
+        const quote = await tx.salesQuote.findUnique({ where: { id: docId } })
         if (!quote) return
-        await upsertSalesDocumentShareForDoc(tx as any, {
+        await upsertSalesDocumentShareForDoc(tx, {
           type: 'QUOTE',
           doc: salesQuoteFromDb(quote as any),
           clientId: quote.clientId,

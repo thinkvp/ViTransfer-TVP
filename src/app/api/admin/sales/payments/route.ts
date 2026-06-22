@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     })
 
     if (created.invoiceId) {
-      await recomputeInvoiceStoredStatus(tx as any, String(created.invoiceId), { createdByUserId: authResult.id })
+      await recomputeInvoiceStoredStatus(tx, String(created.invoiceId), { createdByUserId: authResult.id })
     }
 
     return created

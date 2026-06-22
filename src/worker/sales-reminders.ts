@@ -147,18 +147,18 @@ export async function processSalesReminders() {
   const now = new Date()
   const today = ymdLocal(now)
 
-  const reminderSettings = await (prisma as any).salesReminderSettings
+  const reminderSettings = await prisma.salesReminderSettings
     .findUnique({ where: { id: 'default' } })
     .catch(() => null)
 
   const overdueEnabled = Boolean(reminderSettings?.overdueInvoiceRemindersEnabled)
   const overdueDays = Number.isFinite(Number(reminderSettings?.overdueInvoiceBusinessDaysAfterDue))
-    ? Math.max(1, Math.trunc(Number(reminderSettings.overdueInvoiceBusinessDaysAfterDue)))
+    ? Math.max(1, Math.trunc(Number(reminderSettings?.overdueInvoiceBusinessDaysAfterDue)))
     : 3
 
   const quoteExpiryEnabled = Boolean(reminderSettings?.quoteExpiryRemindersEnabled)
   const quoteExpiryDays = Number.isFinite(Number(reminderSettings?.quoteExpiryBusinessDaysBeforeValidUntil))
-    ? Math.max(1, Math.trunc(Number(reminderSettings.quoteExpiryBusinessDaysBeforeValidUntil)))
+    ? Math.max(1, Math.trunc(Number(reminderSettings?.quoteExpiryBusinessDaysBeforeValidUntil)))
     : 3
 
   if (!overdueEnabled && !quoteExpiryEnabled) return
@@ -280,7 +280,7 @@ export async function processSalesReminders() {
   void today
 
   async function getRecipientContactsForClient(clientId: string): Promise<Array<{ email: string; name: string | null }>> {
-    const list = await (prisma as any).clientRecipient
+    const list = await prisma.clientRecipient
       .findMany({
         where: { clientId, receiveSalesReminders: true },
         select: { email: true, name: true },

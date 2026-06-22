@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
   const limit = getLimit(request)
 
-  const items = await (prisma as any).quickBooksPaymentImport.findMany({
+  const items = await prisma.quickBooksPaymentImport.findMany({
     orderBy: [{ lastUpdatedTime: 'desc' }, { updatedAt: 'desc' }],
     take: limit,
     select: {

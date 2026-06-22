@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   }, 'roles-list')
   if (rateLimitResult) return rateLimitResult
 
-  const roleDelegate = (prisma as any).role
+  const roleDelegate = prisma.role
   const roles = await roleDelegate.findMany({
     select: {
       id: true,
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Admin role already exists' }, { status: 400 })
   }
 
-  const roleDelegate = (prisma as any).role
+  const roleDelegate = prisma.role
   const role = await roleDelegate.create({
     data: {
       name,

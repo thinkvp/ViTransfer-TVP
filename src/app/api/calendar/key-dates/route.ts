@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
       })
     : []
 
-  const personalRows = await (prisma as any).userKeyDate.findMany({
+  const personalRows = await prisma.userKeyDate.findMany({
     where: {
       userId: user.id,
       date: { gte: today, lte: end },
@@ -255,7 +255,7 @@ export async function GET(request: NextRequest) {
       calLines.push(icsProperty('DTSTART;VALUE=DATE', start))
       calLines.push(icsProperty('DTEND;VALUE=DATE', endExclusive))
     } else {
-      const start = `${ymdToCompact(k.date)}T${hhmmToCompact(k.startTime)}00`
+      const start = `${ymdToCompact(k.date)}T${hhmmToCompact(k.startTime!)}00`
       calLines.push(icsProperty(`DTSTART;TZID=${tz}`, start))
 
       if (k.finishTime) {
