@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **QuickBooks Online integration removed** — The pull-only QuickBooks (QBO) integration has been removed entirely. This deletes the QBO OAuth connect flow, the Sales → Settings → "Quickbooks Integration" tab and the "QuickBooks Actions" panel on the Sales dashboard, the `/api/sales/quickbooks/*` routes (auth, health, settings, imports, and the customer/quote/invoice/payment pulls), the QBO import-detail pages under `admin/sales/{invoices,quotes}/imports/[id]`, and the worker's `quickbooks-refresh-token` and `quickbooks-daily-pull` scheduled jobs (the worker now purges any stale repeatable QBO jobs left in Redis on boot). The QBO failure push-notification type (`QUICKBOOKS_DAILY_PULL_FAILURE`) and the `QBO_*` / `QUICKBOOKS_*` environment variables (documented in `.env.example`) are gone. Migration `20260623000000_remove_quickbooks` drops the five QBO staging tables (`QuickBooksIntegration`, `QuickBooksEstimateImport`, `QuickBooksInvoiceImport`, `QuickBooksPaymentImport`, `QuickBooksPaymentAppliedInvoice`). The sales records themselves are unaffected: the `qboId` columns on `SalesQuote`/`SalesInvoice`/`SalesPayment`, the `Client.quickbooksCustomerId` column, and the `SalesPaymentSource.QUICKBOOKS` enum value are intentionally retained as inert historical identifiers, so previously-imported quotes/invoices/payments remain intact. Also removes the now-orphaned `src/lib/sales/server-native-store.ts` (no importers). Touches `prisma/schema.prisma`, `src/worker/index.ts`, `src/app/admin/sales/page.tsx`, `src/app/admin/sales/settings/page.tsx`, `src/lib/pinned-system-notifications.ts`, `src/lib/push-notifications.ts`, `.env.example`, and deletes `src/lib/quickbooks/`, `src/lib/sales/server-qbo-merge.ts`, and the `src/app/api/sales/quickbooks/` routes.
+
 ## [2.0.2] - 2026-06-22
 
 ### Changed

@@ -14,7 +14,7 @@ import type { SalesLabel } from '@/lib/sales/admin-api'
 import { apiFetch } from '@/lib/api-client'
 import { formatDateTime, cn } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { BarChart3, Bell, Building2, CreditCard, Link2, Pencil, Plus, ReceiptText, Save, Star, Tag, Trash2 } from 'lucide-react'
+import { BarChart3, Bell, Building2, CreditCard, Pencil, Plus, ReceiptText, Save, Star, Tag, Trash2 } from 'lucide-react'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -27,7 +27,6 @@ const SALES_SECTIONS = [
   { id: 'labels', label: 'Labels', icon: Tag },
   { id: 'sales-notifications', label: 'Sales Notifications', icon: Bell },
   { id: 'stripe-checkout', label: 'Stripe Checkout', icon: CreditCard },
-  { id: 'quickbooks', label: 'Quickbooks Integration', icon: Link2 },
 ] as const
 
 type SalesSection = typeof SALES_SECTIONS[number]['id']
@@ -45,21 +44,6 @@ export default function SalesSettingsPage() {
   const [activeSection, setActiveSection] = useState<SalesSection>('sales-details')
   const [universalSaving, setUniversalSaving] = useState(false)
   const [universalSuccess, setUniversalSuccess] = useState(false)
-
-  const [qbBusy, setQbBusy] = useState(false)
-  const [qbLoaded, setQbLoaded] = useState(false)
-  const [qbSaving, setQbSaving] = useState(false)
-  const [qbSaved, setQbSaved] = useState(false)
-
-  const [qbDailyPullEnabled, setQbDailyPullEnabled] = useState(true)
-  const [qbDailyPullTime, setQbDailyPullTime] = useState('21:00')
-  const [qbLookbackDays, setQbLookbackDays] = useState('7')
-  const [qbLastAttempt, setQbLastAttempt] = useState<null | {
-    attemptedAt: string | null
-    succeeded: boolean | null
-    message: string | null
-  }>(null)
-  const [qbManualStatus, setQbManualStatus] = useState<string>('')
 
   const [businessName, setBusinessName] = useState('')
   const [address, setAddress] = useState('')
@@ -137,7 +121,6 @@ export default function SalesSettingsPage() {
     defaultQuoteValidDays, defaultInvoiceDueDays, defaultTerms, paymentDetails, defaultIncomeAccountId,
     stripeEnabled, stripeLabel, stripeFeePercent, stripeFeeFixed,
     stripePublishableKey, stripeSecretKey, stripeDashboardPaymentDescription, stripeCurrencies,
-    qbDailyPullEnabled, qbDailyPullTime, qbLookbackDays,
     overdueInvoiceRemindersEnabled, overdueInvoiceBusinessDaysAfterDue,
     quoteExpiryRemindersEnabled, quoteExpiryBusinessDaysBeforeValidUntil,
   })
@@ -304,36 +287,6 @@ export default function SalesSettingsPage() {
 
   useEffect(() => {
     let cancelled = false
-
-    const loadQb = async () => {
-      try {
-        const res = await apiFetch('/api/sales/quickbooks/settings', { method: 'GET' })
-        const json = await res.json().catch(() => null)
-        if (!res.ok) return
-
-        if (cancelled) return
-
-        setQbDailyPullEnabled(Boolean(json?.dailyPullEnabled))
-        setQbDailyPullTime(typeof json?.dailyPullTime === 'string' ? json.dailyPullTime : '21:00')
-        setQbLookbackDays(String(typeof json?.pullLookbackDays === 'number' ? json.pullLookbackDays : 7))
-        setQbLastAttempt({
-          attemptedAt: typeof json?.lastDailyPullAttemptAt === 'string' ? json.lastDailyPullAttemptAt : null,
-          succeeded: typeof json?.lastDailyPullSucceeded === 'boolean' ? json.lastDailyPullSucceeded : null,
-          message: typeof json?.lastDailyPullMessage === 'string' ? json.lastDailyPullMessage : null,
-        })
-      } finally {
-        if (!cancelled) setQbLoaded(true)
-      }
-    }
-
-    void loadQb()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
     ;(async () => {
       try {
         const [lbls, accountRes] = await Promise.all([
@@ -353,67 +306,6 @@ export default function SalesSettingsPage() {
     })()
     return () => { cancelled = true }
   }, [])
-
-  const runQuickBooksAction = async (label: string, url: string, method: 'GET' | 'POST') => {
-    setQbBusy(true)
-    setQbSaved(false)
-    setQbManualStatus('')
-    try {
-      const parsedLookback = Number(qbLookbackDays)
-      const body = method === 'POST'
-        ? JSON.stringify({ days: Number.isFinite(parsedLookback) ? parsedLookback : 7 })
-        : undefined
-
-      const res = await apiFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body,
-      })
-      const json = await res.json().catch(() => null)
-
-      const summarySuffix = (() => {
-        const stored = (json as any)?.stored
-        const created = stored && typeof stored?.created === 'number' ? stored.created : (typeof (json as any)?.created === 'number' ? (json as any).created : null)
-        const updatedRaw = stored && typeof stored?.updated === 'number' ? stored.updated : (typeof (json as any)?.updated === 'number' ? (json as any).updated : null)
-        const skipped = stored && typeof stored?.skipped === 'number' ? stored.skipped : (typeof (json as any)?.skipped === 'number' ? (json as any).skipped : null)
-
-        if (created === null || updatedRaw === null || skipped === null) return ''
-
-        // Customer pulls report linked-by-name separately; treat that as an update for the concise summary.
-        const linkedByName = typeof (json as any)?.linkedByName === 'number' ? (json as any).linkedByName : 0
-        const updated = updatedRaw + linkedByName
-        return ` (c=${created},u=${updated},s=${skipped})`
-      })()
-
-      if (res.ok) {
-        setQbManualStatus(`${label} completed${summarySuffix}.`)
-      } else {
-        const err = typeof (json as any)?.error === 'string' ? (json as any).error : null
-        setQbManualStatus(err ? `${label} failed: ${err}` : `${label} failed (${res.status}).`)
-      }
-
-      // Refresh daily pull summary (single last attempt) after any successful action.
-      if (res.ok) {
-        try {
-          const sres = await apiFetch('/api/sales/quickbooks/settings', { method: 'GET' })
-          const sj = await sres.json().catch(() => null)
-          if (sres.ok) {
-            setQbLastAttempt({
-              attemptedAt: typeof sj?.lastDailyPullAttemptAt === 'string' ? sj.lastDailyPullAttemptAt : null,
-              succeeded: typeof sj?.lastDailyPullSucceeded === 'boolean' ? sj.lastDailyPullSucceeded : null,
-              message: typeof sj?.lastDailyPullMessage === 'string' ? sj.lastDailyPullMessage : null,
-            })
-          }
-        } catch {
-          // ignore
-        }
-      }
-    } catch (e) {
-      setQbManualStatus(`${label} failed: ${e instanceof Error ? e.message : String(e)}`)
-    } finally {
-      setQbBusy(false)
-    }
-  }
 
   async function handleSaveLabel() {
     const name = labelFormName.trim()
@@ -443,84 +335,6 @@ export default function SalesSettingsPage() {
       setLabelFormError(e instanceof Error ? e.message : 'Failed to save label')
     } finally {
       setLabelModalSaving(false)
-    }
-  }
-
-  const onSaveQuickBooks = async () => {
-    setQbSaving(true)
-    setQbSaved(false)
-    setQbManualStatus('')
-    try {
-      const parsedLookback = Number(qbLookbackDays)
-      const body = {
-        dailyPullEnabled: qbDailyPullEnabled,
-        dailyPullTime: qbDailyPullTime,
-        pullLookbackDays: Number.isFinite(parsedLookback) ? parsedLookback : 7,
-      }
-
-      const res = await apiFetch('/api/sales/quickbooks/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-
-      const json = await res.json().catch(() => null)
-      if (!res.ok) {
-        setQbManualStatus(typeof json?.error === 'string' ? json.error : 'Failed to save QuickBooks settings')
-        return
-      }
-
-      setQbDailyPullEnabled(Boolean(json?.dailyPullEnabled))
-      setQbDailyPullTime(typeof json?.dailyPullTime === 'string' ? json.dailyPullTime : qbDailyPullTime)
-      setQbLookbackDays(String(typeof json?.pullLookbackDays === 'number' ? json.pullLookbackDays : Number(qbLookbackDays)))
-      setQbLastAttempt({
-        attemptedAt: typeof json?.lastDailyPullAttemptAt === 'string' ? json.lastDailyPullAttemptAt : null,
-        succeeded: typeof json?.lastDailyPullSucceeded === 'boolean' ? json.lastDailyPullSucceeded : null,
-        message: typeof json?.lastDailyPullMessage === 'string' ? json.lastDailyPullMessage : null,
-      })
-
-      setQbSaved(true)
-      setTimeout(() => setQbSaved(false), 2000)
-    } catch (e) {
-      setQbManualStatus(e instanceof Error ? e.message : String(e))
-    } finally {
-      setQbSaving(false)
-    }
-  }
-
-  const openQuickBooksAuthorize = async () => {
-    setQbBusy(true)
-    setQbManualStatus('')
-
-    // Open immediately (avoids popup blockers), then set URL after we fetch it with auth.
-    const popup = window.open('about:blank', 'qbo_oauth', 'width=600,height=720')
-    if (!popup) {
-      setQbManualStatus('Authorize failed: Popup blocked. Please allow popups for this site.')
-      setQbBusy(false)
-      return
-    }
-
-    try {
-      const res = await apiFetch('/api/sales/quickbooks/auth/start?json=1', { method: 'GET' })
-      const json = await res.json().catch(() => null)
-
-      const authorizeUrl = typeof json?.authorizeUrl === 'string' ? json.authorizeUrl : ''
-      if (res.ok && authorizeUrl) {
-        popup.location.href = authorizeUrl
-        setQbManualStatus('Authorize started (popup opened).')
-      } else {
-        popup.close()
-        setQbManualStatus('Authorize failed: could not start OAuth flow.')
-      }
-    } catch (e) {
-      setQbManualStatus(`Authorize failed: ${e instanceof Error ? e.message : String(e)}`)
-      try {
-        popup.close()
-      } catch {
-        // ignore
-      }
-    } finally {
-      setQbBusy(false)
     }
   }
 
@@ -714,30 +528,6 @@ export default function SalesSettingsPage() {
             const src = typeof json.secretKeySource === 'string' ? json.secretKeySource : stripeSecretKeySource
             setStripeSecretKeySource(src === 'env' || src === 'db' || src === 'none' ? src : stripeSecretKeySource)
             setStripeSecretKey('')
-          }
-        })(),
-        // QuickBooks settings
-        (async () => {
-          const parsedLookback = Number(qbLookbackDays)
-          const body = {
-            dailyPullEnabled: qbDailyPullEnabled,
-            dailyPullTime: qbDailyPullTime,
-            pullLookbackDays: Number.isFinite(parsedLookback) ? parsedLookback : 7,
-          }
-          const res = await apiFetch('/api/sales/quickbooks/settings', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-          })
-          const json = await res.json().catch(() => null)
-          if (!res.ok) throw new Error(typeof json?.error === 'string' ? json.error : 'Failed to save QuickBooks settings')
-          if (json) {
-            setQbDailyPullEnabled(Boolean(json.dailyPullEnabled))
-            setQbDailyPullTime(typeof json.dailyPullTime === 'string' ? json.dailyPullTime : qbDailyPullTime)
-            setQbLookbackDays(String(typeof json.pullLookbackDays === 'number' ? json.pullLookbackDays : Number(qbLookbackDays)))
-            setQbLastAttempt({
-              attemptedAt: typeof json.lastDailyPullAttemptAt === 'string' ? json.lastDailyPullAttemptAt : null,
-              succeeded: typeof json.lastDailyPullSucceeded === 'boolean' ? json.lastDailyPullSucceeded : null,
-              message: typeof json.lastDailyPullMessage === 'string' ? json.lastDailyPullMessage : null,
-            })
           }
         })(),
       ])
@@ -1430,127 +1220,6 @@ export default function SalesSettingsPage() {
                 </div>
               </div>
 
-            </>
-          )}
-        </CardContent>
-      </Card>
-          </div>
-
-          <div className={cn(activeSection !== 'quickbooks' && 'lg:hidden')}>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
-          <CardTitle className="text-base">QuickBooks Integration (Pull only)</CardTitle>
-          <Switch checked={qbDailyPullEnabled} onCheckedChange={setQbDailyPullEnabled} disabled={!qbLoaded || qbBusy || qbSaving} />
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="text-sm text-muted-foreground space-y-1">
-            <p>
-              This integration is read-only: ViTransfer will never create/update anything in QuickBooks.
-            </p>
-            <p>
-              Pulling quotes/invoices will ingest them into the main Sales tables automatically.
-            </p>
-            <p>
-              Note: Intuit refresh tokens can rotate. ViTransfer will automatically persist the latest refresh token (encrypted) in Postgres when you run pulls or the daily worker refresh job.
-            </p>
-          </div>
-
-          {!qbLoaded ? (
-            <div className="text-sm text-muted-foreground">Loading QuickBooks settings…</div>
-          ) : (
-            <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Daily pull task</Label>
-                <Input
-                  type="time"
-                  value={qbDailyPullTime}
-                  onChange={(e) => setQbDailyPullTime(e.target.value)}
-                  className="h-9"
-                  disabled={!qbDailyPullEnabled || qbBusy || universalSaving}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Lookback (days)</Label>
-                <Input
-                  value={qbLookbackDays}
-                  onChange={(e) => setQbLookbackDays(e.target.value)}
-                  className="h-9"
-                  inputMode="numeric"
-                  disabled={qbBusy || universalSaving}
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2 items-end">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={qbBusy}
-                onClick={() => void openQuickBooksAuthorize()}
-              >
-                Authorize
-              </Button>
-
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={qbBusy}
-                onClick={() => runQuickBooksAction('Health', '/api/sales/quickbooks/health', 'GET')}
-              >
-                {qbBusy ? 'Working…' : 'Test connection'}
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                disabled={qbBusy}
-                onClick={() => runQuickBooksAction('Pull Clients', '/api/sales/quickbooks/pull/customers', 'POST')}
-              >
-                Pull Clients
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                disabled={qbBusy}
-                onClick={() => runQuickBooksAction('Pull Quotes (store)', '/api/sales/quickbooks/pull/quotes', 'POST')}
-              >
-                Pull Quotes
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                disabled={qbBusy}
-                onClick={() => runQuickBooksAction('Pull Invoices (store)', '/api/sales/quickbooks/pull/invoices', 'POST')}
-              >
-                Pull Invoices
-              </Button>
-
-              <Button
-                type="button"
-                variant="outline"
-                disabled={qbBusy}
-                onClick={() => runQuickBooksAction('Pull Payments (store)', '/api/sales/quickbooks/pull/payments', 'POST')}
-              >
-                Pull Payments
-              </Button>
-            </div>
-
-            <div className="space-y-1">
-              {qbManualStatus && <div className="text-xs text-muted-foreground">{qbManualStatus}</div>}
-              <div className="text-xs text-muted-foreground">Daily pull summary</div>
-              {!qbLastAttempt?.attemptedAt ? (
-                <div className="text-xs text-muted-foreground">No attempts yet.</div>
-              ) : (
-                <div className="text-xs text-muted-foreground">
-                  {formatDateTime(qbLastAttempt.attemptedAt)} — {qbLastAttempt.succeeded ? 'Success' : 'Error'}
-                  {qbLastAttempt.message ? ` — ${qbLastAttempt.message}` : ''}
-                </div>
-              )}
-            </div>
             </>
           )}
         </CardContent>

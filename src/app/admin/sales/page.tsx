@@ -4,12 +4,11 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { AlertTriangle, BarChart3, Building2, CreditCard, DollarSign, FileText, Receipt } from 'lucide-react'
+import { AlertTriangle, BarChart3, CreditCard, DollarSign, FileText, Receipt } from 'lucide-react'
 import {
   fetchSalesRollup,
   fetchSalesSettings,
 } from '@/lib/sales/admin-api'
-import { apiFetch } from '@/lib/api-client'
 import type { SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { InvoiceStatus, QuoteStatus, SalesSettings } from '@/lib/sales/types'
 import { invoiceStatusBadgeClass, invoiceStatusLabel, quoteStatusBadgeClass, quoteStatusLabel } from '@/lib/sales/badge'
@@ -28,9 +27,6 @@ export default function SalesDashboardPage() {
 
   const [loading, setLoading] = useState(true)
 
-  const [qbActionsEnabled, setQbActionsEnabled] = useState<boolean | null>(null)
-  const [qbBusy, setQbBusy] = useState(false)
-  const [qbActionMessage, setQbActionMessage] = useState<{ text: string; isError: boolean } | null>(null)
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
     address: '',
@@ -70,7 +66,7 @@ export default function SalesDashboardPage() {
 
     ;(async () => {
       try {
-        const [s, r, qbEnabled] = await Promise.all([
+        const [s, r] = await Promise.all([
           fetchSalesSettings(),
           fetchSalesRollup({
             invoicesLimit: 2000,
@@ -78,17 +74,10 @@ export default function SalesDashboardPage() {
             paymentsLimit: 5000,
             stripePaymentsLimit: 5000,
           }),
-          apiFetch('/api/sales/quickbooks/settings', { method: 'GET' })
-            .then(async (res) => {
-              const json = await res.json().catch(() => null)
-              return json?.dailyPullEnabled === true
-            })
-            .catch(() => false),
         ])
         if (cancelled) return
         setSettings(s)
         setRollup(r)
-        setQbActionsEnabled(qbEnabled)
       } catch {
         // ignore
       } finally {
@@ -112,43 +101,6 @@ export default function SalesDashboardPage() {
     }
     void run()
   }, [])
-
-  const runQbPull = async (
-    url: string,
-    singular: string,
-    plural: string,
-    extractCount: (json: any) => number,
-  ) => {
-    setQbBusy(true)
-    setQbActionMessage(null)
-    try {
-      const res = await apiFetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ days: 7 }),
-      })
-      const json = await res.json().catch(() => null)
-      if (res.ok) {
-        const count = extractCount(json)
-        const text =
-          count === 0
-            ? `No ${plural} to pull`
-            : count === 1
-            ? `Successfully pulled 1 ${singular}`
-            : `Successfully pulled ${count} ${plural}`
-        setQbActionMessage({ text, isError: false })
-        setTick((v) => v + 1)
-      } else {
-        const errText = typeof (json as any)?.error === 'string' ? (json as any).error : `Pull failed (${res.status}).`
-        setQbActionMessage({ text: errText, isError: true })
-      }
-    } catch (e) {
-      setQbActionMessage({ text: `Pull failed: ${e instanceof Error ? e.message : String(e)}`, isError: true })
-    } finally {
-      setQbBusy(false)
-      setTimeout(() => setQbActionMessage(null), 3000)
-    }
-  }
 
   const stats = useMemo(() => {
     return rollup?.stats ?? {
@@ -357,65 +309,6 @@ export default function SalesDashboardPage() {
       </Card>
 
       <SalesDashboardCharts rollup={rollup} settings={settings} nowIso={nowIso} />
-
-      {qbActionsEnabled && (
-        <Card>
-          <CardContent className="p-4 sm:p-5">
-            <div className="flex flex-col items-center sm:flex-row sm:justify-center gap-3">
-              <p className="text-base font-semibold">QuickBooks Actions</p>
-              <div className="grid grid-cols-2 sm:flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={qbBusy}
-                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/customers', 'client', 'clients', (j) => (j?.created ?? 0))}
-                >
-                  <Building2 className="w-3.5 h-3.5" />
-                  {qbBusy ? 'Working…' : 'Pull Clients'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={qbBusy}
-                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/quotes', 'quote', 'quotes', (j) => (j?.stored?.created ?? 0))}
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  {qbBusy ? 'Working…' : 'Pull Quotes'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={qbBusy}
-                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/invoices', 'invoice', 'invoices', (j) => (j?.stored?.created ?? 0))}
-                >
-                  <Receipt className="w-3.5 h-3.5" />
-                  {qbBusy ? 'Working…' : 'Pull Invoices'}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={qbBusy}
-                  onClick={() => void runQbPull('/api/sales/quickbooks/pull/payments', 'payment', 'payments', (j) => (j?.stored?.created ?? 0))}
-                >
-                  <DollarSign className="w-3.5 h-3.5" />
-                  {qbBusy ? 'Working…' : 'Pull Payments'}
-                </Button>
-              </div>
-            </div>
-            {qbActionMessage && (
-              <div className={`mt-3 p-3 sm:p-4 rounded-lg border-2 ${
-                qbActionMessage.isError
-                  ? 'bg-destructive-visible border-destructive-visible'
-                  : 'bg-success-visible border-success-visible'
-              }`}>
-                <p className={`text-xs sm:text-sm font-medium ${
-                  qbActionMessage.isError ? 'text-destructive' : 'text-success'
-                }`}>{qbActionMessage.text}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         <Card>
