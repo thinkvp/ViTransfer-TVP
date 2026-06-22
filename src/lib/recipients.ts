@@ -30,7 +30,7 @@ export async function getProjectRecipients(projectId: string): Promise<Recipient
 
   return recipients.map(r => ({
     id: r.id,
-    clientRecipientId: (r as any).clientRecipientId ?? null,
+    clientRecipientId: r.clientRecipientId ?? null,
     email: r.email,
     name: r.name,
     displayColor: r.displayColor,
@@ -153,9 +153,9 @@ export async function addRecipient(
                 isPrimary: false,
                 receiveNotifications: true,
                 receiveSalesReminders: true,
-              } as any,
+              },
               select: { id: true },
-            } as any)
+            })
             resolvedClientRecipientId = created?.id ? String(created.id) : null
           }
         }
@@ -170,7 +170,7 @@ export async function addRecipient(
         name,
         isPrimary,
         displayColor: normalizedColor ?? generateRandomHexDisplayColor(),
-      } as any,
+      },
     })
 
     // Keep client recipient fields in sync when linked.
@@ -182,9 +182,9 @@ export async function addRecipient(
             ...(email ? { email: normalizeEmail(email) } : {}),
             ...(name !== null && name !== undefined ? { name } : {}),
             ...(Object.prototype.hasOwnProperty.call(createdProjectRecipient, 'displayColor')
-              ? { displayColor: (createdProjectRecipient as any).displayColor ?? null }
+              ? { displayColor: createdProjectRecipient.displayColor ?? null }
               : {}),
-          } as any,
+          },
         })
       } catch {
         // ignore
@@ -196,7 +196,7 @@ export async function addRecipient(
 
   return {
     id: recipient.id,
-    clientRecipientId: (recipient as any).clientRecipientId ?? null,
+    clientRecipientId: recipient.clientRecipientId ?? null,
     email: recipient.email,
     name: recipient.name,
     displayColor: recipient.displayColor,
@@ -253,12 +253,12 @@ export async function updateRecipient(
   // Keep linked client recipient in sync (strong linkage via clientRecipientId).
   try {
     const project = await prisma.project.findUnique({
-      where: { id: (recipient as any).projectId },
+      where: { id: recipient.projectId },
       select: { clientId: true },
     })
     const clientId = project?.clientId ?? null
     if (clientId) {
-      let linkedId: string | null = (recipient as any).clientRecipientId ?? null
+      let linkedId: string | null = recipient.clientRecipientId ?? null
 
       // Allow explicitly setting/clearing linkage.
       if (Object.prototype.hasOwnProperty.call(updateData, 'clientRecipientId')) {
@@ -274,13 +274,13 @@ export async function updateRecipient(
 
         await prisma.projectRecipient.update({
           where: { id: recipientId },
-          data: { clientRecipientId: linkedId } as any,
+          data: { clientRecipientId: linkedId },
         })
       }
 
       // If not linked but email exists, auto-link to a matching client recipient.
       if (!linkedId) {
-        const emailKey = normalizeEmail((recipient as any).email)
+        const emailKey = normalizeEmail(recipient.email)
         if (emailKey) {
           const existing = await prisma.clientRecipient.findFirst({
             where: { clientId, email: emailKey },
@@ -290,7 +290,7 @@ export async function updateRecipient(
             linkedId = existing.id
             await prisma.projectRecipient.update({
               where: { id: recipientId },
-              data: { clientRecipientId: linkedId } as any,
+              data: { clientRecipientId: linkedId },
             })
           }
         }
@@ -299,14 +299,14 @@ export async function updateRecipient(
       if (linkedId) {
         const nextEmail = Object.prototype.hasOwnProperty.call(updateData, 'email')
           ? (updateData.email ? normalizeEmail(updateData.email) : null)
-          : normalizeEmail((recipient as any).email)
+          : normalizeEmail(recipient.email)
 
         const nextName = Object.prototype.hasOwnProperty.call(updateData, 'name')
           ? (updateData.name ?? null)
-          : ((recipient as any).name ?? null)
+          : (recipient.name ?? null)
 
         const nextColor = Object.prototype.hasOwnProperty.call(updateData, 'displayColor')
-          ? ((recipient as any).displayColor ?? null)
+          ? (recipient.displayColor ?? null)
           : undefined
 
         await prisma.clientRecipient.update({
@@ -315,7 +315,7 @@ export async function updateRecipient(
             ...(Object.prototype.hasOwnProperty.call(updateData, 'email') ? { email: nextEmail } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'name') ? { name: nextName } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'displayColor') ? { displayColor: nextColor } : {}),
-          } as any,
+          },
         }).catch(() => null)
 
         // Update all project recipients that link to the same client recipient.
@@ -325,7 +325,7 @@ export async function updateRecipient(
             ...(Object.prototype.hasOwnProperty.call(updateData, 'email') ? { email: nextEmail } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'name') ? { name: nextName } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'displayColor') ? { displayColor: nextColor } : {}),
-          } as any,
+          },
         }).catch(() => null)
       }
     }
@@ -335,7 +335,7 @@ export async function updateRecipient(
 
   return {
     id: recipient.id,
-    clientRecipientId: (recipient as any).clientRecipientId ?? null,
+    clientRecipientId: recipient.clientRecipientId ?? null,
     email: recipient.email,
     name: recipient.name,
     displayColor: recipient.displayColor,

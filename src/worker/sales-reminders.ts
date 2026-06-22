@@ -126,20 +126,20 @@ function firstCurrencyFromCsv(value: unknown, fallback: string = 'AUD'): string 
 }
 
 function invoiceTotalCents(inv: SalesInvoice, settings: SalesSettings): number {
-  const invTaxEnabled = typeof (inv as any)?.taxEnabled === 'boolean' ? (inv as any).taxEnabled : true
-  const taxRatePercent = Number((settings as any)?.taxRatePercent)
+  const invTaxEnabled = typeof inv?.taxEnabled === 'boolean' ? inv.taxEnabled : true
+  const taxRatePercent = Number(settings?.taxRatePercent)
   const rate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
-  const subtotal = sumLineItemsSubtotal(Array.isArray((inv as any)?.items) ? (inv as any).items : [])
-  const tax = invTaxEnabled ? sumLineItemsTax(Array.isArray((inv as any)?.items) ? (inv as any).items : [], rate) : 0
+  const subtotal = sumLineItemsSubtotal(Array.isArray(inv?.items) ? inv.items : [])
+  const tax = invTaxEnabled ? sumLineItemsTax(Array.isArray(inv?.items) ? inv.items : [], rate) : 0
   return subtotal + tax
 }
 
 function quoteTotalCents(q: SalesQuote, settings: SalesSettings): number {
-  const qTaxEnabled = typeof (q as any)?.taxEnabled === 'boolean' ? (q as any).taxEnabled : true
-  const taxRatePercent = Number((settings as any)?.taxRatePercent)
+  const qTaxEnabled = typeof q?.taxEnabled === 'boolean' ? q.taxEnabled : true
+  const taxRatePercent = Number(settings?.taxRatePercent)
   const rate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
-  const subtotal = sumLineItemsSubtotal(Array.isArray((q as any)?.items) ? (q as any).items : [])
-  const tax = qTaxEnabled ? sumLineItemsTax(Array.isArray((q as any)?.items) ? (q as any).items : [], rate) : 0
+  const subtotal = sumLineItemsSubtotal(Array.isArray(q?.items) ? q.items : [])
+  const tax = qTaxEnabled ? sumLineItemsTax(Array.isArray(q?.items) ? q.items : [], rate) : 0
   return subtotal + tax
 }
 
@@ -234,11 +234,11 @@ export async function processSalesReminders() {
 
   const stripePaidByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
   for (const p of stripePayments) {
-    const id = (p as any)?.invoiceDocId
-    const amount = Number((p as any)?.invoiceAmountCents)
+    const id = p?.invoiceDocId
+    const amount = Number(p?.invoiceAmountCents)
     if (typeof id !== 'string' || !id.trim() || !Number.isFinite(amount)) continue
     const paidCents = Math.max(0, Math.trunc(amount))
-    const createdIso = typeof (p as any)?.createdAt === 'string' ? (p as any).createdAt : (p as any)?.createdAt?.toISOString?.()
+    const createdIso = typeof p?.createdAt === 'string' ? p.createdAt : p?.createdAt?.toISOString?.()
     const ymd = typeof createdIso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(createdIso) ? createdIso.slice(0, 10) : null
 
     const base = stripePaidByInvoiceId[id] ?? { paidCents: 0, latestYmd: null }
@@ -260,12 +260,12 @@ export async function processSalesReminders() {
 
   const manualPaidByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
   for (const p of salesPayments) {
-    const id = (p as any)?.invoiceId
-    const amount = Number((p as any)?.amountCents)
+    const id = p?.invoiceId
+    const amount = Number(p?.amountCents)
     if (typeof id !== 'string' || !id.trim() || !Number.isFinite(amount)) continue
     const paidCents = Math.max(0, Math.trunc(amount))
-    const ymd = typeof (p as any)?.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test((p as any).paymentDate)
-      ? (p as any).paymentDate
+    const ymd = typeof p?.paymentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.paymentDate)
+      ? p.paymentDate
       : null
 
     const base = manualPaidByInvoiceId[id] ?? { paidCents: 0, latestYmd: null }

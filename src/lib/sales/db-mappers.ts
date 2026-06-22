@@ -80,6 +80,14 @@ export type DbSalesSettings = {
   defaultInvoiceDueDays: number
   defaultTerms: string
   paymentDetails: string
+  businessRegistrationLabel?: string | null
+  currencyCode?: string | null
+  fiscalYearStartMonth?: number | null
+  quoteLabel?: string | null
+  invoiceLabel?: string | null
+  taxLabel?: string | null
+  taxEnabled?: boolean
+  defaultIncomeAccountId?: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -106,7 +114,7 @@ export function salesQuoteFromDb(row: DbSalesQuote): SalesQuoteWithVersion {
     sentAt: row.sentAt ? iso(row.sentAt) : null,
     remindersEnabled: row.remindersEnabled,
     lastExpiryReminderSentYmd: row.lastExpiryReminderSentYmd,
-    taxEnabled: typeof (row as any).taxEnabled === 'boolean' ? (row as any).taxEnabled : true,
+    taxEnabled: typeof row.taxEnabled === 'boolean' ? row.taxEnabled : true,
     version: Number.isFinite(Number(row.version)) ? Math.max(1, Math.trunc(Number(row.version))) : 1,
   }
 }
@@ -128,7 +136,7 @@ export function salesInvoiceFromDb(row: DbSalesInvoice): SalesInvoiceWithVersion
     sentAt: row.sentAt ? iso(row.sentAt) : null,
     remindersEnabled: row.remindersEnabled,
     lastOverdueReminderSentYmd: row.lastOverdueReminderSentYmd,
-    taxEnabled: typeof (row as any).taxEnabled === 'boolean' ? (row as any).taxEnabled : true,
+    taxEnabled: typeof row.taxEnabled === 'boolean' ? row.taxEnabled : true,
     version: Number.isFinite(Number(row.version)) ? Math.max(1, Math.trunc(Number(row.version))) : 1,
   }
 }
@@ -142,7 +150,7 @@ export function salesPaymentFromDb(row: DbSalesPayment): SalesPaymentWithMeta {
     reference: row.reference ?? '',
     clientId: row.clientId,
     invoiceId: row.invoiceId,
-    excludeFromInvoiceBalance: Boolean((row as any).excludeFromInvoiceBalance),
+    excludeFromInvoiceBalance: Boolean(row.excludeFromInvoiceBalance),
     createdAt: iso(row.createdAt),
     updatedAt: iso(row.updatedAt),
     source: typeof row.source === 'string' ? row.source : undefined,
@@ -157,21 +165,21 @@ export function salesSettingsFromDb(row: DbSalesSettings): SalesSettings {
     phone: row.phone ?? '',
     email: row.email ?? '',
     website: row.website ?? '',
-    businessRegistrationLabel: (row as any).businessRegistrationLabel ?? 'ABN',
-    currencyCode: (row as any).currencyCode ?? 'AUD',
-    fiscalYearStartMonth: Number((row as any).fiscalYearStartMonth ?? 7),
-    quoteLabel: (row as any).quoteLabel ?? 'QUOTE',
-    invoiceLabel: (row as any).invoiceLabel ?? 'INVOICE',
-    taxLabel: (row as any).taxLabel ?? '',
-    taxEnabled: typeof (row as any).taxEnabled === 'boolean' ? (row as any).taxEnabled : true,
-    dashboardReportingBasis: (row as any).dashboardReportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL',
-    dashboardAmountsIncludeGst: typeof (row as any).dashboardAmountsIncludeGst === 'boolean' ? (row as any).dashboardAmountsIncludeGst : true,
+    businessRegistrationLabel: row.businessRegistrationLabel ?? 'ABN',
+    currencyCode: row.currencyCode ?? 'AUD',
+    fiscalYearStartMonth: Number(row.fiscalYearStartMonth ?? 7),
+    quoteLabel: row.quoteLabel ?? 'QUOTE',
+    invoiceLabel: row.invoiceLabel ?? 'INVOICE',
+    taxLabel: row.taxLabel ?? '',
+    taxEnabled: typeof row.taxEnabled === 'boolean' ? row.taxEnabled : true,
+    dashboardReportingBasis: row.dashboardReportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL',
+    dashboardAmountsIncludeGst: typeof row.dashboardAmountsIncludeGst === 'boolean' ? row.dashboardAmountsIncludeGst : true,
     taxRatePercent: Number(row.taxRatePercent ?? 10),
     defaultQuoteValidDays: Number(row.defaultQuoteValidDays ?? 14),
     defaultInvoiceDueDays: Number(row.defaultInvoiceDueDays ?? 7),
     defaultTerms: row.defaultTerms ?? 'Payment due within 7 days unless otherwise agreed.',
     paymentDetails: row.paymentDetails ?? '',
-    defaultIncomeAccountId: (row as any).defaultIncomeAccountId ?? null,
+    defaultIncomeAccountId: row.defaultIncomeAccountId ?? null,
     updatedAt: iso(row.updatedAt),
   }
 }
