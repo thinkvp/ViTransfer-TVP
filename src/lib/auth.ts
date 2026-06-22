@@ -418,11 +418,6 @@ export async function requireApiUser(request: NextRequest): Promise<AuthUser | R
   return user
 }
 
-/** @deprecated Use requireApiUser() — this function does NOT check admin privileges. */
-export async function requireApiAdmin(request: NextRequest): Promise<AuthUser | Response> {
-  return requireApiUser(request)
-}
-
 // RBAC-era naming: prefer these helpers going forward.
 export async function requireApiSystemAdmin(request: NextRequest): Promise<AuthUser | Response> {
   const user = await requireApiUser(request)

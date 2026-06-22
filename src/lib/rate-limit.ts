@@ -338,11 +338,6 @@ export async function clearAllRateLimitLockouts(): Promise<number> {
   }
 }
 
-/** @deprecated Use clearAllRateLimitLockouts() — see docstring for why. */
-export async function unblockIpAddress(_ipAddress: string): Promise<number> {
-  return clearAllRateLimitLockouts()
-}
-
 /**
  * Get all currently rate-limited IPs
  * Note: Since IPs are hashed in keys, we can only return lockout info

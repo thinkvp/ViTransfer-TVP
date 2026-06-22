@@ -183,18 +183,3 @@ ${sectionHtml}
 <div style="margin-top:20px;font-size:9px;color:#999;">Generated ${esc(formatDate(new Date()))}</div>
 </body></html>`
 }
-
-/** @deprecated Use generateReportPdf for proper formatted reports */
-export function downloadPdf(title: string) {
-  const style = document.createElement('style')
-  style.textContent = `
-    @media print {
-      nav, header, [data-no-print], button, .no-print { display: none !important; }
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-  `
-  document.head.appendChild(style)
-  document.title = title
-  window.print()
-  document.head.removeChild(style)
-}
