@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Comment, Video } from '@prisma/client'
+import type { Comment } from '@prisma/client'
+import type { Video } from '@/types/video'
 import { useRouter } from 'next/navigation'
 import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
 import { secondsToTimecode } from '@/lib/timecode'

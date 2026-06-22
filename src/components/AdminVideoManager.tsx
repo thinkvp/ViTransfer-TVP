@@ -77,6 +77,25 @@ export default function AdminVideoManager({
 
   // Reprocess state per video group
   const [reprocessingGroups, setReprocessingGroups] = useState<Set<string>>(new Set())
+  // Reprocess confirmation modal
+  const [reprocessConfirm, setReprocessConfirm] = useState<{ groupName: string; videoIds: string[] } | null>(null)
+
+  const runReprocess = async (groupName: string, videoIds: string[]) => {
+    setReprocessingGroups((prev) => new Set(prev).add(groupName))
+    try {
+      await apiPost(`/api/projects/${projectId}/reprocess-previews`, { videoIds })
+      toast.success(`Queued ${videoIds.length} video(s) for reprocessing`)
+      onRefresh?.()
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to reprocess videos')
+    } finally {
+      setReprocessingGroups((prev) => {
+        const next = new Set(prev)
+        next.delete(groupName)
+        return next
+      })
+    }
+  }
 
   // Poster thumbnails for the latest version of each group. Tokens are minted in one
   // batch request and served via /api/content/<token>; we cache per-video so list
@@ -273,24 +292,11 @@ export default function AdminVideoManager({
                     : 'text-primary'
                   const thumbUrl = thumbUrlByVideoId[latestVideo.id]
 
-                  const handleReprocess = async (e: React.MouseEvent) => {
+                  const handleReprocess = (e: React.MouseEvent) => {
                     e.stopPropagation()
                     if (!canReprocess || isReprocessing) return
                     const videoIds = groupVideos.map((v: any) => v.id)
-                    setReprocessingGroups((prev) => new Set(prev).add(groupName))
-                    try {
-                      await apiPost(`/api/projects/${projectId}/reprocess-previews`, { videoIds })
-                      toast.success(`Queued ${videoIds.length} video(s) for reprocessing`)
-                      onRefresh?.()
-                    } catch (err: any) {
-                      toast.error(err?.message || 'Failed to reprocess videos')
-                    } finally {
-                      setReprocessingGroups((prev) => {
-                        const next = new Set(prev)
-                        next.delete(groupName)
-                        return next
-                      })
-                    }
+                    setReprocessConfirm({ groupName, videoIds })
                   }
 
                   return (
@@ -551,6 +557,22 @@ export default function AdminVideoManager({
         }
       }}
       onCancel={() => setRenameConfirmGroup(null)}
+    />
+
+    <ConfirmDialog
+      open={reprocessConfirm !== null}
+      onOpenChange={(v) => { if (!v) setReprocessConfirm(null) }}
+      title="Reprocess Previews?"
+      description={`This will re-generate previews for ${reprocessConfirm?.videoIds.length ?? 0} video version(s). It runs as a background job — you can track progress in the Running Jobs indicator.`}
+      confirmLabel="Reprocess"
+      variant="default"
+      onConfirm={async () => {
+        if (!reprocessConfirm) return
+        const { groupName, videoIds } = reprocessConfirm
+        setReprocessConfirm(null)
+        await runReprocess(groupName, videoIds)
+      }}
+      onCancel={() => setReprocessConfirm(null)}
     />
   </>
   )

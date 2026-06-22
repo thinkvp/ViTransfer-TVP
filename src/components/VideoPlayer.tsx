@@ -3,8 +3,8 @@
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import Image from 'next/image'
+import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
-type Video = any
 type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings, Loader2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
@@ -471,16 +471,16 @@ export default function VideoPlayer({
   const selectedVideo = displayVideos[safeIndex >= 0 ? safeIndex : 0]
 
   const effectiveDurationSeconds =
-    durationSeconds || ((selectedVideo as any)?.duration as number | undefined) || 0
+    durationSeconds || (selectedVideo?.duration as number | undefined) || 0
 
-  const effectiveFps = (selectedVideo as any)?.fps as number | undefined
+  const effectiveFps = selectedVideo?.fps as number | undefined
 
-  const selectedVideoWidth = (selectedVideo as any)?.width as number | undefined
-  const selectedVideoHeight = (selectedVideo as any)?.height as number | undefined
+  const selectedVideoWidth = selectedVideo?.width as number | undefined
+  const selectedVideoHeight = selectedVideo?.height as number | undefined
 
-  const selectedVideoTimelineVttUrl = (selectedVideo as any)?.timelineVttUrl as string | null | undefined
-  const selectedVideoTimelineSpriteUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
-  const selectedVideoTimelinePreviewsReady = (selectedVideo as any)?.timelinePreviewsReady === true
+  const selectedVideoTimelineVttUrl = selectedVideo?.timelineVttUrl as string | null | undefined
+  const selectedVideoTimelineSpriteUrl = selectedVideo?.timelineSpriteUrl as string | null | undefined
+  const selectedVideoTimelinePreviewsReady = selectedVideo?.timelinePreviewsReady === true
 
   const desktopOffsetPx =
     typeof viewportHeightOffsetPx === 'number' && Number.isFinite(viewportHeightOffsetPx)
@@ -546,7 +546,7 @@ export default function VideoPlayer({
       return [] as Array<{ id: string; seconds: number; timecodeEndSeconds: number | null; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }>
     }
 
-    const fps = (selectedVideo as any)?.fps || 24
+    const fps = selectedVideo?.fps || 24
 
     const markers: Array<{ id: string; seconds: number; timecodeEndSeconds: number | null; isInternal: boolean; replyCount: number; displayColor?: string | null; authorName?: string | null; authorEmail?: string | null; avatarUrl?: string | null }> = []
     // Only show markers for top-level comments.
@@ -935,14 +935,14 @@ export default function VideoPlayer({
 
 
   // Safety check: ensure selectedVideo exists before accessing properties
-  const isVideoApproved = selectedVideo ? (selectedVideo as any).approved === true : false
+  const isVideoApproved = selectedVideo ? selectedVideo.approved === true : false
   const isProjectApproved = projectStatus === 'APPROVED' || projectStatus === 'SHARE_ONLY'
-  const approvedDownloadUrl = (selectedVideo as any)?.downloadUrl as string | null | undefined
+  const approvedDownloadUrl = selectedVideo?.downloadUrl as string | null | undefined
   const canShowApprovedDownload =
     !hideDownloadButton && !isAdmin && !isGuest && isVideoApproved && Boolean(approvedDownloadUrl)
 
-  const approvedVideoName = String((selectedVideo as any)?.name || 'Video')
-  const approvedVideoVersionLabel = String((selectedVideo as any)?.versionLabel || (selectedVideo as any)?.version || '')
+  const approvedVideoName = String(selectedVideo?.name || 'Video')
+  const approvedVideoVersionLabel = String(selectedVideo?.versionLabel || selectedVideo?.version || '')
 
   const handleApprovedDownloadClick = async () => {
     const video = selectedVideo
@@ -958,7 +958,7 @@ export default function VideoPlayer({
         return
       }
 
-      const folderName = String((video as any)?.versionLabel || (video as any)?.name || '').trim()
+      const folderName = String(video?.versionLabel || video?.name || '').trim()
       if (!folderName) return
 
       window.dispatchEvent(
@@ -983,9 +983,9 @@ export default function VideoPlayer({
   const availableQualities = useMemo(() => {
     if (!selectedVideo) return [] as ('480p' | '720p' | '1080p')[]
     const q: ('480p' | '720p' | '1080p')[] = []
-    if ((selectedVideo as any).streamUrl480p) q.push('480p')
-    if ((selectedVideo as any).streamUrl720p) q.push('720p')
-    if ((selectedVideo as any).streamUrl1080p) q.push('1080p')
+    if (selectedVideo.streamUrl480p) q.push('480p')
+    if (selectedVideo.streamUrl720p) q.push('720p')
+    if (selectedVideo.streamUrl1080p) q.push('1080p')
     return q
   }, [selectedVideo])
 
@@ -994,11 +994,11 @@ export default function VideoPlayer({
   const hasOriginalOnly = useMemo(() => {
     if (!selectedVideo) return false
     const hasPreviews = !!(
-      (selectedVideo as any).streamUrl480p ||
-      (selectedVideo as any).streamUrl720p ||
-      (selectedVideo as any).streamUrl1080p
+      selectedVideo.streamUrl480p ||
+      selectedVideo.streamUrl720p ||
+      selectedVideo.streamUrl1080p
     )
-    return !hasPreviews && !!(selectedVideo as any).streamUrlOriginal
+    return !hasPreviews && !!selectedVideo.streamUrlOriginal
   }, [selectedVideo])
 
   const showQualitySelector = availableQualities.length > 1 || hasOriginalOnly
@@ -1157,11 +1157,11 @@ export default function VideoPlayer({
         let url: string | undefined
 
         if (effectiveQuality === '1080p') {
-          url = (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrlOriginal
+          url = selectedVideo.streamUrl1080p || selectedVideo.streamUrl720p || selectedVideo.streamUrl480p || selectedVideo.streamUrlOriginal
         } else if (effectiveQuality === '480p') {
-          url = (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrlOriginal
+          url = selectedVideo.streamUrl480p || selectedVideo.streamUrl720p || selectedVideo.streamUrl1080p || selectedVideo.streamUrlOriginal
         } else {
-          url = (selectedVideo as any).streamUrl720p || (selectedVideo as any).streamUrl1080p || (selectedVideo as any).streamUrl480p || (selectedVideo as any).streamUrlOriginal
+          url = selectedVideo.streamUrl720p || selectedVideo.streamUrl1080p || selectedVideo.streamUrl480p || selectedVideo.streamUrlOriginal
         }
 
         if (url) {
@@ -1261,7 +1261,7 @@ export default function VideoPlayer({
 
   const getTimeFromScrubEvent = (clientX: number) => {
     const el = scrubBarRef.current
-    const duration = (videoRef.current?.duration || durationSeconds || (selectedVideo as any)?.duration || 0) as number
+    const duration = (videoRef.current?.duration || durationSeconds || selectedVideo?.duration || 0) as number
     if (!el || !duration || duration <= 0) return { time: 0, left: 0, width: 0 }
     const rect = el.getBoundingClientRect()
     const x = Math.min(Math.max(clientX - rect.left, 0), rect.width)
@@ -1297,8 +1297,8 @@ export default function VideoPlayer({
       return null as number | null
     }
 
-    const spriteBaseUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
-    const duration = (videoRef.current?.duration || durationSeconds || (selectedVideo as any)?.duration || 0) as number
+    const spriteBaseUrl = selectedVideo?.timelineSpriteUrl as string | null | undefined
+    const duration = (videoRef.current?.duration || durationSeconds || selectedVideo?.duration || 0) as number
     const el = scrubBarRef.current
 
     if (!el || !duration || duration <= 0 || !spriteBaseUrl || timelineCues.length === 0) {
@@ -1343,7 +1343,7 @@ export default function VideoPlayer({
       return
     }
 
-    const spriteBaseUrl = (selectedVideo as any)?.timelineSpriteUrl as string | null | undefined
+    const spriteBaseUrl = selectedVideo?.timelineSpriteUrl as string | null | undefined
     if (!spriteBaseUrl || timelineCues.length === 0) {
       setTimelineHover((prev) => ({ ...prev, visible: false }))
       return
@@ -2018,13 +2018,13 @@ export default function VideoPlayer({
                 // poster on first load. Only suppress it when an autoplay request is pending
                 // for this video (responsive/mobile folder click) so it never flashes before
                 // the first frame. Desktop keeps the poster until the user presses play.
-                poster={autoPlayRequestRef.current === (selectedVideo as any)?.id ? undefined : ((selectedVideo as any).thumbnailUrl || undefined)}
+                poster={autoPlayRequestRef.current === selectedVideo?.id ? undefined : (selectedVideo.thumbnailUrl || undefined)}
                 className="w-full h-full"
                 onTimeUpdate={handleTimeUpdate}
                 onCanPlay={(e) => {
                   // Fulfil a pending folder-click autoplay request as soon as the new
                   // source can play, seeking to the requested time first (usually 0).
-                  if (autoPlayRequestRef.current && autoPlayRequestRef.current === (selectedVideo as any)?.id) {
+                  if (autoPlayRequestRef.current && autoPlayRequestRef.current === selectedVideo?.id) {
                     autoPlayRequestRef.current = null
                     const el = e.currentTarget
                     const seek = autoPlaySeekRef.current || 0
@@ -2043,7 +2043,7 @@ export default function VideoPlayer({
                   // A failed source (commonly an expired /api/content stream token) leaves the
                   // element unplayable even on a manual retry. Ask the parent to re-mint tokens,
                   // but only once per source to avoid an error→refresh→error loop.
-                  const vid = (selectedVideo as any)?.id
+                  const vid = selectedVideo?.id
                   if (!vid || !videoUrl) return
                   if (streamErrorRecoveryRef.current === vid) return
                   streamErrorRecoveryRef.current = vid
@@ -2054,7 +2054,7 @@ export default function VideoPlayer({
 
                   // Source loaded successfully — clear any pending recovery latch so a future
                   // failure can trigger another refresh.
-                  if (streamErrorRecoveryRef.current === (selectedVideo as any)?.id) {
+                  if (streamErrorRecoveryRef.current === selectedVideo?.id) {
                     streamErrorRecoveryRef.current = null
                   }
 
@@ -2089,7 +2089,7 @@ export default function VideoPlayer({
                   try {
                     if (isAdmin) return
                     if (!shareToken) return
-                    const videoId = (selectedVideo as any)?.id
+                    const videoId = selectedVideo?.id
                     if (!videoId) return
                     void fetch('/api/track/video-view', {
                       method: 'POST',
@@ -2124,10 +2124,10 @@ export default function VideoPlayer({
               </div>
             )}
 
-            {showPosterOverlay && (selectedVideo as any)?.thumbnailUrl ? (
+            {showPosterOverlay && selectedVideo?.thumbnailUrl ? (
               <Image
                 alt="Video thumbnail"
-                src={(selectedVideo as any).thumbnailUrl}
+                src={selectedVideo.thumbnailUrl}
                 fill
                 unoptimized
                 className="absolute inset-0 w-full h-full pointer-events-none"

@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
-type Video = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { CheckCircle2, Info, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
@@ -599,11 +599,11 @@ export function CommentSectionView({
     localApprovedVideoId && videos.some(v => v.id === localApprovedVideoId)
   )
   const isCurrentVideoApproved = currentVideo
-    ? (currentVideo as any).approved === true || currentVideo.id === localApprovedVideoId
+    ? currentVideo.approved === true || currentVideo.id === localApprovedVideoId
     : false
   // Check if ANY video in the group is approved (for admin view with multiple versions)
-  const hasAnyApprovedVideo = videos.some(v => (v as any).approved === true) || hasLocallyApprovedVideoInGroup
-  const approvedVideo = videos.find(v => (v as any).approved === true) || videos.find(v => v.id === localApprovedVideoId)
+  const hasAnyApprovedVideo = videos.some(v => v.approved === true) || hasLocallyApprovedVideoInGroup
+  const approvedVideo = videos.find(v => v.approved === true) || videos.find(v => v.id === localApprovedVideoId)
   // Project is approved but this specific video is NOT individually approved
   const isProjectApprovedOnly = isApproved && !isCurrentVideoApproved && !hasAnyApprovedVideo && !hasLocallyApprovedVideoInGroup
   const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || hasLocallyApprovedVideoInGroup
@@ -828,9 +828,9 @@ export function CommentSectionView({
     window.dispatchEvent(new CustomEvent('openShortcutsDialog'))
   }
 
-  const hasAnyApprovedVideoInGroup = videos.some(v => (v as any).approved === true) || hasLocallyApprovedVideoInGroup
+  const hasAnyApprovedVideoInGroup = videos.some(v => v.approved === true) || hasLocallyApprovedVideoInGroup
   const selectableVideos = hasAnyApprovedVideoInGroup
-    ? videos.filter(v => (v as any).approved === true || v.id === localApprovedVideoId)
+    ? videos.filter(v => v.approved === true || v.id === localApprovedVideoId)
     : videos
 
   const sortedVideoVersions = useMemo(() => {
@@ -846,11 +846,11 @@ export function CommentSectionView({
 
   const latestSelectableVideo = sortedVideoVersions[0] || null
   const headerVideo = currentVideo || latestSelectableVideo
-  const headerVideoName = headerVideo ? (headerVideo as any).name : 'Video'
-  const headerVideoNotes = String((headerVideo as any)?.videoNotes || '').trim()
+  const headerVideoName = headerVideo ? headerVideo.name : 'Video'
+  const headerVideoNotes = String(headerVideo?.videoNotes || '').trim()
   const isHeaderVideoLocallyApproved = Boolean(headerVideo?.id && localApprovedVideoId === headerVideo.id)
-  const approvalEnabledForHeaderVideo = Boolean((headerVideo as any)?.allowApproval)
-  const headerVideoFileSizeBytes = parseVideoFileSize((headerVideo as any)?.originalFileSize)
+  const approvalEnabledForHeaderVideo = Boolean(headerVideo?.allowApproval)
+  const headerVideoFileSizeBytes = parseVideoFileSize(headerVideo?.originalFileSize)
 
   const showOlderVersionNote = Boolean(
     !restrictToLatestVersion &&
@@ -874,9 +874,9 @@ export function CommentSectionView({
   const handleDownloadSelected = () => {
     const video = headerVideo
     if (!video) return
-    if (!(video as any).approved && !isApproved && !isHeaderVideoLocallyApproved) return
+    if (!video.approved && !isApproved && !isHeaderVideoLocallyApproved) return
 
-    const folderName = String((video as any)?.name || headerVideoName || '').trim()
+    const folderName = String(video?.name || headerVideoName || '').trim()
     window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
       detail: { folderName },
     }))
@@ -925,7 +925,7 @@ export function CommentSectionView({
       // appear without waiting for the async prop-refresh chain.
       setLocalApprovedVideoId(video.id)
       if (!isAdminView) {
-        const folderName = String((video as any)?.name || headerVideoName || '').trim()
+        const folderName = String(video?.name || headerVideoName || '').trim()
         window.dispatchEvent(new CustomEvent('shareOpenFilesForVideo', {
           detail: { folderName },
         }))
@@ -1030,7 +1030,7 @@ export function CommentSectionView({
             <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="flex-shrink-0">Version:</span>
               <span className="text-foreground font-medium">
-                {(headerVideo as any)?.versionLabel || '—'}
+                {headerVideo?.versionLabel || '—'}
               </span>
               {showVideoActions ? (
                 <Button
@@ -1159,7 +1159,7 @@ export function CommentSectionView({
                           <div className="space-y-3 text-xs sm:text-sm">
                             <div className="flex flex-col gap-1">
                               <span className="text-muted-foreground">Filename:</span>
-                              <span className="font-medium break-all text-xs sm:text-sm">{(headerVideo as any).originalFileName}</span>
+                              <span className="font-medium break-all text-xs sm:text-sm">{headerVideo.originalFileName}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">File Size:</span>
@@ -1167,23 +1167,23 @@ export function CommentSectionView({
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Resolution:</span>
-                              <span className="font-medium">{(headerVideo as any).width}x{(headerVideo as any).height}</span>
+                              <span className="font-medium">{headerVideo.width}x{headerVideo.height}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Codec:</span>
-                              <span className="font-medium">{(headerVideo as any).codec || 'N/A'}</span>
+                              <span className="font-medium">{headerVideo.codec || 'N/A'}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Duration:</span>
-                              <span className="font-medium">{formatTimestamp((headerVideo as any).duration)}</span>
+                              <span className="font-medium">{formatTimestamp(headerVideo.duration)}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">FPS:</span>
-                              <span className="font-medium">{(headerVideo as any).fps ? Number((headerVideo as any).fps).toFixed(2) : 'N/A'}</span>
+                              <span className="font-medium">{headerVideo.fps ? Number(headerVideo.fps).toFixed(2) : 'N/A'}</span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-muted-foreground">Upload Date:</span>
-                              <span className="font-medium">{formatDate((headerVideo as any).createdAt)}</span>
+                              <span className="font-medium">{headerVideo.createdAt ? formatDate(headerVideo.createdAt) : '—'}</span>
                             </div>
 
                           </div>
@@ -1205,7 +1205,7 @@ export function CommentSectionView({
               <DialogTitle>Approve Video</DialogTitle>
               <DialogDescription>
                 {headerVideo
-                  ? `Approve ${(headerVideo as any).versionLabel || 'this version'} for ${headerVideoName}? This will lock further feedback and make it downloadable.`
+                  ? `Approve ${headerVideo.versionLabel || 'this version'} for ${headerVideoName}? This will lock further feedback and make it downloadable.`
                   : 'Approve this version? This will lock further feedback and make it downloadable.'}
               </DialogDescription>
             </DialogHeader>
@@ -1265,7 +1265,7 @@ export function CommentSectionView({
                 </div>
               </div>
 
-              {showVideoActions && headerVideo && ((headerVideo as any)?.approved || isHeaderVideoLocallyApproved) ? (
+              {showVideoActions && headerVideo && (headerVideo?.approved || isHeaderVideoLocallyApproved) ? (
                 <div className="flex-shrink-0">
                   <Button
                     variant="default"
@@ -1340,7 +1340,7 @@ export function CommentSectionView({
                   {exportingSrt ? 'Exporting...' : 'Export Comments'}
                 </Button>
               )}
-              {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !(headerVideo as any)?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
+              {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !headerVideo?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
                 <Button
                   variant="success"
                   size="sm"

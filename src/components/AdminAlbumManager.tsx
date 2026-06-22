@@ -105,6 +105,26 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
   // Reprocess state per album
   const [reprocessingAlbumIds, setReprocessingAlbumIds] = useState<Set<string>>(new Set())
+  // Reprocess confirmation modal
+  const [reprocessConfirm, setReprocessConfirm] = useState<{ id: string; name: string } | null>(null)
+
+  const runReprocessAlbum = async (albumId: string) => {
+    setReprocessingAlbumIds((prev) => new Set(prev).add(albumId))
+    try {
+      await apiPost(`/api/albums/${albumId}/reprocess`, {})
+      toast.success('Album queued for reprocessing')
+      onProjectDataChanged?.()
+      void fetchAlbums()
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to reprocess album')
+    } finally {
+      setReprocessingAlbumIds((prev) => {
+        const next = new Set(prev)
+        next.delete(albumId)
+        return next
+      })
+    }
+  }
 
   const sortedAlbums = useMemo(() => {
     return [...albums].sort((a, b) => {
@@ -554,24 +574,10 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                     : 'text-primary'
                   const coverUrl = album.coverThumbnailUrl
 
-                  const handleReprocess = async (e: React.MouseEvent) => {
+                  const handleReprocess = (e: React.MouseEvent) => {
                     e.stopPropagation()
                     if (!canReprocess || isReprocessing) return
-                    setReprocessingAlbumIds((prev) => new Set(prev).add(album.id))
-                    try {
-                      await apiPost(`/api/albums/${album.id}/reprocess`, {})
-                      toast.success('Album queued for reprocessing')
-                      onProjectDataChanged?.()
-                      void fetchAlbums()
-                    } catch (err: any) {
-                      toast.error(err?.message || 'Failed to reprocess album')
-                    } finally {
-                      setReprocessingAlbumIds((prev) => {
-                        const next = new Set(prev)
-                        next.delete(album.id)
-                        return next
-                      })
-                    }
+                    setReprocessConfirm({ id: album.id, name: album.name })
                   }
 
                   return (
@@ -1047,6 +1053,21 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       )}
     </div>
 
+    <ConfirmDialog
+      open={reprocessConfirm !== null}
+      onOpenChange={(v) => { if (!v) setReprocessConfirm(null) }}
+      title="Reprocess Album?"
+      description={`This will re-generate ZIPs, thumbnails, and social copies for "${reprocessConfirm?.name ?? ''}". It runs as a background job — you can track progress in the Running Jobs indicator.`}
+      confirmLabel="Reprocess"
+      variant="default"
+      onConfirm={async () => {
+        if (!reprocessConfirm) return
+        const albumId = reprocessConfirm.id
+        setReprocessConfirm(null)
+        await runReprocessAlbum(albumId)
+      }}
+      onCancel={() => setReprocessConfirm(null)}
+    />
     <ConfirmDialog
       open={pendingDisableSocialAlbumId !== null}
       onOpenChange={(v) => { if (!v) setPendingDisableSocialAlbumId(null) }}
