@@ -838,6 +838,9 @@ model Comment {
   @@index([videoId])
   @@index([projectId, videoId])
   @@index([parentId])
+  // Serves the threaded-reply fetch in /api/comments (replies filtered by parentId,
+  // ordered by createdAt) without a post-filter in-memory sort.
+  @@index([parentId, createdAt])
   @@index([userId])
   @@index([recipientId])
 }
