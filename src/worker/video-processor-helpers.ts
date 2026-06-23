@@ -489,8 +489,9 @@ export async function processTimelinePreviews(
   metadata: VideoMetadata,
   tempFiles: TempFiles
 ): Promise<{ vttPath: string; spritesPath: string; ready: boolean } | null> {
-  // Capture timeline thumbnails twice as often for denser hover previews.
-  const intervalSeconds = 5
+  // Capture one timeline thumbnail every 2 seconds (30 per minute) for dense
+  // hover previews. With a 10×10 sprite sheet that's 200s of video per sheet.
+  const intervalSeconds = 2
   const tileColumns = 10
   const tileRows = 10
   const framesPerSprite = tileColumns * tileRows

@@ -282,6 +282,23 @@ export default function VideoPlayer({
     commentId: null,
   })
   const isScrubbingRef = useRef(false)
+  // Whether the playhead is actively being dragged on the scrub bar. State (not
+  // just the ref) so the scrub preview can render a primary-coloured frame +
+  // "PLAYHEAD POSITION" label, mirroring the comment range-drag cue.
+  const [isScrubbingPlayhead, setIsScrubbingPlayhead] = useState(false)
+  // Which interactable timeline element the mouse is hovering (not dragging):
+  // the playhead thumb, a comment IN/OUT handle, or the "clear range" ✕. Drives
+  // the same coloured preview frame as dragging, but anchored to the element's
+  // *neutral* stored timecode — the IN/OUT handles are rendered slightly apart
+  // for clarity, so their on-screen position doesn't exactly match their true
+  // timecode and we must not derive the preview time from the cursor here. The
+  // ref lets the scrub bar's pointer-move handler know to leave the preview alone.
+  const [hoveredTimelineTarget, setHoveredTimelineTarget] = useState<'playhead' | 'rangeStart' | 'rangeEnd' | 'clear' | null>(null)
+  const hoveredTimelineTargetRef = useRef<'playhead' | 'rangeStart' | 'rangeEnd' | 'clear' | null>(null)
+  const setHoverTimelineTarget = (target: 'playhead' | 'rangeStart' | 'rangeEnd' | 'clear' | null) => {
+    hoveredTimelineTargetRef.current = target
+    setHoveredTimelineTarget(target)
+  }
 
   // Comment range selection state (two-handle timeline overlay)
   const [commentRangeActive, setCommentRangeActive] = useState(false)
@@ -294,6 +311,9 @@ export default function VideoPlayer({
   const keepTimelineHoverPinnedRef = useRef(false)
   const isRangeFramePreviewActiveRef = useRef(false)
   const rangeFramePreviewOriginalPlayheadRef = useRef<number | null>(null)
+  // Canvas used to show the exact live video frame in the timeline preview while
+  // dragging a handle / scrubbing (sprites are too coarse for scene changes).
+  const previewFrameCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const suppressTimelineSeekUntilRef = useRef(0)
   const draggingRangeHandle = useRef<'start' | 'end' | null>(null)
   // Which range handle is actively being dragged — drives the labelled,
@@ -304,6 +324,59 @@ export default function VideoPlayer({
   useEffect(() => { commentRangeActiveRef.current = commentRangeActive }, [commentRangeActive])
   useEffect(() => { commentRangeStartRef.current = commentRangeStart }, [commentRangeStart])
   useEffect(() => { commentRangeEndRef.current = commentRangeEnd }, [commentRangeEnd])
+
+  // Safety net for stuck drags. A scrub or range-handle drag clears itself on
+  // pointerup/pointercancel, but those events can be lost if focus is stolen
+  // mid-drag (a screenshot overlay like Win+Shift+S, alt-tab, etc.). Without a
+  // release, the captured pointer keeps "dragging" on plain hover. So we also
+  // end any in-progress drag when the window blurs, the tab is hidden, or a
+  // pointerup/cancel reaches the window — and self-heal in the move handlers
+  // when a "drag" move arrives with no mouse button held (e.buttons === 0).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const endStuckDrags = () => {
+      draggingRangeHandle.current = null
+      isScrubbingRef.current = false
+      keepTimelineHoverPinnedRef.current = false
+      setActiveRangeDragHandle(null)
+      setIsScrubbingPlayhead(false)
+    }
+    const onVisibility = () => { if (document.hidden) endStuckDrags() }
+    window.addEventListener('pointerup', endStuckDrags)
+    window.addEventListener('pointercancel', endStuckDrags)
+    window.addEventListener('blur', endStuckDrags)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pointerup', endStuckDrags)
+      window.removeEventListener('pointercancel', endStuckDrags)
+      window.removeEventListener('blur', endStuckDrags)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
+
+  // While dragging a comment IN/OUT handle or scrubbing the playhead, draw the
+  // live (already-seeked) video frame into the preview canvas each animation
+  // frame. This makes the timeline preview match the main player exactly — the
+  // sprite sheet is too coarse to track scene changes mid-drag. Passive hover
+  // keeps using sprites (we don't seek the playing video just to hover).
+  useEffect(() => {
+    const isDragging = activeRangeDragHandle !== null || isScrubbingPlayhead
+    if (!isDragging) return
+    let raf = 0
+    const draw = () => {
+      const video = videoRef.current
+      const canvas = previewFrameCanvasRef.current
+      if (video && canvas && canvas.width > 0 && video.readyState >= 2) {
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          try { ctx.drawImage(video, 0, 0, canvas.width, canvas.height) } catch {}
+        }
+      }
+      raf = requestAnimationFrame(draw)
+    }
+    raf = requestAnimationFrame(draw)
+    return () => cancelAnimationFrame(raf)
+  }, [activeRangeDragHandle, isScrubbingPlayhead])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -388,20 +461,26 @@ export default function VideoPlayer({
       const x = pendingScrubClientXRef.current
       if (x == null) return
 
+      const { time, width } = getTimeFromScrubEvent(x)
+      const snapped = snapPlayheadToHandles(time, width)
       if (videoRef.current) {
-        const { time } = getTimeFromScrubEvent(x)
         try {
-          videoRef.current.currentTime = time
+          videoRef.current.currentTime = snapped
         } catch {
           // ignore
         }
-        currentTimeRef.current = time
-        setCurrentTimeSeconds(time)
+        currentTimeRef.current = snapped
+        setCurrentTimeSeconds(snapped)
       }
 
       // Desktop: hover preview. Mobile/touch: preview while actively scrubbing.
+      // Keep the preview frame/time consistent with the snapped playhead.
       if (canShowTimelineHover || isScrubbingRef.current) {
-        updateHoverFromClientX(x, isScrubbingRef.current)
+        if (snapped !== time) {
+          updateHoverFromTimeSeconds(snapped, undefined, isScrubbingRef.current)
+        } else {
+          updateHoverFromClientX(x, isScrubbingRef.current)
+        }
       }
     })
   }
@@ -695,15 +774,12 @@ export default function VideoPlayer({
       if (commentRangeActiveRef.current) return
       const current = currentTimeRef.current
       const duration = effectiveDurationSeconds
-            // Use a percentage-based visual gap so the distance between handles looks
-      // consistent regardless of video duration (~2% of timeline width).
-      const initialVisualGap = Math.max(0.3, duration * 0.02)
-      const start = duration > initialVisualGap
-        ? Math.min(current, duration - initialVisualGap)
-        : Math.max(0, current)
-      const end = duration > 0
-        ? Math.min(duration, start + initialVisualGap)
-        : start + initialVisualGap
+      // Both handles start as a single point at the playhead (the ball). They are
+      // drawn flanking the ball with a small fixed-pixel gap purely in the render,
+      // so the visual gap is consistent regardless of duration / timeline width
+      // (no misleading time-percentage gap).
+      const start = duration > 0 ? Math.min(Math.max(0, current), duration) : Math.max(0, current)
+      const end = start
       setCommentRangeActive(true)
       commentRangeHasExplicitSelectionRef.current = false
       keepTimelineHoverPinnedRef.current = false
@@ -724,18 +800,18 @@ export default function VideoPlayer({
       rangeFramePreviewOriginalPlayheadRef.current = null
       draggingRangeHandle.current = null
       setActiveRangeDragHandle(null)
+      // The range (and its ✕) is going away — drop any lingering hover target and
+      // hide the scrub preview, otherwise the ✕'s "CLEAR TIME RANGE" cue can stay
+      // stuck on screen because the ✕ unmounts before its pointer-leave fires.
+      setHoverTimelineTarget(null)
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
     }
 
     const handleResetOut = () => {
       if (!commentRangeActiveRef.current) return
       const start = commentRangeStartRef.current
-      const duration = effectiveDurationSeconds
-            // Use a percentage-based visual gap so the distance between handles looks
-      // consistent regardless of video duration (~2% of timeline width).
-      const initialVisualGap = Math.max(0.3, duration * 0.02)
-      const end = duration > 0
-        ? Math.min(duration, start + initialVisualGap)
-        : start + initialVisualGap
+      // Reset OUT back onto the IN point — the brackets flank the ball visually.
+      const end = start
       setCommentRangeEnd(end)
       commentRangeEndRef.current = end
       commentRangeHasExplicitSelectionRef.current = false
@@ -1420,6 +1496,57 @@ export default function VideoPlayer({
 
     isRangeFramePreviewActiveRef.current = false
     rangeFramePreviewOriginalPlayheadRef.current = null
+  }
+
+  // Subtle "stickiness" while dragging a comment IN/OUT handle: snap its time to
+  // the playhead when the cursor is within a few pixels of it. Small enough that
+  // you can still place a handle just before/after the playhead, but enough to
+  // feel a catch right at it. We snap to `currentTimeRef` — the exact value the
+  // on-screen playhead/timecode uses (and which is frozen during a handle drag,
+  // since handleTimeUpdate is suppressed). Snapping to that guarantees the
+  // handle's timecode matches the playhead's to the frame, with no drift.
+  const SNAP_TO_PLAYHEAD_PX = 6
+  // Width (px) of each comment IN/OUT marker rectangle. Its inner edge sits at
+  // its point's time and the body extends this far outward from it. The playhead
+  // ball renders on top (higher z), centered on the same point.
+  const RANGE_HANDLE_WIDTH_PX = 12
+  // Marker height (px). A touch taller than the 16px scrub bar so the markers
+  // read as grabbable handles standing slightly proud of the bar.
+  const RANGE_HANDLE_HEIGHT_PX = 20
+  // Inset the scrub bar from its container by this much on each side so the
+  // elements that overhang a point — the playhead ball and the "[" / "]"
+  // brackets — render fully at 0:00 and the end instead of being clipped. The
+  // bracket reaches furthest: its full width outward from the point.
+  const TIMELINE_EDGE_INSET_PX = RANGE_HANDLE_WIDTH_PX
+  const snapHandleTimeToPlayhead = (candidateSeconds: number, barWidthPx: number) => {
+    const playhead = currentTimeRef.current
+    if (!Number.isFinite(playhead) || barWidthPx <= 0 || effectiveDurationSeconds <= 0) return candidateSeconds
+    const snapSeconds = (SNAP_TO_PLAYHEAD_PX / barWidthPx) * effectiveDurationSeconds
+    return Math.abs(candidateSeconds - playhead) <= snapSeconds ? playhead : candidateSeconds
+  }
+
+  // Mirror of the above for dragging the playhead itself: when a comment range is
+  // active, the playhead gently snaps to the nearest visible IN/OUT handle within
+  // the same ~6px threshold, so it's easy to line the playhead up with a marker.
+  const snapPlayheadToHandles = (candidateSeconds: number, barWidthPx: number) => {
+    if (!commentRangeActiveRef.current || barWidthPx <= 0 || effectiveDurationSeconds <= 0) return candidateSeconds
+    const snapSeconds = (SNAP_TO_PLAYHEAD_PX / barWidthPx) * effectiveDurationSeconds
+    const start = commentRangeStartRef.current
+    const end = commentRangeEndRef.current
+    // When the handles are hard up against each other, collapse to a single snap
+    // target at their exact midpoint — otherwise the playhead could catch on the
+    // start or the end separately, a sliver apart.
+    const targets = Math.abs(end - start) <= snapSeconds ? [(start + end) / 2] : [start, end]
+    let best = candidateSeconds
+    let bestDist = snapSeconds
+    for (const target of targets) {
+      const dist = Math.abs(candidateSeconds - target)
+      if (dist <= bestDist) {
+        best = target
+        bestDist = dist
+      }
+    }
+    return best
   }
 
   // Start playback for an autoplay request. The folder click is a user gesture, so an
@@ -2302,8 +2429,11 @@ export default function VideoPlayer({
               </div>
             </div>
 
-            {/* Timeline */}
-            <div className="relative">
+            {/* Timeline — inset on both sides so the playhead ball and the IN/OUT
+                brackets render fully at 0:00 / the end instead of being clipped.
+                The bar fills this wrapper, so the hover-preview offsets (computed
+                relative to the bar) stay aligned with the wrapper. */}
+            <div className="relative" style={{ marginLeft: TIMELINE_EDGE_INSET_PX, marginRight: TIMELINE_EDGE_INSET_PX }}>
               <div
                 ref={scrubBarRef}
                 className="h-4 rounded-md bg-muted/40 border border-border cursor-pointer relative overflow-visible touch-none select-none"
@@ -2313,16 +2443,26 @@ export default function VideoPlayer({
                 }}
                 onPointerMove={(e) => {
                   if (isScrubbingRef.current) {
+                    if (e.buttons === 0) { // released outside our handlers — abort stale scrub
+                      isScrubbingRef.current = false
+                      setIsScrubbingPlayhead(false)
+                      return
+                    }
                     e.preventDefault()
                     scheduleScrubToClientX(e.clientX)
                     return
                   }
+
+                  // While hovering the playhead/IN/OUT element, keep its neutral
+                  // time preview — don't recompute from the cursor position.
+                  if (hoveredTimelineTargetRef.current) return
 
                   if (!canShowTimelineHover) return
                   updateHoverFromClientX(e.clientX)
                 }}
                 onPointerLeave={() => {
                   isScrubbingRef.current = false
+                  setIsScrubbingPlayhead(false)
                   if (keepTimelineHoverPinnedRef.current) return
                   setTimelineHover((prev) => ({ ...prev, visible: false }))
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
@@ -2340,6 +2480,7 @@ export default function VideoPlayer({
                   setShowPosterOverlay(false)
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
                   isScrubbingRef.current = true
+                  setIsScrubbingPlayhead(true)
                   scheduleScrubToClientX(e.clientX)
                   if (!canShowTimelineHover) {
                     updateHoverFromClientX(e.clientX, true)
@@ -2350,6 +2491,7 @@ export default function VideoPlayer({
                     ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
                   } catch {}
                   isScrubbingRef.current = false
+                  setIsScrubbingPlayhead(false)
                   if (!canShowTimelineHover) {
                     setTimelineHover((prev) => ({ ...prev, visible: false }))
                   }
@@ -2359,6 +2501,7 @@ export default function VideoPlayer({
                     ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
                   } catch {}
                   isScrubbingRef.current = false
+                  setIsScrubbingPlayhead(false)
                   setTimelineHover((prev) => ({ ...prev, visible: false }))
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
@@ -2373,10 +2516,14 @@ export default function VideoPlayer({
                   isRangeFramePreviewActiveRef.current = false
                   rangeFramePreviewOriginalPlayheadRef.current = null
                   if (videoRef.current) {
-                    const { time } = getTimeFromScrubEvent(e.clientX)
-                    videoRef.current.currentTime = time
-                    currentTimeRef.current = time
-                    setCurrentTimeSeconds(time)
+                    const { time, width } = getTimeFromScrubEvent(e.clientX)
+                    // Apply the same IN/OUT snap as scrubbing, so the click that fires
+                    // after a drag-release lands on the snapped position instead of
+                    // nudging the playhead back to the raw cursor location.
+                    const snapped = snapPlayheadToHandles(time, width)
+                    videoRef.current.currentTime = snapped
+                    currentTimeRef.current = snapped
+                    setCurrentTimeSeconds(snapped)
                   }
                 }}
               >
@@ -2391,17 +2538,26 @@ export default function VideoPlayer({
 
                 {/* Playhead thumb (YouTube-style) — visible ball at the current position
                     that grows only when the ball itself is hovered (not anywhere on the
-                    bar). It sits above the comment markers (z-10) so it stays grabbable
-                    even when the playhead is parked on a marker, but below the comment
-                    range handles (z-20) so those stay easy to grab. It is
-                    pointer-events-auto and grabbable: a press bubbles up to the scrub
-                    bar's existing pointer handlers, so dragging the ball drives seeking
-                    exactly like dragging the bar. */}
+                    bar). It sits above the comment range markers (z-25 > z-20) so it stays
+                    grabbable and centered over their inner edges; the markers stay grabbable
+                    on the parts that extend outward beyond the ball. It is pointer-events-auto
+                    and grabbable: a press bubbles up to the scrub bar's existing pointer
+                    handlers, so dragging the ball drives seeking exactly like dragging the
+                    bar. */}
                 {effectiveDurationSeconds > 0 && (
                   <div
-                    className="pointer-events-auto absolute top-1/2 z-[15] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-md ring-2 ring-background transition-[width,height] duration-100 ease-out h-3 w-3 hover:h-[18px] hover:w-[18px] cursor-grab active:cursor-grabbing"
+                    className="pointer-events-auto absolute top-1/2 z-[25] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-md ring-2 ring-background transition-[width,height] duration-100 ease-out h-3 w-3 hover:h-[18px] hover:w-[18px] cursor-grab active:cursor-grabbing"
                     style={{
                       left: `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`,
+                    }}
+                    onPointerEnter={(e) => {
+                      if (e.pointerType !== 'mouse' || isScrubbingRef.current) return
+                      setHoverTimelineTarget('playhead')
+                      updateHoverFromTimeSeconds(currentTimeRef.current, 96, true)
+                    }}
+                    onPointerLeave={(e) => {
+                      if (e.pointerType !== 'mouse') return
+                      if (hoveredTimelineTargetRef.current === 'playhead') setHoverTimelineTarget(null)
                     }}
                   />
                 )}
@@ -2420,10 +2576,21 @@ export default function VideoPlayer({
                       />
                     )}
 
-                    {/* IN handle (left) */}
+                    {/* IN handle (left) — solid amber rectangle whose right edge sits at the
+                        current time. The playhead ball renders on top (higher z), centered
+                        on the same point, so the marker reads as the range start beside it. */}
                     <div
-                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-l animate-comment-range-handle-left-nudge motion-reduce:animate-none"
-                      style={{ left: `${Math.min(100, Math.max(0, (commentRangeStart / effectiveDurationSeconds) * 100))}%`, transform: 'translateX(-50%)' }}
+                      className="absolute z-20 bg-amber-400 rounded-l-sm cursor-ew-resize touch-none animate-comment-range-handle-left-nudge motion-reduce:animate-none"
+                      style={{ left: `${Math.min(100, Math.max(0, (commentRangeStart / effectiveDurationSeconds) * 100))}%`, top: '50%', transform: 'translateX(-100%) translateY(-50%)', width: RANGE_HANDLE_WIDTH_PX, height: RANGE_HANDLE_HEIGHT_PX }}
+                      onPointerEnter={(e) => {
+                        if (e.pointerType !== 'mouse' || draggingRangeHandle.current) return
+                        setHoverTimelineTarget('rangeStart')
+                        updateHoverFromTimeSeconds(commentRangeStartRef.current, 96, true)
+                      }}
+                      onPointerLeave={(e) => {
+                        if (e.pointerType !== 'mouse') return
+                        if (hoveredTimelineTargetRef.current === 'rangeStart') setHoverTimelineTarget(null)
+                      }}
                       onPointerDown={(e) => {
                         e.stopPropagation()
                         e.preventDefault()
@@ -2436,8 +2603,15 @@ export default function VideoPlayer({
                       }}
                       onPointerMove={(e) => {
                         if (draggingRangeHandle.current !== 'start') return
-                        const { time } = getTimeFromScrubEvent(e.clientX)
-                        const newStart = Math.max(0, Math.min(time, commentRangeEnd - 0.1))
+                        if (e.buttons === 0) { // released outside our handlers — abort stale drag
+                          draggingRangeHandle.current = null
+                          setActiveRangeDragHandle(null)
+                          keepTimelineHoverPinnedRef.current = false
+                          return
+                        }
+                        const { time, width } = getTimeFromScrubEvent(e.clientX)
+                        const snapped = snapHandleTimeToPlayhead(time, width)
+                        const newStart = Math.max(0, Math.min(snapped, commentRangeEnd - 0.1))
                         setCommentRangeStart(newStart)
                         commentRangeStartRef.current = newStart
                         const separation = commentRangeEnd - newStart
@@ -2455,6 +2629,7 @@ export default function VideoPlayer({
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
+                        keepTimelineHoverPinnedRef.current = false
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
@@ -2464,6 +2639,7 @@ export default function VideoPlayer({
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
+                        keepTimelineHoverPinnedRef.current = false
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
@@ -2473,10 +2649,27 @@ export default function VideoPlayer({
                       }}
                     />
 
-                    {/* OUT handle (right) */}
+                    {/* OUT handle (right) — solid amber rectangle whose left edge sits at the
+                        current time. The playhead ball renders on top (higher z), centered
+                        on the same point, so the marker reads as the range end beside it. */}
                     <div
-                      className="absolute top-0 h-full w-1.5 bg-amber-400 cursor-ew-resize touch-none z-20 rounded-r animate-comment-range-handle-right-nudge motion-reduce:animate-none"
-                      style={{ left: `${Math.min(100, Math.max(0, (commentRangeEnd / effectiveDurationSeconds) * 100))}%`, transform: 'translateX(-50%)' }}
+                      className="absolute z-20 bg-amber-400 rounded-r-sm cursor-ew-resize touch-none animate-comment-range-handle-right-nudge motion-reduce:animate-none"
+                      style={{ left: `${Math.min(100, Math.max(0, (commentRangeEnd / effectiveDurationSeconds) * 100))}%`, top: '50%', transform: 'translateX(0) translateY(-50%)', width: RANGE_HANDLE_WIDTH_PX, height: RANGE_HANDLE_HEIGHT_PX }}
+                      onPointerEnter={(e) => {
+                        if (e.pointerType !== 'mouse' || draggingRangeHandle.current) return
+                        setHoverTimelineTarget('rangeEnd')
+                        // Until the user has dragged out an explicit range, IN and OUT
+                        // both represent the single point at the playhead — show that
+                        // time, not the OUT handle's slightly-offset visual position.
+                        const outTime = commentRangeHasExplicitSelectionRef.current
+                          ? commentRangeEndRef.current
+                          : commentRangeStartRef.current
+                        updateHoverFromTimeSeconds(outTime, 96, true)
+                      }}
+                      onPointerLeave={(e) => {
+                        if (e.pointerType !== 'mouse') return
+                        if (hoveredTimelineTargetRef.current === 'rangeEnd') setHoverTimelineTarget(null)
+                      }}
                       onPointerDown={(e) => {
                         e.stopPropagation()
                         e.preventDefault()
@@ -2489,11 +2682,18 @@ export default function VideoPlayer({
                       }}
                       onPointerMove={(e) => {
                         if (draggingRangeHandle.current !== 'end') return
-                        const { time } = getTimeFromScrubEvent(e.clientX)
+                        if (e.buttons === 0) { // released outside our handlers — abort stale drag
+                          draggingRangeHandle.current = null
+                          setActiveRangeDragHandle(null)
+                          keepTimelineHoverPinnedRef.current = false
+                          return
+                        }
+                        const { time, width } = getTimeFromScrubEvent(e.clientX)
+                        const snapped = snapHandleTimeToPlayhead(time, width)
                         const duration = effectiveDurationSeconds
                         const newEnd = Math.min(
-                          duration > 0 ? duration : time,
-                          Math.max(time, commentRangeStart + 0.1)
+                          duration > 0 ? duration : snapped,
+                          Math.max(snapped, commentRangeStart + 0.1)
                         )
                         setCommentRangeEnd(newEnd)
                         commentRangeEndRef.current = newEnd
@@ -2511,6 +2711,7 @@ export default function VideoPlayer({
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
+                        keepTimelineHoverPinnedRef.current = false
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
@@ -2520,6 +2721,7 @@ export default function VideoPlayer({
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
+                        keepTimelineHoverPinnedRef.current = false
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
@@ -2529,20 +2731,37 @@ export default function VideoPlayer({
                       }}
                     />
 
-                    {/* Dismiss ✕ — floats above the right (OUT) handle */}
+                    {/* Dismiss ✕ — floats above the right (OUT) handle. Hidden whenever a
+                        timeline preview for another element is showing (dragging a handle,
+                        dragging the playhead, or hovering the playhead/IN/OUT) so it doesn't
+                        sit under the cursor / preview — but stays visible when hovering the
+                        ✕ itself (which shows its own destructive "Clear time range" preview). */}
+                    {!activeRangeDragHandle && !isScrubbingPlayhead && (hoveredTimelineTarget === null || hoveredTimelineTarget === 'clear') && (
                     <button
                       type="button"
                       className="absolute z-30 flex items-center justify-center rounded-sm bg-amber-400 text-amber-900 hover:bg-amber-300 leading-none"
                       style={{
-                        top: '-16px',
+                        // Sit clear above the OUT marker (which now stands ~2px proud of the
+                        // bar top), leaving an ~8px gap between the marker and the ✕.
+                        top: '-24px',
                         left: `${Math.min(100, Math.max(0, (commentRangeEnd / effectiveDurationSeconds) * 100))}%`,
-                        transform: 'translateX(-50%)',
+                        // Centre over the OUT marker (which extends half its width right of the point).
+                        transform: `translateX(calc(-50% + ${RANGE_HANDLE_WIDTH_PX / 2}px))`,
                         width: '14px',
                         height: '14px',
                         fontSize: '10px',
                         lineHeight: 1,
                       }}
-                      title="Clear time range"
+                      aria-label="Clear time range"
+                      onPointerEnter={(e) => {
+                        if (e.pointerType !== 'mouse') return
+                        setHoverTimelineTarget('clear')
+                        updateHoverFromTimeSeconds(commentRangeEndRef.current, 96, true)
+                      }}
+                      onPointerLeave={(e) => {
+                        if (e.pointerType !== 'mouse') return
+                        if (hoveredTimelineTargetRef.current === 'clear') setHoverTimelineTarget(null)
+                      }}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -2551,6 +2770,7 @@ export default function VideoPlayer({
                     >
                       ×
                     </button>
+                    )}
                   </>
                 )}
 
@@ -2720,31 +2940,46 @@ export default function VideoPlayer({
                     const scale = Math.min(maxW / timelineHover.w, maxH / timelineHover.h, 1)
                     const displayW = Math.round(timelineHover.w * scale)
                     const displayH = Math.round(timelineHover.h * scale)
-                    // When dragging a range handle, make the preview unmistakable:
-                    // a thick amber frame + label that matches the timeline range colour,
-                    // so clients clearly see they are setting the comment start/end point.
-                    const isRangeDrag = activeRangeDragHandle !== null
+                    // When dragging OR hovering a range handle / the playhead / the clear ✕,
+                    // make the preview unmistakable: a thick coloured frame + label. Range
+                    // uses the amber range colour ("Comment start/end point"); the playhead
+                    // uses the primary app colour ("PLAYHEAD POSITION"); the clear ✕ uses the
+                    // destructive red ("CLEAR TIME RANGE"). An active drag wins over a hover.
+                    const dragKind = activeRangeDragHandle
+                      ? (activeRangeDragHandle === 'start' ? 'rangeStart' : 'rangeEnd')
+                      : isScrubbingPlayhead ? 'playhead' : null
+                    const previewKind = dragKind ?? hoveredTimelineTarget
+                    const isRangeKind = previewKind === 'rangeStart' || previewKind === 'rangeEnd'
+                    const isClearKind = previewKind === 'clear'
+                    const highlight = previewKind !== null
                     const rangeColor = '#fbbf24' // amber-400 — same as the range handles/fill
+                    const accentColor = isRangeKind ? rangeColor : isClearKind ? 'hsl(var(--destructive))' : 'hsl(var(--primary))'
+                    const accentTextColor = isRangeKind ? '#78350f' : isClearKind ? 'hsl(var(--destructive-foreground))' : 'hsl(var(--primary-foreground))'
+                    const accentRing = isRangeKind ? 'rgba(251,191,36,0.45)' : isClearKind ? 'hsl(var(--destructive) / 0.45)' : 'hsl(var(--primary) / 0.45)'
+                    const highlightLabel = previewKind === 'rangeStart' ? 'Comment start point'
+                      : previewKind === 'rangeEnd' ? 'Comment end point'
+                      : previewKind === 'clear' ? 'Clear time range'
+                      : 'PLAYHEAD POSITION'
                     return (
                     <>
-                      {isRangeDrag && (
+                      {highlight && (
                         <div
                           className="mb-1 rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-wide shadow-elevation-sm whitespace-nowrap"
-                          style={{ backgroundColor: rangeColor, color: '#78350f' }}
+                          style={{ backgroundColor: accentColor, color: accentTextColor }}
                         >
-                          {activeRangeDragHandle === 'start' ? 'Comment start point' : 'Comment end point'}
+                          {highlightLabel}
                         </div>
                       )}
                       <div
                         className="rounded-md overflow-hidden"
                         style={
-                          isRangeDrag
+                          highlight
                             ? {
                                 width: displayW,
                                 height: displayH,
-                                border: `4px solid ${rangeColor}`,
-                                boxShadow: `0 0 0 2px rgba(251,191,36,0.45)`,
-                                backgroundColor: rangeColor,
+                                border: `4px solid ${accentColor}`,
+                                boxShadow: `0 0 0 2px ${accentRing}`,
+                                backgroundColor: accentColor,
                               }
                             : {
                                 width: displayW,
@@ -2754,20 +2989,31 @@ export default function VideoPlayer({
                               }
                         }
                       >
-                        <div
-                          style={{
-                            width: displayW,
-                            height: displayH,
-                            backgroundImage: `url(${timelineHover.spriteUrl})`,
-                            backgroundSize: `${displayW * 10}px auto`,
-                            backgroundPosition: `-${Math.round(timelineHover.x * scale)}px -${Math.round(timelineHover.y * scale)}px`,
-                            backgroundRepeat: 'no-repeat',
-                          }}
-                        />
+                        {dragKind !== null ? (
+                          // Dragging/scrubbing: paint the exact live video frame (kept in
+                          // sync by the rAF effect) so the preview matches the main player.
+                          <canvas
+                            ref={previewFrameCanvasRef}
+                            width={displayW}
+                            height={displayH}
+                            style={{ width: displayW, height: displayH, display: 'block' }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: displayW,
+                              height: displayH,
+                              backgroundImage: `url(${timelineHover.spriteUrl})`,
+                              backgroundSize: `${displayW * 10}px auto`,
+                              backgroundPosition: `-${Math.round(timelineHover.x * scale)}px -${Math.round(timelineHover.y * scale)}px`,
+                              backgroundRepeat: 'no-repeat',
+                            }}
+                          />
+                        )}
                       </div>
                       <div
-                        className={`mt-1 text-xs text-center tabular-nums ${isRangeDrag ? 'font-bold' : 'text-muted-foreground'}`}
-                        style={isRangeDrag ? { color: rangeColor } : undefined}
+                        className={`mt-1 text-xs text-center tabular-nums ${highlight ? 'font-bold' : 'text-muted-foreground'}`}
+                        style={highlight ? { color: accentColor } : undefined}
                       >
                         {formatTimestampForDuration(timelineHover.timeSeconds, effectiveDurationSeconds)}
                       </div>
@@ -2784,33 +3030,48 @@ export default function VideoPlayer({
               {(() => {
                 const spritePreviewVisible =
                   timelineCues.length > 0 && timelineHover.visible && !!timelineHover.spriteUrl
-                if (activeRangeDragHandle === null || spritePreviewVisible) return null
+                const dragKind = activeRangeDragHandle
+                  ? (activeRangeDragHandle === 'start' ? 'rangeStart' : 'rangeEnd')
+                  : isScrubbingPlayhead ? 'playhead' : null
+                const previewKind = dragKind ?? hoveredTimelineTarget
+                if (previewKind === null || spritePreviewVisible) return null
+                const isRangeKind = previewKind === 'rangeStart' || previewKind === 'rangeEnd'
+                const isClearKind = previewKind === 'clear'
                 const rangeColor = '#fbbf24' // amber-400 — same as the range handles/fill
-                const handleSeconds =
-                  activeRangeDragHandle === 'start' ? commentRangeStart : commentRangeEnd
+                const accentColor = isRangeKind ? rangeColor : isClearKind ? 'hsl(var(--destructive))' : 'hsl(var(--primary))'
+                const accentTextColor = isRangeKind ? '#78350f' : isClearKind ? 'hsl(var(--destructive-foreground))' : 'hsl(var(--primary-foreground))'
+                const label = previewKind === 'rangeStart' ? 'Comment start point'
+                  : previewKind === 'rangeEnd' ? 'Comment end point'
+                  : previewKind === 'clear' ? 'Clear time range'
+                  : 'PLAYHEAD POSITION'
+                const anchorSeconds = previewKind === 'rangeStart' ? commentRangeStart
+                  : previewKind === 'rangeEnd'
+                    ? (dragKind === 'rangeEnd' || commentRangeHasExplicitSelectionRef.current ? commentRangeEnd : commentRangeStart)
+                  : previewKind === 'clear' ? commentRangeEnd
+                  : currentTimeSeconds
                 return (
                   <div
                     className="absolute bottom-full mb-2 pointer-events-none z-20 flex flex-col items-center"
                     style={{
-                      left: getLeftPxForSeconds(handleSeconds, 180),
+                      left: getLeftPxForSeconds(anchorSeconds, 180),
                       transform: 'translateX(-50%)',
                     }}
                   >
                     <div
                       className="flex flex-col items-stretch overflow-hidden rounded-md shadow-elevation-sm"
-                      style={{ border: `3px solid ${rangeColor}` }}
+                      style={{ border: `3px solid ${accentColor}` }}
                     >
                       <div
                         className="px-2.5 py-1 text-xs font-bold uppercase tracking-wide whitespace-nowrap text-center"
-                        style={{ backgroundColor: rangeColor, color: '#78350f' }}
+                        style={{ backgroundColor: accentColor, color: accentTextColor }}
                       >
-                        {activeRangeDragHandle === 'start' ? 'Comment start point' : 'Comment end point'}
+                        {label}
                       </div>
                       <div
                         className="bg-card px-2.5 py-1 text-sm font-bold tabular-nums text-center"
-                        style={{ color: rangeColor }}
+                        style={{ color: accentColor }}
                       >
-                        {formatTimestampForDuration(handleSeconds, effectiveDurationSeconds)}
+                        {formatTimestampForDuration(anchorSeconds, effectiveDurationSeconds)}
                       </div>
                     </div>
                   </div>
