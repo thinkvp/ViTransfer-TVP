@@ -296,6 +296,10 @@ export default function VideoPlayer({
   const rangeFramePreviewOriginalPlayheadRef = useRef<number | null>(null)
   const suppressTimelineSeekUntilRef = useRef(0)
   const draggingRangeHandle = useRef<'start' | 'end' | null>(null)
+  // Which range handle is actively being dragged — drives the labelled,
+  // colour-matched hover preview so clients can see whether they are setting
+  // the comment start or end point. State (not just a ref) so the preview re-renders.
+  const [activeRangeDragHandle, setActiveRangeDragHandle] = useState<'start' | 'end' | null>(null)
   // Sync ref so event handlers have a non-stale view of active state
   useEffect(() => { commentRangeActiveRef.current = commentRangeActive }, [commentRangeActive])
   useEffect(() => { commentRangeStartRef.current = commentRangeStart }, [commentRangeStart])
@@ -655,6 +659,7 @@ export default function VideoPlayer({
       // Deactivate any active comment range when switching videos
       setCommentRangeActive(false)
       draggingRangeHandle.current = null
+      setActiveRangeDragHandle(null)
     }
   }, [selectedVideo?.id])
 
@@ -718,6 +723,7 @@ export default function VideoPlayer({
       isRangeFramePreviewActiveRef.current = false
       rangeFramePreviewOriginalPlayheadRef.current = null
       draggingRangeHandle.current = null
+      setActiveRangeDragHandle(null)
     }
 
     const handleResetOut = () => {
@@ -2383,6 +2389,23 @@ export default function VideoPlayer({
                   }}
                 />
 
+                {/* Playhead thumb (YouTube-style) — visible ball at the current position
+                    that grows only when the ball itself is hovered (not anywhere on the
+                    bar). It sits above the comment markers (z-10) so it stays grabbable
+                    even when the playhead is parked on a marker, but below the comment
+                    range handles (z-20) so those stay easy to grab. It is
+                    pointer-events-auto and grabbable: a press bubbles up to the scrub
+                    bar's existing pointer handlers, so dragging the ball drives seeking
+                    exactly like dragging the bar. */}
+                {effectiveDurationSeconds > 0 && (
+                  <div
+                    className="pointer-events-auto absolute top-1/2 z-[15] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-md ring-2 ring-background transition-[width,height] duration-100 ease-out h-3 w-3 hover:h-[18px] hover:w-[18px] cursor-grab active:cursor-grabbing"
+                    style={{
+                      left: `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`,
+                    }}
+                  />
+                )}
+
                 {/* Comment range overlay — shown when user starts typing a comment */}
                 {commentRangeActive && effectiveDurationSeconds > 0 && (
                   <>
@@ -2408,6 +2431,7 @@ export default function VideoPlayer({
                         keepTimelineHoverPinnedRef.current = true
                         beginRangeFramePreview()
                         draggingRangeHandle.current = 'start'
+                        setActiveRangeDragHandle('start')
                         videoRef.current?.pause()
                       }}
                       onPointerMove={(e) => {
@@ -2430,6 +2454,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
+                        setActiveRangeDragHandle(null)
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
@@ -2438,6 +2463,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
+                        setActiveRangeDragHandle(null)
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
@@ -2458,6 +2484,7 @@ export default function VideoPlayer({
                         keepTimelineHoverPinnedRef.current = true
                         beginRangeFramePreview()
                         draggingRangeHandle.current = 'end'
+                        setActiveRangeDragHandle('end')
                         videoRef.current?.pause()
                       }}
                       onPointerMove={(e) => {
@@ -2483,6 +2510,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
+                        setActiveRangeDragHandle(null)
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
@@ -2491,6 +2519,7 @@ export default function VideoPlayer({
                         e.preventDefault()
                         try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
                         draggingRangeHandle.current = null
+                        setActiveRangeDragHandle(null)
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
@@ -2691,11 +2720,39 @@ export default function VideoPlayer({
                     const scale = Math.min(maxW / timelineHover.w, maxH / timelineHover.h, 1)
                     const displayW = Math.round(timelineHover.w * scale)
                     const displayH = Math.round(timelineHover.h * scale)
+                    // When dragging a range handle, make the preview unmistakable:
+                    // a thick amber frame + label that matches the timeline range colour,
+                    // so clients clearly see they are setting the comment start/end point.
+                    const isRangeDrag = activeRangeDragHandle !== null
+                    const rangeColor = '#fbbf24' // amber-400 — same as the range handles/fill
                     return (
                     <>
+                      {isRangeDrag && (
+                        <div
+                          className="mb-1 rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-wide shadow-elevation-sm whitespace-nowrap"
+                          style={{ backgroundColor: rangeColor, color: '#78350f' }}
+                        >
+                          {activeRangeDragHandle === 'start' ? 'Comment start point' : 'Comment end point'}
+                        </div>
+                      )}
                       <div
-                        className="rounded-md border border-border overflow-hidden bg-card"
-                        style={{ width: displayW, height: displayH }}
+                        className="rounded-md overflow-hidden"
+                        style={
+                          isRangeDrag
+                            ? {
+                                width: displayW,
+                                height: displayH,
+                                border: `4px solid ${rangeColor}`,
+                                boxShadow: `0 0 0 2px rgba(251,191,36,0.45)`,
+                                backgroundColor: rangeColor,
+                              }
+                            : {
+                                width: displayW,
+                                height: displayH,
+                                border: '1px solid hsl(var(--border))',
+                                backgroundColor: 'hsl(var(--card))',
+                              }
+                        }
                       >
                         <div
                           style={{
@@ -2708,7 +2765,10 @@ export default function VideoPlayer({
                           }}
                         />
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground text-center tabular-nums">
+                      <div
+                        className={`mt-1 text-xs text-center tabular-nums ${isRangeDrag ? 'font-bold' : 'text-muted-foreground'}`}
+                        style={isRangeDrag ? { color: rangeColor } : undefined}
+                      >
                         {formatTimestampForDuration(timelineHover.timeSeconds, effectiveDurationSeconds)}
                       </div>
                     </>
@@ -2716,6 +2776,46 @@ export default function VideoPlayer({
                   })()}
                 </div>
               )}
+
+              {/* Range-drag label fallback — shown while dragging an IN/OUT handle when
+                  timeline sprites are unavailable (no scrub preview to attach the label
+                  to). Renders the same amber-framed "Comment start/end point" badge + time
+                  anchored to the handle, so the cue is identical with or without sprites. */}
+              {(() => {
+                const spritePreviewVisible =
+                  timelineCues.length > 0 && timelineHover.visible && !!timelineHover.spriteUrl
+                if (activeRangeDragHandle === null || spritePreviewVisible) return null
+                const rangeColor = '#fbbf24' // amber-400 — same as the range handles/fill
+                const handleSeconds =
+                  activeRangeDragHandle === 'start' ? commentRangeStart : commentRangeEnd
+                return (
+                  <div
+                    className="absolute bottom-full mb-2 pointer-events-none z-20 flex flex-col items-center"
+                    style={{
+                      left: getLeftPxForSeconds(handleSeconds, 180),
+                      transform: 'translateX(-50%)',
+                    }}
+                  >
+                    <div
+                      className="flex flex-col items-stretch overflow-hidden rounded-md shadow-elevation-sm"
+                      style={{ border: `3px solid ${rangeColor}` }}
+                    >
+                      <div
+                        className="px-2.5 py-1 text-xs font-bold uppercase tracking-wide whitespace-nowrap text-center"
+                        style={{ backgroundColor: rangeColor, color: '#78350f' }}
+                      >
+                        {activeRangeDragHandle === 'start' ? 'Comment start point' : 'Comment end point'}
+                      </div>
+                      <div
+                        className="bg-card px-2.5 py-1 text-sm font-bold tabular-nums text-center"
+                        style={{ color: rangeColor }}
+                      >
+                        {formatTimestampForDuration(handleSeconds, effectiveDurationSeconds)}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
 
             {/* Desktop: controls row below timeline — left / centre / right */}

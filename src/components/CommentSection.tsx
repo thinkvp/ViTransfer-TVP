@@ -6,7 +6,7 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { CheckCircle2, Info, Share2, X } from 'lucide-react'
+import { CheckCircle2, Info, Lock, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -1375,8 +1375,14 @@ export function CommentSectionView({
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3 min-h-0 bg-muted/30">
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
-              <div className="w-12 h-12 bg-muted rounded-full mx-auto mb-3" />
-                            <p className="text-muted-foreground">
+              {commentsDisabled ? (
+                <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-3 flex items-center justify-center">
+                  <Lock className="w-5 h-5 text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="w-12 h-12 bg-muted rounded-full mx-auto mb-3" />
+              )}
+              <p className="text-muted-foreground">
                 {commentsDisabled && isProjectApprovedOnly
                   ? 'This project has been approved. Comments are now closed.'
                   : commentsDisabled
@@ -1386,6 +1392,19 @@ export function CommentSectionView({
             </div>
           ) : (
             <>
+              {commentsDisabled && (
+                <div className="py-1 text-muted-foreground">
+                  <div className="flex items-start justify-center gap-1.5 px-4 text-xs text-center">
+                    <Lock className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <span>
+                      {isProjectApprovedOnly
+                        ? 'This project has been approved. Comments are now closed.'
+                        : 'This video has been approved. Comments are now closed.'}
+                    </span>
+                  </div>
+                  <div className="h-px w-full bg-border mt-4" />
+                </div>
+              )}
               {sortedComments.map((comment) => {
                 const isViewerMessage = isAdminView ? comment.isInternal : !comment.isInternal
                 const hasReplies = comment.replies && comment.replies.length > 0

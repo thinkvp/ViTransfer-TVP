@@ -1469,21 +1469,24 @@ export async function PATCH(
           const allRecipients = await getProjectRecipients(project.id)
           const recipients = allRecipients.filter((r) => r.receiveNotifications && r.email)
 
+          const settings = await prisma.settings.findUnique({
+            where: { id: 'default' },
+            select: {
+              autoCloseApprovedProjectsEnabled: true,
+              autoCloseApprovedProjectsAfterDays: true,
+              clientEmailProjectApproved: true,
+            },
+          })
+
           if (recipients.length === 0) {
             console.log('[PROJECT UPDATE] No recipients opted in; skipping Project Approved email')
+          } else if (settings?.clientEmailProjectApproved === false) {
+            console.log('[PROJECT UPDATE] Skipped - clientEmailProjectApproved is disabled')
           } else {
             const shareUrl = await generateShareUrl(project.slug)
             const approvedVideos = await prisma.video.findMany({
               where: { projectId: project.id, approved: true },
               select: { id: true, name: true },
-            })
-
-            const settings = await prisma.settings.findUnique({
-              where: { id: 'default' },
-              select: {
-                autoCloseApprovedProjectsEnabled: true,
-                autoCloseApprovedProjectsAfterDays: true,
-              },
             })
 
             let autoCloseInfo: { closeDate: Date; days: number } | null = null

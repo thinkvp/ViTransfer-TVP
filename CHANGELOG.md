@@ -5,7 +5,17 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.3] - 2026-06-23
+
+### Changed
+
+- **Timeline now has a YouTube-style draggable playhead thumb (admin + client share player)** — The video scrub bar previously showed only a coloured progress fill with no visible handle at the current position. It now renders a round thumb at the playhead that grows when hovered directly and is grabbable (a press on the thumb bubbles to the bar's existing pointer handlers, so dragging it seeks like dragging the bar). The thumb sits below the comment IN/OUT range handles so those remain easy to grab, and it only enlarges on its own hover (not when hovering anywhere along the bar). Touches `src/components/VideoPlayer.tsx`.
+- **Comment range handles now show a clear labelled preview while dragging (admin + client share player)** — Dragging the IN/OUT markers on the video timeline gave no explicit indication of what the handle did, which confused some clients. While a range handle is being dragged, the timeline scrubbing preview now renders with a thick amber frame and tint matching the range colour, an amber-coloured timestamp, and a labelled header reading "Comment start point" or "Comment end point" depending on which handle is active. When timeline sprites are unavailable (so there's no scrub preview), an equivalent amber-framed label + time badge is shown anchored to the dragged handle, so the cue is identical with or without sprites. The plain preview styling is unchanged for normal scrubbing. Touches `src/components/VideoPlayer.tsx`.
+- **Approved videos now show "Comments are now closed" above the existing thread (admin + client share player)** — When a video/project was approved the comment input is hidden, but if the thread already had comments there was no indication that commenting had closed — the "This video has been approved. Comments are now closed." copy only appeared on an empty thread. The closed notice now renders as a labelled, lock-iconed section divider at the top of the comment list whenever comments are disabled and comments exist (using the project- vs. video-approved wording already used in the empty state). The empty-state placeholder circle above that message is now a lock icon for the closed case too. Touches `src/components/CommentSection.tsx`.
+
+### Fixed
+
+- **"Project approval confirmation" toggle is now honoured when an admin manually marks a project APPROVED** — The Admin → Settings → Client System Emails "Project approval confirmation" toggle (`clientEmailProjectApproved`) was respected on the client-driven approval path (`/api/projects/[id]/approve`), but the admin status-change path that fires when you set a project's status to APPROVED in the project page sent the client "Project Approved" email unconditionally, ignoring the toggle. The admin path now reads `clientEmailProjectApproved` alongside the auto-close settings and skips the client email when it is disabled (logging `Skipped - clientEmailProjectApproved is disabled`), matching the client-driven path. Touches `src/app/api/projects/[id]/route.ts`.
 
 ### Removed
 
