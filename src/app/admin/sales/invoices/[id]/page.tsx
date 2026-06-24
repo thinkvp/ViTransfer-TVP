@@ -669,6 +669,7 @@ export default function InvoiceDetailPage() {
       clientAddress: clientDetails?.address ?? undefined,
       projectTitle: projectId ? projectTitleById[projectId] : undefined,
       publicInvoiceUrl,
+      amountPaidCents: paidCents,
     })
   }
 
@@ -1132,8 +1133,20 @@ export default function InvoiceDetailPage() {
               )}
               <div className="flex items-center justify-end gap-3">
                 <span className="text-muted-foreground">Total</span>
-                <span className="text-foreground font-semibold tabular-nums">{formatMoney(totalCents, getCurrencySymbol(settings.currencyCode))}</span>
+                <span className={`tabular-nums ${paidCents > 0 ? 'text-muted-foreground font-medium' : 'text-foreground font-semibold'}`}>{formatMoney(totalCents, getCurrencySymbol(settings.currencyCode))}</span>
               </div>
+              {paidCents > 0 && (
+                <>
+                  <div className="flex items-center justify-end gap-3">
+                    <span className="text-muted-foreground">Amount paid</span>
+                    <span className="text-foreground font-medium tabular-nums">-{formatMoney(Math.min(paidCents, totalCents), getCurrencySymbol(settings.currencyCode))}</span>
+                  </div>
+                  <div className="flex items-center justify-end gap-3">
+                    <span className="text-muted-foreground">Balance due</span>
+                    <span className="text-foreground font-semibold tabular-nums">{formatMoney(balanceCents, getCurrencySymbol(settings.currencyCode))}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </CardContent>

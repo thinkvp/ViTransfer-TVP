@@ -451,6 +451,7 @@ export async function processSalesReminders() {
         clientAddress: client?.address ? String(client.address).trim() : undefined,
         projectTitle: project?.title ?? undefined,
         publicInvoiceUrl: share.url,
+        amountPaidCents: paidCents,
       }
 
       if (stripeGateway?.enabled) {

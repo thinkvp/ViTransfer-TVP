@@ -37,10 +37,12 @@ if (!(Test-Path .env.example)) {
 Write-Host "Generating secure random secrets..." -ForegroundColor Green
 Write-Host ""
 
-# Function to generate random hex string
+# Function to generate random hex string (cryptographically secure)
 function Get-RandomHex {
     param([int]$Length)
-    -join ((1..$Length) | ForEach-Object { '{0:x2}' -f (Get-Random -Maximum 256) })
+    $bytes = New-Object byte[] $Length
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    -join ($bytes | ForEach-Object { '{0:x2}' -f $_ })
 }
 
 # Function to generate random base64 string
@@ -213,7 +215,7 @@ Write-Host "  - Timezone: $TZ"
 Write-Host ""
 Write-Host "Next steps:"
 Write-Host "  1. Review .env file and adjust any settings"
-Write-Host "  2. Run: docker-compose up -d"
+Write-Host "  2. Run: docker compose up -d"
 Write-Host "  3. Access: http://localhost:$APP_PORT"
 Write-Host ""
 Write-Host "==================================================" -ForegroundColor Cyan

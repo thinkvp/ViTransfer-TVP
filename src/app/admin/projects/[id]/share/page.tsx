@@ -19,6 +19,7 @@ import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { useContentImageRefresh } from '@/hooks/useContentImageRefresh'
+import { useEdgeSwipeNavigation } from '@/hooks/useEdgeSwipeNavigation'
 import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
@@ -125,6 +126,15 @@ export default function AdminSharePage() {
     const guard = draftGuardRef.current
     return guard ? guard.confirmDiscardDraft() : true
   }, [])
+
+  // Mobile edge-swipe navigation: drag in from the right edge → back to the
+  // project page (mirrors the breadcrumb "Back" button). Honors the unsent
+  // comment guard so an accidental swipe can't silently discard a draft.
+  useEdgeSwipeNavigation({
+    onSwipeLeft: () => {
+      if (confirmShareDraftNavigation()) router.push(`/admin/projects/${id}`)
+    },
+  })
 
   const markVideoApproved = useCallback((videoId: string) => {
     if (!videoId) return

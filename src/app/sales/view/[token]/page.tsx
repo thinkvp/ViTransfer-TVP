@@ -10,6 +10,7 @@ import {
 } from '@/lib/sales/badge'
 import { calcLineSubtotalCents, calcLineTaxCents, centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
+import { aggregateInvoicePaidCents } from '@/lib/sales/invoice-paid'
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import PublicSalesDocActions from './public-sales-doc-actions'
 import { getSecuritySettings } from '@/lib/video-access'
@@ -198,30 +199,7 @@ export default async function SalesDocPublicViewPage(
   )
 
   const paidCentsFromDb = type === 'INVOICE'
-    ? await (async () => {
-        const invoiceId = String(share.docId || '').trim()
-        if (!invoiceId) return 0
-
-        const [localAgg, stripeAgg] = await Promise.all([
-          (prisma as any).salesPayment
-            .aggregate({
-              where: { invoiceId, excludeFromInvoiceBalance: false },
-              _sum: { amountCents: true },
-            })
-            .catch(() => null),
-          (prisma as any).salesInvoiceStripePayment
-            .aggregate({
-              where: { invoiceDocId: invoiceId },
-              _sum: { invoiceAmountCents: true },
-            })
-            .catch(() => null),
-        ])
-
-        const local = Number(localAgg?._sum?.amountCents ?? 0)
-        const stripe = Number(stripeAgg?._sum?.invoiceAmountCents ?? 0)
-        const total = (Number.isFinite(local) ? local : 0) + (Number.isFinite(stripe) ? stripe : 0)
-        return Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0
-      })()
+    ? await aggregateInvoicePaidCents(String(share.docId || '').trim())
     : 0
 
   const nowMs = Date.now()
@@ -323,6 +301,7 @@ export default async function SalesDocPublicViewPage(
             processingFeeCents={processingFeeCents}
             processingFeeCurrency={stripeCurrency}
             currencyCode={currencyCode}
+            amountPaidCents={type === 'INVOICE' ? paidCentsFromDb : undefined}
           />
         </div>
         <div className="rounded-xl border bg-card overflow-hidden">
@@ -485,9 +464,21 @@ export default async function SalesDocPublicViewPage(
                 </div>
                 )}
                 <div className="flex justify-between border-t pt-2">
-                  <span className="font-semibold">Total</span>
-                  <span className="font-semibold tabular-nums">{formatMoney(totalCents, currencySymbol)}</span>
+                  <span className={type === 'INVOICE' && paidCentsFromDb > 0 ? 'text-muted-foreground' : 'font-semibold'}>Total</span>
+                  <span className={type === 'INVOICE' && paidCentsFromDb > 0 ? 'tabular-nums' : 'font-semibold tabular-nums'}>{formatMoney(totalCents, currencySymbol)}</span>
                 </div>
+                {type === 'INVOICE' && paidCentsFromDb > 0 && (
+                  <>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Amount paid</span>
+                      <span className="tabular-nums">-{formatMoney(Math.min(paidCentsFromDb, totalCents), currencySymbol)}</span>
+                    </div>
+                    <div className="flex justify-between border-t pt-2">
+                      <span className="font-semibold">Balance due</span>
+                      <span className="font-semibold tabular-nums">{formatMoney(Math.max(0, totalCents - paidCentsFromDb), currencySymbol)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

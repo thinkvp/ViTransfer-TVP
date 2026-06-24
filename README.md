@@ -21,7 +21,7 @@ ViTransfer-TVP is designed for video production companies, freelance filmmakers,
 - **Share video previews** with clients via secure, branded links
 - **Collect timestamped feedback** with threaded, version-aware comments
 - **Manage approval workflows** with per-video approval tracking
-- **Send professional invoices** with QuickBooks and Stripe integration
+- **Send professional invoices** with Stripe payment integration
 - **Track project analytics** including page visits, downloads, and engagement
 - **Maintain full control** over your data with self-hosted deployment
 
@@ -67,11 +67,9 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 
 ### Sales & CRM Integration
 
-Planning note: the staged roadmap for expanding Sales into a broader Finance area is documented in [docs/finance-roadmap.md](docs/finance-roadmap.md).
-
 <p align="center">
   <img src="docs/screenshots/Sales Dashboard.jpg" alt="Sales Dashboard" width="800">
-  <br><em>Sales dashboard with invoice tracking and QuickBooks integration</em>
+  <br><em>Sales dashboard with invoice and payment tracking</em>
 </p>
 
 <p align="center">
@@ -140,20 +138,19 @@ Planning note: the staged roadmap for expanding Sales into a broader Finance are
 - **Approval Workflow** — Per-video approval system with automatic project approval when all videos are approved
 - **Version Control** — Multiple video versions per project with revision tracking and optional max revision limits
 - **Custom Thumbnails** — Set per-version thumbnails from uploaded image assets
-- **Dark Mode** — Native light and dark themes for consistent experience across devices
+- **Dark Theme** — Polished dark-only interface with semantic colour tokens for a consistent experience across devices
 - **Responsive Design** — Optimized for desktop, tablet, and mobile devices
 
 ### Authentication & Access Control
-- **Flexible Share Authentication** — Password protection, email OTP codes, both methods, or no authentication with optional guest mode
+- **Flexible Share Authentication** — Password protection, email OTP codes, both methods, or no authentication
 - **Client Project Switching** — Authenticated share-page recipients can switch between other current projects for the same client, with global and per-project controls plus status-based restrictions
 - **WebAuthn Passkeys** — Modern passwordless login for admin accounts with multi-device support
-- **Guest Mode** — View-only guest access with optional restriction to latest version only
 - **Session Management** — Configurable timeouts, IP binding, and automatic session invalidation on security changes
 
 ### Sales & CRM (TVP Exclusive)
-- **QuickBooks Integration** — Pull client and invoice data from QuickBooks Online (read-only sync)
 - **Stripe Checkout** — Accept payments directly on invoices with Stripe payment links
-- **Invoice Management** — Create, send, and track invoices with payment reminders
+- **Quotes & Invoices** — Create, send, and track quotes and invoices with branded PDFs and payment reminders
+- **Partial Payment Tracking** — Invoice totals show amount paid and remaining balance across the admin page, public web view, and emailed PDF
 - **Sales Dashboard** — Overview of outstanding invoices, payment status, and revenue
 
 ### Notifications
@@ -188,7 +185,6 @@ These features distinguish ViTransfer-TVP from the original ViTransfer:
 
 ### Sales & CRM Integration
 Built-in customer relationship management and invoicing capabilities:
-- **QuickBooks Sync** — One-way sync pulls clients, quotes, and invoices from QuickBooks Online with automatic daily updates
 - **Stripe Checkout** — Generate payment links for invoices that redirect to Stripe-hosted checkout pages
 - **Client Database** — Centralized client management with company details, contact information, and display colors
 - **Sales Dashboard** — Overview of outstanding invoices, payment status, revenue tracking, and quote conversion
@@ -223,7 +219,6 @@ Per-video shareable links for targeted distribution:
 - **Version-Specific** — Links are tied to specific video versions, automatically updating when versions change
 - **Token-Based Security** — Cryptographically secure random tokens (like `gv/abc123xyz`) for each link
 - **14-Day Expiry** — Auto-expiring links with ability to refresh expiry without regenerating token
-- **Guest Mode Required** — Requires project guest mode to be enabled for security
 - **Analytics Tracking** — Track views and IP-based dedupe to prevent analytics inflation
 - **Push Notifications** — Optional admin notifications when guest video links are accessed
 - **Project Status Checks** — Links automatically disabled when projects are CLOSED
@@ -234,7 +229,7 @@ Per-video shareable links for targeted distribution:
 ### Comprehensive Branding
 Deep customization throughout the entire application:
 - **Company Logo** — Upload or link to PNG/JPG logo displayed in app header and email communications
-- **Dark Mode Logo** — Optional separate logo for dark theme with automatic theme switching
+- **Dark-Background Logo** — Optional separate logo variant for use on dark surfaces (e.g. the app UI and dark email headers)
 - **Favicon** — Custom browser favicon (upload or link) for professional browser tab appearance
 - **Accent Color** — Custom hex color for buttons, links, toggles, and email templates (default blue)
 - **Accent Text Mode** — Choose light (white) or dark (black) text on accent-colored buttons for contrast
@@ -517,15 +512,10 @@ The app and worker containers run as non-root user `911:911` by default. If you 
 
 | Variable | Description |
 |----------|-------------|
-| `QBO_CLIENT_ID` | QuickBooks Online OAuth client ID |
-| `QBO_CLIENT_SECRET` | QuickBooks Online OAuth client secret |
-| `QBO_REALM_ID` | QuickBooks company ID (realmId) |
-| `QBO_REFRESH_TOKEN` | QuickBooks OAuth2 refresh token |
-| `QBO_SANDBOX` | Use Intuit sandbox environment (`false`) |
-| `QBO_MINOR_VERSION` | QuickBooks API minor version (`75`) |
-| `QBO_REDIRECT_URI` | OAuth redirect URI if behind proxy |
 | `STRIPE_SECRET_KEY` | Stripe API secret key |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook endpoint secret |
+| `SMTP_POOL_MAX_CONNECTIONS` | Max pooled SMTP connections (default `5`) |
+| `SMTP_POOL_MAX_MESSAGES` | Max messages per pooled SMTP connection (default `100`) |
 
 **Important Notes:**
 - Use `openssl rand -hex 32` for database passwords (no special characters that break URLs)
@@ -580,7 +570,6 @@ Each project can override global defaults:
 
 **Client Access:**
 - Authentication Mode — PASSWORD, OTP, BOTH, or NONE
-- Guest Mode — Allow view-only access without password
 - Password — Client access password (AES-256 encrypted)
 - Custom URL — Memorable share link slug
 
@@ -629,7 +618,7 @@ If `TRUSTED_PROXIES` is not set, the app falls back to the left-most `X-Forwarde
 ### Client Workflow
 
 1. Receive share link from filmmaker
-2. Enter password / OTP / access as guest (depending on project auth mode)
+2. Enter password / OTP (depending on project auth mode)
 3. Watch videos and leave timestamped feedback
 4. Submit approval when satisfied
 5. Download approved videos (if enabled)

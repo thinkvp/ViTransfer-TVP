@@ -23,6 +23,7 @@ import type { PdfPartyInfo } from '@/lib/sales/pdf'
 import type { SalesInvoice, SalesQuote, SalesSettings } from '@/lib/sales/types'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
+import { aggregateInvoicePaidCents } from '@/lib/sales/invoice-paid'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -192,6 +193,11 @@ export async function POST(request: NextRequest) {
     projectTitle: share.projectTitle || undefined,
     publicQuoteUrl: isQuote ? shareUrl : undefined,
     publicInvoiceUrl: !isQuote ? shareUrl : undefined,
+  }
+
+  if (!isQuote) {
+    // Surface recorded payments / remaining balance on the invoice PDF.
+    pdfInfo.amountPaidCents = await aggregateInvoicePaidCents(String(share.docId || '')).catch(() => 0)
   }
 
   if (!isQuote && stripeGateway?.enabled) {

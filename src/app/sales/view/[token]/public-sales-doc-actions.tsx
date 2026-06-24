@@ -24,6 +24,7 @@ type Props = {
   processingFeeCents?: number | null
   processingFeeCurrency?: string | null
   currencyCode?: string | null
+  amountPaidCents?: number | null
 }
 
 export default function PublicSalesDocActions(props: Props) {
@@ -46,8 +47,9 @@ export default function PublicSalesDocActions(props: Props) {
       publicInvoiceUrl: props.type === 'INVOICE'
         ? `${typeof window !== 'undefined' ? window.location.origin : ''}/sales/view/${props.token}`
         : undefined,
+      amountPaidCents: props.type === 'INVOICE' && typeof props.amountPaidCents === 'number' ? props.amountPaidCents : undefined,
     }),
-    [props.clientAddress, props.clientName, props.processingFeeCents, props.processingFeeCurrency, props.projectTitle, props.token, props.type]
+    [props.amountPaidCents, props.clientAddress, props.clientName, props.processingFeeCents, props.processingFeeCurrency, props.projectTitle, props.token, props.type]
   )
 
   const onDownload = useCallback(async () => {

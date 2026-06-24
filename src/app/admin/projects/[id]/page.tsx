@@ -16,6 +16,7 @@ import { toast } from 'sonner'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { getEffectiveStartDateYmd } from '@/lib/project-start-date'
+import { useEdgeSwipeNavigation } from '@/hooks/useEdgeSwipeNavigation'
 import { formatDate } from '@/lib/utils'
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { ProjectFileUpload } from '@/components/ProjectFileUpload'
@@ -98,6 +99,14 @@ export default function ProjectPage() {
   const bumpProjectStorageRefresh = useCallback(() => {
     setProjectStorageRefresh((v) => v + 1)
   }, [])
+
+  // Mobile edge-swipe navigation: drag in from the left edge → share page,
+  // drag in from the right edge → back to the projects dashboard.
+  const canSwipeToShare = canAccessSharePage && project?.status !== 'CLOSED'
+  useEdgeSwipeNavigation({
+    onSwipeRight: canSwipeToShare ? () => router.push(`/admin/projects/${id}/share`) : undefined,
+    onSwipeLeft: () => router.push('/admin/projects'),
+  })
 
   useEffect(() => {
     setNowIso(new Date().toISOString())

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ViTransfer-TVP is a self-hosted **video production review platform + CRM**: clients receive branded share links, leave timestamped/versioned feedback, and approve videos; admins manage projects, clients, invoicing (Stripe + QuickBooks), and accounting. Forked from MansiVisuals/ViTransfer and diverged significantly. Self-hosted via Docker Compose.
+ViTransfer-TVP is a self-hosted **video production review platform + CRM**: clients receive branded share links, leave timestamped/versioned feedback, and approve videos; admins manage projects, clients, invoicing (Stripe), and accounting. Forked from MansiVisuals/ViTransfer and diverged significantly. Self-hosted via Docker Compose.
 
 ## Commands
 
@@ -33,7 +33,7 @@ The app and worker both need PostgreSQL and Redis. Simplest path is `docker comp
 ### Two processes, one codebase
 
 1. **Web app** (`next`) — Next.js 16 App Router, React 19, serving `src/app/`. Entry-time initialization happens in `src/instrumentation.ts` (`register()`), which seeds the default admin and security settings on server start.
-2. **Worker** (`src/worker/index.ts`, launched via `worker.mjs` / `npm run worker`) — a long-running BullMQ consumer that does all heavy/async work: FFmpeg transcoding, thumbnail/sprite generation, ZIP building, email/push notifications, QuickBooks daily pull, S3 backups, scheduled reminders, and storage reconciliation. It also runs repeating maintenance jobs on timers.
+2. **Worker** (`src/worker/index.ts`, launched via `worker.mjs` / `npm run worker`) — a long-running BullMQ consumer that does all heavy/async work: FFmpeg transcoding, thumbnail/sprite generation, ZIP building, email/push notifications, S3 backups, scheduled reminders, and storage reconciliation. It also runs repeating maintenance jobs on timers.
 
 The app **enqueues** jobs; the worker **processes** them. They communicate only through Postgres + Redis, never in-process.
 
@@ -60,7 +60,7 @@ Note: `src/proxy.ts` is the Next.js middleware (matcher `/admin/:path*`) but is 
 
 ### Data model
 
-Single large Prisma schema (`prisma/schema.prisma`, ~90 models). Major clusters: **projects/videos/comments** (review core), **clients/recipients**, **sales** (`Sales*` quotes/invoices/payments + Stripe + QuickBooks import tables), **accounting** (`Account`, `JournalEntry`, vehicle logbook), **kanban**, **security** (events, blocklists, rate limits), **notifications** (queue + read state + web push), and **StoredFile**. Sales and accounting logic lives in `src/lib/sales/` and `src/lib/accounting/`; QuickBooks integration in `src/lib/quickbooks/`.
+Single large Prisma schema (`prisma/schema.prisma`, ~90 models). Major clusters: **projects/videos/comments** (review core), **clients/recipients**, **sales** (`Sales*` quotes/invoices/payments + Stripe), **accounting** (`Account`, `JournalEntry`, vehicle logbook), **kanban**, **security** (events, blocklists, rate limits), **notifications** (queue + read state + web push), and **StoredFile**. Sales and accounting logic lives in `src/lib/sales/` and `src/lib/accounting/`. (A former pull-only QuickBooks integration was removed in 2.0.3; inert `qboId` columns and the `SalesPaymentSource.QUICKBOOKS` enum value are retained as historical identifiers only.)
 
 ### Frontend
 

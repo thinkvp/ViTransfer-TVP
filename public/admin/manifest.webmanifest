@@ -2,7 +2,7 @@
   "name": "ViTransfer-TVP",
   "short_name": "ViTransfer-TVP",
   "id": "/admin/",
-  "start_url": "/admin/",
+  "start_url": "/admin/projects",
   "scope": "/admin/",
   "display_override": ["window-controls-overlay", "standalone"],
   "display": "standalone",

@@ -11,7 +11,7 @@ echo ""
 
 # Check if .env already exists
 if [ -f .env ]; then
-    echo "⚠️  WARNING: .env file already exists!"
+    echo "WARNING: .env file already exists!"
     echo ""
     echo "Overwriting will replace ALL secrets and credentials."
     echo "This could lock you out if your database is already initialized."
@@ -29,14 +29,14 @@ fi
 
 # Check if .env.example exists
 if [ ! -f .env.example ]; then
-    echo "❌ ERROR: .env.example file not found!"
+    echo "ERROR: .env.example file not found!"
     echo "Please run this script from the ViTransfer-TVP root directory."
     exit 1
 fi
 
 # Check for openssl
 if ! command -v openssl &> /dev/null; then
-    echo "❌ ERROR: openssl is not installed!"
+    echo "ERROR: openssl is not installed!"
     echo "Please install openssl and try again."
     exit 1
 fi
@@ -54,7 +54,7 @@ JWT_SECRET=$(openssl rand -base64 64 | tr -d '\r\n')
 JWT_REFRESH_SECRET=$(openssl rand -base64 64 | tr -d '\r\n')
 SHARE_TOKEN_SECRET=$(openssl rand -base64 64 | tr -d '\r\n')
 
-echo "✓ Secrets generated"
+echo "Secrets generated"
 echo ""
 
 # Prompt for admin credentials
@@ -69,7 +69,7 @@ while true; do
     if [[ "$ADMIN_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
         break
     else
-        echo "❌ Invalid email format. Please try again."
+        echo "Invalid email format. Please try again."
     fi
 done
 
@@ -83,10 +83,10 @@ while true; do
         if [ "$ADMIN_PASSWORD" = "$ADMIN_PASSWORD_CONFIRM" ]; then
             break
         else
-            echo "❌ Passwords do not match. Please try again."
+            echo "Passwords do not match. Please try again."
         fi
     else
-        echo "❌ Password must be at least 8 characters long."
+        echo "Password must be at least 8 characters long."
     fi
 done
 
@@ -107,7 +107,7 @@ while true; do
     if [[ "$APP_PORT" =~ ^[0-9]+$ ]] && [ "$APP_PORT" -ge 1 ] && [ "$APP_PORT" -le 65535 ]; then
         break
     else
-        echo "❌ Invalid port. Must be a number between 1 and 65535."
+        echo "Invalid port. Must be a number between 1 and 65535."
     fi
 done
 
@@ -117,7 +117,7 @@ while true; do
     TZ=${TZ:-UTC}
     # Basic validation: should match Region/City or UTC format
     if ! ([[ "$TZ" =~ ^[A-Za-z]+(/[A-Za-z_]+)?$ ]] || [ "$TZ" = "UTC" ]); then
-        echo "❌ Invalid timezone format. Use format like 'America/New_York' or 'UTC'."
+        echo "Invalid timezone format. Use format like 'America/New_York' or 'UTC'."
         echo "   See: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
         continue
     fi
@@ -125,7 +125,7 @@ while true; do
     # Best-effort existence check (skip on platforms without zoneinfo files)
     if [ "$TZ" != "UTC" ] && [ -d "/usr/share/zoneinfo" ]; then
         if [ ! -f "/usr/share/zoneinfo/$TZ" ]; then
-            echo "❌ Timezone '$TZ' not found on this system."
+            echo "Timezone '$TZ' not found on this system."
             echo "   Pick one from: timedatectl list-timezones (Linux)"
             continue
         fi
@@ -141,7 +141,7 @@ while true; do
     if [ "$HTTPS_ENABLED" = "true" ] || [ "$HTTPS_ENABLED" = "false" ]; then
         break
     else
-        echo "❌ Invalid value. Must be exactly 'true' or 'false'."
+        echo "Invalid value. Must be exactly 'true' or 'false'."
     fi
 done
 
@@ -187,25 +187,25 @@ rm .env.tmp
 # Sanity check: ensure placeholders are gone
 if grep -q "<<REPLACE_WITH" .env; then
     echo ""
-    echo "❌ Setup failed: one or more placeholders remain in .env"
+    echo "Setup failed: one or more placeholders remain in .env"
     echo "   Please re-run the script or edit .env manually."
     exit 1
 fi
 
 echo ""
 echo "=================================================="
-echo "  ✓ Setup Complete!"
+echo "  Setup Complete!"
 echo "=================================================="
 echo ""
 echo "Your .env file has been created with:"
-echo "  • 6 secure random secrets"
-echo "  • Admin account: $ADMIN_EMAIL"
-echo "  • Application port: $APP_PORT"
-echo "  • Timezone: $TZ"
+echo "  - 6 secure random secrets"
+echo "  - Admin account: $ADMIN_EMAIL"
+echo "  - Application port: $APP_PORT"
+echo "  - Timezone: $TZ"
 echo ""
 echo "Next steps:"
 echo "  1. Review .env file and adjust any settings"
-echo "  2. Run: docker-compose up -d"
+echo "  2. Run: docker compose up -d"
 echo "  3. Access: http://localhost:$APP_PORT"
 echo ""
 echo "=================================================="

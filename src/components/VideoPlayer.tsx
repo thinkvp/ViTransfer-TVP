@@ -361,7 +361,9 @@ export default function VideoPlayer({
   // keeps using sprites (we don't seek the playing video just to hover).
   useEffect(() => {
     const isDragging = activeRangeDragHandle !== null || isScrubbingPlayhead
-    if (!isDragging) return
+    // Only desktop renders the live-frame canvas; on touch we show sprites
+    // instead (see preview render), so there's nothing to draw into there.
+    if (!isDragging || !canShowTimelineHover) return
     let raf = 0
     const draw = () => {
       const video = videoRef.current
@@ -376,7 +378,7 @@ export default function VideoPlayer({
     }
     raf = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(raf)
-  }, [activeRangeDragHandle, isScrubbingPlayhead])
+  }, [activeRangeDragHandle, isScrubbingPlayhead, canShowTimelineHover])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -2625,9 +2627,9 @@ export default function VideoPlayer({
                         // the committed (snapped) time instead of tracking the cursor, so a
                         // tiny move inside the snap zone doesn't jiggle the displayed time.
                         if (snapped !== time) {
-                          updateHoverFromTimeSeconds(newStart, 96)
+                          updateHoverFromTimeSeconds(newStart, 96, true)
                         } else {
-                          updateHoverFromClientX(e.clientX)
+                          updateHoverFromClientX(e.clientX, true)
                         }
                       }}
                       onPointerUp={(e) => {
@@ -2714,9 +2716,9 @@ export default function VideoPlayer({
                         // the committed (snapped) time instead of tracking the cursor, so a
                         // tiny move inside the snap zone doesn't jiggle the displayed time.
                         if (snapped !== time) {
-                          updateHoverFromTimeSeconds(newEnd, 96)
+                          updateHoverFromTimeSeconds(newEnd, 96, true)
                         } else {
-                          updateHoverFromClientX(e.clientX)
+                          updateHoverFromClientX(e.clientX, true)
                         }
                       }}
                       onPointerUp={(e) => {
@@ -3003,9 +3005,12 @@ export default function VideoPlayer({
                               }
                         }
                       >
-                        {dragKind !== null ? (
-                          // Dragging/scrubbing: paint the exact live video frame (kept in
+                        {dragKind !== null && canShowTimelineHover ? (
+                          // Desktop drag/scrub: paint the exact live video frame (kept in
                           // sync by the rAF effect) so the preview matches the main player.
+                          // On touch we fall back to the sprite below — drawing a paused,
+                          // rapidly-seeking video to canvas is unreliable on mobile (stale
+                          // or blank frame), whereas a sprite tile always renders.
                           <canvas
                             ref={previewFrameCanvasRef}
                             width={displayW}
