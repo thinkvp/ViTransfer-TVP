@@ -24,8 +24,8 @@ type SortKey = 'date' | 'supplier' | 'description' | 'category' | 'amountExGst' 
 
 const STATUS_BADGE: Record<ExpenseStatus, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
-  APPROVED: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-  RECONCILED: 'bg-green-500/15 text-green-700 dark:text-green-400',
+  APPROVED: 'bg-blue-500/15 text-blue-400',
+  RECONCILED: 'bg-green-500/15 text-green-400',
 }
 
 function fmtAud(cents: number) {

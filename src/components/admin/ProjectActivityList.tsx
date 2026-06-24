@@ -7,7 +7,7 @@ import { cn, formatDateTime } from '@/lib/utils'
 import { projectStatusBadgeClass, projectStatusLabel } from '@/lib/project-status'
 
 function getAccessMethodColor(_method: string): string {
-  return 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400'
+  return 'bg-blue-950 text-blue-400'
 }
 
 function StatusPill({ status }: { status: string }) {

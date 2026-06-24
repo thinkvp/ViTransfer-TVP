@@ -678,7 +678,7 @@ function KanbanColumnView({
       onDrop={canDragColumn ? onColumnDrop : undefined}
       onDragEnd={canDragColumn ? onColumnDragEnd : undefined}
       className={`
-        ${stretch ? 'flex-shrink-0 w-[280px] md:w-auto md:flex-1 md:min-w-[200px]' : 'flex-shrink-0 w-[280px]'} bg-muted/70 dark:bg-muted/30 rounded-lg border transition-all
+        ${stretch ? 'flex-shrink-0 w-[280px] md:w-auto md:flex-1 md:min-w-[200px]' : 'flex-shrink-0 w-[280px]'} bg-muted/30 rounded-lg border transition-all
         ${isColumnDragging ? 'opacity-40 ring-2 ring-primary' : ''}
         ${isColumnDropTarget ? 'ring-2 ring-primary/50' : ''}
       `}

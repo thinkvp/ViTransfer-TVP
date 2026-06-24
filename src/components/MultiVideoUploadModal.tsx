@@ -425,7 +425,7 @@ export default function MultiVideoUploadModal({
 
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor={`videoNotes-${item.id}`}>
-                        Version Notes <span className="text-muted-foreground dark:text-white">(Optional)</span>
+                        Version Notes <span className="text-white">(Optional)</span>
                       </Label>
                       <Textarea
                         id={`videoNotes-${item.id}`}

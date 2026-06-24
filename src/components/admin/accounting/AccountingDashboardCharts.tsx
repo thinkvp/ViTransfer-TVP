@@ -321,7 +321,7 @@ export function AccountingTrendChart({
             <span
               className={
                 totalNetProfitCents >= 0
-                  ? 'text-emerald-600 dark:text-emerald-400'
+                  ? 'text-emerald-400'
                   : 'text-destructive'
               }
             >
@@ -482,9 +482,9 @@ const SECTION_GRADIENT: Record<RowSection, string> = {
 }
 
 const SECTION_BADGE: Record<RowSection, { label: string; className: string }> = {
-  INCOME: { label: 'Income', className: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400' },
-  COGS: { label: 'COGS', className: 'bg-amber-500/15 text-amber-700 dark:text-amber-400' },
-  EXPENSE: { label: 'Expense', className: 'bg-rose-500/15 text-rose-700 dark:text-rose-400' },
+  INCOME: { label: 'Income', className: 'bg-emerald-500/15 text-emerald-400' },
+  COGS: { label: 'COGS', className: 'bg-amber-500/15 text-amber-400' },
+  EXPENSE: { label: 'Expense', className: 'bg-rose-500/15 text-rose-400' },
 }
 
 interface LeaderboardEntry {

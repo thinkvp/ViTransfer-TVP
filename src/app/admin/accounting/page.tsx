@@ -146,7 +146,7 @@ export default function AccountingDashboardPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-3xl font-bold text-emerald-700 dark:text-emerald-400">{fmtAud(stats.pl.totalIncomeCents)}</p>
+                <p className="text-3xl font-bold text-emerald-400">{fmtAud(stats.pl.totalIncomeCents)}</p>
                 <p className="text-xs text-muted-foreground mt-1">{stats.reportingBasis === 'CASH' ? 'cash basis, ex GST' : 'accrual basis, ex GST'}</p>
               </CardContent>
             </Card>
@@ -162,7 +162,7 @@ export default function AccountingDashboardPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className={cn('text-3xl font-bold', stats.pl.netProfitCents >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive')}>
+                  <p className={cn('text-3xl font-bold', stats.pl.netProfitCents >= 0 ? 'text-emerald-400' : 'text-destructive')}>
                     {fmtAud(stats.pl.netProfitCents)}
                   </p>
                   {(() => {
@@ -170,7 +170,7 @@ export default function AccountingDashboardPage() {
                     return proj !== null ? (
                       <p className="text-xs text-muted-foreground mt-1">
                         Projected {fy.label}:{' '}
-                        <span className={proj >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}>
+                        <span className={proj >= 0 ? 'text-emerald-400' : 'text-destructive'}>
                           {fmtAud(proj)}
                         </span>
                       </p>

@@ -98,7 +98,7 @@ export default function AdminPage() {
     }
   }, [searchParams])
 
-  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20'
+  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20'
   const metricIconClassName = 'w-5 h-5 text-primary'
 
   const overview = useMemo<OverviewStats>(() => {

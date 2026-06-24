@@ -234,7 +234,7 @@ export default function MessageBubble({
             {!isReply && comment.timecode ? (
               <button
                 onClick={handleTimestampClick}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap mr-2 align-baseline bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-400/50 hover:bg-amber-500/25 transition-colors"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap mr-2 align-baseline bg-amber-500/20 text-amber-400 border border-amber-400/50 hover:bg-amber-500/25 transition-colors"
                 title="Seek to this timecode"
               >
                 <Clock className="w-3 h-3 flex-shrink-0" />

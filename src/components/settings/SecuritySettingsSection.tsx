@@ -207,7 +207,7 @@ export function SecuritySettingsSection({
                   HTTPS Mode
                 </Label>
               </div>
-              <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${httpsEnabled ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' : 'bg-muted text-muted-foreground'}`}>
+              <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${httpsEnabled ? 'bg-green-900 text-green-300' : 'bg-muted text-muted-foreground'}`}>
                 {httpsEnabled ? 'Enabled' : 'Disabled'}
               </span>
             </div>

@@ -468,10 +468,10 @@ export default function AccountingSettingsPage() {
                         </div>
                         <div className="hidden sm:block text-sm tabular-nums">{(rate.rate * 100).toFixed(1)}%</div>
                         <div className="hidden sm:block">
-                          {rate.isDefault && <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />}
+                          {rate.isDefault && <Check className="w-4 h-4 text-emerald-400" />}
                         </div>
                         <div className="hidden sm:block">
-                          <span className={cn('text-xs', rate.isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground')}>
+                          <span className={cn('text-xs', rate.isActive ? 'text-emerald-400' : 'text-muted-foreground')}>
                             {rate.isActive ? 'Active' : 'Off'}
                           </span>
                         </div>
@@ -488,7 +488,7 @@ export default function AccountingSettingsPage() {
                           <div className="flex items-center gap-3 text-xs text-muted-foreground">
                             <span className="font-mono bg-muted px-1.5 py-0.5 rounded">{rate.code}</span>
                             <span>{(rate.rate * 100).toFixed(1)}%</span>
-                            {rate.isDefault && <span className="text-emerald-600 dark:text-emerald-400">Default</span>}
+                            {rate.isDefault && <span className="text-emerald-400">Default</span>}
                           </div>
                           <div className="flex items-center gap-1">
                             <AccountingTableActionButton className="h-8 w-8" onClick={() => startEdit(rate)} title="Edit tax rate" aria-label="Edit tax rate"><Pencil className="w-3.5 h-3.5" /></AccountingTableActionButton>

@@ -244,7 +244,7 @@ export default function SalesDashboardPage() {
         <CardContent className="p-3 sm:p-4">
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             <div className="flex items-center gap-2">
-              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                 <FileText className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
@@ -254,7 +254,7 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                 <Receipt className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
@@ -264,7 +264,7 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                 <DollarSign className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
@@ -274,7 +274,7 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                 <AlertTriangle className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
@@ -284,7 +284,7 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                 <CreditCard className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">
@@ -295,7 +295,7 @@ export default function SalesDashboardPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+              <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                 <BarChart3 className="w-5 h-5 text-primary" />
               </div>
               <div className="min-w-0">

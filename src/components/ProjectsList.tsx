@@ -753,7 +753,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
                             <tr className="md:hidden border-b border-border last:border-b-0">
                               <td
                                 colSpan={3}
-                                className="px-3 py-2 bg-muted/40 dark:bg-muted/10"
+                                className="px-3 py-2 bg-muted/10"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <div className="space-y-1 text-sm">

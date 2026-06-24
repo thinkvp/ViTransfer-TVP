@@ -45,8 +45,8 @@ function fmtBasCsvAmount(cents: number) {
 
 const STATUS_BADGE: Record<BasPeriodStatus, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
-  REVIEWED: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-  LODGED: 'bg-green-500/15 text-green-700 dark:text-green-400',
+  REVIEWED: 'bg-blue-500/15 text-blue-400',
+  LODGED: 'bg-green-500/15 text-green-400',
 }
 
 function shouldUseDefaultPaygInstalment(period: BasPeriod) {
@@ -528,11 +528,11 @@ export default function BasDetailPage() {
                 {/* Bank reconciliation status */}
                 <div className="flex items-center gap-2 text-xs">
                   {period.bankTransactionId ? (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/10 text-green-700 dark:text-green-400">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/10 text-green-400">
                       <CheckCircle className="w-3 h-3" />Bank reconciled
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400">
                       Awaiting bank match — match the ATO debit of {fmtAud(period.paymentAmountCents ?? 0)}{' '}in Bank Transactions as &ldquo;BAS Payment&rdquo;
                     </span>
                   )}
@@ -659,7 +659,7 @@ export default function BasDetailPage() {
                 <div className="px-4 py-3 space-y-1 border-t border-border">
                   <p className="text-xs font-medium text-muted-foreground">Issues</p>
                   {issues.map((issue, i) => (
-                    <div key={i} className={cn('text-xs px-2 py-1 rounded', issue.severity === 'warning' ? 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-400' : 'bg-muted text-muted-foreground')}>
+                    <div key={i} className={cn('text-xs px-2 py-1 rounded', issue.severity === 'warning' ? 'bg-yellow-500/10 text-yellow-400' : 'bg-muted text-muted-foreground')}>
                       {issue.message}{issue.count != null ? ` (${issue.count})` : ''}
                     </div>
                   ))}
@@ -729,7 +729,7 @@ export default function BasDetailPage() {
                           <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtAud(r.totalIncGstCents)}</td>
                           <td className="px-2 py-1.5 text-center">
                             {!r.taxEnabled && (
-                              <span title="GST disabled on this invoice" className="text-yellow-600 dark:text-yellow-400">
+                              <span title="GST disabled on this invoice" className="text-yellow-400">
                                 <AlertTriangle className="w-3.5 h-3.5 inline" />
                               </span>
                             )}
@@ -774,10 +774,10 @@ export default function BasDetailPage() {
                           <p className="text-xs font-semibold text-muted-foreground mb-1.5">
                             <span className={cn(
                               'px-1.5 py-0.5 rounded text-[10px] font-medium mr-1.5',
-                              code === 'GST' ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+                              code === 'GST' ? 'bg-green-500/15 text-green-400'
                                 : code === 'GST_FREE' ? 'bg-muted text-muted-foreground'
-                                : code === 'BAS_EXCLUDED' ? 'bg-orange-500/15 text-orange-700 dark:text-orange-400'
-                                : code === 'INPUT_TAXED' ? 'bg-purple-500/15 text-purple-700 dark:text-purple-400'
+                                : code === 'BAS_EXCLUDED' ? 'bg-orange-500/15 text-orange-400'
+                                : code === 'INPUT_TAXED' ? 'bg-purple-500/15 text-purple-400'
                                 : 'bg-muted text-muted-foreground',
                             )}>
                               {code}
@@ -823,17 +823,17 @@ export default function BasDetailPage() {
                                     <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtAud(r.amountIncGstCents)}</td>
                                     <td className="px-2 py-1.5 text-center">
                                       {r.issue === 'zero_gst' && (
-                                        <span title="Coded GST but $0 GST amount" className="text-yellow-600 dark:text-yellow-400">
+                                        <span title="Coded GST but $0 GST amount" className="text-yellow-400">
                                           <AlertTriangle className="w-3.5 h-3.5 inline" />
                                         </span>
                                       )}
                                       {r.issue === 'bas_excluded' && (
-                                        <span title="BAS Excluded — not claimed" className="text-orange-600 dark:text-orange-400">
+                                        <span title="BAS Excluded — not claimed" className="text-orange-400">
                                           <Info className="w-3.5 h-3.5 inline" />
                                         </span>
                                       )}
                                       {r.issue === 'input_taxed' && (
-                                        <span title="Input Taxed — no GST credit" className="text-purple-600 dark:text-purple-400">
+                                        <span title="Input Taxed — no GST credit" className="text-purple-400">
                                           <Info className="w-3.5 h-3.5 inline" />
                                         </span>
                                       )}
@@ -1118,8 +1118,8 @@ function BASTableRow({ description, lineCode, cents, bold, highlight }: {
       <td className={cn(
         'px-4 py-1.5 text-right tabular-nums',
         bold && 'font-semibold',
-        highlight === 'payable' && 'text-red-600 dark:text-red-400',
-        highlight === 'refund' && 'text-green-600 dark:text-green-400',
+        highlight === 'payable' && 'text-red-400',
+        highlight === 'refund' && 'text-green-400',
       )}>
         {fmtBasDollars(cents)}
       </td>

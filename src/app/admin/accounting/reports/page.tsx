@@ -223,14 +223,14 @@ export default function ReportsPage() {
                 )}
                 <div className="flex justify-between py-1.5 font-semibold text-sm border-t border-border mt-2">
                   <span>Gross Profit</span>
-                  <span className={plReport.grossProfitCents >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                  <span className={plReport.grossProfitCents >= 0 ? 'text-green-400' : 'text-red-400'}>
                     {fmtAud(plReport.grossProfitCents)}
                   </span>
                 </div>
                 <PLSection title="Expenses" rows={plReport.expenses} total={plReport.totalExpenseCents} totalLabel="Total Expenses" from={plFrom} to={plTo} />
                 <div className="flex justify-between py-2 font-bold text-sm border-t-2 border-border mt-2">
                   <span>Net Profit</span>
-                  <span className={plReport.netProfitCents >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                  <span className={plReport.netProfitCents >= 0 ? 'text-green-400' : 'text-red-400'}>
                     {fmtAud(plReport.netProfitCents)}
                   </span>
                 </div>
@@ -331,7 +331,7 @@ function PLSection({ title, rows, total, totalLabel, positive, from, to }: {
       {total != null && (
         <div className="flex justify-between py-1 font-semibold text-sm border-t border-border">
           <span>{totalLabel}</span>
-          <span className={cn('tabular-nums', positive && total >= 0 ? 'text-green-600 dark:text-green-400' : '')}>{fmtAud(total)}</span>
+          <span className={cn('tabular-nums', positive && total >= 0 ? 'text-green-400' : '')}>{fmtAud(total)}</span>
         </div>
       )}
     </div>

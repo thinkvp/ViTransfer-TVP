@@ -958,8 +958,8 @@ export default function BankAccountsPage() {
                             {activeTab === 'MATCHED' && (
                               <div className="w-32 shrink-0 hidden sm:block">
                                 {(() => {
-                                  if (t.matchType === 'SPLIT') return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">Split ({t.splitLines?.length ?? 0})</span>
-                                  if (t.matchType === 'BAS_PAYMENT') return <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-400">BAS Payment{t.basPeriod ? ` — ${t.basPeriod.label || `Q${t.basPeriod.quarter} ${t.basPeriod.financialYear}`}` : ''}</span>
+                                  if (t.matchType === 'SPLIT') return <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">Split ({t.splitLines?.length ?? 0})</span>
+                                  if (t.matchType === 'BAS_PAYMENT') return <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400">BAS Payment{t.basPeriod ? ` — ${t.basPeriod.label || `Q${t.basPeriod.quarter} ${t.basPeriod.financialYear}`}` : ''}</span>
                                   const acctId = t.accountId ?? t.expense?.accountId
                                   const acctName = t.accountName ?? t.expense?.accountName ?? ''
                                   const acctCode = coaAccounts.find(a => a.id === acctId)?.code
@@ -986,7 +986,7 @@ export default function BankAccountsPage() {
                                 onClick={e => { e.stopPropagation(); void handleQuickMatchInvoice(t, quickInvoice.id) }}
                                 disabled={isQuickMatching}
                                 title={`Exact match: Invoice ${quickInvoice.invoiceNumber}${quickInvoice.clientName ? ` — ${quickInvoice.clientName}` : ''}`}
-                                className="hidden sm:flex shrink-0 items-center gap-1 text-xs px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20 transition-colors font-medium whitespace-nowrap"
+                                className="hidden sm:flex shrink-0 items-center gap-1 text-xs px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors font-medium whitespace-nowrap"
                               >
                                 {isQuickMatching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
                                 {quickInvoice.invoiceNumber}
@@ -998,14 +998,14 @@ export default function BankAccountsPage() {
                                 onClick={e => { e.stopPropagation(); void handleQuickMatchExpense(t, quickExpense.id) }}
                                 disabled={isQuickMatching}
                                 title={`Exact match: ${quickExpense.supplierName ? `${quickExpense.supplierName} — ` : ''}${quickExpense.description}`}
-                                className="hidden sm:flex shrink-0 items-center gap-1 text-xs px-2 py-1 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors font-medium whitespace-nowrap"
+                                className="hidden sm:flex shrink-0 items-center gap-1 text-xs px-2 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors font-medium whitespace-nowrap"
                               >
                                 {isQuickMatching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
                                 {quickExpense.supplierName || quickExpense.description.slice(0, 20)}
                               </button>
                             )}
                             <div className={cn('w-28 text-right shrink-0 text-sm tabular-nums font-medium',
-                              t.amountCents < 0 ? 'text-destructive' : 'text-emerald-700 dark:text-emerald-400')}>
+                              t.amountCents < 0 ? 'text-destructive' : 'text-emerald-400')}>
                               {fmtAmt(t.amountCents)}
                             </div>
                             {activeTab === 'EXCLUDED' && (
@@ -1040,7 +1040,7 @@ export default function BankAccountsPage() {
                                       <div className="h-5 flex items-center justify-between">
                                         <Label className="text-xs">Account</Label>
                                         {form.suggestedAccountId && form.accountId === form.suggestedAccountId && (
-                                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 leading-none">SUGGESTED</span>
+                                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 leading-none">SUGGESTED</span>
                                         )}
                                       </div>
                                       <div className="relative">
@@ -1377,7 +1377,7 @@ export default function BankAccountsPage() {
           <div className="space-y-4">
             {importStep === 'done' && importResult ? (
               <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-4 text-sm">
-                <p className="font-medium text-emerald-700 dark:text-emerald-400">Import complete</p>
+                <p className="font-medium text-emerald-400">Import complete</p>
                 <p className="text-muted-foreground mt-1">{importResult.imported} transaction{importResult.imported !== 1 ? 's' : ''} imported{importResult.duplicates > 0 ? `, ${importResult.duplicates} duplicate${importResult.duplicates !== 1 ? 's' : ''} skipped` : ''}.</p>
               </div>
             ) : importStep === 'preview' ? (
@@ -1553,8 +1553,8 @@ export default function BankAccountsPage() {
                             const nearlyBalanced = diffAbs > 0 && diffAbs <= 100
                             return (
                               <div className={cn('mt-1.5 px-3 py-2 rounded-md text-xs flex items-center justify-between gap-2',
-                                balanced ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400' :
-                                nearlyBalanced ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-500' :
+                                balanced ? 'bg-emerald-950/30 text-emerald-400' :
+                                nearlyBalanced ? 'bg-amber-950/30 text-amber-500' :
                                 'bg-destructive/10 text-destructive'
                               )}>
                                 <span>

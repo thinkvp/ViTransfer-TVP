@@ -27,19 +27,19 @@ export function projectStatusLabel(status: string): string {
 export function projectStatusBadgeClass(status: string): string {
   switch (status) {
     case 'REVIEWED':
-      return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300'
+      return 'bg-emerald-500/20 text-emerald-300'
     case 'APPROVED':
-      return 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300'
+      return 'bg-green-500/20 text-green-300'
     case 'SHARE_ONLY':
-      return 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300'
+      return 'bg-sky-500/20 text-sky-300'
     case 'ON_HOLD':
-      return 'bg-warning text-warning-visible dark:bg-warning/20 dark:text-warning'
+      return 'bg-warning/20 text-warning'
     case 'IN_REVIEW':
-      return 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300'
+      return 'bg-blue-500/20 text-blue-300'
     case 'IN_PROGRESS':
-      return 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300'
+      return 'bg-violet-500/20 text-violet-300'
     case 'NOT_STARTED':
-      return 'bg-pending text-pending-visible dark:bg-pending/20 dark:text-pending'
+      return 'bg-pending/20 text-pending'
     case 'CLOSED':
       return 'bg-muted text-muted-foreground'
     default:
@@ -50,7 +50,7 @@ export function projectStatusBadgeClass(status: string): string {
 export function projectStatusDotClass(status: string): string {
   switch (status) {
     case 'REVIEWED':
-      return 'text-emerald-700 dark:text-emerald-300'
+      return 'text-emerald-300'
     case 'APPROVED':
       return 'text-success'
     case 'SHARE_ONLY':
@@ -58,11 +58,11 @@ export function projectStatusDotClass(status: string): string {
     case 'ON_HOLD':
       return 'text-warning'
     case 'IN_REVIEW':
-      return 'text-blue-600 dark:text-blue-400'
+      return 'text-blue-400'
     case 'IN_PROGRESS':
-      return 'text-violet-600 dark:text-violet-400'
+      return 'text-violet-400'
     case 'NOT_STARTED':
-      return 'text-pending-visible dark:text-pending'
+      return 'text-pending'
     case 'CLOSED':
       return 'text-muted-foreground'
     default:

@@ -290,7 +290,7 @@ export default function VideoUpload({
       {showVideoNotesField && (
         <div className="space-y-2">
           <Label htmlFor="videoNotes">
-            Version Notes <span className="text-muted-foreground dark:text-white">(Optional)</span>
+            Version Notes <span className="text-white">(Optional)</span>
           </Label>
           <Textarea
             id="videoNotes"

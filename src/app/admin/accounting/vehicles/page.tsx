@@ -146,7 +146,7 @@ function VehicleCard({
         <div className="mt-2 pl-6 flex items-center gap-2 flex-wrap">
           <span className={cn(
             'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full',
-            lb.businessUsePercent >= 50 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+            lb.businessUsePercent >= 50 ? 'bg-emerald-900/40 text-emerald-300' : 'bg-amber-900/40 text-amber-300'
           )}>
             <BarChart2 className="w-3 h-3" />
             {fmtPct(lb.businessUsePercent)} business
@@ -529,7 +529,7 @@ function TripModal({
                   className={cn(
                     'h-12 rounded-lg border-2 font-medium text-sm transition-colors',
                     form.tripType === t
-                      ? t === 'BUSINESS' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-600' : 'border-slate-400 bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      ? t === 'BUSINESS' ? 'border-emerald-600 bg-emerald-900/30 text-emerald-300' : 'border-slate-400 bg-slate-800 text-slate-300'
                       : 'border-border bg-background text-muted-foreground hover:bg-accent/50'
                   )}
                 >{t === 'BUSINESS' ? 'Business' : 'Private'}</button>
@@ -665,13 +665,13 @@ function LogbookSummary({
           </p>
         </div>
         {isClosed ? (
-          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
             <CheckCircle2 className="w-3 h-3" /> Closed
           </span>
         ) : (
           <span className={cn(
             'inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full',
-            isComplete ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
+            isComplete ? 'bg-emerald-900/40 text-emerald-300' : 'bg-amber-900/40 text-amber-300'
           )}>
             {isComplete ? <CheckCircle2 className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
             {isComplete ? '12 weeks ✓' : `${Math.floor(weeksElapsed)} / ${LOGBOOK_WEEKS_REQUIRED} wks`}
@@ -1182,7 +1182,7 @@ export default function VehiclesPage() {
                                   <div>
                                     <span className={cn(
                                       'inline-block text-xs font-medium px-1.5 py-0.5 rounded mr-2',
-                                      trip.tripType === 'BUSINESS' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                      trip.tripType === 'BUSINESS' ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-800 text-slate-300'
                                     )}>{trip.tripType === 'BUSINESS' ? 'Biz' : 'Priv'}</span>
                                     <span className="text-sm">{trip.purpose}</span>
                                   </div>
@@ -1206,7 +1206,7 @@ export default function VehiclesPage() {
                                 <span>
                                   <span className={cn(
                                     'inline-block text-xs font-medium px-1.5 py-0.5 rounded',
-                                    trip.tripType === 'BUSINESS' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                                    trip.tripType === 'BUSINESS' ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-800 text-slate-300'
                                   )}>{trip.tripType === 'BUSINESS' ? 'Business' : 'Private'}</span>
                                 </span>
                                 <span className="truncate">{trip.purpose}{trip.notes ? <span className="text-muted-foreground ml-1 text-xs">· {trip.notes}</span> : ''}</span>

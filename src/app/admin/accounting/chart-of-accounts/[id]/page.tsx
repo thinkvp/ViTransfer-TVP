@@ -287,18 +287,18 @@ export default function AccountLedgerPage() {
   }
 
   const transactionStatusBadge: Record<string, string> = {
-    UNMATCHED: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
-    MATCHED: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+    UNMATCHED: 'bg-amber-500/10 text-amber-400',
+    MATCHED: 'bg-emerald-500/10 text-emerald-400',
     EXCLUDED: 'bg-muted text-muted-foreground',
   }
 
   const TYPE_BADGE: Record<string, string> = {
-    ASSET: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-    LIABILITY: 'bg-orange-500/15 text-orange-700 dark:text-orange-400',
-    EQUITY: 'bg-purple-500/15 text-purple-700 dark:text-purple-400',
-    INCOME: 'bg-green-500/15 text-green-700 dark:text-green-400',
-    COGS: 'bg-yellow-500/15 text-yellow-700 dark:text-yellow-400',
-    EXPENSE: 'bg-red-500/15 text-red-700 dark:text-red-400',
+    ASSET: 'bg-blue-500/15 text-blue-400',
+    LIABILITY: 'bg-orange-500/15 text-orange-400',
+    EQUITY: 'bg-purple-500/15 text-purple-400',
+    INCOME: 'bg-green-500/15 text-green-400',
+    COGS: 'bg-yellow-500/15 text-yellow-400',
+    EXPENSE: 'bg-red-500/15 text-red-400',
   }
 
   return (
@@ -457,7 +457,7 @@ export default function AccountLedgerPage() {
                         <tr key={`exp-${e.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(e.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-700 dark:text-red-400">Expense</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">Expense</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={e.accountName ?? account?.name}>{!isOwn && e.accountName ? `\u2014 ${e.accountName}` : e.accountName ?? account?.name ?? '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{e.description}</td>
@@ -488,7 +488,7 @@ export default function AccountLedgerPage() {
                         <tr key={`txn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(t.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400">Bank Txn</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">Bank Txn</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={t.accountName ?? account?.name ?? undefined}>{!isOwn && t.accountName ? `\u2014 ${t.accountName}` : t.accountName ?? account?.name ?? '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{t.description}</td>
@@ -515,7 +515,7 @@ export default function AccountLedgerPage() {
                         <tr key={`je-${j.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(j.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-400">Journal</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">Journal</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={j.accountName ?? account?.name}>{!isOwn && j.accountName ? `\u2014 ${j.accountName}` : j.accountName ?? account?.name ?? '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{j.description}</td>
@@ -542,7 +542,7 @@ export default function AccountLedgerPage() {
                         <tr key={`sales-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(row.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-700 dark:text-green-400">Sales Invoice</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">Sales Invoice</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSales && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{s.invoiceNumber} - {s.description}</td>
@@ -565,7 +565,7 @@ export default function AccountLedgerPage() {
                         <tr key={`batxn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(row.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-400">Cash</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400">Cash</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]">{account?.name ?? '—'}</td>
                           <td className="px-4 py-2.5 truncate">{t.description}</td>
@@ -585,7 +585,7 @@ export default function AccountLedgerPage() {
                         <tr key={`split-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(s.bankTransactionDate)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
-                            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">Split</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">Split</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSplit && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
                           <td className="px-4 py-2.5 truncate">{s.description || s.bankTransactionDescription}</td>

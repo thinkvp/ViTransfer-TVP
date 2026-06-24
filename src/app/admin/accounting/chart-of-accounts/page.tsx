@@ -20,12 +20,12 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
 const TYPE_BADGE: Record<AccountType, string> = {
-  ASSET: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-  LIABILITY: 'bg-orange-500/15 text-orange-700 dark:text-orange-400',
-  EQUITY: 'bg-purple-500/15 text-purple-700 dark:text-purple-400',
-  INCOME: 'bg-green-500/15 text-green-700 dark:text-green-400',
-  COGS: 'bg-yellow-500/15 text-yellow-700 dark:text-yellow-400',
-  EXPENSE: 'bg-red-500/15 text-red-700 dark:text-red-400',
+  ASSET: 'bg-blue-500/15 text-blue-400',
+  LIABILITY: 'bg-orange-500/15 text-orange-400',
+  EQUITY: 'bg-purple-500/15 text-purple-400',
+  INCOME: 'bg-green-500/15 text-green-400',
+  COGS: 'bg-yellow-500/15 text-yellow-400',
+  EXPENSE: 'bg-red-500/15 text-red-400',
 }
 
 function fmtAud(cents: number) {
@@ -338,7 +338,7 @@ export default function ChartOfAccountsPage() {
                       </td>
                       <td className="px-3 py-2 text-sm text-muted-foreground">{TAX_CODE_LABELS[a.taxCode]}</td>
                       <td className="px-3 py-2">
-                        <span className={cn('text-xs', a.isActive ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground')}>
+                        <span className={cn('text-xs', a.isActive ? 'text-green-400' : 'text-muted-foreground')}>
                           {a.isActive ? 'Active' : 'Inactive'}
                         </span>
                       </td>

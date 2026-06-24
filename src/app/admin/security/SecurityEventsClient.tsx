@@ -57,7 +57,7 @@ function getSeverityColor(severity: string): string {
   const map: Record<string, string> = {
     'CRITICAL': 'bg-destructive-visible text-destructive border-2 border-destructive-visible',
     'WARNING': 'bg-warning-visible text-warning border-2 border-warning-visible',
-    'INFO': 'bg-blue-50 text-blue-600 border-2 border-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900',
+    'INFO': 'bg-blue-950 text-blue-400 border-2 border-blue-900',
   }
   return map[severity] || 'bg-muted text-muted-foreground border border-border'
 }
@@ -300,7 +300,7 @@ export default function SecurityEventsClient() {
           <CardContent className="p-3 sm:p-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <Shield className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
@@ -310,7 +310,7 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <Tag className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
@@ -320,7 +320,7 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <XCircle className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
@@ -330,7 +330,7 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <Unlock className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">

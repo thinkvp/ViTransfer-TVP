@@ -46,21 +46,14 @@ function buildAccentOverrideCss(hex: string, textMode?: string | null): string |
   if (!hsl) return null
   const { h, s, l } = hsl
   // Use the exact lightness the user chose — no silent clamping.
-  const lightVisibleL = 95, darkVisibleL = 20
+  const visibleL = 20
   // Accent text: LIGHT = white (0 0% 100%), DARK = near-black (220 14% 7%)
   const foreground = textMode === 'DARK' ? '220 14% 7%' : '0 0% 100%'
   return `
     :root {
       --primary: ${h} ${s}% ${l}%;
       --primary-foreground: ${foreground};
-      --primary-visible: ${h} ${s}% ${lightVisibleL}%;
-      --accent-foreground: ${foreground};
-      --ring: ${h} ${s}% ${l}%;
-    }
-    .dark {
-      --primary: ${h} ${s}% ${l}%;
-      --primary-foreground: ${foreground};
-      --primary-visible: ${h} ${s}% ${darkVisibleL}%;
+      --primary-visible: ${h} ${s}% ${visibleL}%;
       --accent-foreground: ${foreground};
       --ring: ${h} ${s}% ${l}%;
     }
@@ -125,12 +118,12 @@ export default async function RootLayout({
   const accentCss = brandingSettings?.accentColor
     ? buildAccentOverrideCss(brandingSettings.accentColor, brandingSettings.accentTextMode)
     : brandingSettings?.accentTextMode === 'DARK'
-      ? `:root, .dark { --primary-foreground: 220 14% 7%; }`
+      ? `:root { --primary-foreground: 220 14% 7%; }`
       : null
 
   // Always use dark theme
   return (
-    <html lang="en" suppressHydrationWarning className={inter.variable + ' dark'}>
+    <html lang="en" suppressHydrationWarning className={inter.variable}>
       <head>
         {accentCss && (
           <style dangerouslySetInnerHTML={{ __html: accentCss }} />

@@ -69,6 +69,7 @@ const config: Config = {
           DEFAULT: "hsl(var(--success))",
           foreground: "hsl(var(--success-foreground))",
           visible: "hsl(var(--success-visible))",
+          solid: "hsl(var(--success-solid))",
         },
         warning: {
           DEFAULT: "hsl(var(--warning))",

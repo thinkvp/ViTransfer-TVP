@@ -1897,7 +1897,7 @@ export default function ProjectSettingsPage() {
         {/* S3 folder rename confirmation modal */}
         {renameConfirmOpen && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-            <div className="bg-background dark:bg-card border border-border rounded-lg max-w-lg w-full p-6 space-y-4">
+            <div className="bg-card border border-border rounded-lg max-w-lg w-full p-6 space-y-4">
               <div className="flex items-start gap-3">
                 <FolderSync className="w-6 h-6 text-warning flex-shrink-0 mt-0.5" />
                 <div className="flex-1">

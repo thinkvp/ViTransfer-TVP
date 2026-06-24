@@ -22,8 +22,8 @@ const TRANSACTION_STATUS_LABELS: Record<string, string> = {
 }
 
 const TRANSACTION_STATUS_BADGES: Record<string, string> = {
-  UNMATCHED: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
-  MATCHED: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  UNMATCHED: 'bg-amber-500/10 text-amber-400',
+  MATCHED: 'bg-emerald-500/10 text-emerald-400',
   EXCLUDED: 'bg-muted text-muted-foreground',
 }
 
@@ -122,12 +122,12 @@ export function LinkedBankTransactionDialog({ open, transactionId, onOpenChange,
                 {TRANSACTION_STATUS_LABELS[transaction.status] ?? transaction.status}
               </span>
               {transaction.transactionType && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-400">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
                   {transaction.transactionType}
                 </span>
               )}
               {transaction.matchType === 'SPLIT' && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-700 dark:text-amber-400">
+                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">
                   Split
                 </span>
               )}

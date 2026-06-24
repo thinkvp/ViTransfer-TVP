@@ -17,8 +17,8 @@ type BasSortKey = 'label' | 'startDate' | 'quarter' | 'basis' | 'status' | 'lodg
 
 const STATUS_BADGE: Record<BasPeriodStatus, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
-  REVIEWED: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
-  LODGED: 'bg-green-500/15 text-green-700 dark:text-green-400',
+  REVIEWED: 'bg-blue-500/15 text-blue-400',
+  LODGED: 'bg-green-500/15 text-green-400',
 }
 
 const STATUS_LABELS: Record<BasPeriodStatus, string> = {

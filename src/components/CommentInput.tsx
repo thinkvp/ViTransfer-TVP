@@ -549,18 +549,18 @@ export default function CommentInput({
 
       {/* Replying To Indicator */}
       {replyingToComment && (
-        <div className="mb-3 p-3 bg-gray-100 dark:bg-gray-800 border-l-2 border-primary rounded-lg flex items-start justify-between gap-3">
+        <div className="mb-3 p-3 bg-gray-800 border-l-2 border-primary rounded-lg flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-700 dark:text-gray-300 font-semibold mb-1">
+            <p className="text-xs text-gray-300 font-semibold mb-1">
               Replying to {replyingToComment.authorName || 'Anonymous'}
             </p>
-            <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 leading-snug">
+            <p className="text-xs text-gray-400 line-clamp-2 leading-snug">
               {replyingToComment.content}
             </p>
           </div>
           <button
             onClick={onCancelReply}
-            className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 font-medium flex-shrink-0 px-2 py-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            className="text-xs text-gray-500 hover:text-gray-300 font-medium flex-shrink-0 px-2 py-1 rounded hover:bg-gray-700 transition-colors"
           >
             Cancel
           </button>
@@ -745,7 +745,7 @@ export default function CommentInput({
           <div>
             {!currentVideoRestricted && (
               <div className="w-full rounded-t-lg border border-input border-b-0 bg-muted/35 px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs">
-                <div className="min-w-0 inline-flex items-center gap-1 rounded-full border border-amber-300/80 bg-amber-100/80 px-2 py-0.5 text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-300 font-medium tabular-nums">
+                <div className="min-w-0 inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-amber-300 font-medium tabular-nums">
                   <Clock className="w-3 h-3 flex-shrink-0" />
                   <span className="truncate">{displayRangeTime}</span>
                 </div>

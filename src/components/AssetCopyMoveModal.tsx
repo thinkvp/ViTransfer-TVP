@@ -146,7 +146,7 @@ export function AssetCopyMoveModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-background dark:bg-card border border-border rounded-lg max-w-3xl w-full max-h-[90vh] flex flex-col">
+      <div className="bg-card border border-border rounded-lg max-w-3xl w-full max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-border">
           <div>

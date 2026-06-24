@@ -1663,10 +1663,10 @@ export function ShareFilesBrowser({
 
   const openFolderBannerClassName = useMemo(() => {
     if (openFolder?.groupType === 'video' && openFolderApprovedVideoVersion) {
-      return 'mx-1 rounded-md bg-success px-3 py-2 text-sm font-medium text-success-foreground'
+      return 'mx-1 rounded-md bg-success-visible px-3 py-2 text-sm font-medium text-foreground'
     }
     if (openFolder?.groupType === 'album') {
-      return 'mx-1 rounded-md bg-success px-3 py-2 text-sm font-medium text-success-foreground'
+      return 'mx-1 rounded-md bg-success-visible px-3 py-2 text-sm font-medium text-foreground'
     }
     return 'mx-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white'
   }, [openFolder?.groupType, openFolderApprovedVideoVersion])

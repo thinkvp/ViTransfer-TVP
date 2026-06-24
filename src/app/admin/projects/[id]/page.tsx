@@ -457,7 +457,7 @@ export default function ProjectPage() {
   }
 
   const hasTrackedProjectData = Math.max(Number(project?.totalBytes || 0), Number(project?.diskBytes || 0), 0) > 0
-  const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/5 dark:bg-foreground/10'
+  const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/10'
   const iconBadgeIconClassName = 'w-4 h-4 text-primary'
 
   const formatProjectDate = (date: string | Date) => {

@@ -143,7 +143,7 @@ export default function PublicSalesDocActions(props: Props) {
 
         {props.type === 'QUOTE' && props.canAcceptQuote && (
           acceptedLocal ? (
-            <div className="inline-flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
+            <div className="inline-flex items-center gap-2 text-sm text-emerald-400">
               <CheckCircle2 className="h-4 w-4" />
               Accepted
             </div>

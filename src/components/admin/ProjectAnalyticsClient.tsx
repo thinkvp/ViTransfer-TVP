@@ -295,7 +295,7 @@ interface AnalyticsData {
 }
 
 function getAccessMethodColor(method: string): string {
-  return 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400'
+  return 'bg-blue-950 text-blue-400'
 }
 
 function StatusPill({ status }: { status: string }) {
@@ -462,7 +462,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
   }
 
   const { project, stats, videoStats, albumStats } = data
-  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/10 dark:bg-primary/20 ring-1 ring-primary/20'
+  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20'
   const metricIconClassName = 'w-5 h-5 text-primary'
 
   const hasVideos = videoStats.length > 0
@@ -583,7 +583,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     {version.assets.map((asset) => (
                                       <div
                                         key={asset.id}
-                                        className="flex items-center justify-between gap-2 text-[11px] sm:text-xs bg-muted/60 dark:bg-accent/30 rounded px-2 py-1"
+                                        className="flex items-center justify-between gap-2 text-[11px] sm:text-xs bg-accent/30 rounded px-2 py-1"
                                       >
                                         <div className="min-w-0 flex-1">
                                           <TruncatedText
