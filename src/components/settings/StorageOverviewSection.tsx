@@ -469,7 +469,7 @@ export function StorageOverviewSection({
               {s3LocalBackupEnabled && (
                 <div className="space-y-2 pt-1">
                   {s3LocalBackupCategories.length === 0 && (
-                    <p className="text-xs text-amber-500">
+                    <p className="text-xs text-warning">
                       No categories selected — tick at least one category in the breakdown above to include it in the backup.
                     </p>
                   )}

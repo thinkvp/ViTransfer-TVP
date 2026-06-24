@@ -108,14 +108,14 @@ export default function AccountingDashboardPage() {
       {/* Action items */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Link href="/admin/accounting/bank-accounts">
-          <Card className={cn('hover:bg-accent/30 transition-colors', (stats?.unmatchedCount ?? 0) > 0 && 'border-amber-400/40')}>
+          <Card className={cn('hover:bg-accent/30 transition-colors', (stats?.unmatchedCount ?? 0) > 0 && 'border-warning/40')}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />Unmatched Transactions
+                <AlertTriangle className="w-4 h-4 text-warning" />Unmatched Transactions
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className={cn('text-3xl font-bold', (stats?.unmatchedCount ?? 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground')}>
+              <p className={cn('text-3xl font-bold', (stats?.unmatchedCount ?? 0) > 0 ? 'text-warning' : 'text-muted-foreground')}>
                 {stats?.unmatchedCount ?? 0}
               </p>
               <p className="text-xs text-muted-foreground mt-1">pending reconciliation</p>

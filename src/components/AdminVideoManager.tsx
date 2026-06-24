@@ -280,16 +280,16 @@ export default function AdminVideoManager({
                   const canReprocess = projectStatus !== 'CLOSED'
                   const hasError = hasFailed
                   const hasBusy = hasUploading || hasProcessing || hasQueued
-                  // Status accent: red for error, orange for busy, neutral border when healthy.
+                  // Status accent: destructive for error, warning for busy, neutral border when healthy.
                   const ringColor = hasError
                     ? 'ring-destructive/60'
                     : hasBusy
-                    ? 'ring-orange-500/60'
+                    ? 'ring-warning/60'
                     : 'ring-border'
                   const iconColor = hasError
                     ? 'text-destructive'
                     : hasBusy
-                    ? 'text-orange-500'
+                    ? 'text-warning'
                     : 'text-primary'
                   const thumbUrl = thumbUrlByVideoId[latestVideo.id]
 

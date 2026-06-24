@@ -11,8 +11,7 @@ import { deleteFile, deleteDirectory, getFilePath, uploadFile } from '@/lib/stor
 import { isS3Mode } from '@/lib/s3-storage'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
-import { getShareUploadPreviewStoragePath } from '@/lib/share-upload-video-thumbnail'
-import { getStoredFilePathForProject, getStoredFileRecords, deleteStoredFilesForEntity, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { getStoredFileRecords, deleteStoredFilesForEntity, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -258,11 +257,7 @@ export async function DELETE(
       select: { fileRole: true, storagePath: true },
     }) as Array<{ fileRole: string; storagePath: string | null }>
 
-    const projectStoragePath = resolveProjectStoragePath(access.project)
-    const originalPath = storedRecords.find(r => r.fileRole === 'ORIGINAL')?.storagePath ?? null
-    // Fallback thumbnail path in case the preview derivative was never registered.
-    const derivedThumb = originalPath ? getShareUploadPreviewStoragePath(projectStoragePath, originalPath, file.fileType) : null
-
+    // Delete every registered file (original + preview/timeline derivatives).
     const physicalDeletes: Promise<unknown>[] = []
     for (const rec of storedRecords) {
       if (!rec.storagePath) continue
@@ -270,7 +265,6 @@ export async function DELETE(
         (rec.fileRole === 'TIMELINE_SPRITES' ? deleteDirectory(rec.storagePath) : deleteFile(rec.storagePath)).catch(() => undefined),
       )
     }
-    if (derivedThumb) physicalDeletes.push(deleteFile(derivedThumb).catch(() => undefined))
     await Promise.allSettled(physicalDeletes)
 
     await prisma.shareUploadFile.delete({ where: { id: file.id } })
@@ -305,17 +299,19 @@ export async function DELETE(
     select: { id: true, fileType: true },
   })
 
-  // Get paths from StoredFile
+  // Delete every registered file (original + preview/timeline derivatives) for the
+  // uploads in this folder. Preview paths come from StoredFile (ID-keyed).
   const fileDeleteTasks: Promise<unknown>[] = []
-  const projectStoragePath = resolveProjectStoragePath(access.project)
-  for (const file of filesToDelete) {
-    const fileStoragePath = await getStoredFilePathForProject('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL', access.project.id)
-    if (fileStoragePath) {
-      fileDeleteTasks.push(deleteFile(fileStoragePath))
-      const thumbnailStoragePath = getShareUploadPreviewStoragePath(projectStoragePath, fileStoragePath, file.fileType)
-      if (thumbnailStoragePath) {
-        fileDeleteTasks.push(deleteFile(thumbnailStoragePath))
-      }
+  const folderFileIds = filesToDelete.map((f) => f.id)
+  if (folderFileIds.length > 0) {
+    const folderStored = await getStoredFileRecords('SHARE_UPLOAD_FILE', folderFileIds, {
+      select: { fileRole: true, storagePath: true },
+    }) as Array<{ fileRole: string; storagePath: string | null }>
+    for (const rec of folderStored) {
+      if (!rec.storagePath) continue
+      fileDeleteTasks.push(
+        (rec.fileRole === 'TIMELINE_SPRITES' ? deleteDirectory(rec.storagePath) : deleteFile(rec.storagePath)).catch(() => undefined),
+      )
     }
   }
   await Promise.allSettled(fileDeleteTasks)

@@ -162,9 +162,7 @@ export async function processAssetTimeline(job: { data: AssetTimelineJob }): Pro
       }
     }
 
-    const spritesPath = buildAssetTimelineStorageRoot(
-      video.project.storagePath || '', video.storageFolderName || video.name, video.versionLabel, assetId,
-    )
+    const spritesPath = buildAssetTimelineStorageRoot(video.projectId, videoId, assetId)
     const result = await generateTimelinePreviews({
       inputPath, outputSpritesPath: spritesPath,
       durationSeconds: effectiveDuration, videoWidth: effectiveWidth, videoHeight: effectiveHeight, tempDirPrefix: `asset-${assetId}`,
@@ -243,7 +241,7 @@ export async function processUploadTimeline(job: { data: UploadTimelineJob }): P
       }
     }
 
-    const spritesPath = buildUploadTimelineStorageRoot(project.storagePath || '', uploadFile.folderRelativePath, uploadFileId)
+    const spritesPath = buildUploadTimelineStorageRoot(projectId, uploadFileId)
     const result = await generateTimelinePreviews({
       inputPath, outputSpritesPath: spritesPath,
       durationSeconds: effectiveDuration, videoWidth: effectiveWidth, videoHeight: effectiveHeight, tempDirPrefix: `upload-${uploadFileId}`,

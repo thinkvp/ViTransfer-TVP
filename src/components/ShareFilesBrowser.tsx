@@ -1663,10 +1663,10 @@ export function ShareFilesBrowser({
 
   const openFolderBannerClassName = useMemo(() => {
     if (openFolder?.groupType === 'video' && openFolderApprovedVideoVersion) {
-      return 'mx-1 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white'
+      return 'mx-1 rounded-md bg-success px-3 py-2 text-sm font-medium text-success-foreground'
     }
     if (openFolder?.groupType === 'album') {
-      return 'mx-1 rounded-md bg-green-600 px-3 py-2 text-sm font-medium text-white'
+      return 'mx-1 rounded-md bg-success px-3 py-2 text-sm font-medium text-success-foreground'
     }
     return 'mx-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white'
   }, [openFolder?.groupType, openFolderApprovedVideoVersion])
@@ -2160,9 +2160,9 @@ export function ShareFilesBrowser({
       <div className="flex items-center gap-1">
         <Button
           type="button"
-          variant="default"
+          variant="success"
           size="icon"
-          className={cn('shrink-0 bg-green-600 hover:bg-green-700 text-white', compact ? 'h-6 w-6' : 'h-7 w-7')}
+          className={cn('shrink-0', compact ? 'h-6 w-6' : 'h-7 w-7')}
           disabled={approving}
           onClick={(event) => { event.stopPropagation(); setApproveConfirmFile(file); setApproveConfirmVideoName(openFolder?.name || file.fileName) }}
           onMouseDown={(event) => event.stopPropagation()}

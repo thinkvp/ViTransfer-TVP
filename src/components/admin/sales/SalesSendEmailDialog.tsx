@@ -282,13 +282,13 @@ export function SalesSendEmailDialog(props: {
           </div>
 
           {message ? (
-            <div className={message.type === 'error' ? 'text-sm text-red-600' : 'text-sm text-green-600'}>
+            <div className={message.type === 'error' ? 'text-sm text-destructive' : 'text-sm text-success'}>
               {message.text}
             </div>
           ) : null}
 
           {hasUnsavedChanges ? (
-            <div className="flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-300">
+            <div className="flex items-center gap-2 rounded-md border border-warning-visible bg-warning-visible px-3 py-2 text-sm text-warning">
               <AlertTriangle className="h-4 w-4 shrink-0" />
               <span>You have unsaved changes to this {type === 'QUOTE' ? 'quote' : 'invoice'}. Only saved information will be sent.</span>
             </div>

@@ -8,15 +8,6 @@ import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownload
 // Token-based auth; entity types (VIDEO_ASSET, SHARE_UPLOAD_FILE) resolved via tokens, not projectId.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, getStoredFileRecords } from '@/lib/stored-file'
-import {
-  buildProjectStorageRoot,
-  buildVideoAssetPreviewStoragePath,
-  buildVideoAssetStoragePath,
-  buildVideoOriginalStoragePath,
-  buildVideoPreviewStoragePath,
-  buildVideoThumbnailStoragePath,
-  buildVideoTimelineStorageRoot,
-} from '@/lib/project-storage-paths'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
@@ -292,22 +283,10 @@ export async function GET(
           return NextResponse.json({ error: 'Preview not ready' }, { status: 404 })
         }
 
-        if (normalizedAssetType.startsWith('video/')) {
-          const projectStoragePath = video.project.storagePath || buildProjectStorageRoot(
-            (video.project as any).companyName || 'Client',
-            video.project.title,
-          )
-          const assetOrigPath = assetPaths.get('ORIGINAL') || ''
-          filePath = buildVideoAssetPreviewStoragePath(
-            projectStoragePath,
-            video.storageFolderName || video.name,
-            video.versionLabel,
-            assetOrigPath,
-            '.jpg',
-          )
-        } else {
-          filePath = previewPath
-        }
+        // Both video assets (companion JPG) and image assets register their
+        // thumbnail under PREVIEW_IMAGE in StoredFile (ID-keyed previews), so the
+        // path comes straight from the registry — no recomputation needed.
+        filePath = previewPath
 
         filename = `${asset.fileName}.jpg`
         contentType = 'image/jpeg'
@@ -519,12 +498,9 @@ export async function GET(
       })
     }
 
-    let fullPath = getFilePath(filePath)
+    const fullPath = getFilePath(filePath)
     if (!existsSync(fullPath)) {
       // No canonical fallback — StoredFile is the canonical path now
-      return NextResponse.json({ error: 'Access denied' }, { status: 404 })
-    }
-    if (!existsSync(fullPath)) {
       return NextResponse.json({ error: 'Access denied' }, { status: 404 })
     }
 

@@ -93,8 +93,7 @@ export async function uploadFile(
   contentType: string = 'application/octet-stream'
 ): Promise<void> {
   if (isS3Mode()) {
-    const body = Buffer.isBuffer(stream) ? stream : stream
-    await s3UploadFile(filePath, body as any, contentType, size)
+    await s3UploadFile(filePath, stream as any, contentType, size)
     return
   }
 

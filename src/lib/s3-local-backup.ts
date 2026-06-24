@@ -32,7 +32,6 @@ import {
 } from '@aws-sdk/client-s3'
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
-import { buildAlbumZipStoragePath, buildAlbumPhotoPreviewStoragePath, buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import { getAllStoredPaths, type EntityType, type FileRole } from '@/lib/stored-file'
 
 // ---------------------------------------------------------------------------
@@ -255,49 +254,6 @@ async function collectTimelineSpriteKeys(client: ReturnType<typeof getS3Client>,
   return entries
 }
 
-/** Collect album preview photo paths (derived from storagePath — low-res previews used in album viewer). */
-async function collectAlbumPhotoPreviewKeys(): Promise<FileEntry[]> {
-  const photos = await prisma.albumPhoto.findMany({
-    select: { id: true, album: {
-        select: {
-          name: true,
-          storageFolderName: true,
-          project: {
-            select: { title: true,
-              companyName: true,
-              storagePath: true,
-              client: { select: { name: true } },
-            },
-          },
-        },
-      },
-    },
-  })
-
-  // Batch-load StoredFile paths for all photos
-  const photoIds = photos.map(p => p.id)
-  const storedPaths = new Map<string, string>()
-  if (photoIds.length > 0) {
-    const stored = await prisma.storedFile.findMany({
-      where: { entityType: 'ALBUM_PHOTO', entityId: { in: photoIds }, fileRole: 'ORIGINAL' },
-      select: { entityId: true, storagePath: true },
-    })
-    for (const s of stored) storedPaths.set(s.entityId, s.storagePath)
-  }
-
-  const entries: FileEntry[] = []
-  for (const photo of photos) {
-    const base = storedPaths.get(photo.id)
-    if (!base) continue
-    const projectPath = photo.album.project.storagePath
-      || buildProjectStorageRoot(photo.album.project.client?.name || photo.album.project.companyName || 'Client', photo.album.project.title)
-    const previewKey = normalizeKey(buildAlbumPhotoPreviewStoragePath(projectPath, base))
-    if (!previewKey) continue
-    entries.push({ key: previewKey, localPath: path.join(STORAGE_ROOT, previewKey) })
-  }
-  return entries
-}
-
 /** Collect album ZIP paths (full + social variants), derived from DB. */
 async function collectAlbumZipKeys(): Promise<FileEntry[]> {
   const albums = await prisma.album.findMany({
@@ -379,9 +335,8 @@ async function collectKeysForCategory(
         ['ALBUM_PHOTO', 'ALBUM'],
         ['SOCIAL', 'THUMBNAIL', 'ZIP_FULL', 'ZIP_SOCIAL'],
       )
-      const previewEntries = await collectAlbumPhotoPreviewKeys()
       const zipEntries = await collectAlbumZipKeys()
-      return [...entries, ...previewEntries, ...zipEntries]
+      return [...entries, ...zipEntries]
     }
 
     case 'communicationsBytes':

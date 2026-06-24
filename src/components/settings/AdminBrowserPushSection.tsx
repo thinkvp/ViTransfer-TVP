@@ -352,8 +352,8 @@ export function AdminBrowserPushSection({ show, setShow, hideCollapse, embedded 
               </p>
             ) : null}
 
-            {error ? <p className="text-sm text-red-500 pt-2">{error}</p> : null}
-            {status ? <p className="text-sm text-green-600 pt-2">{status}</p> : null}
+            {error ? <p className="text-sm text-destructive pt-2">{error}</p> : null}
+            {status ? <p className="text-sm text-success pt-2">{status}</p> : null}
           </div>
 
           {serverSubs.length > 0 ? (

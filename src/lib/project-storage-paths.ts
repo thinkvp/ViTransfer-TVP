@@ -15,18 +15,12 @@
  *     projects/{projectTitle}/
  *       files/projectfile-{ts}-{name}           ← ProjectFile
  *       uploads/{folderPath}/{fileName}          ← Share uploads
- *       .previews/                               ← All derived preview assets
- *         uploads/{folder}/{id}/timeline-previews/
- *         videos/{videoFolder}/{version}/
- *           preview-{res}.mp4
- *           thumbnail.jpg
- *           timeline-previews/
- *           assets/{assetId}/timeline-previews/
  *       videos/{videoFolder}/{version}/
  *         {originalFile}                         ← Video original
  *         assets/{fileName}                      ← VideoAsset
  *       albums/{albumFolder}/
  *         {photoFile}                            ← AlbumPhoto original
+ *         {photoFile}-social.jpg                 ← AlbumPhoto social derivative
  *         zips/{AlbumName} Full Res.zip
  *       comments/{commentId}/{name}_{ts}.{ext}
  *       communication/
@@ -34,6 +28,26 @@
  *         emails/{id}/att-{ts}-{idx}-{name}
  *
  *   files/clientfile-{ts}-{name}                 ← ClientFile (under clients/{name})
+ *
+ * === DERIVED PREVIEWS (ID-keyed, rename-immune) ===
+ *
+ * Preview derivatives live OUTSIDE the name-based client/project tree, keyed by
+ * stable entity IDs so renaming a client/project/video/album never moves them.
+ * StoredFile is the single source of truth for these paths.
+ *
+ *   previews/{projectId}/
+ *     videos/{videoId}/
+ *       preview-{res}.mp4
+ *       thumbnail.jpg
+ *       timeline-previews/
+ *       assets/{assetId}/
+ *         preview.jpg | preview.mp4
+ *         timeline-previews/
+ *     uploads/{uploadFileId}/
+ *       preview.jpg
+ *       timeline-previews/
+ *     album-photos/{albumPhotoId}/
+ *       thumbnail.jpg
  *
  * === ACCOUNTING (separate volume) ===
  *   See src/lib/accounting/file-storage.ts
@@ -109,10 +123,6 @@ export function buildProjectUploadsRoot(projectStoragePath: string): string {
   return path.posix.join(projectStoragePath, 'uploads')
 }
 
-export function buildProjectPreviewsRoot(projectStoragePath: string): string {
-  return path.posix.join(projectStoragePath, '.previews')
-}
-
 /**
  * Root directory for all videos under a project (not for a specific video).
  * Used as a prune-stop boundary when deleting individual videos.
@@ -121,12 +131,35 @@ export function buildProjectAllVideosRoot(projectStoragePath: string): string {
   return path.posix.join(projectStoragePath, 'videos')
 }
 
-/**
- * Root directory for all video previews under a project.
- * Used as a prune-stop boundary when deleting individual video previews.
- */
-export function buildProjectAllVideoPreviewsRoot(projectStoragePath: string): string {
-  return path.posix.join(projectStoragePath, '.previews', 'videos')
+// ---------------------------------------------------------------------------
+// PREVIEW PATHS — ID-keyed, rename-immune (see header). All derived previews
+// live under previews/{projectId}/… keyed by stable entity IDs, NOT by the
+// mutable client/project/video/album names. StoredFile is the source of truth.
+// ---------------------------------------------------------------------------
+
+/** Root for all of a project's derived previews: previews/{projectId} */
+export function buildPreviewsRoot(projectId: string): string {
+  return path.posix.join('previews', projectId)
+}
+
+/** Root for a single video's previews: previews/{projectId}/videos/{videoId} */
+export function buildVideoPreviewsRoot(projectId: string, videoId: string): string {
+  return path.posix.join(buildPreviewsRoot(projectId), 'videos', videoId)
+}
+
+/** Root for a video asset's previews: previews/{projectId}/videos/{videoId}/assets/{assetId} */
+export function buildVideoAssetPreviewsRoot(projectId: string, videoId: string, assetId: string): string {
+  return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), 'assets', assetId)
+}
+
+/** Root for a share-upload file's previews: previews/{projectId}/uploads/{uploadFileId} */
+export function buildUploadPreviewsRoot(projectId: string, uploadFileId: string): string {
+  return path.posix.join(buildPreviewsRoot(projectId), 'uploads', uploadFileId)
+}
+
+/** Root for an album photo's previews: previews/{projectId}/album-photos/{albumPhotoId} */
+export function buildAlbumPhotoPreviewsRoot(projectId: string, albumPhotoId: string): string {
+  return path.posix.join(buildPreviewsRoot(projectId), 'album-photos', albumPhotoId)
 }
 
 export function normalizeProjectUploadRelativePath(relativePath: string): string {
@@ -170,29 +203,21 @@ export function buildProjectUploadFileStoragePath(
   return path.posix.join(normalizedFolderPath, safeFileName)
 }
 
-export function buildProjectUploadVideoThumbnailStoragePath(projectStoragePath: string, uploadFileStoragePath: string): string {
-  const normalized = String(uploadFileStoragePath || '').replace(/\\/g, '/')
-  const relativePath = path.posix.relative(projectStoragePath, normalized).replace(/\\/g, '/')
-  const parsed = path.posix.parse(relativePath)
-  const baseName = sanitizeFileName(parsed.base || `${parsed.name || 'video'}.bin`)
-  const thumbnailFileName = `${baseName}.jpg`
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), parsed.dir, thumbnailFileName)
+/** Preview image (jpg) for a share-upload file: previews/{projectId}/uploads/{uploadFileId}/preview.jpg */
+export function buildUploadPreviewStoragePath(projectId: string, uploadFileId: string, previewExtension = '.jpg'): string {
+  const ext = previewExtension.startsWith('.') ? previewExtension : `.${previewExtension}`
+  return path.posix.join(buildUploadPreviewsRoot(projectId, uploadFileId), `preview${ext}`)
 }
 
+/** Preview (jpg thumbnail / mp4 playback) for a video asset, keyed by assetId. */
 export function buildVideoAssetPreviewStoragePath(
-  projectStoragePath: string,
-  videoFolderName: string,
-  versionLabel: string,
-  assetStoragePath: string,
+  projectId: string,
+  videoId: string,
+  assetId: string,
   previewExtension = '.jpg',
 ): string {
-  const normalized = String(assetStoragePath || '').replace(/\\/g, '/')
-  const assetsRoot = buildVideoAssetsStorageRoot(projectStoragePath, videoFolderName, versionLabel)
-  const relativePath = path.posix.relative(assetsRoot, normalized).replace(/\\/g, '/')
-  const parsed = path.posix.parse(relativePath)
-  const safeExtension = previewExtension.startsWith('.') ? previewExtension : `.${previewExtension}`
-  const fileName = `${sanitizeFileName(parsed.name || 'asset')}${safeExtension}`
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'assets', parsed.dir, fileName)
+  const ext = previewExtension.startsWith('.') ? previewExtension : `.${previewExtension}`
+  return path.posix.join(buildVideoAssetPreviewsRoot(projectId, videoId, assetId), `preview${ext}`)
 }
 
 export function allocateUniqueUploadFileName(fileName: string, existingNames: Iterable<string>): string {
@@ -269,41 +294,26 @@ export function buildVideoAssetStoragePath(
   return path.posix.join(buildVideoAssetsStorageRoot(projectStoragePath, videoFolderName, versionLabel), fileName)
 }
 
-export function buildVideoPreviewStoragePath(projectStoragePath: string, videoFolderName: string, versionLabel: string, resolution: string): string {
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), `preview-${resolution}.mp4`)
+export function buildVideoPreviewStoragePath(projectId: string, videoId: string, resolution: string): string {
+  return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), `preview-${resolution}.mp4`)
 }
 
-export function buildVideoThumbnailStoragePath(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'thumbnail.jpg')
+export function buildVideoThumbnailStoragePath(projectId: string, videoId: string): string {
+  return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), 'thumbnail.jpg')
 }
 
-export function buildVideoTimelineStorageRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'timeline-previews')
+export function buildVideoTimelineStorageRoot(projectId: string, videoId: string): string {
+  return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), 'timeline-previews')
 }
 
 /** Timeline sprite storage root for a video asset's hover previews. */
-export function buildAssetTimelineStorageRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string, assetId: string): string {
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel), 'assets', assetId, 'timeline-previews')
+export function buildAssetTimelineStorageRoot(projectId: string, videoId: string, assetId: string): string {
+  return path.posix.join(buildVideoAssetPreviewsRoot(projectId, videoId, assetId), 'timeline-previews')
 }
 
 /** Timeline sprite storage root for an upload file's hover previews. */
-export function buildUploadTimelineStorageRoot(projectStoragePath: string, folderRelativePath: string, uploadFileId: string): string {
-  const segments = [buildProjectPreviewsRoot(projectStoragePath), 'uploads']
-  if (folderRelativePath) {
-    segments.push(sanitizeStorageName(folderRelativePath))
-  }
-  segments.push(uploadFileId, 'timeline-previews')
-  return path.posix.join(...segments)
-}
-
-/**
- * Returns the root of the preview folder for a specific video version.
- * All preview derivatives (MP4 previews, thumbnail, timeline sprites, asset previews)
- * live under this root. Used when moving or renaming a version label.
- * e.g. {projectStoragePath}/.previews/videos/{videoFolderName}/{versionLabel}
- */
-export function buildVideoVersionPreviewsRoot(projectStoragePath: string, videoFolderName: string, versionLabel: string): string {
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), 'videos', sanitizeStorageName(videoFolderName), sanitizeStorageName(versionLabel))
+export function buildUploadTimelineStorageRoot(projectId: string, uploadFileId: string): string {
+  return path.posix.join(buildUploadPreviewsRoot(projectId, uploadFileId), 'timeline-previews')
 }
 
 export function buildAlbumStorageRoot(projectStoragePath: string, albumFolderName: string): string {
@@ -315,26 +325,14 @@ export function buildAlbumPhotoStoragePath(projectStoragePath: string, albumFold
 }
 
 /**
- * Derives the preview storage path for an album photo.
- * Previews live in a `previews/` subfolder in the same album directory as the original.
- * e.g.  albums/AlbumName/photo.jpg  →  albums/AlbumName/previews/photo.jpg
+ * Thumbnail storage path for an album photo, keyed by the photo's stable ID.
+ * e.g. previews/{projectId}/album-photos/{albumPhotoId}/thumbnail.jpg
+ *
+ * Note: the album photo SOCIAL derivative is NOT a preview-tree file — it lives
+ * next to the original at `{original}-social.jpg` and moves with the album folder.
  */
-export function buildAlbumPhotoPreviewStoragePath(projectStoragePath: string, photoStoragePath: string): string {
-  const relativePath = path.posix.relative(projectStoragePath, photoStoragePath).replace(/\\/g, '/')
-  const parsed = path.posix.parse(relativePath)
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), parsed.dir, 'previews', `${parsed.name || 'photo'}.jpg`)
-}
-
-/**
- * Derives the thumbnail storage path for an album photo.
- * Thumbnails live in a `thumbnails/` subfolder in the same album directory as the original.
- * e.g. albums/AlbumName/photo.jpg -> albums/AlbumName/thumbnails/photo.jpg
- */
-export function buildAlbumPhotoThumbnailStoragePath(projectStoragePath: string, photoStoragePath: string): string {
-  const relativePath = path.posix.relative(projectStoragePath, photoStoragePath).replace(/\\/g, '/')
-  const parsed = path.posix.parse(relativePath)
-  const fileName = `${parsed.name || 'thumbnail'}.jpg`
-  return path.posix.join(buildProjectPreviewsRoot(projectStoragePath), parsed.dir, 'thumbnails', fileName)
+export function buildAlbumPhotoThumbnailStoragePath(projectId: string, albumPhotoId: string): string {
+  return path.posix.join(buildAlbumPhotoPreviewsRoot(projectId, albumPhotoId), 'thumbnail.jpg')
 }
 
 export function buildAlbumZipStoragePath(
@@ -379,7 +377,7 @@ export function getStoragePathBasename(storagePath: string | null | undefined): 
  *
  * @example
  *   const projectRoot = resolveProjectStoragePath(video.project)
- *   const previewPath = buildVideoPreviewStoragePath(projectRoot, folder, version, '720p')
+ *   const originalPath = buildVideoOriginalStoragePath(projectRoot, folder, version, fileName)
  */
 export function resolveProjectStoragePath(project: {
   storagePath?: string | null

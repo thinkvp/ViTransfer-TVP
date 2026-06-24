@@ -1444,7 +1444,7 @@ export default function ProjectSettingsPage() {
                         className="h-10 w-10 p-0 flex-shrink-0"
                       >
                         {copiedPassword ? (
-                          <Check className="w-4 h-4 text-green-500" />
+                          <Check className="w-4 h-4 text-success" />
                         ) : (
                           <Copy className="w-4 h-4" />
                         )}
@@ -1842,7 +1842,7 @@ export default function ProjectSettingsPage() {
                           </Button>
                           {sharePassword && (
                             <Button type="button" variant="outline" size="sm" onClick={copyPassword} title={copiedPassword ? 'Copied!' : 'Copy password'} className="h-10 w-10 p-0 flex-shrink-0">
-                              {copiedPassword ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                              {copiedPassword ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
                             </Button>
                           )}
                         </div>

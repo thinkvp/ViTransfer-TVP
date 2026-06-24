@@ -7,7 +7,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { validateAssetFile } from '@/lib/file-validation'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetPreviewStoragePath, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
+import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetStoragePath } from '@/lib/project-storage-paths'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
@@ -108,7 +108,6 @@ export async function GET(
     const assetIds = assets.map(a => a.id)
     const storedSizes = assetIds.length > 0 ? await getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: ['ORIGINAL'], select: { entityId: true, fileSize: true, storagePath: true } }) : []
     const sizeByAssetId = new Map(storedSizes.map(s => [s.entityId, s.fileSize ? String(s.fileSize) : '0']))
-    const origPathByAssetId = new Map(storedSizes.map(s => [s.entityId, s.storagePath as string]))
 
     // Resolve current thumbnail path from StoredFile
     const thumbnailRecord = await prisma.storedFile.findUnique({
@@ -138,8 +137,6 @@ export async function GET(
     // Mirrors the content route's assetPreview path resolution: image assets use the stored
     // PREVIEW_IMAGE path; video assets use the computed preview-image path.
     const s3 = isS3Mode()
-    const projectStoragePath = project.storagePath
-      || buildProjectStorageRoot((project as any).companyName || 'Client', project.title)
 
     const thumbnailUrlByAssetId = new Map<string, string>()
     await Promise.all(
@@ -154,21 +151,9 @@ export async function GET(
         if (!((isImage || isVideo) && hasReadyPreview)) return
 
         if (s3) {
-          let previewPath: string | null = null
-          if (isVideo) {
-            const origPath = origPathByAssetId.get(asset.id)
-            if (origPath) {
-              previewPath = buildVideoAssetPreviewStoragePath(
-                projectStoragePath,
-                video.storageFolderName || video.name,
-                video.versionLabel,
-                origPath,
-                '.jpg',
-              )
-            }
-          } else {
-            previewPath = previewImagePathByAssetId.get(asset.id) ?? null
-          }
+          // Both video assets (companion JPG) and image assets register their
+          // thumbnail under PREVIEW_IMAGE in StoredFile (ID-keyed previews).
+          const previewPath = previewImagePathByAssetId.get(asset.id) ?? null
           if (previewPath) {
             try {
               thumbnailUrlByAssetId.set(asset.id, await s3GetPresignedStreamUrl(previewPath, DOWNLOAD_TOKEN_TTL, 'image/jpeg'))

@@ -13,11 +13,6 @@ import type { FileRole } from '@/lib/stored-file'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import {
-  buildProjectStorageRoot,
-  buildVideoAssetPreviewStoragePath,
-  buildVideoTimelineStorageRoot,
-} from '@/lib/project-storage-paths'
-import {
   recalculateAndStoreProjectDiskBytes,
   recalculateAndStoreProjectPreviewBytes,
   recalculateAndStoreProjectTotalBytes,

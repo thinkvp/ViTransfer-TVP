@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { prisma } from '@/lib/db'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath, buildVideoThumbnailStoragePath } from '@/lib/project-storage-paths'
+import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import {
   getFilePath,
   getRawStoragePath,
@@ -109,6 +109,8 @@ function isIgnoredStoragePath(relPath: string): boolean {
 
 function extractProjectId(relPath: string): string | null {
   const parts = normalizeRelativeStoragePath(relPath).split('/').filter(Boolean)
+  // ID-keyed previews: previews/{projectId}/…
+  if (parts[0] === 'previews') return parts[1] || null
   if (parts[0] !== 'projects') return null
   if (parts[1] === 'closed') return null
   if (YEAR_MONTH_RE.test(parts[1] || '')) return parts[2] || null
@@ -131,6 +133,9 @@ function shouldPruneEmptyDir(relPath: string): boolean {
     if (parts[2] === 'files') return parts.length > 3
     return parts[2] === 'projects' && parts.length > 4
   }
+
+  // ID-keyed previews tree: prune empty dirs below previews/ (but keep the root).
+  if (parts[0] === 'previews') return parts.length > 1
 
   if (parts[0] !== 'projects') return false
   if (parts[1] === 'closed') return false

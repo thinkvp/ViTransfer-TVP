@@ -420,7 +420,7 @@ export default function NotificationsBell() {
         >
           <Bell className="h-4 w-4 sm:h-5 sm:w-5" />
           {unreadCount > 0 ? (
-            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] leading-[18px] text-center">
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] leading-[18px] text-center">
               {unreadCount > 99 ? '99+' : unreadCount}
             </span>
           ) : null}
@@ -456,7 +456,7 @@ export default function NotificationsBell() {
             ) : null}
           </div>
           {pushError ? (
-            <div className="px-4 sm:px-5 py-2 text-xs text-red-600 border-b border-border bg-red-50 dark:bg-red-950/20">
+            <div className="px-4 sm:px-5 py-2 text-xs text-destructive border-b border-border bg-destructive-visible">
               {pushError}
             </div>
           ) : null}
@@ -465,7 +465,7 @@ export default function NotificationsBell() {
             {loading ? (
               <div className="p-4 text-sm text-muted-foreground">Loading…</div>
             ) : loadError ? (
-              <div className="p-4 text-sm text-red-600">{loadError}</div>
+              <div className="p-4 text-sm text-destructive">{loadError}</div>
             ) : items.length === 0 ? (
               <div className="p-4 text-sm text-muted-foreground">No notifications yet.</div>
             ) : (
@@ -502,16 +502,16 @@ export default function NotificationsBell() {
                       ) : null}
 
                       {!n.success ? (
-                        <div className="mt-2 text-xs text-red-600">Send failed: {n.message || 'Unknown error'}</div>
+                        <div className="mt-2 text-xs text-destructive">Send failed: {n.message || 'Unknown error'}</div>
                       ) : null}
                     </>
                   )
 
                   return (
-                    <div key={n.id} className={clearable ? 'pl-3 sm:pl-4 pr-4 sm:pr-5 py-3 bg-amber-50/60 dark:bg-amber-950/20 border-l-[3px] border-l-amber-400 dark:border-l-amber-500' : 'px-4 sm:px-5 py-3'}>
+                    <div key={n.id} className={clearable ? 'pl-3 sm:pl-4 pr-4 sm:pr-5 py-3 bg-warning-visible/60 border-l-[3px] border-l-warning' : 'px-4 sm:px-5 py-3'}>
                       {clearable ? (
                         <div className="flex items-center justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-500">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-warning">
                             <Pin className="w-3 h-3 flex-shrink-0" />
                             <span>System Notification</span>
                           </div>

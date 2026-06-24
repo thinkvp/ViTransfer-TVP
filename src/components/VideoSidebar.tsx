@@ -2137,7 +2137,7 @@ export default function VideoSidebar({
                   <nav className="p-3">
                     {/* For Review heading */}
                     {forReviewGroups.length > 0 && (
-                      <div className="px-3 py-2 text-xs font-semibold text-amber-500 uppercase tracking-wider flex items-center gap-2">
+                      <div className="px-3 py-2 text-xs font-semibold text-warning uppercase tracking-wider flex items-center gap-2">
                         <Play className="w-3 h-3" />
                         For Review
                       </div>

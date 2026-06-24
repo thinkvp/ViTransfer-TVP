@@ -171,9 +171,9 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
         await renameStoredPaths('CLIENT_FILE', clientFileIds, renameJob.oldPrefix, renameJob.newPrefix)
       }
     } else if (renameJob.entityType === 'VIDEO_GROUP') {
-      // entityId = projectId; update video + asset paths for this folder only
-      const projectPrefix = path.posix.dirname(path.posix.dirname(renameJob.oldPrefix))
-      const newFolderName = path.posix.basename(renameJob.newPrefix)
+      // entityId = projectId; move + rebase the originals folder for this video group.
+      // Previews are ID-keyed (previews/{projectId}/videos/{videoId}/…) and never move
+      // on rename, so only the name-based originals folder is touched here.
 
       // Resolve the effective oldPrefix from StoredFile — the DB-derived prefix
       // may be stale if a prior rename's renameStoredPaths call failed.
@@ -207,21 +207,12 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
       }
 
       const oldFolderName = path.posix.basename(effectiveOldPrefix)
-      let oldPreviewPrefix = `${projectPrefix}/.previews/videos/${oldFolderName}`
-      const newPreviewPrefix = `${projectPrefix}/.previews/videos/${newFolderName}`
 
       // Move the main video folder using the resolved effective prefix
       // (the generic s3MoveDirectoryWithProgress at the top used renameJob.oldPrefix,
       //  which may be stale — this corrective move uses the real prefix from StoredFile)
       if (effectiveOldPrefix !== renameJob.oldPrefix) {
         await s3MoveDirectoryWithProgress(effectiveOldPrefix, renameJob.newPrefix, async () => {})
-      }
-
-      // Move the .previews/videos/{folder} prefix (non-fatal if absent)
-      try {
-        await s3MoveDirectoryWithProgress(oldPreviewPrefix, newPreviewPrefix, async () => {})
-      } catch (previewMoveError) {
-        console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: video group previews move failed (non-fatal):`, previewMoveError)
       }
 
       await prisma.$executeRaw`
@@ -231,78 +222,38 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
           AND "storageFolderName" = ${oldFolderName}
       `
 
-      // Rename StoredFile paths using the resolved effective prefix
+      // Rename StoredFile paths for originals (previews are ID-keyed, untouched).
       const sfVideos = await prisma.storedFile.findMany({
         where: { entityType: 'VIDEO', fileRole: 'ORIGINAL', storagePath: { startsWith: effectiveOldPrefix } },
         select: { entityId: true },
       })
       const vgVideoIds = sfVideos.map(s => s.entityId)
-
-      // Resolve preview prefix from StoredFile — may be stale independently of the main prefix
-      if (vgVideoIds.length > 0) {
-        const previewCheck = await prisma.storedFile.findFirst({
-          where: { entityType: 'VIDEO', entityId: { in: vgVideoIds }, fileRole: { in: ['PREVIEW_720', 'PREVIEW_480', 'THUMBNAIL'] } },
-          select: { storagePath: true },
-        })
-        if (previewCheck?.storagePath) {
-          const pParts = previewCheck.storagePath.split('/')
-          const pFolderIdx = pParts.indexOf('.previews')
-          if (pFolderIdx !== -1) {
-            const resolvedPreviewPrefix = pParts.slice(0, pFolderIdx + 3).join('/')
-            if (resolvedPreviewPrefix !== oldPreviewPrefix) {
-              console.log(`[FOLDER-RENAME] Job ${folderRenameJobId}: preview prefix mismatch — using StoredFile-derived "${resolvedPreviewPrefix}" instead of "${oldPreviewPrefix}"`)
-              oldPreviewPrefix = resolvedPreviewPrefix
-            }
-          }
-        }
-      }
       const vgAssetIds = vgVideoIds.length > 0
         ? await prisma.videoAsset.findMany({ where: { videoId: { in: vgVideoIds } }, select: { id: true } }).then(r => r.map(a => a.id))
         : []
       if (vgVideoIds.length > 0) {
         await renameStoredPaths('VIDEO', vgVideoIds, effectiveOldPrefix, renameJob.newPrefix)
-        // Preview/timeline files live under .previews/videos/ — rebase those paths too
-        await renameStoredPaths('VIDEO', vgVideoIds, oldPreviewPrefix, newPreviewPrefix)
       }
       if (vgAssetIds.length > 0) {
         await renameStoredPaths('VIDEO_ASSET', vgAssetIds, effectiveOldPrefix, renameJob.newPrefix)
-        // Asset preview/thumbnail derivatives live under .previews/videos/{folder}/{version}/assets/.
-        // The preview tree was physically moved above, so rebase the asset StoredFile preview paths
-        // too — mirroring the VIDEO_VERSION branch. Without this, asset thumbnails 404 after a rename
-        // because their StoredFile rows still point at the old (now-empty) preview prefix.
-        await renameStoredPaths('VIDEO_ASSET', vgAssetIds, oldPreviewPrefix, newPreviewPrefix)
       }
     } else if (renameJob.entityType === 'ALBUM') {
-      // entityId = albumId; update album + photo paths
-      // oldPrefix / newPrefix = {proj}/albums/{folder}
-      const projectStoragePath = path.posix.dirname(path.posix.dirname(renameJob.oldPrefix))
-      const oldAlbumFolder = path.posix.basename(renameJob.oldPrefix)
-      const newAlbumFolder = path.posix.basename(renameJob.newPrefix)
-      const oldAlbumPreviewsPrefix = `${projectStoragePath}/.previews/albums/${oldAlbumFolder}`
-      const newAlbumPreviewsPrefix = `${projectStoragePath}/.previews/albums/${newAlbumFolder}`
-
-      // Move the .previews/albums/{folder} prefix (non-fatal if absent)
-      try {
-        await s3MoveDirectoryWithProgress(oldAlbumPreviewsPrefix, newAlbumPreviewsPrefix, async () => {})
-      } catch (previewMoveError) {
-        console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: album previews move failed (non-fatal):`, previewMoveError)
-      }
-
+      // entityId = albumId; oldPrefix / newPrefix = {proj}/albums/{folder}.
+      // Photo originals + their `-social.jpg` derivatives live under the album folder
+      // and move with it; thumbnails are ID-keyed (rename-immune) and never move.
       await prisma.$executeRaw`
         UPDATE "Album"
         SET "storageFolderName" = ${renameJob.entityName}
         WHERE "id" = ${renameJob.entityId}
       `
 
-      // Rename StoredFile paths for album photos and album ZIPs
+      // Rename StoredFile paths for album photos (originals + social) and album ZIPs.
       const albumPhotoIds = await prisma.albumPhoto.findMany({
         where: { albumId: renameJob.entityId },
         select: { id: true },
       }).then(r => r.map(p => p.id))
       if (albumPhotoIds.length > 0) {
         await renameStoredPaths('ALBUM_PHOTO', albumPhotoIds, renameJob.oldPrefix, renameJob.newPrefix)
-        // Album photo thumbnails/social copies live under .previews/albums/
-        await renameStoredPaths('ALBUM_PHOTO', albumPhotoIds, oldAlbumPreviewsPrefix, newAlbumPreviewsPrefix)
       }
       await renameStoredPaths('ALBUM', [renameJob.entityId], renameJob.oldPrefix, renameJob.newPrefix)
 
@@ -334,34 +285,15 @@ export async function processFolderRename(job: Job<FolderRenameJobPayload>): Pro
         }
       }
     } else if (renameJob.entityType === 'VIDEO_VERSION') {
-      // entityId = videoId; entityName = new version label
-      // Derive the previews-root prefix from the main prefix:
-      //   oldPrefix = {projectStoragePath}/videos/{videoFolderName}/{oldVersionLabel}
-      //   oldPreviewPrefix = {projectStoragePath}/.previews/videos/{videoFolderName}/{oldVersionLabel}
-      const videoFolderName = path.posix.basename(path.posix.dirname(renameJob.oldPrefix))
-      const projectStoragePath = path.posix.dirname(path.posix.dirname(path.posix.dirname(renameJob.oldPrefix)))
-      const oldVersionLabelFolder = path.posix.basename(renameJob.oldPrefix)
-      const newVersionLabelFolder = path.posix.basename(renameJob.newPrefix)
-      const oldPreviewPrefix = `${projectStoragePath}/.previews/videos/${videoFolderName}/${oldVersionLabelFolder}`
-      const newPreviewPrefix = `${projectStoragePath}/.previews/videos/${videoFolderName}/${newVersionLabelFolder}`
-
-      // Move the previews folder (no-ops silently if no preview objects exist yet).
-      try {
-        await s3MoveDirectoryWithProgress(oldPreviewPrefix, newPreviewPrefix, async () => {})
-      } catch (previewMoveError) {
-        console.warn(`[FOLDER-RENAME] Job ${folderRenameJobId}: previews move failed (non-fatal):`, previewMoveError)
-      }
-
-      // Rename StoredFile paths for this video and its assets — both main and preview prefixes
+      // entityId = videoId. The main version folder was moved by the generic move
+      // above; previews are ID-keyed (rename-immune) so only originals rebase.
       await renameStoredPaths('VIDEO', [renameJob.entityId], renameJob.oldPrefix, renameJob.newPrefix)
-      await renameStoredPaths('VIDEO', [renameJob.entityId], oldPreviewPrefix, newPreviewPrefix)
       const vvAssetIds = await prisma.videoAsset.findMany({
         where: { videoId: renameJob.entityId },
         select: { id: true },
       }).then(r => r.map(a => a.id))
       if (vvAssetIds.length > 0) {
         await renameStoredPaths('VIDEO_ASSET', vvAssetIds, renameJob.oldPrefix, renameJob.newPrefix)
-        await renameStoredPaths('VIDEO_ASSET', vvAssetIds, oldPreviewPrefix, newPreviewPrefix)
       }
     }
 

@@ -406,7 +406,7 @@ export default function SalesQuotesPage() {
         </div>
 
         {actionError ? (
-          <div className="text-sm text-red-600">{actionError}</div>
+          <div className="text-sm text-destructive">{actionError}</div>
         ) : null}
 
       <div className="flex flex-nowrap items-center justify-between gap-2 mb-3">

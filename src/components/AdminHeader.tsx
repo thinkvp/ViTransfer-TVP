@@ -694,7 +694,7 @@ export default function AdminHeader() {
             </div>
           </div>
           {profileError && <p className="text-sm text-destructive">{profileError}</p>}
-          {profileSuccess && <p className="text-sm text-green-600 dark:text-green-400">{profileSuccess}</p>}
+          {profileSuccess && <p className="text-sm text-success">{profileSuccess}</p>}
           <Button
             onClick={handlePasswordSave}
             disabled={savingPassword || !newPassword}

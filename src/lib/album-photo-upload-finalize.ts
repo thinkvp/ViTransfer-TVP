@@ -2,7 +2,7 @@ import { prisma } from '@/lib/db'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
-import { buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { buildAlbumPhotoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import { deleteFile } from '@/lib/storage'
 import { getAlbumPhotoSocialQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 import { registerStoredFile } from '@/lib/stored-file'
@@ -22,13 +22,8 @@ export async function finalizeAlbumPhotoUpload(photoId: string): Promise<{ ok: t
     where: { entityType_entityId_fileRole: { entityType: 'ALBUM_PHOTO', entityId: photoId, fileRole: 'ORIGINAL' } },
     select: { storagePath: true },
   }).then(r => r?.storagePath || '')
-  const project = photo.album.project
-  const projectStoragePath = buildProjectStorageRoot(
-    project.client?.name || project.companyName || 'Client',
-    project.title,
-  )
   const socialStoragePath = `${origPath}-social.jpg`
-  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(projectStoragePath, origPath)
+  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(photo.album.projectId, photoId)
 
   // Update photo status (legacy path columns dropped — StoredFile handles them)
   await prisma.albumPhoto.update({

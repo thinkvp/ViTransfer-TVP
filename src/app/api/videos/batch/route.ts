@@ -1,4 +1,3 @@
-import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
@@ -10,12 +9,8 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
-  buildVideoAssetPreviewStoragePath,
-  buildProjectPreviewsRoot,
   buildProjectStorageRoot,
   buildVideoStorageRoot,
-  getStoragePathBasename,
-  replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 export const runtime = 'nodejs'
 
@@ -120,9 +115,8 @@ export async function PATCH(request: NextRequest) {
 
       const oldVideoStorageRoot = buildVideoStorageRoot(projectStoragePath, currentFolderName)
       const newVideoStorageRoot = buildVideoStorageRoot(projectStoragePath, nextFolderName)
-      // Preview files live under .previews/videos/{folder}/ (sibling to videos/{folder}/)
-      const oldVideoPreviewRoot = `${buildProjectPreviewsRoot(projectStoragePath)}/videos/${path.posix.basename(oldVideoStorageRoot)}`
-      const newVideoPreviewRoot = `${buildProjectPreviewsRoot(projectStoragePath)}/videos/${path.posix.basename(newVideoStorageRoot)}`
+      // Previews are ID-keyed (previews/{projectId}/videos/{videoId}/…) and never move
+      // on rename — only the name-based originals folder is touched below.
 
       if (oldVideoStorageRoot !== newVideoStorageRoot) {
         if (isS3Mode()) {
@@ -166,9 +160,8 @@ export async function PATCH(request: NextRequest) {
           })
           await getFolderRenameQueue().add('folder-rename', { folderRenameJobId: folderRenameJob.id })
         } else {
-          // Local mode: move both the main video folder and its .previews mirror.
+          // Local mode: move the originals folder (previews are ID-keyed, untouched).
           await moveDirectory(oldVideoStorageRoot, newVideoStorageRoot)
-          await moveDirectory(oldVideoPreviewRoot, newVideoPreviewRoot)
         }
       }
 
@@ -192,9 +185,8 @@ export async function PATCH(request: NextRequest) {
           })
 
           if (needsPathRebase) {
-            // StoredFile handles path rebasing
+            // StoredFile handles path rebasing (originals only — previews are ID-keyed)
             await renameStoredPaths('VIDEO', [video.id], oldVideoStorageRoot, newVideoStorageRoot)
-            await renameStoredPaths('VIDEO', [video.id], oldVideoPreviewRoot, newVideoPreviewRoot)
           }
         }
 
@@ -204,10 +196,8 @@ export async function PATCH(request: NextRequest) {
           for (const asset of groupAssets) {
             const assetVideo = groupByVideoId.get(asset.videoId)
             if (!assetVideo) continue
-            // StoredFile handles path rebasing — both the main folder and the .previews mirror,
-            // since asset thumbnails/previews live under .previews/videos/{folder}/.
+            // StoredFile handles path rebasing (originals only — asset previews are ID-keyed)
             await renameStoredPaths('VIDEO_ASSET', [asset.id], oldVideoStorageRoot, newVideoStorageRoot)
-            await renameStoredPaths('VIDEO_ASSET', [asset.id], oldVideoPreviewRoot, newVideoPreviewRoot)
           }
         }
       })

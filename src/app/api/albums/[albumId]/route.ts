@@ -12,9 +12,7 @@ import {
   allocateUniqueStorageName,
   buildAlbumStorageRoot,
   buildAlbumZipStoragePath,
-  buildProjectPreviewsRoot,
   buildProjectStorageRoot,
-  replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 import { z } from 'zod'
 
@@ -85,8 +83,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let albumRenamePlan: null | {
     oldAlbumStorageRoot: string
     newAlbumStorageRoot: string
-    oldAlbumPreviewsRoot: string
-    newAlbumPreviewsRoot: string
     newAlbumFolderName: string
   } = null
 
@@ -113,16 +109,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         album.storageFolderName || album.name,
       )
       const newAlbumStorageRoot = buildAlbumStorageRoot(projectStoragePath, newAlbumFolderName)
-      const projectPreviewsRoot = buildProjectPreviewsRoot(projectStoragePath)
-      // Derive the sanitized folder name from the already-computed storage roots
-      const oldSanitizedAlbumFolder = oldAlbumStorageRoot.slice(oldAlbumStorageRoot.lastIndexOf('/') + 1)
-      const newSanitizedAlbumFolder = newAlbumStorageRoot.slice(newAlbumStorageRoot.lastIndexOf('/') + 1)
-      const oldAlbumPreviewsRoot = `${projectPreviewsRoot}/albums/${oldSanitizedAlbumFolder}`
-      const newAlbumPreviewsRoot = `${projectPreviewsRoot}/albums/${newSanitizedAlbumFolder}`
       data.storageFolderName = newAlbumFolderName
 
       if (oldAlbumStorageRoot !== newAlbumStorageRoot) {
-        albumRenamePlan = { oldAlbumStorageRoot, newAlbumStorageRoot, oldAlbumPreviewsRoot, newAlbumPreviewsRoot, newAlbumFolderName }
+        albumRenamePlan = { oldAlbumStorageRoot, newAlbumStorageRoot, newAlbumFolderName }
       }
     }
   }
@@ -169,9 +159,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       })
       await getFolderRenameQueue().add('folder-rename', { folderRenameJobId: folderRenameJob.id })
     } else {
-      // Local mode: move both the main album folder and its .previews mirror.
+      // Local mode: move the originals album folder (previews are ID-keyed, untouched).
       await moveDirectory(albumRenamePlan.oldAlbumStorageRoot, albumRenamePlan.newAlbumStorageRoot)
-      await moveDirectory(albumRenamePlan.oldAlbumPreviewsRoot, albumRenamePlan.newAlbumPreviewsRoot)
 
             // Rename the zip files inside the (now-moved) zips/ subdirectory.
       // The zip filename encodes the album display name, so a folder move alone is not enough.

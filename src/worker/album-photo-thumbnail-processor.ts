@@ -6,7 +6,7 @@ import { pipeline } from 'stream/promises'
 import { prisma } from '@/lib/db'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
-import { buildAlbumPhotoThumbnailStoragePath, buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { buildAlbumPhotoThumbnailStoragePath } from '@/lib/project-storage-paths'
 import { deleteFile, downloadFile, getFilePath, uploadFile } from '@/lib/storage'
 import { isS3Mode, s3FileExists } from '@/lib/s3-storage'
 import { registerStoredFile, getStoredFilePath } from '@/lib/stored-file'
@@ -36,7 +36,7 @@ async function thumbnailExists(storagePath: string | null | undefined): Promise<
   }
 }
 
-async function resolveAlbumCandidates(albumId: string, projectStoragePath: string): Promise<AlbumPhotoCandidate[]> {
+async function resolveAlbumCandidates(albumId: string, projectId: string): Promise<AlbumPhotoCandidate[]> {
   const photos = await prisma.albumPhoto.findMany({
     where: { albumId, status: 'READY' },
     orderBy: { createdAt: 'asc' },
@@ -51,10 +51,10 @@ async function resolveAlbumCandidates(albumId: string, projectStoragePath: strin
 
   const candidates: AlbumPhotoCandidate[] = []
   for (const photo of photos) {
-    // Get the original photo path from StoredFile
+    // Thumbnails are ID-keyed (rename-immune); the original must still exist.
     const origPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL')
     const thumbnailStoragePath = origPath
-      ? buildAlbumPhotoThumbnailStoragePath(projectStoragePath, origPath)
+      ? buildAlbumPhotoThumbnailStoragePath(projectId, photo.id)
       : null
     if (!thumbnailStoragePath) continue
     const alreadyReady = photo.thumbnailStatus === 'READY' && await thumbnailExists(thumbnailStoragePath)
@@ -84,11 +84,11 @@ async function rescheduleAlbumThumbnailJob(params: {
   await enqueueAlbumThumbnailJob({ albumId, delayMs })
 }
 
-async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string, projectStoragePath: string): Promise<{ processedBytes: bigint; error?: string }> {
+async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string): Promise<{ processedBytes: bigint; error?: string }> {
   // Get original path from StoredFile
   const origPath = await getStoredFilePath('ALBUM_PHOTO', photo.id, 'ORIGINAL')
   if (!origPath) return { processedBytes: BigInt(0), error: 'Original file path not found' }
-  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(projectStoragePath, origPath)
+  const thumbnailStoragePath = buildAlbumPhotoThumbnailStoragePath(projectId, photo.id)
 
   // Read previous thumbnail size from StoredFile for delta computation
   const prevThumbFile = await prisma.storedFile.findUnique({
@@ -248,8 +248,7 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
     return
   }
 
-  const projectStoragePath = album.project.storagePath || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
-  const candidates = await resolveAlbumCandidates(album.id, projectStoragePath)
+  const candidates = await resolveAlbumCandidates(album.id, album.projectId)
   const totalBytes = BigInt(0) // Computed from StoredFile as needed
 
   await prisma.albumThumbnailJob.update({
@@ -297,7 +296,7 @@ export async function processAlbumPhotoThumbnail(job: Job<AlbumPhotoThumbnailJob
   const failures: string[] = []
 
   for (const photo of candidates) {
-    const result = await processSinglePhoto(photo, album.projectId, projectStoragePath)
+    const result = await processSinglePhoto(photo, album.projectId)
     processedPhotos += 1
     processedBytes += result.processedBytes
     if (result.error) {

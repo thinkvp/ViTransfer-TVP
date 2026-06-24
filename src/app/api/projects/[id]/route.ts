@@ -13,6 +13,7 @@ import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib
 import { isS3Mode } from '@/lib/s3-storage'
 import {
   allocateUniqueStorageName,
+  buildPreviewsRoot,
   buildProjectStorageRoot,
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
@@ -1624,6 +1625,14 @@ export async function DELETE(
     } catch (error) {
       console.error(`Failed to delete project directory for ${id}:`, error)
       // Continue even if directory deletion fails
+    }
+
+    // Previews are ID-keyed and live outside the name-based project tree, so the
+    // directory delete above does not cover them — remove previews/{projectId}/ too.
+    try {
+      await deleteDirectory(buildPreviewsRoot(project.id))
+    } catch (error) {
+      console.error(`Failed to delete preview directory for ${id}:`, error)
     }
 
     // SECURITY: Invalidate all sessions for this project before deletion

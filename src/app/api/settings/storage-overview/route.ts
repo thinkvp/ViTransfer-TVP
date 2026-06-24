@@ -47,7 +47,6 @@ export async function GET(request: NextRequest) {
       clientFileAgg,
       userFileAgg,
       projectTotals,
-      projectsWithDisk,
       accountingTotal,
     ] = await Promise.all([
       // All file sizes now come from StoredFile registry
@@ -64,12 +63,6 @@ export async function GET(request: NextRequest) {
       getStoredFileAggregate({ entityType: 'CLIENT_FILE' }),
       getStoredFileAggregate({ entityType: 'USER_FILE' } as any),
       prisma.project.aggregate({ _sum: { totalBytes: true, previewBytes: true } }),
-      isS3Provider
-        ? Promise.resolve({ _sum: { totalBytes: 0, diskBytes: 0 } } as any)
-        : prisma.project.aggregate({
-            where: { diskBytes: { not: null } },
-            _sum: { totalBytes: true, diskBytes: true },
-          }),
       // Accounting files total from StoredFile
       getStoredFileAggregate({ entityType: 'ACCOUNTING_ATTACHMENT' } as any),
     ])
@@ -88,20 +81,19 @@ export async function GET(request: NextRequest) {
     const userFilesBytes = asNumber(userFileAgg._sum.fileSize)
     const accountingFilesBytes = asNumber((accountingTotal as any)._sum.fileSize)
 
-    // In S3 mode, use DB-backed previewBytes (reconciled daily) instead of a live S3 scan.
-    // In local mode, estimate preview bytes as the difference between disk total and DB-tracked total.
-    let videoPreviewsBytes = 0
-    if (isS3Provider) {
-      videoPreviewsBytes = asNumber((projectTotals as any)._sum.previewBytes)
-    } else {
-      const diskBytesForProjects = asNumber((projectsWithDisk as any)._sum.diskBytes)
-      const totalBytesForProjectsWithDisk = asNumber((projectsWithDisk as any)._sum.totalBytes)
-      videoPreviewsBytes = Math.max(0, diskBytesForProjects - totalBytesForProjectsWithDisk)
-    }
+    // previewBytes is now reconciled in both storage modes (see project-total-bytes.ts).
+    const videoPreviewsBytes = asNumber((projectTotals as any)._sum.previewBytes)
 
     const allProjectTotalBytes = asNumber((projectTotals as any)._sum.totalBytes)
+    // Preview bytes are part of the grand total in both modes, but reach it differently:
+    //  - S3: preview StoredFile rows have null fileSize (uploaded to R2, never stat'd locally),
+    //    so they are NOT inside project.totalBytes → add videoPreviewsBytes here.
+    //  - Local: preview rows carry real fileSize (stat'd from disk at finalize), so they are
+    //    ALREADY inside project.totalBytes → do not add again (it would double-count).
     const totalBytes =
-      allProjectTotalBytes + videoPreviewsBytes + clientFilesBytes + userFilesBytes + accountingFilesBytes
+      allProjectTotalBytes +
+      (isS3Provider ? videoPreviewsBytes : 0) +
+      clientFilesBytes + userFilesBytes + accountingFilesBytes
 
     let capacityBytes: number | null = null
     let availableBytes: number | null = null

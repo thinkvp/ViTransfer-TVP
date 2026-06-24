@@ -255,7 +255,7 @@ export function VideoAssetDownloadModal({
                   <p className="text-sm text-muted-foreground">Download the approved video file</p>
                 </div>
                 {downloadedVideo && (
-                  <CheckCircle className="h-5 w-5 text-green-600" aria-hidden="true" />
+                  <CheckCircle className="h-5 w-5 text-success" aria-hidden="true" />
                 )}
               </div>
             </button>
@@ -310,7 +310,7 @@ export function VideoAssetDownloadModal({
                       </div>
                     </div>
                     {isDownloaded && (
-                      <CheckCircle className="h-5 w-5 text-green-600" aria-hidden="true" />
+                      <CheckCircle className="h-5 w-5 text-success" aria-hidden="true" />
                     )}
                   </div>
                 )})}

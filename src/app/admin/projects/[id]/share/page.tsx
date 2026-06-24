@@ -2227,7 +2227,7 @@ export default function AdminSharePage() {
               <span className="text-foreground whitespace-nowrap flex-shrink-0">{headerVersion?.versionLabel || '\u2014'}</span>
             )}
             {isOlderVersionSelected && (
-              <span className="text-amber-600 dark:text-amber-400 text-xs whitespace-nowrap flex-shrink-0">(Newer version available)</span>
+              <span className="text-warning text-xs whitespace-nowrap flex-shrink-0">(Newer version available)</span>
             )}
           </>
         )}

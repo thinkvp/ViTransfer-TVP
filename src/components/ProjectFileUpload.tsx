@@ -726,7 +726,7 @@ export function ProjectFileUpload({
                         <div
                           className={
                             'h-full transition-all ' +
-                            (isError ? 'bg-destructive' : isDone ? 'bg-emerald-500' : 'bg-primary')
+                            (isError ? 'bg-destructive' : isDone ? 'bg-success' : 'bg-primary')
                           }
                           style={{ width: `${Math.min(100, Math.max(0, u.progress))}%` }}
                         />
@@ -754,7 +754,7 @@ export function ProjectFileUpload({
                         </span>
                       )}
                       {u.status === 'completed' && (
-                        <span className="inline-flex items-center gap-1 text-emerald-600">
+                        <span className="inline-flex items-center gap-1 text-success">
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           Completed
                         </span>

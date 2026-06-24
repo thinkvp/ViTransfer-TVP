@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getFilePath } from '@/lib/storage'
 import { getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot, buildProjectUploadsRoot } from '@/lib/project-storage-paths'
+import { buildPreviewsRoot, buildProjectStorageRoot, buildProjectUploadsRoot } from '@/lib/project-storage-paths'
 import { computeProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { getStoredFileAggregate, getStoredFileRecords } from '@/lib/stored-file'
 import * as path from 'path'
@@ -198,7 +198,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (isS3Provider) {
       s3VideoPreviewsBytes = Number(await computeProjectPreviewBytes(projectId, prisma))
     }
-    let videoPreviewsBytes = isS3Provider ? s3VideoPreviewsBytes : 0
+    // Local: previews are tracked in StoredFile with real sizes (already part of totalBytes),
+    // so read the reconciled previewBytes column for display. Overwritten with a precise
+    // on-disk walk below when includeDisk=1.
+    let videoPreviewsBytes = isS3Provider ? s3VideoPreviewsBytes : asNumberBigInt(project?.previewBytes)
 
     const totalBytesStored = asNumberBigInt(project?.totalBytes)
     const previewBytesDelta = isS3Provider ? s3VideoPreviewsBytes : 0
@@ -246,12 +249,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         uploadsRel,
       ].map((p) => getFilePath(p))
 
+      // ID-keyed previews live outside the project tree at previews/{projectId}/… —
+      // walk them too so the on-disk total matches the project's true footprint.
+      const previewsRootAbs = getFilePath(buildPreviewsRoot(projectId))
+
       const [
         videoEntries,
         videoAssetEntries,
         albumPhotoEntries,
         albumEntries,
-        rootBytes,
+        projectTreeBytes,
+        previewsTreeBytes,
         commentsBytesDisk,
         communicationBytesDisk,
         filesBytesDisk,
@@ -274,11 +282,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           select: { id: true, name: true, storageFolderName: true },
         }),
         computeDirectorySizeBytes(projectRootAbs),
+        computeDirectorySizeBytes(previewsRootAbs),
         computeDirectorySizeBytes(commentsAbs),
         computeDirectorySizeBytes(communicationAbs),
         computeDirectorySizeBytes(filesAbs),
         computeDirectorySizeBytes(uploadsAbs),
       ])
+
+      const rootBytes = projectTreeBytes + previewsTreeBytes
 
       const videoAssetStoragePaths = new Set<string>()
       // Disk bytes via StoredFile — batch-load all paths for this project's entities

@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { prisma } from '@/lib/db'
 import { generateThumbnail, getVideoMetadata, transcodeVideo } from '@/lib/ffmpeg'
-import { buildProjectStorageRoot, buildProjectUploadVideoThumbnailStoragePath, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
+import { buildUploadPreviewStoragePath, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import { recalculateAndStoreProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { getFilePath, uploadFile } from '@/lib/storage'
@@ -45,16 +45,16 @@ function getHighestSelectedResolution(rawResolutions: string): '480p' | '720p' |
   return best
 }
 
-function getPreviewStoragePath(projectStoragePath: string, storagePath: string): string {
-  return buildProjectUploadVideoThumbnailStoragePath(projectStoragePath, storagePath)
+function getUploadPreviewStoragePath(projectId: string, uploadFileId: string): string {
+  return buildUploadPreviewStoragePath(projectId, uploadFileId)
 }
 
-function getVideoAssetPreviewStoragePath(projectStoragePath: string, storagePath: string, videoFolderName: string, versionLabel: string): string {
-  return buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, versionLabel, storagePath)
+function getVideoAssetPreviewStoragePath(projectId: string, videoId: string, assetId: string): string {
+  return buildVideoAssetPreviewStoragePath(projectId, videoId, assetId)
 }
 
-function getVideoAssetPlaybackPreviewStoragePath(projectStoragePath: string, storagePath: string, videoFolderName: string, versionLabel: string): string {
-  return buildVideoAssetPreviewStoragePath(projectStoragePath, videoFolderName, versionLabel, storagePath, '.mp4')
+function getVideoAssetPlaybackPreviewStoragePath(projectId: string, videoId: string, assetId: string): string {
+  return buildVideoAssetPreviewStoragePath(projectId, videoId, assetId, '.mp4')
 }
 
 function getThumbnailCaptureTimestamp(durationSeconds?: number | null): number {
@@ -270,6 +270,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
         where: { id: recordId },
         select: { fileType: true,
           fileName: true,
+          projectId: true,
           project: {
             select: { title: true,
               companyName: true,
@@ -288,6 +289,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
           fileName: true,
           video: {
             select: {
+              id: true,
               projectId: true,
               storageFolderName: true,
               name: true,
@@ -312,19 +314,6 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
     return
   }
 
-  let projectStoragePath: string
-  if ('project' in record) {
-    projectStoragePath = record.project.storagePath || buildProjectStorageRoot(
-      record.project.client?.name || record.project.companyName || 'Client',
-      record.project.title,
-    )
-  } else {
-    projectStoragePath = record.video.project.storagePath || buildProjectStorageRoot(
-      record.video.project.client?.name || record.video.project.companyName || 'Client',
-      record.video.project.title,
-    )
-  }
-
   // StoredFile handles original storage path — resolve if not provided
   const resolvedStoragePath = storagePath || await getStoredFilePath(
     type === 'shareUploadFile' ? 'SHARE_UPLOAD_FILE' : 'VIDEO_ASSET',
@@ -344,7 +333,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
     title: string
   } | null = null
   if ('project' in record) {
-    previewStoragePath = getPreviewStoragePath(projectStoragePath, resolvedStoragePath)
+    previewStoragePath = getUploadPreviewStoragePath(record.projectId, recordId)
   } else {
     const videoRecord = record.video
     projectIdForPreviewBytes = videoRecord.projectId
@@ -354,18 +343,8 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
       watermarkText: videoRecord.project.watermarkText,
       title: videoRecord.project.title,
     }
-    previewStoragePath = getVideoAssetPreviewStoragePath(
-      projectStoragePath,
-      resolvedStoragePath,
-      videoRecord.storageFolderName || videoRecord.name,
-      videoRecord.versionLabel,
-    )
-    playbackPreviewStoragePath = getVideoAssetPlaybackPreviewStoragePath(
-      projectStoragePath,
-      resolvedStoragePath,
-      videoRecord.storageFolderName || videoRecord.name,
-      videoRecord.versionLabel,
-    )
+    previewStoragePath = getVideoAssetPreviewStoragePath(videoRecord.projectId, videoRecord.id, recordId)
+    playbackPreviewStoragePath = getVideoAssetPlaybackPreviewStoragePath(videoRecord.projectId, videoRecord.id, recordId)
   }
 
   const isImage = String(resolvedFileType || '').toLowerCase().startsWith('image/')

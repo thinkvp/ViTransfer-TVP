@@ -1,9 +1,9 @@
 import { prisma } from '@/lib/db'
 import { reconcileAllAlbumZipSizes } from '@/lib/album-zip-size-sync'
 import { getFilePath } from '@/lib/storage'
+import { buildPreviewsRoot } from '@/lib/project-storage-paths'
 import { isS3Mode, s3GetFileSize, s3SumPrefixSize } from '@/lib/s3-storage'
-import { buildProjectStorageRoot, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
-import { getStoredPathsForEntities, type FileRole } from '@/lib/stored-file'
+import { type FileRole } from '@/lib/stored-file'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -143,8 +143,7 @@ export async function recalculateAndStoreProjectTotalBytes(
 }
 
 /**
- * Recompute and persist previewBytes for a single project.
- * No-ops in local/disk mode (previewBytes stays 0).
+ * Recompute and persist previewBytes for a single project (both storage modes).
  * Call this after video processing completes so the dashboard reflects
  * preview storage immediately without waiting for the nightly reconcile.
  */
@@ -153,12 +152,10 @@ export async function recalculateAndStoreProjectPreviewBytes(
   prismaClient: typeof prisma = prisma
 ): Promise<bigint> {
   const previewBytes = await computeProjectPreviewBytes(projectId, prismaClient)
-  if (isS3Mode()) {
-    await prismaClient.project.update({
-      where: { id: projectId },
-      data: { previewBytes },
-    })
-  }
+  await prismaClient.project.update({
+    where: { id: projectId },
+    data: { previewBytes },
+  })
   return previewBytes
 }
 
@@ -196,11 +193,18 @@ export async function computeProjectDiskBytes(
     select: { storagePath: true },
   })
 
-  if (!project?.storagePath) return ZERO
+  // Name-based project tree: originals, assets, photos, comments, emails, ZIPs.
+  let total = ZERO
+  if (project?.storagePath) {
+    total += await computeDirectorySizeBytesBigInt(getFilePath(project.storagePath))
+  }
 
-  const projectRootAbs = getFilePath(project.storagePath)
-  const bytes = await computeDirectorySizeBytesBigInt(projectRootAbs)
-  return bytes > ZERO ? bytes : ZERO
+  // ID-keyed previews live OUTSIDE the project tree at previews/{projectId}/… (see
+  // project-storage-paths.ts). Include them so diskBytes is the project's TRUE physical
+  // footprint — this is what the dashboard "Data" total and project page figures show.
+  total += await computeDirectorySizeBytesBigInt(getFilePath(buildPreviewsRoot(projectId)))
+
+  return total > ZERO ? total : ZERO
 }
 
 export async function recalculateAndStoreProjectDiskBytes(
@@ -242,16 +246,28 @@ export async function reconcileAllProjectsDiskBytes(
 }
 
 /**
- * Compute the total bytes used by S3-stored video preview files for a project.
- * Uses StoredFile registry as the single source of truth for preview file paths.
- * Returns 0 in local/disk storage mode.
+ * Compute the total bytes used by derived video preview files for a project
+ * (transcoded previews, thumbnails, timeline VTT + sprite sheets, asset/upload previews).
+ *
+ * Both modes measure the ID-keyed previews tree (previews/{projectId}/…):
+ *  - Local mode walks the directory on disk (sprite sheets have no per-file StoredFile
+ *    size, so a registry aggregate would under-count them).
+ *  - S3 mode sizes the StoredFile-registered preview objects via the S3 API.
  */
 export async function computeProjectPreviewBytes(
   projectId: string,
   prismaClient: typeof prisma = prisma
 ): Promise<bigint> {
   const ZERO = BigInt(0)
-  if (!projectId || !isS3Mode()) return ZERO
+  if (!projectId) return ZERO
+
+  if (!isS3Mode()) {
+    // Local mode: previews live under previews/{projectId}/… on disk, OUTSIDE the
+    // name-based project tree that computeProjectDiskBytes walks. Sum the whole subtree.
+    const previewsRootAbs = getFilePath(buildPreviewsRoot(projectId))
+    const bytes = await computeDirectorySizeBytesBigInt(previewsRootAbs)
+    return bytes > ZERO ? bytes : ZERO
+  }
 
   // Collect all preview file paths for the project in one query via the denormalized
   // projectId (covers VIDEO, VIDEO_ASSET and SHARE_UPLOAD_FILE preview derivatives).
@@ -292,17 +308,12 @@ export async function computeProjectPreviewBytes(
 export async function reconcileAllProjectsPreviewBytes(
   prismaClient: typeof prisma = prisma
 ): Promise<{ checkedCount: number; updatedCount: number }> {
-  // Only meaningful in S3 mode; in local mode keep previewBytes = 0.
-  if (!isS3Mode()) {
-    return { checkedCount: 0, updatedCount: 0 }
-  }
-
   const projects = await prismaClient.project.findMany({
     select: { id: true, previewBytes: true },
   })
 
   let updatedCount = 0
-  // Use a concurrency pool to avoid overwhelming S3 with parallel requests.
+  // Use a concurrency pool to avoid overwhelming S3 (or local disk) with parallel work.
   await asyncPool(2, projects, async (p) => {
     const computed = await computeProjectPreviewBytes(p.id, prismaClient)
     const stored = toBigIntSafe((p as any).previewBytes)

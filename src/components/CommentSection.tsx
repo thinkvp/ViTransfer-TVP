@@ -1220,10 +1220,9 @@ export function CommentSectionView({
               </Button>
               <Button
                 type="button"
-                variant="default"
+                variant="success"
                 onClick={() => void handleApproveSelected()}
                 disabled={approving}
-                className="bg-green-500 hover:bg-green-600 text-white"
               >
                 {approving ? 'Approving...' : 'Approve'}
               </Button>
@@ -1346,7 +1345,6 @@ export function CommentSectionView({
                   size="sm"
                   onClick={() => setShowApproveConfirm(true)}
                   disabled={approving}
-                  className="!bg-green-600 hover:!bg-green-700 text-white hover:opacity-100"
                 >
                   Approve Video
                 </Button>

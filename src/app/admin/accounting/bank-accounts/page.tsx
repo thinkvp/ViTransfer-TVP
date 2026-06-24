@@ -1416,7 +1416,7 @@ export default function BankAccountsPage() {
                           <td className="px-2 py-1.5 max-w-[260px] truncate">{row.description}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{row.amountCents < 0 ? '-' : ''}${(Math.abs(row.amountCents) / 100).toFixed(2)}</td>
                           <td className="px-2 py-1.5">
-                            {row.isDuplicate && <AlertTriangle className="w-3.5 h-3.5 text-amber-500" aria-label="Possible duplicate" />}
+                            {row.isDuplicate && <AlertTriangle className="w-3.5 h-3.5 text-warning" aria-label="Possible duplicate" />}
                           </td>
                         </tr>
                       ))}
@@ -1424,7 +1424,7 @@ export default function BankAccountsPage() {
                   </table>
                 </div>
                 {previewRows.some(r => r.isDuplicate) && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <p className="text-xs text-warning flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5" />
                     Rows marked with a warning may already exist and are deselected by default.
                   </p>

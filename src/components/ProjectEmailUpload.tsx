@@ -509,7 +509,7 @@ export function ProjectEmailUpload({
                     <div
                       className={`h-full transition-all ${
                         u.status === 'completed'
-                          ? 'bg-emerald-500'
+                          ? 'bg-success'
                           : u.status === 'error'
                             ? 'bg-destructive'
                             : 'bg-primary'
@@ -530,7 +530,7 @@ export function ProjectEmailUpload({
                     {u.status === 'queued' && <span className="text-muted-foreground">Queued</span>}
                     {u.status === 'paused' && <span className="text-muted-foreground">Paused</span>}
                     {u.status === 'completed' && (
-                      <span className="inline-flex items-center gap-1 text-emerald-600">
+                      <span className="inline-flex items-center gap-1 text-success">
                         <CheckCircle2 className="w-3.5 h-3.5" /> Uploaded
                       </span>
                     )}
@@ -673,7 +673,7 @@ export function ProjectEmailUpload({
                   <div
                     className={`h-full transition-all ${
                       u.status === 'completed'
-                        ? 'bg-emerald-500'
+                        ? 'bg-success'
                         : u.status === 'error'
                           ? 'bg-destructive'
                           : 'bg-primary'
@@ -694,7 +694,7 @@ export function ProjectEmailUpload({
                   {u.status === 'queued' && <span className="text-muted-foreground">Queued</span>}
                   {u.status === 'paused' && <span className="text-muted-foreground">Paused</span>}
                   {u.status === 'completed' && (
-                    <span className="inline-flex items-center gap-1 text-emerald-600">
+                    <span className="inline-flex items-center gap-1 text-success">
                       <CheckCircle2 className="w-3.5 h-3.5" /> Uploaded
                     </span>
                   )}

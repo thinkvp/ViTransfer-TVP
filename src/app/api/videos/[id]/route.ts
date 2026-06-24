@@ -14,15 +14,12 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import {
   allocateUniqueStorageName,
-  buildVideoAssetPreviewStoragePath,
   buildProjectAllVideosRoot,
-  buildProjectAllVideoPreviewsRoot,
   buildProjectStorageRoot,
   buildVideoAssetsStorageRoot,
+  buildVideoPreviewsRoot,
   buildVideoStorageRoot,
   buildVideoVersionRoot,
-  buildVideoVersionPreviewsRoot,
-  replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 export const runtime = 'nodejs'
 
@@ -292,9 +289,6 @@ export async function PATCH(
       | {
           oldMainPrefix: string
           newMainPrefix: string
-          oldPreviewPrefix: string
-          newPreviewPrefix: string
-          currentVideo: Record<string, string | null>
           videoAssets: Array<{ id: string }>
         }
       | null = null
@@ -398,9 +392,8 @@ export async function PATCH(
         const newMainPrefix = buildVideoVersionRoot(projectStoragePath, videoFolderName, trimmedLabel)
 
         if (oldMainPrefix !== newMainPrefix) {
-          const oldPreviewPrefix = buildVideoVersionPreviewsRoot(projectStoragePath, videoFolderName, video.versionLabel)
-          const newPreviewPrefix = buildVideoVersionPreviewsRoot(projectStoragePath, videoFolderName, trimmedLabel)
-
+          // Only the originals version folder moves — previews are ID-keyed and
+          // unaffected by the version label.
           const videoAssets = await prisma.videoAsset.findMany({
             where: { videoId: id },
             select: { id: true, previewStatus: true },
@@ -441,26 +434,11 @@ export async function PATCH(
             // In S3 mode only update the versionLabel field now; path columns will be
             // rebased by the background worker once the S3 copy completes.
           } else {
-            // Local mode: plan an inline directory move + path rebase.
-            // Paths from StoredFile registry (legacy columns dropped)
-            const storedPaths = await getStoredFileRecords('VIDEO', [id], {
-              select: { fileRole: true, storagePath: true },
-            }) as unknown as Array<{ fileRole: string; storagePath: string | null }>
-            const pathMap = new Map(storedPaths.map(f => [f.fileRole, f.storagePath] as const))
+            // Local mode: plan an inline directory move + StoredFile path rebase
+            // for the originals folder only.
             versionLabelRenamePlan = {
               oldMainPrefix,
               newMainPrefix,
-              oldPreviewPrefix,
-              newPreviewPrefix,
-              currentVideo: {
-                originalStoragePath: pathMap.get('ORIGINAL') ?? null,
-                preview480Path: pathMap.get('PREVIEW_480') ?? null,
-                preview720Path: pathMap.get('PREVIEW_720') ?? null,
-                preview1080Path: pathMap.get('PREVIEW_1080') ?? null,
-                thumbnailPath: pathMap.get('THUMBNAIL') ?? null,
-                timelinePreviewVttPath: pathMap.get('TIMELINE_VTT') ?? null,
-                timelinePreviewSpritesPath: pathMap.get('TIMELINE_SPRITES') ?? null,
-              },
               videoAssets,
             }
           }
@@ -521,37 +499,24 @@ export async function PATCH(
         }
       })
     } else if (versionLabelRenamePlan) {
-      // Move both the main version folder and its previews folder, then rebase all paths.
+      // Move the originals version folder, then rebase StoredFile originals paths.
+      // Previews are ID-keyed (rename-immune) — no preview move/rebase needed.
       await moveDirectory(versionLabelRenamePlan.oldMainPrefix, versionLabelRenamePlan.newMainPrefix)
-      // Previews may not exist yet (unprocessed video) — moveDirectory returns early if src is absent.
-      await moveDirectory(versionLabelRenamePlan.oldPreviewPrefix, versionLabelRenamePlan.newPreviewPrefix)
 
-      const { oldMainPrefix, newMainPrefix, oldPreviewPrefix, newPreviewPrefix } = versionLabelRenamePlan
+      const { oldMainPrefix, newMainPrefix } = versionLabelRenamePlan
 
-      // StoredFile handles path rebasing via renameStoredPaths()
-      // called by the folder-rename-processor or inline below
       await prisma.$transaction(async (tx) => {
         await tx.video.update({
           where: { id },
           data: updateData,
         })
 
-        // Rename StoredFile paths for this video (OLD prefix → NEW prefix)
+        // Rename StoredFile paths for this video and its assets (OLD prefix → NEW prefix)
         if (oldMainPrefix !== newMainPrefix) {
           await renameStoredPaths('VIDEO', [id], oldMainPrefix, newMainPrefix)
-        }
-        if (oldPreviewPrefix !== newPreviewPrefix) {
-          await renameStoredPaths('VIDEO', [id], oldPreviewPrefix, newPreviewPrefix)
-        }
-
-        // Rename StoredFile paths for all assets of this video
-        const assetIds = versionLabelRenamePlan.videoAssets.map(a => a.id)
-        if (assetIds.length > 0) {
-          if (oldMainPrefix !== newMainPrefix) {
+          const assetIds = versionLabelRenamePlan.videoAssets.map(a => a.id)
+          if (assetIds.length > 0) {
             await renameStoredPaths('VIDEO_ASSET', assetIds, oldMainPrefix, newMainPrefix)
-          }
-          if (oldPreviewPrefix !== newPreviewPrefix) {
-            await renameStoredPaths('VIDEO_ASSET', assetIds, oldPreviewPrefix, newPreviewPrefix)
           }
         }
       })
@@ -689,7 +654,9 @@ export async function DELETE(
       || buildProjectStorageRoot(video.project.client?.name || video.project.companyName || 'Client', video.project.title)
     const videoFolderName = video.storageFolderName || video.name || id
     const versionLabel = video.versionLabel || `v${video.version}`
-    const previewRoot = buildVideoVersionPreviewsRoot(projectStoragePath, videoFolderName, versionLabel)
+    // Previews are ID-keyed: previews/{projectId}/videos/{videoId}/… — deleting this
+    // root removes preview mp4s, thumbnail, timeline sprites, and all asset derivatives.
+    const previewRoot = buildVideoPreviewsRoot(projectId, id)
 
     // Collect comment file IDs before any deletion so we can clean up
     // StoredFile rows even if the pre-deletion file removal fails.
@@ -796,7 +763,6 @@ export async function DELETE(
     ])
 
     const pruneStopAt = buildProjectAllVideosRoot(projectStoragePath)
-    const previewPruneStopAt = buildProjectAllVideoPreviewsRoot(projectStoragePath)
 
     try {
       await pruneEmptyParentDirectories(
@@ -807,10 +773,8 @@ export async function DELETE(
         buildVideoVersionRoot(projectStoragePath, videoFolderName, versionLabel),
         pruneStopAt,
       )
-      await pruneEmptyParentDirectories(
-        previewRoot,
-        previewPruneStopAt,
-      )
+      // The ID-keyed preview tree (previews/{projectId}/videos/{videoId}) was deleted
+      // above; orphan-cleanup prunes any now-empty preview parent dirs in local mode.
     } catch (error) {
       console.error(`Failed to prune empty folders for video ${video.id}:`, error)
     }
