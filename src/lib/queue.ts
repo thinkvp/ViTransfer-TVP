@@ -16,6 +16,7 @@ let folderRenameQueueInstance: Queue<FolderRenameJobPayload> | null = null
 let shareUploadPreviewQueueInstance: Queue<ShareUploadPreviewJob> | null = null
 let assetTimelineQueueInstance: Queue<AssetTimelineJob> | null = null
 let uploadTimelineQueueInstance: Queue<UploadTimelineJob> | null = null
+let passwordEmailQueueInstance: Queue<PasswordEmailJob> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -66,6 +67,14 @@ export interface ProjectEmailProcessingJob {
 
 export interface AlbumPhotoSocialJob {
   photoId: string
+}
+
+// Password emails for a password-protected project's share link. Enqueued (with a delay) by the
+// notify route so the password is staggered after the notification email without blocking the
+// admin's request, and so delivery survives a web-process restart.
+export interface PasswordEmailJob {
+  projectId: string
+  recipientIds: string[]
 }
 
 export interface AlbumPhotoThumbnailJob {
@@ -281,6 +290,33 @@ export function getProjectEmailQueue(): Queue<ProjectEmailProcessingJob> {
     })
   }
   return projectEmailQueueInstance
+}
+
+export function getPasswordEmailQueue(): Queue<PasswordEmailJob> {
+  // Don't create queue during build phase
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!passwordEmailQueueInstance) {
+    passwordEmailQueueInstance = new Queue<PasswordEmailJob>('password-email', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 5000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+  return passwordEmailQueueInstance
 }
 
 export function getAlbumPhotoSocialQueue(): Queue<AlbumPhotoSocialJob> {

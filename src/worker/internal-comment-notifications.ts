@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db'
 import { buildCompanyLogoUrl, getEmailSettings, sendEmail } from '../lib/email'
 import { generateInternalCommentSummaryEmail } from '../lib/email-templates'
-import { shouldSendNow, getPeriodString, sendNotificationsWithRetry } from './notification-helpers'
+import { shouldSendNow, getPeriodString, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash } from './notification-helpers'
 import { redactEmailForLogs } from '../lib/log-sanitization'
 
 export async function processInternalCommentNotifications() {
@@ -149,13 +149,14 @@ export async function processInternalCommentNotifications() {
 
     const period = getPeriodString(settings.adminNotificationSchedule)
     const notificationIds = pendingNotifications.map((n) => n.id)
+    const batchHash = notificationBatchHash(notificationIds)
 
     await prisma.notificationQueue.updateMany({
       where: { id: { in: notificationIds } },
       data: { adminAttempts: { increment: 1 } },
     })
 
-    const currentAttempts = pendingNotifications[0]?.adminAttempts + 1 || 1
+    const currentAttempts = (pendingNotifications[0]?.adminAttempts ?? 0) + 1
 
     const result = await sendNotificationsWithRetry({
       notificationIds,
@@ -163,32 +164,40 @@ export async function processInternalCommentNotifications() {
       isClientNotification: false,
       logPrefix: '[INTERNAL]',
       onSuccess: async () => {
-        for (const recipient of recipients) {
-          const html = generateInternalCommentSummaryEmail({
-            companyName: emailSettings.companyName || 'ViTransfer',
-            recipientName: recipient.name || '',
-            period,
-            companyLogoUrl: companyLogoUrl || undefined,
-            mainCompanyDomain: emailSettings.mainCompanyDomain,
-            accentColor: emailSettings.accentColor || undefined,
-            accentTextMode: emailSettings.accentTextMode || undefined,
-            emailHeaderColor: emailSettings.emailHeaderColor || undefined,
-            emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
-            projects: recipient.projects,
-          })
+        // Per-recipient idempotent send: retries skip recipients already emailed for
+        // this batch, so a single failing address never re-mails everyone else.
+        await sendSummaryToRecipients({
+          channel: 'internal',
+          batchHash,
+          recipients,
+          getEmail: (r) => r.email,
+          logPrefix: '[INTERNAL]',
+          sendOne: async (recipient) => {
+            const html = generateInternalCommentSummaryEmail({
+              companyName: emailSettings.companyName || 'ViTransfer',
+              recipientName: recipient.name || '',
+              period,
+              companyLogoUrl: companyLogoUrl || undefined,
+              mainCompanyDomain: emailSettings.mainCompanyDomain,
+              accentColor: emailSettings.accentColor || undefined,
+              accentTextMode: emailSettings.accentTextMode || undefined,
+              emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+              emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
+              projects: recipient.projects,
+            })
 
-          const sendResult = await sendEmail({
-            to: recipient.email,
-            subject: `Internal comments summary (${pendingNotifications.length} updates)`,
-            html,
-          })
+            const sendResult = await sendEmail({
+              to: recipient.email,
+              subject: `Internal comments summary (${pendingNotifications.length} updates)`,
+              html,
+            })
 
-          if (sendResult.success) {
-            console.log(`[INTERNAL] Sent to ${redactEmailForLogs(recipient.email)}`)
-          } else {
-            throw new Error(`Failed to send to ${redactEmailForLogs(recipient.email)}: ${sendResult.error}`)
-          }
-        }
+            if (sendResult.success) {
+              console.log(`[INTERNAL] Sent to ${redactEmailForLogs(recipient.email)}`)
+            }
+            return sendResult
+          },
+        })
       },
     })
 

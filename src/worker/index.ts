@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload, ShareUploadPreviewJob, AssetTimelineJob, UploadTimelineJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload, ShareUploadPreviewJob, AssetTimelineJob, UploadTimelineJob, PasswordEmailJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -15,6 +15,7 @@ import { processProjectEmail } from './project-email-processor'
 import { processAlbumPhotoSocial } from './album-photo-social-processor'
 import { processAlbumPhotoThumbnail } from './album-photo-thumbnail-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
+import { processPasswordEmail } from './password-email-processor'
 import { processFolderRename } from './folder-rename-processor'
 import { processShareUploadPreview, reconcileShareUploadPreviews } from './share-upload-preview-processor'
 import { processAdminNotifications } from './admin-notifications'
@@ -354,6 +355,22 @@ async function main() {
   })
 
   console.log('[WORKER] Album photo ZIP generation worker started')
+
+  // Create password-email worker (staggered share-link password emails enqueued by the notify route)
+  const passwordEmailWorker = new Worker<PasswordEmailJob>('password-email', processPasswordEmail, {
+    connection: getRedisForQueue(),
+    concurrency: 1,
+  })
+
+  passwordEmailWorker.on('completed', (job) => {
+    console.log(`[WORKER] Password email job ${job.id} completed`)
+  })
+
+  passwordEmailWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Password email job ${job?.id} failed:`, err)
+  })
+
+  console.log('[WORKER] Password email worker started')
 
   // Create folder rename worker (S3 copy + delete for project/client renames)
   const folderRenameWorker = new Worker<FolderRenameJobPayload>('folder-rename', processFolderRename, {
@@ -1007,6 +1024,7 @@ async function main() {
       assetWorker.close(),
       albumPhotoSocialWorker.close(),
       albumPhotoZipWorker.close(),
+      passwordEmailWorker.close(),
       shareUploadPreviewWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),
@@ -1027,6 +1045,7 @@ async function main() {
       assetWorker.close(),
       albumPhotoSocialWorker.close(),
       albumPhotoZipWorker.close(),
+      passwordEmailWorker.close(),
       shareUploadPreviewWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),

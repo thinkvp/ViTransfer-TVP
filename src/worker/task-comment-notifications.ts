@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db'
 import { buildCompanyLogoUrl, getEmailSettings, sendEmail } from '../lib/email'
 import { generateTaskCommentSummaryEmail } from '../lib/email-templates'
-import { shouldSendNow, getPeriodString, sendNotificationsWithRetry } from './notification-helpers'
+import { shouldSendNow, getPeriodString, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash } from './notification-helpers'
 import { redactEmailForLogs } from '../lib/log-sanitization'
 
 export async function processTaskCommentNotifications() {
@@ -146,13 +146,14 @@ export async function processTaskCommentNotifications() {
 
     const period = getPeriodString(settings.adminNotificationSchedule)
     const notificationIds = pendingNotifications.map((n) => n.id)
+    const batchHash = notificationBatchHash(notificationIds)
 
     await prisma.notificationQueue.updateMany({
       where: { id: { in: notificationIds } },
       data: { adminAttempts: { increment: 1 } },
     })
 
-    const currentAttempts = pendingNotifications[0]?.adminAttempts + 1 || 1
+    const currentAttempts = (pendingNotifications[0]?.adminAttempts ?? 0) + 1
 
     const result = await sendNotificationsWithRetry({
       notificationIds,
@@ -160,32 +161,43 @@ export async function processTaskCommentNotifications() {
       isClientNotification: false,
       logPrefix: '[TASK_COMMENT]',
       onSuccess: async () => {
-        for (const recipient of recipients) {
-          const html = generateTaskCommentSummaryEmail({
-            companyName: emailSettings.companyName || 'ViTransfer',
-            recipientName: recipient.name || '',
-            period,
-            companyLogoUrl: companyLogoUrl || undefined,
-            mainCompanyDomain: emailSettings.mainCompanyDomain,
-            accentColor: emailSettings.accentColor || undefined,
-            accentTextMode: emailSettings.accentTextMode || undefined,
-            emailHeaderColor: emailSettings.emailHeaderColor || undefined,
-            emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
-            tasks: recipient.tasks,
-          })
+        // Per-recipient idempotent send: retries skip recipients already emailed for
+        // this batch, so a single failing address never re-mails everyone else.
+        await sendSummaryToRecipients({
+          channel: 'task',
+          batchHash,
+          recipients,
+          getEmail: (r) => r.email,
+          logPrefix: '[TASK_COMMENT]',
+          sendOne: async (recipient) => {
+            const html = generateTaskCommentSummaryEmail({
+              companyName: emailSettings.companyName || 'ViTransfer',
+              recipientName: recipient.name || '',
+              period,
+              companyLogoUrl: companyLogoUrl || undefined,
+              mainCompanyDomain: emailSettings.mainCompanyDomain,
+              accentColor: emailSettings.accentColor || undefined,
+              accentTextMode: emailSettings.accentTextMode || undefined,
+              emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+              emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
+              tasks: recipient.tasks,
+            })
 
-          try {
-            await sendEmail({
+            // sendEmail never throws — it returns { success }. Returning the result lets the
+            // helper count a failed send as a failure (previously these were silently logged
+            // as "Sent").
+            const sendResult = await sendEmail({
               to: recipient.email,
               subject: `Task Comments Summary — ${emailSettings.companyName || 'ViTransfer'}`,
               html,
             })
-            console.log(`[TASK_COMMENT] Sent summary to ${redactEmailForLogs(recipient.email)}`)
-          } catch (e) {
-            console.error(`[TASK_COMMENT] Failed to send to ${redactEmailForLogs(recipient.email)}:`, e)
-            throw e
-          }
-        }
+
+            if (sendResult.success) {
+              console.log(`[TASK_COMMENT] Sent summary to ${redactEmailForLogs(recipient.email)}`)
+            }
+            return sendResult
+          },
+        })
       },
     })
 

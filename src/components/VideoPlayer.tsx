@@ -2621,7 +2621,14 @@ export default function VideoPlayer({
                           detail: { start: newStart, ...(commentRangeHasExplicitSelectionRef.current ? { end: commentRangeEnd } : {}) }
                         }))
                         previewVideoFrameAt(newStart)
-                        updateHoverFromClientX(e.clientX)
+                        // Mirror the playhead-snap feel: while snapped, hold the preview at
+                        // the committed (snapped) time instead of tracking the cursor, so a
+                        // tiny move inside the snap zone doesn't jiggle the displayed time.
+                        if (snapped !== time) {
+                          updateHoverFromTimeSeconds(newStart, 96)
+                        } else {
+                          updateHoverFromClientX(e.clientX)
+                        }
                       }}
                       onPointerUp={(e) => {
                         e.stopPropagation()
@@ -2703,7 +2710,14 @@ export default function VideoPlayer({
                           detail: { start: commentRangeStart, ...(commentRangeHasExplicitSelectionRef.current ? { end: newEnd } : {}) }
                         }))
                         previewVideoFrameAt(newEnd)
-                        updateHoverFromClientX(e.clientX)
+                        // Mirror the playhead-snap feel: while snapped, hold the preview at
+                        // the committed (snapped) time instead of tracking the cursor, so a
+                        // tiny move inside the snap zone doesn't jiggle the displayed time.
+                        if (snapped !== time) {
+                          updateHoverFromTimeSeconds(newEnd, 96)
+                        } else {
+                          updateHoverFromClientX(e.clientX)
+                        }
                       }}
                       onPointerUp={(e) => {
                         e.stopPropagation()

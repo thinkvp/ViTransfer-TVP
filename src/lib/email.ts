@@ -401,6 +401,9 @@ const CACHE_DURATION = 30 * 1000 // 30 seconds (reduced for testing)
 export function invalidateEmailSettingsCache() {
   cachedSettings = null
   settingsCacheTime = 0
+  // Drop the pooled transporter too so a connection/credential change is picked up
+  // immediately in this process (the worker self-heals via the signature check below).
+  closePooledTransporter()
 }
 
 /**
@@ -481,13 +484,20 @@ export async function isSmtpConfigured(): Promise<boolean> {
   }
 }
 
-/**
- * Create a nodemailer transporter with current SMTP settings or provided config
- */
-async function createTransporter(customConfig?: any) {
-  // Use custom config if provided, otherwise load from database
-  const settings = customConfig || await getEmailSettings()
+// Bound concurrent SMTP connections so a single multi-recipient send (or several batches at
+// once) can't open one connection per email. Tunable via env; conservative defaults.
+const SMTP_POOL_MAX_CONNECTIONS = Number(process.env.SMTP_POOL_MAX_CONNECTIONS) || 5
+const SMTP_POOL_MAX_MESSAGES = Number(process.env.SMTP_POOL_MAX_MESSAGES) || 100
 
+// Memoized pooled transporter, rebuilt only when the SMTP connection config changes.
+let pooledTransporter: nodemailer.Transporter | null = null
+let pooledTransporterSignature: string | null = null
+
+/**
+ * Translate stored SMTP settings into nodemailer connection options.
+ * Throws if SMTP is not configured.
+ */
+function buildTransportOptions(settings: any) {
   if (!settings.smtpServer || !settings.smtpPort || !settings.smtpUsername || !settings.smtpPassword) {
     throw new Error('SMTP settings are not configured. Please configure email settings in the admin panel.')
   }
@@ -507,16 +517,76 @@ async function createTransporter(customConfig?: any) {
     requireTLS = false
   }
 
-  return nodemailer.createTransport({
-    host: settings.smtpServer,
-    port: settings.smtpPort,
-    secure: secure,
-    requireTLS: requireTLS,
+  return {
+    host: settings.smtpServer as string,
+    port: settings.smtpPort as number,
+    secure,
+    requireTLS,
     auth: {
-      user: settings.smtpUsername,
-      pass: settings.smtpPassword,
+      user: settings.smtpUsername as string,
+      pass: settings.smtpPassword as string,
     },
+  }
+}
+
+/**
+ * Tear down the pooled transporter (closes its open SMTP sockets). Safe to call when none
+ * exists. The next send rebuilds it from current settings.
+ */
+export function closePooledTransporter() {
+  if (pooledTransporter) {
+    try {
+      pooledTransporter.close()
+    } catch {
+      // best-effort
+    }
+  }
+  pooledTransporter = null
+  pooledTransporterSignature = null
+}
+
+/**
+ * Get the shared pooled transporter, rebuilding it if the SMTP connection config has changed.
+ *
+ * The signature covers only connection-relevant fields (host/port/security/credentials), so
+ * changing branding fields doesn't churn the pool. Because the signature is recomputed from
+ * getEmailSettings() (30s cache) on every send, the worker process — which never receives the
+ * web app's explicit invalidateEmailSettingsCache() call — still picks up SMTP changes within
+ * one cache window and rebuilds the pool automatically.
+ */
+async function getPooledTransporter() {
+  const settings = await getEmailSettings()
+  const opts = buildTransportOptions(settings)
+  const signature = JSON.stringify([opts.host, opts.port, opts.secure, opts.requireTLS, opts.auth.user, opts.auth.pass])
+
+  if (pooledTransporter && pooledTransporterSignature === signature) {
+    return pooledTransporter
+  }
+
+  // First use, or the connection config changed: replace the pool.
+  closePooledTransporter()
+  pooledTransporter = nodemailer.createTransport({
+    ...opts,
+    pool: true,
+    maxConnections: SMTP_POOL_MAX_CONNECTIONS,
+    maxMessages: SMTP_POOL_MAX_MESSAGES,
   })
+  pooledTransporterSignature = signature
+  return pooledTransporter
+}
+
+/**
+ * Create a nodemailer transporter with current SMTP settings or provided config.
+ *
+ * Normal sends reuse a shared pooled transporter (bounded connections). A one-off customConfig
+ * (e.g. the SMTP connection test) builds a throwaway, non-pooled transport so it never disturbs
+ * or leaks into the shared pool.
+ */
+async function createTransporter(customConfig?: any) {
+  if (customConfig) {
+    return nodemailer.createTransport(buildTransportOptions(customConfig))
+  }
+  return getPooledTransporter()
 }
 
 /**
@@ -2102,11 +2172,13 @@ export async function renderPasswordEmail({
   clientName,
   projectTitle,
   password,
+  trackingToken,
   branding,
 }: {
   clientName: string
   projectTitle: string
   password: string
+  trackingToken?: string
   branding?: EmailBrandingOverrides
 }): Promise<RenderedEmail> {
   const resolved = await resolveEmailBranding(branding)
@@ -2125,6 +2197,7 @@ export async function renderPasswordEmail({
     headerTextColor,
     title: 'Project Password',
     subtitle: projectTitle,
+    trackingToken,
     trackingPixelsEnabled: resolved.trackingPixelsEnabled,
     appDomain: resolved.appDomain,
     mainCompanyDomain: resolved.mainCompanyDomain,
@@ -2159,16 +2232,19 @@ export async function sendPasswordEmail({
   clientName,
   projectTitle,
   password,
+  trackingToken,
 }: {
   clientEmail: string
   clientName: string
   projectTitle: string
   password: string
+  trackingToken?: string
 }) {
   const { subject, html } = await renderPasswordEmail({
     clientName,
     projectTitle,
     password,
+    trackingToken,
   })
 
   return sendEmail({

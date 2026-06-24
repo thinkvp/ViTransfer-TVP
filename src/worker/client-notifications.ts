@@ -6,8 +6,7 @@ import { getProjectRecipients } from '../lib/recipients'
 import { buildUnsubscribeUrl } from '../lib/unsubscribe'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
-import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
-import { createHash } from 'crypto'
+import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, normalizeNotificationDataTimecode } from './notification-helpers'
 import { redactEmailForLogs } from '../lib/log-sanitization'
 
 /**
@@ -143,13 +142,22 @@ export async function processClientNotifications() {
 
       const notificationIds = validNotifications.map(n => n.id)
 
+      // Serialize against a concurrent manual send for this project so the two paths can't both
+      // fire the same summary at once. If a manual send holds the lock, skip this project and
+      // pick it up next run. Released right after sending; the lock's TTL is the crash backstop.
+      const lockKey = clientSendLockKey(project.id)
+      if (!(await tryAcquireSendLock(lockKey))) {
+        console.log(`[CLIENT]   Another send is in progress for this project; will retry next run`)
+        continue
+      }
+
       // Increment attempt counter before sending
       await prisma.notificationQueue.updateMany({
         where: { id: { in: notificationIds } },
         data: { clientAttempts: { increment: 1 } }
       })
 
-      const currentAttempts = project.notificationQueue[0]?.clientAttempts + 1 || 1
+      const currentAttempts = (project.notificationQueue[0]?.clientAttempts ?? 0) + 1
       console.log(`[CLIENT]   Attempt #${currentAttempts} for ${project.notificationQueue.length} notification(s)`)
 
       // Send summary to each recipient
@@ -184,74 +192,76 @@ export async function processClientNotifications() {
             updatedAt: emailSettings.updatedAt,
           })
 
-          // Stable batch key to prevent duplicate tracking/event logs on retries.
-          // Note: if the same notification IDs are retried, we reuse the same token per recipient.
-          const sortedNotificationIds = [...notificationIds].sort().join('|')
-          const batchKey = `${project.id}|${period}|${sortedNotificationIds}`
-          const batchHash = createHash('sha256').update(batchKey).digest('hex').slice(0, 16)
+          // Stable batch key to prevent duplicate tracking/event logs on retries, and to share
+          // per-recipient idempotency markers with the manual "Comment Summary" send (which
+          // computes the identical hash), so the two paths never re-mail the same recipient.
+          const batchHash = notificationBatchHash(notificationIds, `${project.id}|${period}`)
 
-          const successfulRecipientEmails: string[] = []
+          // Per-recipient idempotent send: retries skip recipients already emailed for
+          // this batch, so a single failing address never re-mails everyone else.
+          const { sentEmails: successfulRecipientEmails } = await sendSummaryToRecipients({
+            channel: 'client',
+            batchHash,
+            recipients,
+            getEmail: (r) => r.email,
+            logPrefix: '[CLIENT]  ',
+            sendOne: async (recipient) => {
+              // Create tracking token per-recipient so opens can be recorded.
+              // Use upsert with a stable token so retries don't create duplicate rows.
+              const normalizedEmail = recipient.email!.toLowerCase()
+              const stableToken = `${project.id}-${batchHash}-${normalizedEmail}`
+              const trackingToken = trackingPixelsEnabled
+                ? await prisma.emailTracking.upsert({
+                    where: { token: stableToken },
+                    update: {
+                      sentAt: new Date(),
+                    },
+                    create: {
+                      token: stableToken,
+                      projectId: project.id,
+                      type: 'COMMENT_SUMMARY',
+                      videoId: null,
+                      recipientEmail: normalizedEmail,
+                    },
+                  })
+                : null
 
-          for (const recipient of recipients) {
-            // Create tracking token per-recipient so opens can be recorded.
-            // Use upsert with a stable token so retries don't create duplicate rows.
-            const normalizedEmail = recipient.email!.toLowerCase()
-            const stableToken = `${project.id}-${batchHash}-${normalizedEmail}`
-            const trackingToken = trackingPixelsEnabled
-              ? await prisma.emailTracking.upsert({
-                  where: { token: stableToken },
-                  update: {
-                    sentAt: new Date(),
-                  },
-                  create: {
-                    token: stableToken,
-                    projectId: project.id,
-                    type: 'COMMENT_SUMMARY',
-                    videoId: null,
-                    recipientEmail: normalizedEmail,
-                  },
-                })
-              : null
+              const html = generateNotificationSummaryEmail({
+                companyName: emailSettings.companyName || 'ViTransfer',
+                projectTitle: project.title,
+                useFullTimecode: project.useFullTimecode,
+                shareUrl,
+                unsubscribeUrl: recipient.id ? buildUnsubscribeUrl(appDomain, project.id, recipient.id) : undefined,
+                recipientName: recipient.name || recipient.email!,
+                recipientEmail: recipient.email!,
+                period,
+                notifications,
+                trackingToken: trackingToken?.token,
+                trackingPixelsEnabled,
+                appDomain,
+                companyLogoUrl: companyLogoUrl || undefined,
+                mainCompanyDomain: emailSettings.mainCompanyDomain,
+                emailCustomFooterText: emailSettings.emailCustomFooterText,
+                accentColor: emailSettings.accentColor || undefined,
+                accentTextMode: emailSettings.accentTextMode || undefined,
+                emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+                emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
+              })
 
-            const html = generateNotificationSummaryEmail({
-              companyName: emailSettings.companyName || 'ViTransfer',
-              projectTitle: project.title,
-              useFullTimecode: project.useFullTimecode,
-              shareUrl,
-              unsubscribeUrl: recipient.id ? buildUnsubscribeUrl(appDomain, project.id, recipient.id) : undefined,
-              recipientName: recipient.name || recipient.email!,
-              recipientEmail: recipient.email!,
-              period,
-              notifications,
-              trackingToken: trackingToken?.token,
-              trackingPixelsEnabled,
-              appDomain,
-              companyLogoUrl: companyLogoUrl || undefined,
-              mainCompanyDomain: emailSettings.mainCompanyDomain,
-              emailCustomFooterText: emailSettings.emailCustomFooterText,
-              accentColor: emailSettings.accentColor || undefined,
-              accentTextMode: emailSettings.accentTextMode || undefined,
-              emailHeaderColor: emailSettings.emailHeaderColor || undefined,
-              emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
-            })
+              const result = await sendEmail({
+                to: recipient.email!,
+                subject: `Updates on ${project.title}`,
+                html,
+              })
 
-            const result = await sendEmail({
-              to: recipient.email!,
-              subject: `Updates on ${project.title}`,
-              html,
-            })
-
-            if (result.success) {
-              successfulRecipientEmails.push(recipient.email!)
-              console.log(
-                `[CLIENT]     Sent to ${recipient.name || redactEmailForLogs(recipient.email)}`
-              )
-            } else {
-              throw new Error(
-                `Failed to send to ${redactEmailForLogs(recipient.email)}: ${result.error}`
-              )
-            }
-          }
+              if (result.success) {
+                console.log(
+                  `[CLIENT]     Sent to ${recipient.name || redactEmailForLogs(recipient.email)}`
+                )
+              }
+              return result
+            },
+          })
 
           // Log analytics event for this batch (non-blocking)
           if (successfulRecipientEmails.length > 0) {
@@ -283,6 +293,9 @@ export async function processClientNotifications() {
           }
         }
       })
+
+      // Sending is done — release the lock so a manual send isn't blocked longer than needed.
+      await releaseSendLock(lockKey)
 
       // Update project last sent timestamp on success
       if (result.success) {

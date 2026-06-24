@@ -404,6 +404,8 @@ export async function GET(
         ? 'New Comment'
         : evt.type === 'COMMENT_SUMMARY'
         ? 'Comment Summary'
+        : evt.type === 'PASSWORD'
+        ? 'Project Password'
         : 'Specific Video & Version',
       recipients: JSON.parse(evt.recipientEmails) as string[],
       videoName: evt.video?.name,
@@ -422,6 +424,8 @@ export async function GET(
         ? 'New Comment'
         : tracking.type === 'COMMENT_SUMMARY'
         ? 'Comment Summary'
+        : tracking.type === 'PASSWORD'
+        ? 'Project Password'
         : 'Specific Video & Version',
       recipientEmail: tracking.recipientEmail,
       videoName: tracking.video?.name,

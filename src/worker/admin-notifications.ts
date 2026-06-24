@@ -4,7 +4,7 @@ import { generateAdminSummaryEmail } from '../lib/email-templates'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
 import { redactEmailForLogs } from '../lib/log-sanitization'
-import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, normalizeNotificationDataTimecode } from './notification-helpers'
+import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, ADMIN_SEND_LOCK_KEY, normalizeNotificationDataTimecode } from './notification-helpers'
 import { canDoAction, normalizeRolePermissions } from '../lib/rbac'
 
 /**
@@ -168,6 +168,14 @@ export async function processAdminNotifications() {
 
     const period = getPeriodString(settings.adminNotificationSchedule)
     const notificationIds = validNotifications.map(n => n.id)
+    const batchHash = notificationBatchHash(notificationIds)
+
+    // Serialize against a concurrent manual admin send so the two paths can't both fire the
+    // same summary at once. If a manual send holds the lock, bail and pick it up next run.
+    if (!(await tryAcquireSendLock(ADMIN_SEND_LOCK_KEY))) {
+      console.log('[ADMIN] A manual admin send is in progress; will retry next run')
+      return
+    }
 
     // Increment attempt counter before sending
     await prisma.notificationQueue.updateMany({
@@ -175,7 +183,7 @@ export async function processAdminNotifications() {
       data: { adminAttempts: { increment: 1 } }
     })
 
-    const currentAttempts = validNotifications[0]?.adminAttempts + 1 || 1
+    const currentAttempts = (validNotifications[0]?.adminAttempts ?? 0) + 1
     console.log(`[ADMIN] Attempt #${currentAttempts} for ${validNotifications.length} notification(s)`)
 
     // Send summary to each admin
@@ -194,34 +202,45 @@ export async function processAdminNotifications() {
           updatedAt: emailSettings.updatedAt,
         })
 
-        for (const recipient of recipients) {
-          const html = generateAdminSummaryEmail({
-            companyName: emailSettings.companyName || 'ViTransfer',
-            adminName: recipient.name || '',
-            period,
-            companyLogoUrl: companyLogoUrl || undefined,
-            mainCompanyDomain: emailSettings.mainCompanyDomain,
-            accentColor: emailSettings.accentColor || undefined,
-            accentTextMode: emailSettings.accentTextMode || undefined,
-            emailHeaderColor: emailSettings.emailHeaderColor || undefined,
-            emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
-            projects: recipient.projects
-          })
+        // Per-recipient idempotent send: retries skip recipients already emailed for
+        // this batch, so a single failing address never re-mails everyone else.
+        await sendSummaryToRecipients({
+          channel: 'admin',
+          batchHash,
+          recipients,
+          getEmail: (r) => r.email,
+          logPrefix: '[ADMIN]',
+          sendOne: async (recipient) => {
+            const html = generateAdminSummaryEmail({
+              companyName: emailSettings.companyName || 'ViTransfer',
+              adminName: recipient.name || '',
+              period,
+              companyLogoUrl: companyLogoUrl || undefined,
+              mainCompanyDomain: emailSettings.mainCompanyDomain,
+              accentColor: emailSettings.accentColor || undefined,
+              accentTextMode: emailSettings.accentTextMode || undefined,
+              emailHeaderColor: emailSettings.emailHeaderColor || undefined,
+              emailHeaderTextMode: emailSettings.emailHeaderTextMode || undefined,
+              projects: recipient.projects
+            })
 
-          const result = await sendEmail({
-            to: recipient.email,
-            subject: `Project activity summary (${pendingNotifications.length} updates)`,
-            html,
-          })
+            const result = await sendEmail({
+              to: recipient.email,
+              subject: `Project activity summary (${pendingNotifications.length} updates)`,
+              html,
+            })
 
-          if (result.success) {
-            console.log(`[ADMIN]   Sent to ${redactEmailForLogs(recipient.email)}`)
-          } else {
-            throw new Error(`Failed to send to ${redactEmailForLogs(recipient.email)}: ${result.error}`)
-          }
-        }
+            if (result.success) {
+              console.log(`[ADMIN]   Sent to ${redactEmailForLogs(recipient.email)}`)
+            }
+            return result
+          },
+        })
       }
     })
+
+    // Sending is done — release the lock so a manual admin send isn't blocked longer than needed.
+    await releaseSendLock(ADMIN_SEND_LOCK_KEY)
 
     // Update settings last sent timestamp on success
     if (result.success) {
