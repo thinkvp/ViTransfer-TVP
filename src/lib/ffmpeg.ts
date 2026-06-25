@@ -13,6 +13,12 @@ const DEBUG = process.env.DEBUG_WORKER === 'true'
 const ffmpegPath = 'ffmpeg'
 const ffprobePath = 'ffprobe'
 
+// Forced keyframe interval (seconds) for HLS-aligned transcodes. Every rendition gets an
+// IDR frame at the same timestamps (0, 2, 4, … via `-force_key_frames` + scenecut disabled),
+// so the `-c copy` HLS segments share identical boundaries across resolutions — the
+// prerequisite for seamless adaptive-bitrate switching. 2 s divides the 4 s segment length.
+export const HLS_KEYFRAME_INTERVAL_SECONDS = 2
+
 export interface VideoMetadata {
   duration: number
   width: number
@@ -180,6 +186,9 @@ export interface TranscodeOptions {
   watermarkText?: string
   onProgress?: (progress: number) => void | Promise<void>
   shouldAbort?: () => boolean | Promise<boolean>
+  // When true, force keyframes at a fixed interval and disable scene-cut keyframes so this
+  // rendition's segments align with every other rendition's (required for HLS ABR).
+  alignKeyframes?: boolean
 }
 
 export class FFmpegCancellationError extends Error {
@@ -300,6 +309,7 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     watermarkText,
     onProgress,
     shouldAbort,
+    alignKeyframes,
   } = options
 
   if (DEBUG) {
@@ -408,6 +418,12 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     '-crf', '23', // Constant Rate Factor: 18-28 range (lower = better quality, 23 is default)
     '-profile:v', 'high',
     '-level', '4.1',
+    // HLS ABR alignment: force an IDR every HLS_KEYFRAME_INTERVAL_SECONDS and disable
+    // scene-cut keyframes, so this rendition's keyframes (and therefore its `-c copy` HLS
+    // segment boundaries) land at the same timestamps as every other rendition's.
+    ...(alignKeyframes
+      ? ['-force_key_frames', `expr:gte(t,n_forced*${HLS_KEYFRAME_INTERVAL_SECONDS})`, '-x264-params', 'scenecut=0']
+      : []),
     '-pix_fmt', 'yuv420p', // Ensure compatibility with all players (especially Safari/iOS)
     '-c:a', 'aac',
     '-b:a', '128k', // Reduced from 192k to 128k (sufficient for most use cases, saves bandwidth)
@@ -587,6 +603,128 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
         return
       }
 
+      reject(new Error(`Failed to start FFmpeg: ${err.message}`))
+    })
+  })
+}
+
+export interface PackageHlsOptions {
+  /** Source preview MP4 (already H.264/AAC) to remux into HLS. */
+  inputPath: string
+  /** Directory that will receive index.m3u8, init.mp4 and seg-*.m4s. Must exist. */
+  outputDir: string
+  /** Target segment duration in seconds (default 4). */
+  segmentDurationSeconds?: number
+  /** Optional cooperative cancellation, polled while ffmpeg runs. */
+  shouldAbort?: () => Promise<boolean>
+}
+
+/**
+ * Package a single already-transcoded preview MP4 into a VOD HLS rendition using a
+ * stream copy (`-c copy`) — no re-encode, so this is fast, lossless and ~byte-identical
+ * to the source. Emits fMP4 (CMAF) segments + a relative-URI `index.m3u8`:
+ *
+ *   {outputDir}/index.m3u8          (references init.mp4 + seg-NNNNN.m4s by basename)
+ *   {outputDir}/init.mp4            (fMP4 initialization segment)
+ *   {outputDir}/seg-00000.m4s ...   (media segments)
+ *
+ * The relative URIs are deliberate: the HLS delivery endpoint rewrites them into
+ * presigned R2 URLs at request time. Each rendition is independent (no cross-rendition
+ * keyframe alignment required) — adaptive bitrate is a later, separate concern.
+ */
+export async function packageHlsRendition(options: PackageHlsOptions): Promise<void> {
+  const { inputPath, outputDir, segmentDurationSeconds = 4, shouldAbort } = options
+
+  const args = [
+    '-v', DEBUG ? 'verbose' : 'error',
+    '-i', inputPath,
+    // Copy the existing H.264 video + AAC audio (audio optional — silent clips exist).
+    '-map', '0:v:0',
+    '-map', '0:a:0?',
+    '-c', 'copy',
+    '-threads', '1', // pure remux; don't spin up an encoder thread pool
+    '-f', 'hls',
+    '-hls_time', String(segmentDurationSeconds),
+    '-hls_playlist_type', 'vod',
+    '-hls_segment_type', 'fmp4',
+    '-hls_flags', 'independent_segments',
+    '-hls_fmp4_init_filename', 'init.mp4',
+    '-hls_segment_filename', path.join(outputDir, 'seg-%05d.m4s'),
+    '-y',
+    path.join(outputDir, 'index.m3u8'),
+  ]
+
+  if (DEBUG) {
+    console.log('[FFMPEG DEBUG] Packaging HLS rendition:', ffmpegPath, args.join(' '))
+  }
+
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    let abortRequested = false
+    let abortCheckInFlight = false
+    let forcedKillTimer: NodeJS.Timeout | null = null
+
+    const requestAbort = () => {
+      if (abortRequested) return
+      abortRequested = true
+      if (!ffmpeg.killed && ffmpeg.exitCode === null) {
+        ffmpeg.kill('SIGTERM')
+        forcedKillTimer = setTimeout(() => {
+          if (!ffmpeg.killed && ffmpeg.exitCode === null) ffmpeg.kill('SIGKILL')
+        }, 5000)
+        forcedKillTimer.unref?.()
+      }
+    }
+
+    const pollForAbort = async () => {
+      if (!shouldAbort || abortRequested || abortCheckInFlight) return
+      abortCheckInFlight = true
+      try {
+        if (await shouldAbort()) requestAbort()
+      } catch (error) {
+        console.error('[FFMPEG] Failed to evaluate HLS packaging cancellation state:', error)
+      } finally {
+        abortCheckInFlight = false
+      }
+    }
+
+    const abortPollInterval = shouldAbort ? setInterval(() => { void pollForAbort() }, 2000) : null
+    if (abortPollInterval) {
+      abortPollInterval.unref?.()
+      void pollForAbort()
+    }
+
+    const clearTimers = () => {
+      if (abortPollInterval) clearInterval(abortPollInterval)
+      if (forcedKillTimer) clearTimeout(forcedKillTimer)
+    }
+
+    ffmpeg.stderr.on('data', (data) => {
+      const text = data.toString()
+      stderr += text
+      if (DEBUG) console.log('[FFMPEG STDERR]', text.trim())
+    })
+
+    ffmpeg.on('close', (code) => {
+      clearTimers()
+      if (abortRequested) {
+        reject(new FFmpegCancellationError('HLS packaging cancelled'))
+        return
+      }
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`FFmpeg HLS packaging exited with code ${code}: ${stderr}`))
+      }
+    })
+
+    ffmpeg.on('error', (err) => {
+      clearTimers()
+      if (abortRequested) {
+        reject(new FFmpegCancellationError('HLS packaging cancelled'))
+        return
+      }
       reject(new Error(`Failed to start FFmpeg: ${err.message}`))
     })
   })

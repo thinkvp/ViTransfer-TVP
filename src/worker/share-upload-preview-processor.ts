@@ -12,7 +12,38 @@ import { getStoredFilePath } from '@/lib/stored-file'
 import { registerStoredFile } from '@/lib/stored-file'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import type { ShareUploadPreviewJob } from '@/lib/queue'
-import { calculateOutputDimensions, parseResolutions } from './video-processor-helpers'
+import { calculateOutputDimensions, parseResolutions, packageAssetHls, type TempFiles } from './video-processor-helpers'
+
+/**
+ * Package a video asset's freshly-generated MP4 playback preview into a single-rendition HLS
+ * bundle (S3 mode only; HLS is delivered direct-from-R2). Non-fatal — the MP4 still plays if
+ * this fails. Skips when an HLS bundle already exists unless `force` (set after a fresh encode).
+ */
+async function maybePackageAssetHls(
+  assetId: string,
+  projectId: string,
+  videoId: string,
+  opts?: { force?: boolean },
+): Promise<void> {
+  if (!isS3Mode()) return
+  try {
+    if (!opts?.force) {
+      const existing = await prisma.storedFile.findUnique({
+        where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'HLS_PLAYLIST' } },
+        select: { id: true },
+      })
+      if (existing) return
+    }
+    const tempFiles: TempFiles = {}
+    try {
+      await packageAssetHls(assetId, projectId, videoId, tempFiles)
+    } finally {
+      if (tempFiles.hlsDir) await fs.promises.rm(tempFiles.hlsDir, { recursive: true, force: true }).catch(() => {})
+    }
+  } catch (err) {
+    console.error(`[PREVIEW] HLS packaging failed for asset ${assetId}:`, err)
+  }
+}
 
 let sharp: typeof import('sharp') | null = null
 async function getSharp() {
@@ -326,6 +357,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
   let previewStoragePath: string
   let playbackPreviewStoragePath: string | null = null
   let projectIdForPreviewBytes: string | null = null
+  let videoIdForAsset: string | null = null
   let videoAssetPreviewProject: {
     previewResolutions: string
     watermarkEnabled: boolean
@@ -337,6 +369,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
   } else {
     const videoRecord = record.video
     projectIdForPreviewBytes = videoRecord.projectId
+    videoIdForAsset = videoRecord.id
     videoAssetPreviewProject = {
       previewResolutions: videoRecord.project.previewResolutions,
       watermarkEnabled: videoRecord.project.watermarkEnabled,
@@ -370,6 +403,10 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
       if (projectIdForPreviewBytes) {
         await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
       }
+      // Backfill HLS for an already-encoded asset that doesn't have a bundle yet (no re-encode).
+      if (videoIdForAsset && projectIdForPreviewBytes) {
+        await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset)
+      }
       console.log(`[PREVIEW] Already exists for ${type}:${recordId}, marked READY`)
       return
     }
@@ -392,6 +429,10 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
         await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, size)
         if (projectIdForPreviewBytes) {
           await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
+        }
+        // MP4 already present — backfill its HLS bundle if missing (no re-encode).
+        if (videoIdForAsset && projectIdForPreviewBytes) {
+          await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset)
         }
         console.log(`[PREVIEW] Generated missing companion JPG for ${type}:${recordId} → ${previewStoragePath} (${thumbnailStat.size} bytes)`)
       } catch (err) {
@@ -461,6 +502,10 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
 
         const previewFileSize = BigInt(playbackStat.size)
         await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, previewFileSize)
+        // Fresh MP4 encode → (re)build the asset's HLS bundle from it.
+        if (videoIdForAsset && projectIdForPreviewBytes) {
+          await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset, { force: true })
+        }
       } else {
         await generateVideoPreview(resolvedStoragePath, tempThumbnailPath, durationSeconds)
 

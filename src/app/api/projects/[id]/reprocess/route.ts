@@ -160,25 +160,26 @@ export async function POST(
         if (!hasCustomThumbnail) rolesToDelete.push('THUMBNAIL')
       }
 
-      // Timeline files (always delete when doing full or targeted preview reprocessing)
+      // Timeline + HLS files (always delete when doing full or targeted preview reprocessing,
+      // so a shrinking rendition set can't leave stale segments behind).
       if (!thumbnailOnlyMode) {
         if (stored.has('TIMELINE_VTT')) rolesToDelete.push('TIMELINE_VTT')
         if (stored.has('TIMELINE_SPRITES')) rolesToDelete.push('TIMELINE_SPRITES')
+        if (stored.has('HLS_PLAYLIST')) rolesToDelete.push('HLS_PLAYLIST')
+        if (stored.has('HLS_SEGMENTS')) rolesToDelete.push('HLS_SEGMENTS')
       }
 
-      // Delete files from storage (sprite directories need deleteDirectory)
-      const pathsToDelete = rolesToDelete
-        .map(role => stored.get(role))
-        .filter((p): p is string => !!p)
-
+      // Delete files from storage. Directory-style roles (timeline sprites + the HLS bundle)
+      // must use deleteDirectory; everything else is a single file. Classify by role rather
+      // than by path suffix so the routing can't drift from the storage layout.
+      const DIRECTORY_ROLES = new Set<FileRole>(['TIMELINE_SPRITES', 'HLS_SEGMENTS'])
       const filePaths: string[] = []
       const dirPaths: string[] = []
-      for (const p of pathsToDelete) {
-        if (p.endsWith('_sprites')) {
-          dirPaths.push(p)
-        } else {
-          filePaths.push(p)
-        }
+      for (const role of rolesToDelete) {
+        const p = stored.get(role)
+        if (!p) continue
+        if (DIRECTORY_ROLES.has(role)) dirPaths.push(p)
+        else filePaths.push(p)
       }
 
       // Delete files — track failures so we don't orphan StoredFile records
@@ -287,7 +288,9 @@ export async function POST(
     // Delete old asset preview/timeline files and StoredFile records
     const assetFilePathsToDelete: string[] = []
     const assetDirPathsToDelete: string[] = []
-    const assetRolesToDelete: FileRole[] = ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES']
+    // HLS_SEGMENTS (the asset's hls/ dir) is deleted as a directory; it contains the master.m3u8
+    // (HLS_PLAYLIST) too, so HLS_PLAYLIST is dropped via the StoredFile row cleanup, not a file delete.
+    const assetRolesToDelete: FileRole[] = ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'HLS_PLAYLIST', 'HLS_SEGMENTS']
 
     // Build a map from path → assetId for failure tracking
     const pathToAssetId = new Map<string, string>()
@@ -299,11 +302,13 @@ export async function POST(
       const previewMp4 = stored.get('PREVIEW_MP4')
       const timelineVtt = stored.get('TIMELINE_VTT')
       const timelineSprites = stored.get('TIMELINE_SPRITES')
+      const hlsSegments = stored.get('HLS_SEGMENTS')
 
       if (previewImage) { assetFilePathsToDelete.push(previewImage); pathToAssetId.set(previewImage, asset.id) }
       if (previewMp4) { assetFilePathsToDelete.push(previewMp4); pathToAssetId.set(previewMp4, asset.id) }
       if (timelineVtt) { assetFilePathsToDelete.push(timelineVtt); pathToAssetId.set(timelineVtt, asset.id) }
       if (timelineSprites) { assetDirPathsToDelete.push(timelineSprites); pathToAssetId.set(timelineSprites, asset.id) }
+      if (hlsSegments) { assetDirPathsToDelete.push(hlsSegments); pathToAssetId.set(hlsSegments, asset.id) }
     }
 
     // Delete files — track which assets had failures

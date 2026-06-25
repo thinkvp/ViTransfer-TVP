@@ -5,6 +5,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireAnyActionAccess } from '@/lib/rbac-api'
 import { getStoredFileRecords } from '@/lib/stored-file'
+import { getDirectStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -83,6 +84,7 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         projectId: true,
+        hlsVersion: true,
       }
     })
 
@@ -93,11 +95,13 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Resolve available file roles from StoredFile registry
+    // Resolve available file roles + paths from StoredFile registry. Roles gate which
+    // qualities may be issued; paths let us mint a direct-to-R2 stream URL (Option B).
     const storedFiles = await getStoredFileRecords('VIDEO', [videoId], {
-      select: { fileRole: true },
+      select: { fileRole: true, storagePath: true },
     })
     const storedRoles = new Set(storedFiles.map(f => f.fileRole))
+    const storedPaths = new Map(storedFiles.map(f => [f.fileRole, f.storagePath]))
 
     if (!canIssueAdminVideoToken(storedRoles, quality)) {
       return NextResponse.json({ error: `${quality} unavailable` }, { status: 404 })
@@ -132,7 +136,31 @@ export async function GET(request: NextRequest) {
       sessionId
     )
 
-    const response = NextResponse.json({ token })
+    // Option B: in S3 mode, also hand back a presigned R2 URL for direct streaming
+    // (bypasses the /api/content 302 redirect). Admins can serve the original, so it's a
+    // valid fallback whenever ORIGINAL exists. Null for local mode / non-stream qualities;
+    // the client then falls back to the token-gated /api/content URL.
+    const streamUrl = await getDirectStreamUrl({
+      storedPaths,
+      quality,
+      canServeOriginal: storedRoles.has('ORIGINAL'),
+      sessionId,
+      videoId,
+    }).catch(() => null)
+
+    // HLS (proxy-robust segmented) URL — same-origin, token-scoped master playlist.
+    // Per-video; offered only when packaging exists and HLS is enabled.
+    let hlsUrl = ''
+    let hlsAbr = false
+    if (hlsStreamingEnabled() && storedRoles.has('HLS_PLAYLIST')) {
+      const hlsToken = await generateVideoAccessToken(videoId, projectId, 'hls', request, sessionId).catch(() => '')
+      if (hlsToken) {
+        hlsUrl = buildHlsMasterUrl(hlsToken)
+        hlsAbr = hlsAbrReady(video.hlsVersion)
+      }
+    }
+
+    const response = NextResponse.json({ token, streamUrl, hlsUrl, hlsAbr })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response

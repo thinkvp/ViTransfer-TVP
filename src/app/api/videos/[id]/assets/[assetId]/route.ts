@@ -274,8 +274,11 @@ export async function DELETE(
     }
 
                                     // Fetch all stored file records for this asset so we can delete physical files
+    // HLS_SEGMENTS is the hls/ directory; deleting it removes the master.m3u8 (HLS_PLAYLIST)
+    // and every segment in one shot, so HLS_PLAYLIST needn't be fetched for the physical delete
+    // (its StoredFile row is cleared by deleteStoredFilesForEntity below).
     const storedRecords = await getStoredFileRecords('VIDEO_ASSET', [assetId], {
-      fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
+      fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'HLS_SEGMENTS'],
       select: { fileRole: true, storagePath: true },
     })
 
@@ -285,7 +288,7 @@ export async function DELETE(
     const deleteResults = await Promise.allSettled(
       storedRecords.map(async (record) => {
         if (!record.storagePath) return
-        if (record.fileRole === 'TIMELINE_SPRITES') {
+        if (record.fileRole === 'TIMELINE_SPRITES' || record.fileRole === 'HLS_SEGMENTS') {
           await deleteDirectory(record.storagePath)
         } else {
           await deleteFile(record.storagePath)

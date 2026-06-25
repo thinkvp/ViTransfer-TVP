@@ -19,6 +19,7 @@ import { apiFetch } from '@/lib/api-client'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
 import VideoHoverPreview from '@/components/VideoHoverPreview'
+import { HlsVideo } from '@/components/HlsVideo'
 import type { TransferItem } from '@/lib/transfer-state'
 import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
 import {
@@ -3067,8 +3068,9 @@ export function ShareFilesBrowser({
                   onContextMenu={(e) => { e.preventDefault() }}
                 >
                   {isVideoLightbox && lightboxSrc ? (
-                    <video
-                      src={lightboxSrc}
+                    <HlsVideo
+                      key={lightboxSrc}
+                      url={lightboxSrc}
                       className="w-full h-full object-contain"
                       controls
                       autoPlay

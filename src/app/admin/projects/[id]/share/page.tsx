@@ -377,33 +377,47 @@ export default function AdminSharePage() {
                 : Promise.resolve(null),
             ])
 
-            let streamToken480p = ''
-            let streamToken720p = ''
-            let streamToken1080p = ''
-            let downloadToken = null
-            let originalStreamToken = ''
+            let streamUrl480p = ''
+            let streamUrl720p = ''
+            let streamUrl1080p = ''
+            let streamUrlOriginal = ''
+            let hlsUrl = ''
+            let hlsAbr = false
+            let downloadToken: string | null = null
+
+            // Prefer the direct-to-R2 URL (Option B) when the endpoint provides one;
+            // otherwise fall back to the token-gated /api/content URL.
+            const buildStreamUrl = (data: any): string =>
+              (data && typeof data.streamUrl === 'string' && data.streamUrl)
+                ? data.streamUrl
+                : (data?.token ? `/api/content/${data.token}` : '')
+            // HLS master playlist + ABR flag are per-video — the same on every quality response.
+            const pickHls = (data: any) => {
+              if (!hlsUrl && data && typeof data.hlsUrl === 'string' && data.hlsUrl) {
+                hlsUrl = data.hlsUrl
+                hlsAbr = data.hlsAbr === true
+              }
+            }
 
             if (response480p?.ok) {
-              const data480p = await response480p.json()
-              streamToken480p = data480p.token
+              const d = await response480p.json(); streamUrl480p = buildStreamUrl(d); pickHls(d)
             }
 
             if (response720p?.ok) {
-              const data720p = await response720p.json()
-              streamToken720p = data720p.token
+              const d = await response720p.json(); streamUrl720p = buildStreamUrl(d); pickHls(d)
             }
 
             if (response1080p?.ok) {
-              const data1080p = await response1080p.json()
-              streamToken1080p = data1080p.token
+              const d = await response1080p.json(); streamUrl1080p = buildStreamUrl(d); pickHls(d)
             }
 
             if (responseOriginal?.ok) {
               const dataOriginal = await responseOriginal.json()
-              downloadToken = dataOriginal.token
-              originalStreamToken = dataOriginal.token || ''
+              downloadToken = dataOriginal.token || null
               // Do NOT fall back preview stream tokens to the original here.
-              // streamUrlOriginal in the tokenized object handles the "no previews" case.
+              // streamUrlOriginal handles the "no previews" case.
+              streamUrlOriginal = buildStreamUrl(dataOriginal)
+              pickHls(dataOriginal)
             }
 
             let thumbnailUrl = sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null
@@ -425,10 +439,12 @@ export default function AdminSharePage() {
 
             const tokenized = {
               ...video,
-              streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
-              streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
-              streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
-              streamUrlOriginal: originalStreamToken ? `/api/content/${originalStreamToken}` : '',
+              streamUrl480p,
+              streamUrl720p,
+              streamUrl1080p,
+              streamUrlOriginal,
+              hlsUrl,
+              hlsAbr,
               downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
               thumbnailUrl,
               timelineVttUrl,
@@ -2027,6 +2043,10 @@ export default function AdminSharePage() {
       })
       if (!response.ok) return null
       const data = await response.json().catch(() => ({}))
+      // Prefer the proxy-robust HLS master playlist (.m3u8); fall back to the MP4 playback URL.
+      if (typeof (data as any)?.hlsUrl === 'string' && (data as any).hlsUrl) {
+        return String((data as any).hlsUrl)
+      }
       if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
         return String((data as any).playbackUrl)
       }

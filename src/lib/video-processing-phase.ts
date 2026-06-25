@@ -6,6 +6,7 @@ export const PROCESSING_PHASES = {
   transcode: 'transcode',
   thumbnail: 'thumbnail',
   timeline: 'timeline',
+  hls: 'hls',
 } as const
 
 const TRANSCODE_PHASE_PREFIX = `${PROCESSING_PHASES.transcode}:`
@@ -42,6 +43,8 @@ export function getProcessingPhaseLabel(phase: string | null | undefined): strin
       return 'Generating thumbnail...'
     case PROCESSING_PHASES.timeline:
       return 'Generating timeline previews...'
+    case PROCESSING_PHASES.hls:
+      return 'Packaging adaptive stream...'
     default:
       return 'Processing...'
   }

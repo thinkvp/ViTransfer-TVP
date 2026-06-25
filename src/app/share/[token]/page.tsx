@@ -1017,8 +1017,8 @@ export default function SharePage() {
   const fetchVideoStream = useCallback(async (
     videoId: string,
     quality: string,
-  ): Promise<{ token: string; streamUrl: string }> => {
-    if (!shareToken) return { token: '', streamUrl: '' }
+  ): Promise<{ token: string; streamUrl: string; hlsUrl: string; hlsAbr: boolean }> => {
+    if (!shareToken) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
     const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
       headers: {
         Authorization: `Bearer ${shareToken}`,
@@ -1026,13 +1026,16 @@ export default function SharePage() {
     })
     if (response.status === 401) {
       await handleSessionExpired(response)
-      return { token: '', streamUrl: '' }
+      return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
     }
-    if (!response.ok) return { token: '', streamUrl: '' }
+    if (!response.ok) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
     const data = await response.json()
     return {
       token: data.token || '',
       streamUrl: typeof data.streamUrl === 'string' ? data.streamUrl : '',
+      // Per-video HLS master playlist (same value across quality fetches); '' when unavailable.
+      hlsUrl: typeof data.hlsUrl === 'string' ? data.hlsUrl : '',
+      hlsAbr: data.hlsAbr === true,
     }
   }, [token, shareToken, handleSessionExpired])
 
@@ -2082,6 +2085,11 @@ export default function SharePage() {
 
       if (!response.ok) return null
       const data = await response.json().catch(() => ({}))
+      // Prefer the proxy-robust HLS master playlist (ends in .m3u8 → the lightbox's useHlsVideo
+      // detects it); fall back to the single-file MP4 playback URL.
+      if (typeof (data as any)?.hlsUrl === 'string' && (data as any).hlsUrl) {
+        return String((data as any).hlsUrl)
+      }
       if (typeof (data as any)?.playbackUrl === 'string' && (data as any).playbackUrl) {
         return String((data as any).playbackUrl)
       }
@@ -2101,7 +2109,7 @@ export default function SharePage() {
     // otherwise fall back to the token-gated /api/content redirect.
     const buildStreamUrl = (s: { token: string; streamUrl: string }): string =>
       s.streamUrl || (s.token ? `/api/content/${s.token}` : '')
-    const emptyStream = () => Promise.resolve({ token: '', streamUrl: '' })
+    const emptyStream = () => Promise.resolve({ token: '', streamUrl: '', hlsUrl: '', hlsAbr: false })
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -2121,6 +2129,8 @@ export default function SharePage() {
             let streamUrl720p = ''
             let streamUrl1080p = ''
             let streamUrlOriginal = ''
+            let hlsUrl = ''
+            let hlsAbr = false
             let downloadToken: string | null = null
 
             if (video.approved) {
@@ -2139,6 +2149,8 @@ export default function SharePage() {
               streamUrl480p = buildStreamUrl(s480)
               streamUrl720p = buildStreamUrl(s720)
               streamUrl1080p = buildStreamUrl(s1080)
+              hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || orig.hlsUrl || ''
+              hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || orig.hlsAbr || false
             } else {
               // Unapproved: only previews are accessible.
               const [s480, s720, s1080] = await Promise.all([
@@ -2149,6 +2161,8 @@ export default function SharePage() {
               streamUrl480p = buildStreamUrl(s480)
               streamUrl720p = buildStreamUrl(s720)
               streamUrl1080p = buildStreamUrl(s1080)
+              hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || ''
+              hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || false
             }
 
             // Prefer the thumbnail URL minted into the share payload (no extra round-trip).
@@ -2181,6 +2195,8 @@ export default function SharePage() {
               streamUrl720p,
               streamUrl1080p,
               streamUrlOriginal,
+              hlsUrl,
+              hlsAbr,
               downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
               thumbnailUrl,
               timelineVttUrl,

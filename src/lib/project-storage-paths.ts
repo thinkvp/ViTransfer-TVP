@@ -306,6 +306,25 @@ export function buildVideoTimelineStorageRoot(projectId: string, videoId: string
   return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), 'timeline-previews')
 }
 
+/**
+ * Root for a video's HLS packaging output: the master playlist, per-rendition
+ * variant playlists, fMP4 init segments and media segments all live under here.
+ * ID-keyed (rename-immune), mirroring the preview/timeline roots.
+ *   previews/{projectId}/videos/{videoId}/hls/
+ *     master.m3u8
+ *     {480,720,1080}/index.m3u8
+ *     {480,720,1080}/init.mp4
+ *     {480,720,1080}/seg-00000.m4s
+ */
+export function buildVideoHlsStorageRoot(projectId: string, videoId: string): string {
+  return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), 'hls')
+}
+
+/** HLS bundle root for a video *asset's* playback preview (single rendition). */
+export function buildVideoAssetHlsStorageRoot(projectId: string, videoId: string, assetId: string): string {
+  return path.posix.join(buildVideoAssetPreviewsRoot(projectId, videoId, assetId), 'hls')
+}
+
 /** Timeline sprite storage root for a video asset's hover previews. */
 export function buildAssetTimelineStorageRoot(projectId: string, videoId: string, assetId: string): string {
   return path.posix.join(buildVideoAssetPreviewsRoot(projectId, videoId, assetId), 'timeline-previews')

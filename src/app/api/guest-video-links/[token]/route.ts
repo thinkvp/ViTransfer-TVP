@@ -8,7 +8,7 @@ import { getRedis } from '@/lib/redis'
 import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
 import { getStoredFilePathForProject, getStoredFileRecords } from '@/lib/stored-file'
-import { getDirectStreamUrl } from '@/lib/video-stream-url'
+import { getDirectStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -61,6 +61,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           status: true,
           approved: true,
           timelinePreviewsReady: true,
+          hlsVersion: true,
         },
       },
     },
@@ -189,6 +190,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     getDirectStreamUrl({ storedPaths, quality: '1080p', canServeOriginal, sessionId, videoId: link.video.id }).catch(() => null),
   ])
 
+  // HLS (proxy-robust segmented) URL — same-origin, token-scoped master playlist.
+  let hlsUrl = ''
+  let hlsAbr = false
+  if (hlsStreamingEnabled() && storedPaths.has('HLS_PLAYLIST')) {
+    const hlsToken = await generateVideoAccessToken(link.video.id, link.project.id, 'hls', request, sessionId).catch(() => '')
+    if (hlsToken) {
+      hlsUrl = buildHlsMasterUrl(hlsToken)
+      hlsAbr = hlsAbrReady(link.video.hlsVersion)
+    }
+  }
+
   const payload = {
     expiresAt: link.expiresAt,
     project: {
@@ -210,6 +222,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       streamUrl480p: direct480 || (token480 ? `/api/content/${token480}` : ''),
       streamUrl720p: direct720 || (token720 ? `/api/content/${token720}` : ''),
       streamUrl1080p: direct1080 || (token1080 ? `/api/content/${token1080}` : ''),
+      // HLS master playlist (proxy-robust); empty when unavailable, player falls back to MP4.
+      hlsUrl,
+      // Whether the HLS bundle is keyframe-aligned and safe for hls.js adaptive bitrate.
+      hlsAbr,
       downloadUrl: null,
       thumbnailUrl: thumbToken ? `/api/content/${thumbToken}` : null,
       timelineVttUrl: vttToken ? `/api/content/${vttToken}` : null,

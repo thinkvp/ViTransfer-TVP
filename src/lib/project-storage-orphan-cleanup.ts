@@ -243,12 +243,14 @@ async function buildProjectStorageReferences(): Promise<ProjectStorageReferences
     const page = await getAllStoredPaths({ cursor, take: 10000 })
     for (const entry of page.items) {
       if (!entry.storagePath) continue
-      // TIMELINE_SPRITES paths are directories (contain multiple files); protect the prefix
-      if (entry.fileRole === 'TIMELINE_SPRITES') {
+      // TIMELINE_SPRITES and HLS_SEGMENTS paths are directories (each registers ONE row but
+      // contains many files: sprite-*.jpg / index.m3u8 + init.mp4 + seg-*.m4s). Protect the
+      // whole prefix so the individual files inside aren't treated as orphans and deleted.
+      if (entry.fileRole === 'TIMELINE_SPRITES' || entry.fileRole === 'HLS_SEGMENTS') {
         try {
           const rel = normalizeRelativeStoragePath(toStorageRelative(getFilePath(entry.storagePath)))
-          // The stored path IS the sprite directory — protect it as-is, stripping
-          // any trailing slash so comparisons against storage listings are consistent.
+          // The stored path IS the directory — protect it as-is, stripping any trailing
+          // slash so comparisons against storage listings are consistent.
           const dir = rel.replace(/\/+$/, '')
           if (dir && dir !== '.') protectedDirectoryPrefixes.add(dir)
         } catch { /* malformed path — skip */ }
@@ -470,6 +472,11 @@ async function buildMissingFilesReferences(): Promise<{ mainPaths: Set<string>; 
           const dir = rel.replace(/\/+$/, '')
           if (dir && dir !== '.') timelineSpritePrefixes.add(dir)
         } catch { /* malformed path */ }
+      } else if (entry.fileRole === 'HLS_SEGMENTS') {
+        // Directory row (the hls/ tree) — there's no single file at this path, so a
+        // per-file existence check would always false-positive as "missing". Skip it;
+        // its contents are protected from orphan deletion by the prefix above, and the
+        // master.m3u8 (HLS_PLAYLIST) still gets a real missing-file check via mainPaths.
       } else {
         try {
           mainPaths.add(

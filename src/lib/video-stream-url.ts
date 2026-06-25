@@ -112,6 +112,32 @@ function directStreamingEnabled(): boolean {
 }
 
 /**
+ * HLS (segmented) delivery is offered when running in S3 mode and not explicitly
+ * disabled. Mirrors directStreamingEnabled() — `STREAM_HLS=false` is a no-redeploy
+ * kill-switch that reverts every viewer to the single-file MP4 path. HLS is the
+ * proxy-robust path: segments are fetched as full-file 200 GETs (no Range), so it
+ * survives corporate gateways that mangle Range/206 seeking.
+ */
+export function hlsStreamingEnabled(): boolean {
+  return isS3Mode() && process.env.STREAM_HLS !== 'false'
+}
+
+/** Same-origin, token-scoped master-playlist URL the player hands to hls.js. */
+export function buildHlsMasterUrl(token: string): string {
+  return `/api/hls/${token}/master.m3u8`
+}
+
+// HLS packaging format version stamped on Video.hlsVersion. Bump when the on-disk format
+// changes in a way the player must distinguish. v1 = keyframe-aligned renditions, so the
+// player may enable hls.js adaptive-bitrate switching; v0 = none/legacy (ABR-unsafe).
+export const HLS_PACKAGE_VERSION = 1
+
+/** Whether a video's stored HLS bundle is keyframe-aligned and safe for ABR switching. */
+export function hlsAbrReady(hlsVersion: number | null | undefined): boolean {
+  return (hlsVersion ?? 0) >= HLS_PACKAGE_VERSION
+}
+
+/**
  * Presign a stream URL for `path`, reusing a previously-minted URL from Redis when one
  * exists for `cacheKey`. Reuse keeps the player's <video> src byte-for-byte stable
  * across refreshes — re-minting a fresh-signature URL each time would churn the src and

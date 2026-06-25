@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { deleteFile } from '@/lib/storage'
+import { deleteFile, deleteDirectory } from '@/lib/storage'
 import type { FileRole } from '@/lib/stored-file'
 import { getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
@@ -69,9 +69,13 @@ export async function POST(request: NextRequest) {
     // Thumbnails, timeline sprites/VTT and asset still images are intentionally kept.
     const videoPreviewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080']
     const assetPreviewRoles: FileRole[] = ['PREVIEW_MP4']
-    const [videoStored, assetStored] = await Promise.all([
+    // HLS bundles (hls/ dir per video + per asset) are heavy playable renditions too.
+    const hlsDirRoles: FileRole[] = ['HLS_SEGMENTS']
+    const [videoStored, assetStored, videoHlsDirs, assetHlsDirs] = await Promise.all([
       videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: videoPreviewRoles, select: { storagePath: true, entityId: true } }) : [],
       assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: assetPreviewRoles, select: { storagePath: true, entityId: true } }) : [],
+      videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: hlsDirRoles, select: { storagePath: true } }) : [],
+      assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: hlsDirRoles, select: { storagePath: true } }) : [],
     ])
 
     // Each preview file annotated with the project it belongs to.
@@ -127,15 +131,20 @@ export async function POST(request: NextRequest) {
       })
     )
 
+    // Delete the HLS bundle directories (whole hls/ trees).
+    await Promise.allSettled(
+      [...videoHlsDirs, ...assetHlsDirs].map(f => deleteDirectory(f.storagePath).catch(() => {}))
+    )
+
     // Delete StoredFile records
     if (videoIds.length > 0) {
       await deleteStoredFilesByCriteria({
-        entityType: 'VIDEO', entityIds: videoIds, fileRoles: videoPreviewRoles,
+        entityType: 'VIDEO', entityIds: videoIds, fileRoles: [...videoPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
       })
     }
     if (assetIds.length > 0) {
       await deleteStoredFilesByCriteria({
-        entityType: 'VIDEO_ASSET', entityIds: assetIds, fileRoles: assetPreviewRoles,
+        entityType: 'VIDEO_ASSET', entityIds: assetIds, fileRoles: [...assetPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
       })
     }
 

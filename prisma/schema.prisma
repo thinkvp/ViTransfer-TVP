@@ -733,6 +733,12 @@ model Video {
   // Timeline hover previews (sprite sheets + VTT)
   timelinePreviewsReady Boolean @default(false)
 
+  // HLS (segmented) playback packaging is ready (master playlist + segments registered)
+  hlsReady Boolean @default(false)
+  // HLS packaging format version. 0 = none/legacy (non-keyframe-aligned, ABR-unsafe);
+  // >=1 = renditions are keyframe-aligned, so the player may enable hls.js adaptive bitrate.
+  hlsVersion Int @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1944,6 +1950,8 @@ enum FileRole {
   SOCIAL
   TIMELINE_VTT
   TIMELINE_SPRITES
+  HLS_PLAYLIST
+  HLS_SEGMENTS
   AVATAR
   COMPANY_LOGO
   COMPANY_DARK_LOGO

@@ -109,14 +109,14 @@ export async function POST(
       const videoIdsWithoutCustomThumb = videoIds.filter(id => !customThumbnailVideoIds.has(id))
       const videoIdsWithCustomThumb = videoIds.filter(id => customThumbnailVideoIds.has(id))
       if (videoIdsWithoutCustomThumb.length) {
-        roleGroups.push({ entityType: 'VIDEO', entityIds: videoIdsWithoutCustomThumb, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+        roleGroups.push({ entityType: 'VIDEO', entityIds: videoIdsWithoutCustomThumb, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'HLS_PLAYLIST', 'HLS_SEGMENTS'] })
       }
       if (videoIdsWithCustomThumb.length) {
-        roleGroups.push({ entityType: 'VIDEO', entityIds: videoIdsWithCustomThumb, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+        roleGroups.push({ entityType: 'VIDEO', entityIds: videoIdsWithCustomThumb, fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'HLS_PLAYLIST', 'HLS_SEGMENTS'] })
       }
     }
     if (uploadFileIds.length) roleGroups.push({ entityType: 'SHARE_UPLOAD_FILE', entityIds: uploadFileIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
-    if (videoAssetIds.length) roleGroups.push({ entityType: 'VIDEO_ASSET', entityIds: videoAssetIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES'] })
+    if (videoAssetIds.length) roleGroups.push({ entityType: 'VIDEO_ASSET', entityIds: videoAssetIds, fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'HLS_PLAYLIST', 'HLS_SEGMENTS'] })
     if (albumPhotoIds.length) roleGroups.push({ entityType: 'ALBUM_PHOTO', entityIds: albumPhotoIds, fileRoles: ['SOCIAL', 'THUMBNAIL'] })
 
     // Fetch paths to delete — one query per entity type group.
@@ -130,9 +130,9 @@ export async function POST(
     const filePathsToDelete = new Set(storedFilesToDelete.map(f => f.storagePath))
     const directoryPathsToDelete = new Set<string>()
 
-    // Also delete timeline sprite directories
-    const spriteDirs = storedFilesToDelete.filter(f => f.fileRole === 'TIMELINE_SPRITES')
-    spriteDirs.forEach(f => directoryPathsToDelete.add(f.storagePath))
+    // Also delete directory-style roles (timeline sprites + HLS bundle) as whole trees.
+    const dirRoleFiles = storedFilesToDelete.filter(f => f.fileRole === 'TIMELINE_SPRITES' || f.fileRole === 'HLS_SEGMENTS')
+    dirRoleFiles.forEach(f => directoryPathsToDelete.add(f.storagePath))
 
     // Build a map from storagePath → { entityType, entityId } so we can
     // skip StoredFile deletion for any entity whose file deletion failed.

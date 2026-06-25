@@ -39,6 +39,12 @@ export interface Video {
   streamUrl480p?: string
   streamUrl720p?: string
   streamUrl1080p?: string
+  // Same-origin HLS master playlist (proxy-robust segmented playback). When present the
+  // player prefers it over the single-file MP4 stream URLs above.
+  hlsUrl?: string
+  // Whether the HLS bundle is keyframe-aligned (ABR-safe). When true the player lets hls.js
+  // adapt bitrate automatically in "Auto"; when false it pins the level (legacy renditions).
+  hlsAbr?: boolean
   thumbnailUrl?: string | null
   downloadUrl?: string | null
   timelineVttUrl?: string | null

@@ -228,14 +228,18 @@ async function collectAccountingKeys(): Promise<FileEntry[]> {
   return entries
 }
 
-/** Collect S3 keys for timeline sprites from StoredFile registry. */
-async function collectTimelineSpriteKeys(client: ReturnType<typeof getS3Client>, bucket: string): Promise<FileEntry[]> {
+/**
+ * Collect S3 keys for directory-style roles (timeline sprites + the HLS bundle) from the
+ * StoredFile registry. Each registers ONE row pointing at a directory prefix, so the actual
+ * child files (sprite-*.jpg / index.m3u8 + init.mp4 + seg-*.m4s) must be enumerated from S3.
+ */
+async function collectDirectoryPrefixKeys(client: ReturnType<typeof getS3Client>, bucket: string): Promise<FileEntry[]> {
   const allPrefixes: string[] = []
   let cursor: string | undefined
   do {
     const page = await getAllStoredPaths({ cursor, take: 5000 })
     for (const e of page.items) {
-      if (e.fileRole === 'TIMELINE_SPRITES' && e.storagePath) allPrefixes.push(e.storagePath)
+      if ((e.fileRole === 'TIMELINE_SPRITES' || e.fileRole === 'HLS_SEGMENTS') && e.storagePath) allPrefixes.push(e.storagePath)
     }
     cursor = page.nextCursor
   } while (cursor)
@@ -303,9 +307,10 @@ async function collectKeysForCategory(
         ['VIDEO', 'VIDEO_ASSET'],
         ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'PREVIEW_IMAGE', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
       )
-      // Sprite sheets are stored as a directory prefix; enumerate actual files from S3
-      const spriteEntries = await collectTimelineSpriteKeys(client, bucket)
-      return [...entries, ...spriteEntries]
+      // Sprite sheets and the HLS bundle are stored as directory prefixes (one StoredFile row
+      // each); enumerate their actual child files (incl. the HLS master.m3u8) from S3.
+      const dirPrefixEntries = await collectDirectoryPrefixKeys(client, bucket)
+      return [...entries, ...dirPrefixEntries]
     }
 
     case 'videoAssetsBytes':

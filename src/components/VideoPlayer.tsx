@@ -2,6 +2,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import Hls from 'hls.js'
 import Image from 'next/image'
 import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
@@ -182,6 +183,24 @@ export default function VideoPlayer({
   // Tracks the videoId we've already asked the parent to recover, so a failing source
   // triggers exactly one token-refresh request (cleared once a load succeeds).
   const streamErrorRecoveryRef = useRef<string | null>(null)
+
+  // --- HLS (proxy-robust segmented playback) ---
+  // The active hls.js instance (MSE path only). Native-HLS (Safari/iOS) uses the
+  // element's own src and needs no instance.
+  const hlsInstanceRef = useRef<Hls | null>(null)
+  const [hlsLevelsReady, setHlsLevelsReady] = useState(false)
+  // Playback-capability probe, resolved client-side on mount. `mse` → hls.js can run
+  // (desktop incl. desktop-Safari); `native` → element plays .m3u8 directly (iOS Safari).
+  const [hlsSupport, setHlsSupport] = useState<{ mse: boolean; native: boolean }>({ mse: false, native: false })
+  const [hlsResolved, setHlsResolved] = useState(false)
+  useEffect(() => {
+    const probe = document.createElement('video')
+    setHlsSupport({
+      mse: Hls.isSupported(),
+      native: !!probe.canPlayType('application/vnd.apple.mpegurl'),
+    })
+    setHlsResolved(true)
+  }, [])
   const [videoAspectRatio, setVideoAspectRatio] = useState<number>(DEFAULT_ASPECT_RATIO)
   const [showPosterOverlay, setShowPosterOverlay] = useState(true)
   // When a video is opened via a folder click that requests autoplay, we hold the
@@ -557,6 +576,35 @@ export default function VideoPlayer({
 
   const effectiveDurationSeconds =
     durationSeconds || (selectedVideo?.duration as number | undefined) || 0
+
+  // HLS master-playlist URL handed back by the share/guest/admin token routes (empty
+  // when packaging isn't ready or HLS is disabled — the player then uses the MP4 path).
+  const selectedVideoHlsUrl = (selectedVideo?.hlsUrl as string | undefined) || undefined
+  // Whether this video's HLS renditions are keyframe-aligned and safe for hls.js auto-ABR.
+  // Legacy (non-aligned) bundles stay pinned to avoid glitchy automatic switching.
+  const selectedVideoHlsAbr = (selectedVideo?.hlsAbr as boolean | undefined) === true
+  // Prefer hls.js (MSE) wherever it's supported — that's every desktop browser including
+  // desktop Safari. iOS Safari has no MSE for video, so it falls back to native HLS.
+  const hlsMode: 'mse' | 'native' | null = useMemo(() => {
+    if (!selectedVideoHlsUrl) return null
+    if (hlsSupport.mse) return 'mse'
+    if (hlsSupport.native) return 'native'
+    return null
+  }, [selectedVideoHlsUrl, hlsSupport])
+
+  // Resolve the <video> element's src:
+  //  - HLS available but capability probe not resolved yet → hold off (don't load MP4)
+  //  - hls.js (MSE) → no src; the Hls instance feeds the element via MSE
+  //  - native HLS → the master playlist URL directly
+  //  - otherwise → the selected MP4 stream URL (existing behaviour / fallback)
+  const videoElementSrc =
+    selectedVideoHlsUrl && !hlsResolved
+      ? undefined
+      : hlsMode === 'mse'
+        ? undefined
+        : hlsMode === 'native'
+          ? selectedVideoHlsUrl
+          : videoUrl || undefined
 
   const effectiveFps = selectedVideo?.fps as number | undefined
 
@@ -1283,6 +1331,98 @@ export default function VideoPlayer({
 
     loadVideoUrl()
   }, [selectedVideo, effectiveQuality])
+
+  // Ask the parent to re-mint tokens after an unrecoverable stream failure. Latches per
+  // videoId (cleared on the next successful loadedmetadata) so an error→refresh→error
+  // sequence can't loop. Shared by the MP4 <video> onError and the hls.js error handler.
+  const triggerStreamErrorRecovery = useCallback(() => {
+    const vid = selectedVideoIdRef.current
+    if (!vid) return
+    if (streamErrorRecoveryRef.current === vid) return
+    streamErrorRecoveryRef.current = vid
+    onStreamError?.(vid)
+  }, [onStreamError])
+
+  // hls.js (MSE) lifecycle: attach to the <video> element and load the master playlist.
+  // Re-runs when the video changes or the parent hands back a fresh hlsUrl (token refresh),
+  // which is exactly how we recover from expired presigned segment URLs.
+  useEffect(() => {
+    if (hlsMode !== 'mse' || !selectedVideoHlsUrl) return
+    const video = videoRef.current
+    if (!video) return
+
+    setHlsLevelsReady(false)
+    const hls = new Hls({
+      enableWorker: true,
+      // Cap auto/ABR level to what the player can actually show (DPR-aware), so "Auto" never
+      // streams 1080p into a small window — it still drops further on a slow connection. This
+      // restores the old size-based behaviour and combines it with bandwidth adaptation; a
+      // manual quality pick (fixed currentLevel) bypasses this cap.
+      capLevelToPlayerSize: true,
+      // Keep a tight forward buffer instead of prefetching the whole file. hls.js defaults
+      // grow the buffer up to maxBufferSize (~60 MB), so any clip smaller than that downloads
+      // entirely on open — wasteful for a review tool where reviewers frequently open a video,
+      // glance, and jump around by timecode. Cap the forward buffer to ~30 s (and stop it
+      // growing) so segments are fetched as playback approaches them; seeking still fetches the
+      // target segment on demand (the proxy-robust behaviour we want). A generous back-buffer
+      // keeps recently-watched segments so backward jumps don't re-download.
+      maxBufferLength: 30,        // target ~30 s ahead of the playhead
+      maxMaxBufferLength: 30,     // don't let the target grow — this is what stops full prefetch
+      maxBufferSize: 30 * 1000 * 1000, // 30 MB secondary cap (binds for high-bitrate originals)
+      backBufferLength: 60,       // retain ~60 s behind so small rewinds don't refetch
+    })
+    hlsInstanceRef.current = hls
+
+    hls.attachMedia(video)
+    hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(selectedVideoHlsUrl))
+    hls.on(Hls.Events.MANIFEST_PARSED, () => setHlsLevelsReady(true))
+    // Keep the "Auto (xxx)" label in sync with the level hls.js actually plays (esp. under ABR).
+    hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
+      const height = hls.levels?.[data.level]?.height
+      if (height) setAutoResolvedQuality(height >= 1080 ? '1080p' : height >= 720 ? '720p' : '480p')
+    })
+    hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal) return
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        try { hls.recoverMediaError(); return } catch { /* fall through to re-mint */ }
+      }
+      // NETWORK_ERROR is most often expired presigned segment URLs — a re-mint yields a
+      // fresh playlist (new signatures) and re-runs this effect. Other fatal errors also
+      // escalate to the parent's token-refresh recovery.
+      triggerStreamErrorRecovery()
+    })
+
+    return () => {
+      setHlsLevelsReady(false)
+      try { hls.destroy() } catch { /* ignore */ }
+      if (hlsInstanceRef.current === hls) hlsInstanceRef.current = null
+    }
+  }, [hlsMode, selectedVideoHlsUrl, selectedVideo?.id, triggerStreamErrorRecovery])
+
+  // Drive hls.js level selection from the quality control. For ABR-ready (keyframe-aligned)
+  // bundles, "Auto" hands control to hls.js bandwidth adaptation (currentLevel = -1). A manual
+  // pick — or any legacy non-aligned bundle, where automatic switching would glitch — pins the
+  // nearest level instead (manual switches tolerate the brief flush).
+  useEffect(() => {
+    const hls = hlsInstanceRef.current
+    if (hlsMode !== 'mse' || !hls || !hlsLevelsReady) return
+    const levels = hls.levels || []
+    if (levels.length === 0) return
+
+    if (selectedQuality === 'auto' && selectedVideoHlsAbr) {
+      if (!hls.autoLevelEnabled) hls.currentLevel = -1
+      return
+    }
+
+    const targetHeight = effectiveQuality === '1080p' ? 1080 : effectiveQuality === '480p' ? 480 : 720
+    let bestIdx = 0
+    let bestDelta = Infinity
+    levels.forEach((lvl, i) => {
+      const delta = Math.abs((lvl.height || 0) - targetHeight)
+      if (delta < bestDelta) { bestDelta = delta; bestIdx = i }
+    })
+    if (hls.currentLevel !== bestIdx) hls.currentLevel = bestIdx
+  }, [hlsMode, hlsLevelsReady, effectiveQuality, selectedQuality, selectedVideoHlsAbr])
 
   // Load timeline preview VTT when available
   useEffect(() => {
@@ -2143,12 +2283,16 @@ export default function VideoPlayer({
                       aspectRatio: videoAspectRatio,
                     }
             }
+            // Block the native long-press/right-click "Save/Download Video" menu at the
+            // wrapper too (mirrors the asset lightbox, which suppresses it on both the
+            // <video> and its container). Non-admin only, so admins keep native save.
+            onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
           >
-            {videoUrl ? (
+            {(videoUrl || selectedVideoHlsUrl) ? (
               <video
                 key={selectedVideo?.id}
                 ref={videoRef}
-                src={videoUrl}
+                src={videoElementSrc}
                 // Show the thumbnail (custom if set, otherwise the default) as the native
                 // poster on first load. Only suppress it when an autoplay request is pending
                 // for this video (responsive/mobile folder click) so it never flashes before
@@ -2248,15 +2392,16 @@ export default function VideoPlayer({
                 onPointerCancel={handleVideoPointerCancel}
                 onLostPointerCapture={handleVideoLostPointerCapture}
                 onClick={togglePlayPause}
-                controlsList={!isAdmin ? 'nodownload' : undefined}
+                // Mirror the asset lightbox's proven recipe for suppressing the native
+                // "Save/Download Video" menu on non-admin players: fuller controlsList,
+                // disable PiP, block the context menu on the element, and the iOS-only
+                // touch-callout CSS. The long-press-to-2x gesture is pointer-event based,
+                // so it keeps working.
+                controlsList={!isAdmin ? 'nodownload noplaybackrate noremoteplayback' : undefined}
+                disablePictureInPicture={!isAdmin}
                 style={{
                   objectFit: 'contain',
                   backgroundColor: isLgViewport ? '#000' : 'transparent',
-                  // Suppress the native mobile long-press media callout ("Save/Download
-                  // Video…"). onContextMenu covers desktop right-click and Android, but
-                  // iOS Safari's touch callout needs this CSS. The long-press-to-2x
-                  // gesture is pointer-event based, so it keeps working. Non-admin only,
-                  // matching onContextMenu (admins keep native save).
                   ...(!isAdmin
                     ? { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }
                     : {}),

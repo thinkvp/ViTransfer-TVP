@@ -310,7 +310,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       videoAssetStoragePaths as any // unused now — StoredFile has canonical paths
 
       const originalVideoPaths = videoStored.filter(s => s.fileRole === 'ORIGINAL').map(s => s.storagePath)
-      const previewVideoPaths = videoStored.filter(s => ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES'].includes(s.fileRole)).map(s => s.storagePath)
+      // HLS_SEGMENTS is a directory path; sumStorageEntrySizes walks it, capturing the whole
+      // hls/ tree (incl. master.m3u8), so HLS_PLAYLIST is omitted here to avoid double-counting.
+      const previewVideoPaths = videoStored.filter(s => ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'HLS_SEGMENTS'].includes(s.fileRole)).map(s => s.storagePath)
       const originalPhotoPaths = photoStored.filter(s => s.fileRole === 'ORIGINAL').map(s => s.storagePath)
       const socialPhotoPaths = photoStored.filter(s => s.fileRole === 'SOCIAL').map(s => s.storagePath)
       const thumbnailPhotoPaths = photoStored.filter(s => s.fileRole === 'THUMBNAIL').map(s => s.storagePath)

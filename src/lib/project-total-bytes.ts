@@ -272,8 +272,11 @@ export async function computeProjectPreviewBytes(
   // Collect all preview file paths for the project in one query via the denormalized
   // projectId (covers VIDEO, VIDEO_ASSET and SHARE_UPLOAD_FILE preview derivatives).
   const previewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL',
-    'TIMELINE_VTT', 'TIMELINE_SPRITES', 'PREVIEW_IMAGE', 'PREVIEW_MP4']
-  const spriteRoles: FileRole[] = ['TIMELINE_SPRITES']
+    'TIMELINE_VTT', 'TIMELINE_SPRITES', 'PREVIEW_IMAGE', 'PREVIEW_MP4', 'HLS_SEGMENTS']
+  // Directory-style roles whose storagePath is a prefix to sum, not a single object.
+  // HLS_SEGMENTS covers the whole hls/ tree (variant playlists + init + segments AND the
+  // master.m3u8), so HLS_PLAYLIST is deliberately omitted to avoid double-counting it.
+  const spriteRoles: FileRole[] = ['TIMELINE_SPRITES', 'HLS_SEGMENTS']
 
   const rows = await prismaClient.storedFile.findMany({
     where: { projectId, fileRole: { in: previewRoles }, storagePath: { not: '' } },

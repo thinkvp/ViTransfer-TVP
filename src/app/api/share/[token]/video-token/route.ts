@@ -4,7 +4,7 @@ import { getShareContext } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFileRecords } from '@/lib/stored-file'
-import { getDirectStreamUrl } from '@/lib/video-stream-url'
+import { getDirectStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -59,7 +59,7 @@ export async function GET(
   if (limited) return limited
 
   let project: { id: string; slug: string; enableVideos: boolean | null } | null
-  let video: { id: string; projectId: string; approved: boolean } | null
+  let video: { id: string; projectId: string; approved: boolean; hlsVersion: number } | null
   let storedRoles = new Set<string>()
   const storedPaths = new Map<string, string>()
   try {
@@ -82,6 +82,7 @@ export async function GET(
         id: true,
         projectId: true,
         approved: true,
+        hlsVersion: true,
       },
     })
 
@@ -129,7 +130,20 @@ export async function GET(
       videoId: video!.id,
     }).catch(() => null)
 
-    const response = NextResponse.json({ token: tokenValue, streamUrl })
+    // HLS (proxy-robust segmented) URL — same-origin, token-scoped master playlist.
+    // Per-video (not per-quality); the token is cached so repeated quality fetches
+    // return the same URL. Offered only when packaging exists and HLS is enabled.
+    let hlsUrl = ''
+    let hlsAbr = false
+    if (hlsStreamingEnabled() && storedRoles.has('HLS_PLAYLIST')) {
+      const hlsToken = await generateVideoAccessToken(video!.id, project!.id, 'hls', request, sessionId).catch(() => '')
+      if (hlsToken) {
+        hlsUrl = buildHlsMasterUrl(hlsToken)
+        hlsAbr = hlsAbrReady(video!.hlsVersion)
+      }
+    }
+
+    const response = NextResponse.json({ token: tokenValue, streamUrl, hlsUrl, hlsAbr })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response

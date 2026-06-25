@@ -43,8 +43,15 @@ export async function GET(
       return NextResponse.json({ error: 'No avatar' }, { status: 404 })
     }
 
-    // S3 mode: redirect to a presigned stream URL
+    // S3 mode: redirect to a presigned stream URL — but only if the object actually exists.
+    // The legacy fallback path above is a guess; without this check a user who has no avatar
+    // set would 302 to a presigned URL for a missing object, which then 403s in the browser
+    // (the "avatar.jpg (failed)" request seen on share pages). Return a clean 404 instead so
+    // the client falls back to initials.
     if (isS3Mode()) {
+      if (!(await s3FileExists(avatarPath))) {
+        return NextResponse.json({ error: 'No avatar' }, { status: 404 })
+      }
       const presignedUrl = await s3GetPresignedStreamUrl(avatarPath, 86400, 'image/jpeg')
       return NextResponse.redirect(presignedUrl, {
         status: 302,

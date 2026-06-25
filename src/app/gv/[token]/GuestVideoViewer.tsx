@@ -21,6 +21,8 @@ type ResolvePayload = {
     approved?: boolean
     streamUrl720p?: string
     streamUrl1080p?: string
+    hlsUrl?: string
+    hlsAbr?: boolean
     thumbnailUrl?: string | null
     timelineVttUrl?: string | null
     timelineSpriteUrl?: string | null
@@ -145,6 +147,8 @@ export function GuestVideoViewer({ token }: { token: string }) {
     approved: data.video.approved,
     streamUrl720p: data.video.streamUrl720p,
     streamUrl1080p: data.video.streamUrl1080p,
+    hlsUrl: data.video.hlsUrl,
+    hlsAbr: data.video.hlsAbr,
     thumbnailUrl: data.video.thumbnailUrl,
     timelineVttUrl: data.video.timelineVttUrl,
     timelineSpriteUrl: data.video.timelineSpriteUrl,

@@ -4,7 +4,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFilePathForProject } from '@/lib/stored-file'
-import { getDirectAssetStreamUrl } from '@/lib/video-stream-url'
+import { getDirectAssetStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl } from '@/lib/video-stream-url'
 
 /**
  * Generate a temporary download token for asset downloads (admins and share users)
@@ -122,11 +122,23 @@ export async function POST(
           : inlineAssetUrl)
       : (isAudioAsset ? inlineAssetUrl : null)
 
+    // HLS (proxy-robust segmented) playback for the asset preview — single rendition, served
+    // as a same-origin token-scoped master playlist. The player prefers it over playbackUrl.
+    let hlsUrl = ''
+    if (isPreviewableVideo && hasReadyGeneratedPlaybackPreview && hlsStreamingEnabled()) {
+      const hasHls = !!(await getStoredFilePathForProject('VIDEO_ASSET', assetId, 'HLS_PLAYLIST', project.id).catch(() => null))
+      if (hasHls) {
+        const hlsToken = await generateVideoAccessToken(videoId, project.id, 'hls', request, sessionId, undefined, 'asset', assetId).catch(() => '')
+        if (hlsToken) hlsUrl = buildHlsMasterUrl(hlsToken)
+      }
+    }
+
     // Return download URL with asset ID parameter
     const response = NextResponse.json({
       url: directAssetUrl,
       ...(previewUrl ? { previewUrl } : {}),
       ...(playbackUrl ? { playbackUrl } : {}),
+      ...(hlsUrl ? { hlsUrl } : {}),
     })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')

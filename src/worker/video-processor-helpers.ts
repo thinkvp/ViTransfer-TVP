@@ -1,15 +1,17 @@
 import { prisma } from '../lib/db'
-import { getFilePath, moveUploadedFile } from '../lib/storage'
+import { getFilePath, moveUploadedFile, deleteDirectory } from '../lib/storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { isS3Mode, s3FileExists } from '../lib/s3-storage'
-import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
-import { Prisma, type VideoStatus } from '@prisma/client'
+import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, packageHlsRendition, FFmpegCancellationError } from '../lib/ffmpeg'
+import { Prisma, type VideoStatus, type EntityType } from '@prisma/client'
 import {
   buildProjectStorageRoot,
   buildVideoOriginalStoragePath,
   buildVideoPreviewStoragePath,
   buildVideoThumbnailStoragePath,
   buildVideoTimelineStorageRoot,
+  buildVideoHlsStorageRoot,
+  buildVideoAssetHlsStorageRoot,
 } from '@/lib/project-storage-paths'
 import { registerStoredFile, registerStoredFiles, type FileRole, type RegisterStoredFileParams } from '@/lib/stored-file'
 import fs from 'fs'
@@ -78,6 +80,7 @@ export interface TempFiles {
   preview?: string
   thumbnail?: string
   timelineDir?: string
+  hlsDir?: string
 }
 
 export interface ProcessingSettings {
@@ -603,6 +606,217 @@ export async function registerTimelineStoredFiles(
   }
 }
 
+/** Renditions we package into HLS, smallest first (the master lists them low→high). */
+const HLS_RENDITIONS: Array<{ role: FileRole; label: string }> = [
+  { role: 'PREVIEW_480', label: '480' },
+  { role: 'PREVIEW_720', label: '720' },
+  { role: 'PREVIEW_1080', label: '1080' },
+]
+
+/** Conservative per-rendition bandwidth (bits/s) when probing can't derive one. */
+function estimateBandwidthFallback(label: string): number {
+  switch (label) {
+    case '1080': return 5_000_000
+    case '720': return 2_800_000
+    case '480': return 1_400_000
+    default: return 2_000_000
+  }
+}
+
+/**
+ * Package a video's existing MP4 previews into an HLS bundle — a master playlist plus
+ * one fMP4 (CMAF) rendition per available preview — using a fast `-c copy` remux (no
+ * re-encode, no quality loss, ~byte-identical). Source previews are resolved from the
+ * StoredFile registry, so this works both inline (right after finalizeVideo) and from
+ * the standalone backfill. Returns { ready: false } when the video has no previews.
+ *
+ * On-disk URIs are relative; the /api/hls delivery endpoint rewrites them at request
+ * time (variant → same-origin, segment → presigned R2). Renditions are independent —
+ * no cross-rendition keyframe alignment, so this needs no transcode changes.
+ */
+export async function processHlsPackaging(
+  videoId: string,
+  projectId: string,
+  tempFiles: TempFiles,
+): Promise<{ ready: boolean }> {
+  const previewRows = await prisma.storedFile.findMany({
+    where: {
+      entityType: 'VIDEO',
+      entityId: videoId,
+      fileRole: { in: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080'] },
+    },
+    select: { fileRole: true, storagePath: true },
+  })
+  const pathByRole = new Map(previewRows.map((r) => [r.fileRole, r.storagePath]))
+  const renditions = HLS_RENDITIONS.filter((r) => pathByRole.has(r.role))
+  if (renditions.length === 0) {
+    return { ready: false }
+  }
+
+  await updateVideoRecord(
+    videoId,
+    { processingProgress: 0, processingPhase: PROCESSING_PHASES.hls },
+    { context: 'starting HLS packaging', ignoreMissing: true },
+  )
+
+  const tempDir = path.join(TEMP_DIR, `${videoId}-hls`)
+  tempFiles.hlsDir = tempDir
+  await fs.promises.mkdir(tempDir, { recursive: true })
+
+  return packageHlsBundle({
+    entityType: 'VIDEO',
+    entityId: videoId,
+    hlsRoot: buildVideoHlsStorageRoot(projectId, videoId),
+    // Multi-rendition: labels are known from the role, ascending for the master.
+    sources: renditions.map((r) => ({ label: r.label, storagePath: pathByRole.get(r.role)! })),
+    tempDir,
+  })
+}
+
+/**
+ * Package a video *asset's* MP4 playback preview into a single-rendition HLS bundle. Assets
+ * only ever get one preview resolution, so there's no ABR — but HLS still fixes seeking behind
+ * Range-hostile proxies, which is the point. Returns { ready: false } when the asset has no
+ * playback preview (e.g. image/audio assets, or video assets whose preview hasn't run yet).
+ */
+export async function packageAssetHls(
+  assetId: string,
+  projectId: string,
+  videoId: string,
+  tempFiles: TempFiles,
+): Promise<{ ready: boolean }> {
+  const mp4 = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'PREVIEW_MP4' } },
+    select: { storagePath: true },
+  })
+  if (!mp4?.storagePath) return { ready: false }
+
+  const tempDir = path.join(TEMP_DIR, `asset-${assetId}-hls`)
+  tempFiles.hlsDir = tempDir
+  await fs.promises.mkdir(tempDir, { recursive: true })
+
+  return packageHlsBundle({
+    entityType: 'VIDEO_ASSET',
+    entityId: assetId,
+    hlsRoot: buildVideoAssetHlsStorageRoot(projectId, videoId, assetId),
+    // Single rendition — label is derived from the preview's probed height inside the bundler.
+    sources: [{ storagePath: mp4.storagePath }],
+    tempDir,
+  })
+}
+
+/** Map a rendition height to its HLS folder label (must be one of the labels /api/hls serves). */
+function heightToHlsLabel(height: number | undefined): string {
+  const h = height || 0
+  if (h >= 1080) return '1080'
+  if (h >= 720) return '720'
+  return '480'
+}
+
+/**
+ * Entity-agnostic core: remux a set of MP4 preview sources into an HLS bundle (one fMP4
+ * rendition each + a master playlist) under `hlsRoot`, then register HLS_PLAYLIST/HLS_SEGMENTS
+ * for the given entity. Used by both the VIDEO and VIDEO_ASSET packagers. On-disk URIs stay
+ * relative; the /api/hls delivery endpoint rewrites them at request time.
+ */
+async function packageHlsBundle(params: {
+  entityType: EntityType
+  entityId: string
+  hlsRoot: string
+  sources: Array<{ storagePath: string; label?: string }>
+  tempDir: string
+}): Promise<{ ready: boolean }> {
+  const { entityType, entityId, hlsRoot, sources, tempDir } = params
+
+  // Clean slate: drop any previous HLS bundle so a shrunk rendition set (e.g. a resolution
+  // removed from project settings, then reprocessed) can't leave stale segments behind.
+  // Best-effort; runs regardless of how packaging was triggered, so the bundle always matches.
+  await deleteDirectory(hlsRoot).catch(() => {})
+
+  const variants: Array<{ label: string; bandwidth: number; width: number; height: number }> = []
+
+  for (const source of sources) {
+    // Bring the preview to a local file (downloads from R2 in S3 mode; no copy locally).
+    const { localPath, isTemporary } = await materializeStoragePathToLocalFile({
+      rawPath: source.storagePath,
+      tempDir,
+      suggestedName: `src-${variants.length}.mp4`,
+    })
+
+    try {
+      const meta = await getVideoMetadata(localPath).catch(() => null)
+      const label = source.label ?? heightToHlsLabel(meta?.height)
+      const renditionDir = path.join(tempDir, label)
+      await fs.promises.mkdir(renditionDir, { recursive: true })
+
+      await packageHlsRendition({ inputPath: localPath, outputDir: renditionDir })
+
+      const size = await fs.promises.stat(localPath).then((s) => s.size).catch(() => 0)
+      const duration = meta?.duration && meta.duration > 0 ? meta.duration : 0
+      const bandwidth = duration > 0 ? Math.round((size * 8) / duration) : 0
+
+      // Move every generated file (index.m3u8, init.mp4, seg-*.m4s) into storage.
+      const generated = await fs.promises.readdir(renditionDir)
+      for (const file of generated) {
+        await moveTempFileToLogicalStorage(path.join(renditionDir, file), `${hlsRoot}/${label}/${file}`)
+      }
+
+      variants.push({
+        label,
+        bandwidth: bandwidth || estimateBandwidthFallback(label),
+        width: meta?.width || 0,
+        height: meta?.height || 0,
+      })
+    } finally {
+      // materialize returns the real local preview path in local mode — only remove
+      // the temporary R2 download, never the source of truth.
+      if (isTemporary) {
+        await fs.promises.unlink(localPath).catch(() => {})
+      }
+    }
+  }
+
+  if (variants.length === 0) {
+    return { ready: false }
+  }
+
+  // Master playlist referencing each variant's index.m3u8 by relative path.
+  const masterLines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-INDEPENDENT-SEGMENTS']
+  for (const v of variants) {
+    const res = v.width > 0 && v.height > 0 ? `,RESOLUTION=${v.width}x${v.height}` : ''
+    masterLines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${v.bandwidth}${res}`)
+    masterLines.push(`${v.label}/index.m3u8`)
+  }
+  const tempMasterPath = path.join(tempDir, 'master.m3u8')
+  await fs.promises.writeFile(tempMasterPath, masterLines.join('\n') + '\n', 'utf-8')
+
+  const masterPath = `${hlsRoot}/master.m3u8`
+  await moveTempFileToLogicalStorage(tempMasterPath, masterPath)
+
+  await registerHlsStoredFiles(entityType, entityId, masterPath, hlsRoot)
+
+  return { ready: true }
+}
+
+/** Persist HLS master playlist + segment directory to the StoredFile registry. */
+export async function registerHlsStoredFiles(
+  entityType: EntityType,
+  entityId: string,
+  masterPath: string,
+  hlsRoot: string,
+): Promise<void> {
+  try {
+    const masterSize = await fs.promises.stat(getFilePath(masterPath)).then((s) => s.size).catch(() => null)
+    await registerStoredFiles([
+      { entityType, entityId, fileRole: 'HLS_PLAYLIST', storagePath: masterPath, status: 'READY', fileSize: masterSize },
+      // HLS_SEGMENTS is a directory — no single fileSize; leave null.
+      { entityType, entityId, fileRole: 'HLS_SEGMENTS', storagePath: hlsRoot, status: 'READY' },
+    ])
+  } catch (err) {
+    console.error(`[WORKER] StoredFile HLS register failed for ${entityType} ${entityId}:`, err)
+  }
+}
+
 /**
  * Calculate output dimensions based on input metadata and target resolution
  * Pure function - easy to test!
@@ -688,6 +902,8 @@ export async function processPreview(
       width: dimensions.width,
       height: dimensions.height,
       watermarkText: settings.watermarkText,
+      // Keyframe-align every rendition so the HLS bundle supports seamless ABR switching.
+      alignKeyframes: true,
       shouldAbort: async () => {
         const stillRequested = await isPreviewResolutionStillRequested(
           projectId,

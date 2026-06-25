@@ -11,6 +11,7 @@ import {
   processPreview,
   processThumbnail,
   processTimelinePreviews,
+  processHlsPackaging,
   finalizeVideo,
   finalizeVideoWithoutPreview,
   updateVideoStatus,
@@ -25,6 +26,7 @@ import { getPreviewProcessingPhase, PROCESSING_PHASES } from '@/lib/video-proces
 import { recalculateAndStoreProjectTotalBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectDiskBytes } from '@/lib/project-total-bytes'
 import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation, getDynamicThreadsPerJob } from '@/lib/cpu-config'
 import { isS3Mode } from '@/lib/s3-storage'
+import { HLS_PACKAGE_VERSION } from '@/lib/video-stream-url'
 
 /**
  * Returns a throttled progress callback (max 1 DB write per 500 ms) for tracking
@@ -69,9 +71,11 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     projectId,
     timelineOnly,
     thumbnailOnly,
+    hlsOnly,
     requestedPreviewResolutions,
     regenerateThumbnail,
     regenerateTimelinePreviews,
+    regenerateHls,
   } = job.data
   const previewOnly =
     Array.isArray(requestedPreviewResolutions) &&
@@ -87,6 +91,12 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
 
   if (thumbnailOnly) {
     return processThumbnailOnly(videoId, storagePath, projectId)
+  }
+
+  // HLS-only: (re)package HLS from already-generated previews. Video stays READY — used by
+  // the backfill and to recover/regenerate HLS without a full transcode.
+  if (hlsOnly) {
+    return processHlsOnly(videoId, projectId)
   }
 
   if (previewOnly) {
@@ -247,6 +257,9 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       if (!updated) return
     }
 
+    // Stage 8: Package HLS from the finalized previews (S3 mode only; non-fatal).
+    await maybePackageHls(videoId, projectId, tempFiles, regenerateHls)
+
     await Promise.all([
       recalculateAndStoreProjectTotalBytes(projectId),
       recalculateAndStoreProjectPreviewBytes(projectId),
@@ -271,6 +284,67 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     // Release active job slot so remaining jobs can scale up threads.
     decrementActiveVideoJobs()
     // Always cleanup temp files (success or failure)
+    await cleanupTempFiles(tempFiles)
+  }
+}
+
+/**
+ * Package the just-generated MP4 previews into an HLS bundle and flag readiness.
+ * HLS is an enhancement layered on the previews (it fixes seeking behind Range-hostile
+ * proxies); a failure here must never fail the job — the MP4 path still works. Only runs
+ * in S3 mode, since HLS is delivered direct-from-R2 (no benefit on local disk).
+ */
+async function maybePackageHls(
+  videoId: string,
+  projectId: string,
+  tempFiles: TempFiles,
+  regenerateHls?: boolean,
+): Promise<void> {
+  if (regenerateHls === false) return
+  if (!isS3Mode()) return
+  try {
+    const result = await processHlsPackaging(videoId, projectId, tempFiles)
+    await updateVideoRecord(
+      videoId,
+      {
+        hlsReady: result.ready,
+        // Stamp the packaging version so the player knows the renditions are keyframe-aligned
+        // (ABR-safe). Previews are always transcoded with alignment now, so a successful
+        // packaging implies an aligned, ABR-ready bundle.
+        hlsVersion: result.ready ? HLS_PACKAGE_VERSION : 0,
+        processingPhase: null,
+      },
+      { context: 'persisting HLS ready flag', ignoreMissing: true },
+    )
+  } catch (err) {
+    console.error(`[WORKER] HLS packaging failed for video ${videoId}:`, err)
+    await updateVideoRecord(
+      videoId,
+      { hlsReady: false, hlsVersion: 0, processingPhase: null },
+      { context: 'clearing HLS ready flag after failure', ignoreMissing: true },
+    ).catch(() => {})
+  }
+}
+
+/**
+ * HLS-only job: (re)package HLS from a video's existing previews without transcoding.
+ * The video keeps its current status (typically READY) — there's no playback interruption.
+ * Used by the backfill and to recover HLS for already-processed videos.
+ */
+async function processHlsOnly(videoId: string, projectId: string) {
+  console.log(`[WORKER] HLS-only packaging for video ${videoId}`)
+  const tempFiles: TempFiles = {}
+  incrementActiveVideoJobs()
+  try {
+    await maybePackageHls(videoId, projectId, tempFiles)
+  } catch (error) {
+    if (isVideoRecordMissingError(error)) {
+      console.warn(`[WORKER] Video ${videoId} was deleted during HLS packaging; skipping.`)
+      return
+    }
+    throw error
+  } finally {
+    decrementActiveVideoJobs()
     await cleanupTempFiles(tempFiles)
   }
 }
@@ -373,6 +447,9 @@ async function processPreviewOnly(
         { context: 'finalizing no-op preview-only generation', ignoreMissing: true }
       )
     }
+
+    // Previews just changed — re-package HLS to match (S3 mode only; non-fatal).
+    await maybePackageHls(videoId, projectId, tempFiles)
 
     await Promise.all([
       recalculateAndStoreProjectTotalBytes(projectId),

@@ -25,6 +25,8 @@ export interface VideoProcessingJob {
   projectId: string
   /** When true, skip transcode/thumbnail and only generate timeline preview sprites. */
   timelineOnly?: boolean
+  /** When true, skip transcode/thumbnail/timeline and only (re)package HLS from existing previews. */
+  hlsOnly?: boolean
   /** When true, regenerate only the thumbnail and leave previews/timeline assets untouched. */
   thumbnailOnly?: boolean
   /** Optional subset of preview resolutions to generate instead of the full configured set. */
@@ -33,6 +35,8 @@ export interface VideoProcessingJob {
   regenerateThumbnail?: boolean
   /** When false, keep existing timeline preview assets untouched. */
   regenerateTimelinePreviews?: boolean
+  /** When false, skip HLS (re)packaging. Defaults to packaging whenever previews are (re)generated. */
+  regenerateHls?: boolean
 }
 
 export interface AssetProcessingJob {

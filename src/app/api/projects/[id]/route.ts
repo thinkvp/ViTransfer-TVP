@@ -15,9 +15,11 @@ import {
   allocateUniqueStorageName,
   buildPreviewsRoot,
   buildProjectStorageRoot,
+  buildVideoHlsStorageRoot,
   getStoragePathBasename,
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
+import { HLS_PACKAGE_VERSION } from '@/lib/video-stream-url'
 import { cancelProjectJobs, cancelProjectPreviewResolutionJobs } from '@/lib/cancel-project-jobs'
 import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { asNumberBigInt } from '@/lib/utils'
@@ -1026,6 +1028,60 @@ export async function PATCH(
         await cancelProjectPreviewResolutionJobs(project.id, removedPreviewResolutions).catch((err) => {
           console.error('[PROJECT UPDATE] Error cancelling obsolete preview jobs after settings change:', err)
         })
+
+        // Reclaim storage: delete the removed resolution's previews (MP4 + HLS) for every
+        // video in the project, rather than leaving orphaned renditions behind. (Re-adding
+        // the resolution later will re-encode it.)
+        try {
+          const resolutionToRole: Record<PreviewResolution, FileRole> = {
+            '480p': 'PREVIEW_480',
+            '720p': 'PREVIEW_720',
+            '1080p': 'PREVIEW_1080',
+          }
+          const removedRoles = removedPreviewResolutions.map((r) => resolutionToRole[r])
+
+          const projectVideos = await prisma.video.findMany({
+            where: { projectId: project.id },
+            select: { id: true, hlsReady: true, hlsVersion: true },
+          })
+          const videoIds = projectVideos.map((v) => v.id)
+
+          if (videoIds.length > 0) {
+            // 1) Drop the removed-resolution MP4 preview files + their StoredFile rows.
+            const removedStored = await getStoredFileRecords('VIDEO', videoIds, {
+              fileRoles: removedRoles,
+              select: { storagePath: true },
+            })
+            await Promise.allSettled(removedStored.map((f) => deleteFile(f.storagePath).catch(() => {})))
+            await deleteStoredFilesByCriteria({ entityType: 'VIDEO', entityIds: videoIds, fileRoles: removedRoles })
+
+            // 2) Make HLS match. For ABR-ready (keyframe-aligned) bundles, repackage from the
+            //    remaining previews — a cheap `-c copy` remux (the packager wipes hls/ first),
+            //    so the master drops the removed rendition. For legacy non-aligned bundles,
+            //    just delete the bundle: repackaging would falsely stamp it ABR-ready, and it
+            //    rebuilds correctly on the next full reprocess.
+            const videoQueue = getVideoQueue()
+            for (const v of projectVideos) {
+              if (!v.hlsReady) continue
+              if (v.hlsVersion >= HLS_PACKAGE_VERSION) {
+                await videoQueue.add('process-video', { videoId: v.id, projectId: project.id, storagePath: '', hlsOnly: true }).catch(() => {})
+              } else {
+                await deleteDirectory(buildVideoHlsStorageRoot(project.id, v.id)).catch(() => {})
+                await deleteStoredFilesByCriteria({ entityType: 'VIDEO', entityIds: [v.id], fileRoles: ['HLS_PLAYLIST', 'HLS_SEGMENTS'] })
+                await prisma.video.update({ where: { id: v.id }, data: { hlsReady: false, hlsVersion: 0 } }).catch(() => {})
+              }
+            }
+
+            // Refresh precomputed storage totals so the dashboard reflects the freed space now.
+            await Promise.allSettled([
+              recalculateAndStoreProjectTotalBytes(project.id),
+              recalculateAndStoreProjectPreviewBytes(project.id),
+              recalculateAndStoreProjectDiskBytes(project.id),
+            ])
+          }
+        } catch (err) {
+          console.error('[PROJECT UPDATE] Error deleting previews for removed resolutions:', err)
+        }
       }
     }
     } catch (error) {
@@ -1178,17 +1234,25 @@ export async function PATCH(
           // timeline sprites/VTT, and the video-asset still image (PREVIEW_IMAGE).
           const videoPreviewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080']
           const assetPreviewRoles: FileRole[] = ['PREVIEW_MP4']
+          // HLS bundles are heavy playable renditions too — shed them on close (the hls/ dir
+          // per video + per asset). Reopen re-enqueues preview generation, which repackages HLS.
+          const hlsDirRole: FileRole = 'HLS_SEGMENTS'
 
           // Get paths to delete from storage
-          const [videoStored, assetStored] = await Promise.all([
+          const [videoStored, assetStored, videoHlsDirs, assetHlsDirs] = await Promise.all([
             videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: videoPreviewRoles, select: { storagePath: true } }) : [],
             videoAssetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', videoAssetIds, { fileRoles: assetPreviewRoles, select: { storagePath: true } }) : [],
+            videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: [hlsDirRole], select: { storagePath: true } }) : [],
+            videoAssetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', videoAssetIds, { fileRoles: [hlsDirRole], select: { storagePath: true } }) : [],
           ])
           const allStoredFiles = [...videoStored, ...assetStored]
 
-          // Delete files from storage
+          // Delete files from storage (HLS bundles are whole directories).
           await Promise.allSettled(
             allStoredFiles.map(f => deleteFile(f.storagePath).catch(() => {}))
+          )
+          await Promise.allSettled(
+            [...videoHlsDirs, ...assetHlsDirs].map(f => deleteDirectory(f.storagePath).catch(() => {}))
           )
 
           // Delete StoredFile records (no updatedAt bump on Video — raw deletion)
@@ -1196,14 +1260,14 @@ export async function PATCH(
             await deleteStoredFilesByCriteria({
               entityType: 'VIDEO',
               entityIds: videoIds,
-              fileRoles: videoPreviewRoles,
+              fileRoles: [...videoPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
             })
           }
           if (videoAssetIds.length > 0) {
             await deleteStoredFilesByCriteria({
               entityType: 'VIDEO_ASSET',
               entityIds: videoAssetIds,
-              fileRoles: assetPreviewRoles,
+              fileRoles: [...assetPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
             })
           }
 
