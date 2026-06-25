@@ -2248,9 +2248,18 @@ export default function VideoPlayer({
                 onPointerCancel={handleVideoPointerCancel}
                 onLostPointerCapture={handleVideoLostPointerCapture}
                 onClick={togglePlayPause}
+                controlsList={!isAdmin ? 'nodownload' : undefined}
                 style={{
                   objectFit: 'contain',
                   backgroundColor: isLgViewport ? '#000' : 'transparent',
+                  // Suppress the native mobile long-press media callout ("Save/Download
+                  // Video…"). onContextMenu covers desktop right-click and Android, but
+                  // iOS Safari's touch callout needs this CSS. The long-press-to-2x
+                  // gesture is pointer-event based, so it keeps working. Non-admin only,
+                  // matching onContextMenu (admins keep native save).
+                  ...(!isAdmin
+                    ? { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }
+                    : {}),
                 }}
               />
             ) : (

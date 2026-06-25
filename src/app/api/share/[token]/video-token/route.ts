@@ -4,6 +4,7 @@ import { getShareContext } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFileRecords } from '@/lib/stored-file'
+import { getDirectStreamUrl } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -60,6 +61,7 @@ export async function GET(
   let project: { id: string; slug: string; enableVideos: boolean | null } | null
   let video: { id: string; projectId: string; approved: boolean } | null
   let storedRoles = new Set<string>()
+  const storedPaths = new Map<string, string>()
   try {
     project = await prisma.project.findUnique({
       where: { id: shareContext.projectId },
@@ -87,11 +89,13 @@ export async function GET(
       return NextResponse.json({ error: 'Video not found' }, { status: 404 })
     }
 
-    // Resolve available file roles from StoredFile registry
+    // Resolve available file roles + paths from StoredFile registry. Roles gate which
+    // qualities may be issued; paths let us mint a direct-to-R2 stream URL (Option B).
     const storedFiles = await getStoredFileRecords('VIDEO', [videoId], {
-      select: { fileRole: true },
+      select: { fileRole: true, storagePath: true },
     })
     storedRoles = new Set(storedFiles.map(f => f.fileRole))
+    for (const f of storedFiles) storedPaths.set(f.fileRole, f.storagePath)
   } catch (error) {
     console.error('[SHARE] Failed to load project/video:', error)
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 })
@@ -112,7 +116,20 @@ export async function GET(
       sessionId
     )
 
-    const response = NextResponse.json({ token: tokenValue })
+    // Option B: in S3 mode, also hand back a presigned R2 URL the player can stream
+    // directly (bypassing the /api/content 302 redirect that breaks Range-seeking behind
+    // some corporate proxies). Null for local mode / non-stream qualities — the client
+    // then falls back to the token-gated /api/content URL. Approval is already enforced
+    // by canIssueShareVideoToken above; original is only a fallback when approved.
+    const streamUrl = await getDirectStreamUrl({
+      storedPaths,
+      quality,
+      canServeOriginal: video!.approved,
+      sessionId,
+      videoId: video!.id,
+    }).catch(() => null)
+
+    const response = NextResponse.json({ token: tokenValue, streamUrl })
     response.headers.set('Cache-Control', 'no-store')
     response.headers.set('Pragma', 'no-cache')
     return response

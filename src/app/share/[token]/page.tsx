@@ -1010,6 +1010,32 @@ export default function SharePage() {
     return data.token || ''
   }, [token, shareToken, handleSessionExpired])
 
+  // Like fetchVideoToken but also returns the optional direct-to-R2 stream URL (Option B).
+  // In S3 mode the server hands back a presigned URL the player can stream directly,
+  // bypassing the /api/content redirect; `streamUrl` is '' for local mode / non-stream
+  // qualities, in which case callers fall back to the token-gated /api/content URL.
+  const fetchVideoStream = useCallback(async (
+    videoId: string,
+    quality: string,
+  ): Promise<{ token: string; streamUrl: string }> => {
+    if (!shareToken) return { token: '', streamUrl: '' }
+    const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
+      headers: {
+        Authorization: `Bearer ${shareToken}`,
+      }
+    })
+    if (response.status === 401) {
+      await handleSessionExpired(response)
+      return { token: '', streamUrl: '' }
+    }
+    if (!response.ok) return { token: '', streamUrl: '' }
+    const data = await response.json()
+    return {
+      token: data.token || '',
+      streamUrl: typeof data.streamUrl === 'string' ? data.streamUrl : '',
+    }
+  }, [token, shareToken, handleSessionExpired])
+
   // Fire the queued upload-access requests as one (chunked) batch POST and fan the
   // results back out to each waiting caller. Replaces the previous one-POST-per-file
   // pattern that the visible-tile observer triggered for every file in a folder.
@@ -2071,6 +2097,12 @@ export default function SharePage() {
 
     const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
 
+    // Prefer the direct-to-R2 stream URL when the server provides one (Option B);
+    // otherwise fall back to the token-gated /api/content redirect.
+    const buildStreamUrl = (s: { token: string; streamUrl: string }): string =>
+      s.streamUrl || (s.token ? `/api/content/${s.token}` : '')
+    const emptyStream = () => Promise.resolve({ token: '', streamUrl: '' })
+
     return Promise.all(
       videos.map(async (video: any) => {
         const cached = tokenCacheRef.current.get(video.id)
@@ -2085,38 +2117,38 @@ export default function SharePage() {
 
         const request = (async () => {
           try {
-            let streamToken480p = ''
-            let streamToken720p = ''
-            let streamToken1080p = ''
-            let downloadToken = null
-            let originalStreamToken = ''
+            let streamUrl480p = ''
+            let streamUrl720p = ''
+            let streamUrl1080p = ''
+            let streamUrlOriginal = ''
+            let downloadToken: string | null = null
 
             if (video.approved) {
               // Approval unlocks original download, but playback should use preview streams.
               // Only request tokens for resolutions that have an actual preview file so that
               // the VideoPlayer's quality selector reflects what is genuinely available.
-              const [origToken, token480, token720, token1080] = await Promise.all([
-                fetchVideoToken(video.id, 'original'),
-                video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
-                video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
-                video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
+              const [orig, s480, s720, s1080] = await Promise.all([
+                fetchVideoStream(video.id, 'original'),
+                video.preview480Path ? fetchVideoStream(video.id, '480p') : emptyStream(),
+                video.preview720Path ? fetchVideoStream(video.id, '720p') : emptyStream(),
+                video.preview1080Path ? fetchVideoStream(video.id, '1080p') : emptyStream(),
               ])
-              downloadToken = origToken || null
-              originalStreamToken = origToken || ''
-              // Do NOT fall back to origToken here; streamUrlOriginal covers the no-preview case.
-              streamToken480p = token480
-              streamToken720p = token720
-              streamToken1080p = token1080
+              downloadToken = orig.token || null
+              // Do NOT fall back to the original here; streamUrlOriginal covers the no-preview case.
+              streamUrlOriginal = buildStreamUrl(orig)
+              streamUrl480p = buildStreamUrl(s480)
+              streamUrl720p = buildStreamUrl(s720)
+              streamUrl1080p = buildStreamUrl(s1080)
             } else {
               // Unapproved: only previews are accessible.
-              const [token480, token720, token1080] = await Promise.all([
-                video.preview480Path ? fetchVideoToken(video.id, '480p') : Promise.resolve(''),
-                video.preview720Path ? fetchVideoToken(video.id, '720p') : Promise.resolve(''),
-                video.preview1080Path ? fetchVideoToken(video.id, '1080p') : Promise.resolve(''),
+              const [s480, s720, s1080] = await Promise.all([
+                video.preview480Path ? fetchVideoStream(video.id, '480p') : emptyStream(),
+                video.preview720Path ? fetchVideoStream(video.id, '720p') : emptyStream(),
+                video.preview1080Path ? fetchVideoStream(video.id, '1080p') : emptyStream(),
               ])
-              streamToken480p = token480
-              streamToken720p = token720
-              streamToken1080p = token1080
+              streamUrl480p = buildStreamUrl(s480)
+              streamUrl720p = buildStreamUrl(s720)
+              streamUrl1080p = buildStreamUrl(s1080)
             }
 
             // Prefer the thumbnail URL minted into the share payload (no extra round-trip).
@@ -2145,10 +2177,10 @@ export default function SharePage() {
 
             const tokenized = {
               ...video,
-              streamUrl480p: streamToken480p ? `/api/content/${streamToken480p}` : '',
-              streamUrl720p: streamToken720p ? `/api/content/${streamToken720p}` : '',
-              streamUrl1080p: streamToken1080p ? `/api/content/${streamToken1080p}` : '',
-              streamUrlOriginal: originalStreamToken ? `/api/content/${originalStreamToken}` : '',
+              streamUrl480p,
+              streamUrl720p,
+              streamUrl1080p,
+              streamUrlOriginal,
               downloadUrl: downloadToken ? `/api/content/${downloadToken}?download=true` : null,
               thumbnailUrl,
               timelineVttUrl,
@@ -2169,7 +2201,7 @@ export default function SharePage() {
         return request
       })
     )
-  }, [shareToken, project, fetchVideoToken])
+  }, [shareToken, project, fetchVideoToken, fetchVideoStream])
 
   const refreshViewVideoTokens = useCallback(async (force = false) => {
     if (project?.enableVideos === false) return

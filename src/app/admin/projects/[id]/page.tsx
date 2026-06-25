@@ -100,12 +100,12 @@ export default function ProjectPage() {
     setProjectStorageRefresh((v) => v + 1)
   }, [])
 
-  // Mobile edge-swipe navigation: drag in from the left edge → share page,
-  // drag in from the right edge → back to the projects dashboard.
+  // Mobile edge-swipe navigation: drag in from the left edge → back to the
+  // projects dashboard, drag in from the right edge → forward to the share page.
   const canSwipeToShare = canAccessSharePage && project?.status !== 'CLOSED'
   useEdgeSwipeNavigation({
-    onSwipeRight: canSwipeToShare ? () => router.push(`/admin/projects/${id}/share`) : undefined,
-    onSwipeLeft: () => router.push('/admin/projects'),
+    onSwipeRight: () => router.push('/admin/projects'),
+    onSwipeLeft: canSwipeToShare ? () => router.push(`/admin/projects/${id}/share`) : undefined,
   })
 
   useEffect(() => {

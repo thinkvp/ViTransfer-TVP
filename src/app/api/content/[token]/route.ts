@@ -15,6 +15,7 @@ import { recordClientActivity } from '@/lib/client-activity'
 import { registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { createWebReadableStream } from '@/lib/stream-utils'
+import { resolveStreamStoragePath } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -365,16 +366,16 @@ export async function GET(
           filePath = `${spriteDir(spritesBasePath)}${spriteFile}`
           contentType = 'image/jpeg'
         }
-      } else if (verifiedToken.quality === 'original' || verifiedToken.quality === 'download') {
-        if (canServeOriginal) {
-          filePath = originalPath
-        }
-      } else if (verifiedToken.quality === '1080p') {
-        filePath = storedPaths.get('PREVIEW_1080') || storedPaths.get('PREVIEW_720') || storedPaths.get('PREVIEW_480') || (canServeOriginal ? originalPath : null)
-      } else if (verifiedToken.quality === '720p') {
-        filePath = storedPaths.get('PREVIEW_720') || storedPaths.get('PREVIEW_1080') || storedPaths.get('PREVIEW_480') || (canServeOriginal ? originalPath : null)
-      } else if (verifiedToken.quality === '480p') {
-        filePath = storedPaths.get('PREVIEW_480') || storedPaths.get('PREVIEW_720') || storedPaths.get('PREVIEW_1080') || (canServeOriginal ? originalPath : null)
+      } else if (
+        verifiedToken.quality === 'original' ||
+        verifiedToken.quality === 'download' ||
+        verifiedToken.quality === '1080p' ||
+        verifiedToken.quality === '720p' ||
+        verifiedToken.quality === '480p'
+      ) {
+        // Shared with the token-issuing endpoints (Option B direct-stream URLs) so the
+        // quality→path fallback can never drift between the two code paths.
+        filePath = resolveStreamStoragePath(storedPaths, verifiedToken.quality, canServeOriginal)
       }
     }
 

@@ -4,6 +4,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFilePathForProject } from '@/lib/stored-file'
+import { getDirectAssetStreamUrl } from '@/lib/video-stream-url'
 
 /**
  * Generate a temporary download token for asset downloads (admins and share users)
@@ -108,9 +109,16 @@ export async function POST(
       ? `/api/content/${token}?assetId=${assetId}&assetPreview=1`
       : null
 
+    // Option B for asset videos: in S3 mode hand back a direct presigned R2 URL for the
+    // generated playback preview so seeking doesn't break behind redirect-mangling
+    // proxies. Falls back to the token-gated /api/content?assetPlayback=1 redirect.
+    const directPlaybackUrl = isPreviewableVideo && hasReadyGeneratedPlaybackPreview
+      ? await getDirectAssetStreamUrl({ previewPath: previewMp4, sessionId, assetId }).catch(() => null)
+      : null
+
     const playbackUrl = isPreviewableVideo
       ? (hasReadyGeneratedPlaybackPreview
-          ? `/api/content/${token}?assetId=${assetId}&assetPlayback=1`
+          ? (directPlaybackUrl || `/api/content/${token}?assetId=${assetId}&assetPlayback=1`)
           : inlineAssetUrl)
       : (isAudioAsset ? inlineAssetUrl : null)
 

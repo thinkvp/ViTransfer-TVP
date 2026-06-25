@@ -7,7 +7,8 @@ import { getClientIpAddress } from '@/lib/utils'
 import { getRedis } from '@/lib/redis'
 import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
-import { getStoredFilePathForProject } from '@/lib/stored-file'
+import { getStoredFilePathForProject, getStoredFileRecords } from '@/lib/stored-file'
+import { getDirectStreamUrl } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -159,7 +160,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // Preview existence is resolved at content-delivery time via StoredFile.
   const wantTimeline = Boolean(link.project.timelinePreviewsEnabled) && Boolean(link.video.timelinePreviewsReady)
 
-  const [token480, token720, token1080, thumbToken, vttToken, spriteToken] = await Promise.all([
+  // Resolve StoredFile paths so we can mint direct-to-R2 stream URLs (Option B) in
+  // addition to the token-gated /api/content URLs used as a fallback.
+  const storedPaths = new Map<string, string>()
+  try {
+    const storedFiles = await getStoredFileRecords('VIDEO', [link.video.id], {
+      select: { fileRole: true, storagePath: true },
+    })
+    for (const f of storedFiles) storedPaths.set(f.fileRole, f.storagePath)
+  } catch {
+    // Best-effort; without paths we simply fall back to /api/content URLs below.
+  }
+  const canServeOriginal = link.video.approved
+
+  const [token480, token720, token1080, thumbToken, vttToken, spriteToken, direct480, direct720, direct1080] = await Promise.all([
     generateVideoAccessToken(link.video.id, link.project.id, '480p', request, sessionId).catch(() => ''),
     generateVideoAccessToken(link.video.id, link.project.id, '720p', request, sessionId).catch(() => ''),
     generateVideoAccessToken(link.video.id, link.project.id, '1080p', request, sessionId).catch(() => ''),
@@ -170,6 +184,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     wantTimeline
       ? generateVideoAccessToken(link.video.id, link.project.id, 'timeline-sprite', request, sessionId).catch(() => '')
       : Promise.resolve(''),
+    getDirectStreamUrl({ storedPaths, quality: '480p', canServeOriginal, sessionId, videoId: link.video.id }).catch(() => null),
+    getDirectStreamUrl({ storedPaths, quality: '720p', canServeOriginal, sessionId, videoId: link.video.id }).catch(() => null),
+    getDirectStreamUrl({ storedPaths, quality: '1080p', canServeOriginal, sessionId, videoId: link.video.id }).catch(() => null),
   ])
 
   const payload = {
@@ -189,9 +206,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       approved: link.video.approved,
       hasThumbnail,
       timelinePreviewsReady: link.video.timelinePreviewsReady,
-      streamUrl480p: token480 ? `/api/content/${token480}` : '',
-      streamUrl720p: token720 ? `/api/content/${token720}` : '',
-      streamUrl1080p: token1080 ? `/api/content/${token1080}` : '',
+      // Prefer the direct-to-R2 URL (Option B); fall back to the token-gated redirect.
+      streamUrl480p: direct480 || (token480 ? `/api/content/${token480}` : ''),
+      streamUrl720p: direct720 || (token720 ? `/api/content/${token720}` : ''),
+      streamUrl1080p: direct1080 || (token1080 ? `/api/content/${token1080}` : ''),
       downloadUrl: null,
       thumbnailUrl: thumbToken ? `/api/content/${thumbToken}` : null,
       timelineVttUrl: vttToken ? `/api/content/${vttToken}` : null,

@@ -6,6 +6,8 @@ import AdminHeader from '@/components/AdminHeader'
 import AdminMenuAccessGuard from '@/components/AdminMenuAccessGuard'
 import SessionMonitor from '@/components/SessionMonitor'
 import { useEffect, useRef } from 'react'
+import { usePathname } from 'next/navigation'
+import { consumePendingSwipe, runSwipeEntrance } from '@/lib/swipe-page-transition'
 
 function registerAdminPwa() {
   if (typeof window === 'undefined') return
@@ -35,6 +37,15 @@ export default function AdminLayout({
   children: React.ReactNode
 }) {
   const headerRef = useRef<HTMLDivElement>(null)
+  const pathname = usePathname()
+
+  // When a route change was triggered by an edge swipe, slide the freshly
+  // mounted page in from the opposite edge (the outgoing page has already
+  // animated itself off-screen and unmounted). No-op for normal navigation.
+  useEffect(() => {
+    const dir = consumePendingSwipe()
+    if (dir !== 0) runSwipeEntrance(dir)
+  }, [pathname])
 
   // Prevent caching of admin pages
   useEffect(() => {
@@ -90,9 +101,14 @@ export default function AdminLayout({
           <AdminHeader />
         </div>
         <div className="flex-1 min-h-0 flex flex-col overflow-x-hidden">
-          <AdminMenuAccessGuard>
-            {children}
-          </AdminMenuAccessGuard>
+          {/* Translatable surface for mobile edge-swipe navigation feedback
+              (see useEdgeSwipeNavigation). The parent clips overflow-x so the
+              page can slide without introducing a horizontal scrollbar. */}
+          <div id="admin-content-surface" className="flex-1 min-h-0 flex flex-col">
+            <AdminMenuAccessGuard>
+              {children}
+            </AdminMenuAccessGuard>
+          </div>
         </div>
         <SessionMonitor />
       </div>
