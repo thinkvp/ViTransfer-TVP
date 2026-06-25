@@ -335,6 +335,9 @@ export async function GET(
       comments: sanitizedComments,
       sharePassword: decryptedPassword,
       smtpConfigured,
+      // HLS is only packaged in S3 mode (delivered direct-from-R2); the admin UI uses this
+      // to decide whether to show per-video HLS-readiness state at all.
+      s3Mode: isS3Mode(),
       globalAllowAuthenticatedProjectSwitching: globalSettings?.defaultAllowAuthenticatedProjectSwitching ?? true,
       assignedUsers:
         (project as any).assignedUsers

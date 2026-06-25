@@ -821,6 +821,20 @@ export async function getStoredFileRecords(
 }
 
 /**
+ * Return the subset of the given user IDs that have a profile avatar registered in StoredFile.
+ * Used to avoid exposing /api/users/[id]/avatar URLs (and the resulting 404 + initials fallback)
+ * for users on default initials. One query for the whole batch.
+ */
+export async function getUserIdsWithAvatar(userIds: string[]): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set()
+  const rows = await getStoredFileRecords('USER_AVATAR', userIds, {
+    fileRoles: ['AVATAR'],
+    select: { entityId: true },
+  })
+  return new Set(rows.map((r) => r.entityId as string))
+}
+
+/**
  * Run an aggregate query on the StoredFile table.
  * Used by storage overview and project storage stats endpoints
  * that need fine-grained control over filtering.

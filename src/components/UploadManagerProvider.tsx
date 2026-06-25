@@ -46,6 +46,9 @@ export type ProcessingJob = {
   status: 'UPLOADING' | 'QUEUED' | 'PROCESSING' | 'READY'
   processingProgress: number
   processingPhase: string | null
+  /** True when the row is PROCESSING in the DB but has no backing queue job
+   * (worker died mid-transcode). Such a job can be manually cleared. */
+  stalled?: boolean
   allocatedThreads: number | null
   threadBudget: number | null
   // Composite rollup: this video version's assets (preview + timeline legs),

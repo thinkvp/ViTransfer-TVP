@@ -46,7 +46,11 @@ export function sanitizeComment(
   comment: any,
   isAdmin: boolean,
   isAuthenticated: boolean,
-  clientName?: string
+  clientName?: string,
+  // Set of author user IDs known to have a profile picture. When provided, avatarUrl is only
+  // exposed for those, so the client doesn't request /api/users/[id]/avatar (and log a 404)
+  // for authors on default initials. Omit to keep the legacy always-expose behaviour.
+  usersWithAvatar?: Set<string>,
 ) {
   const normalizedTimecode = normalizeTimecode(comment)
 
@@ -91,10 +95,14 @@ export function sanitizeComment(
         ? (comment?.recipient?.displayColor || comment?.displayColorSnapshot || null)
         : (comment?.displayColorSnapshot || null)
 
-  // Avatar URL: expose for USER-type comments when the user has a profile picture.
-  // The /api/users/[id]/avatar endpoint is rate-limited but requires no auth, so it's
-  // safe to expose in any context (admin or share page).
-  if (authorType === 'USER' && comment?.userId) {
+  // Avatar URL: expose for USER-type comments only when the author actually has a profile
+  // picture (so authors on default initials don't trigger a 404 on /api/users/[id]/avatar).
+  // The endpoint is rate-limited but needs no auth, so it's safe to expose in any context.
+  if (
+    authorType === 'USER' &&
+    comment?.userId &&
+    (usersWithAvatar ? usersWithAvatar.has(comment.userId) : true)
+  ) {
     sanitized.avatarUrl = `/api/users/${comment.userId}/avatar`
   }
 

@@ -33,6 +33,7 @@ import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
 import { reconcileAccountingFilesBytes } from '@/lib/accounting/file-storage'
 import { cleanupProjectStorageOrphans } from '@/lib/project-storage-orphan-cleanup'
 import { findDanglingStoredFiles, deleteStoredFilesByIds } from '@/lib/stored-file'
+import { reconcileStuckVideos } from '@/lib/reconcile-stuck-videos'
 import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNotifications } from '@/lib/orphan-project-files-notification'
 import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
 import { processAccountingReminders } from '@/lib/accounting-reminders'
@@ -969,6 +970,21 @@ async function main() {
   console.log('  → Checks on the hour for scheduled summaries')
   console.log('  → Retries every 2 minutes when sends fail (max 3 attempts)')
   console.log('  → IMMEDIATE notifications sent instantly (not in batches)')
+
+  // Recover videos stuck in QUEUED/PROCESSING with no backing queue job (worker
+  // killed mid-transcode). These are otherwise a UI dead zone; flip them to ERROR
+  // so they surface as failed and can be reprocessed. See reconcileStuckVideos.
+  console.log('[WORKER] Reconciling stuck video processing rows...')
+  try {
+    const { recovered } = await reconcileStuckVideos()
+    if (recovered > 0) {
+      console.log(`[WORKER] Recovered ${recovered} stuck video row(s) → ERROR (reprocess to retry)`)
+    } else {
+      console.log('[WORKER] No stuck video rows found')
+    }
+  } catch (err) {
+    console.error('[WORKER] Stuck video reconciliation failed:', err)
+  }
 
   // Run cleanup on startup
   console.log('Running initial TUS upload cleanup...')

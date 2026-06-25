@@ -10,7 +10,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { deleteFile } from '@/lib/storage'
-import { getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { getStoredFileRecords, deleteStoredFilesByCriteria, getUserIdsWithAvatar } from '@/lib/stored-file'
 export const runtime = 'nodejs'
 
 // Prevent static generation for this route
@@ -197,11 +197,17 @@ export async function PATCH(
     // Sanitize response - never expose PII
     // Priority: companyName → primary recipient → undefined
     const primaryRecipientName = existingComment.project.companyName || existingComment.project.recipients[0]?.name || undefined
+    const usersWithAvatar = await getUserIdsWithAvatar([...new Set(
+      allComments
+        .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
+        .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
+    )])
     const sanitizedComments = allComments.map((comment: any) => sanitizeComment(
       comment,
       isAdmin,
       isAuthenticated,
       primaryRecipientName,
+      usersWithAvatar,
     ))
 
     return NextResponse.json(sanitizedComments)

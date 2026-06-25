@@ -4,7 +4,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
-import { batchResolveFileSizes } from '@/lib/stored-file'
+import { batchResolveFileSizes, getUserIdsWithAvatar } from '@/lib/stored-file'
 import { getRateLimitSettings } from '@/lib/settings'
 export const runtime = 'nodejs'
 
@@ -158,12 +158,22 @@ export async function GET(
       }
     }
 
+    // Resolve which comment authors actually have an avatar, so we don't emit avatar URLs
+    // (and 404s) for users on default initials.
+    const authorUserIds = [...new Set(
+      comments
+        .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
+        .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
+    )]
+    const usersWithAvatar = await getUserIdsWithAvatar(authorUserIds)
+
     // Sanitize comments - never expose PII to non-admins
     const sanitizedComments = comments.map((comment: any) => sanitizeComment(
       comment,
       isAdmin,
       isAuthenticated,
       fallbackName,
+      usersWithAvatar,
     ))
 
     return NextResponse.json(sanitizedComments, { headers: noStoreHeaders })

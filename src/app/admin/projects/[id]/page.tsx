@@ -879,6 +879,7 @@ export default function ProjectPage() {
                   maxRevisions={project.maxRevisions}
                   enableRevisions={project.enableRevisions}
                   watermarkEnabled={project.watermarkEnabled}
+                  s3Mode={project.s3Mode}
                 />
               </div>
             )}

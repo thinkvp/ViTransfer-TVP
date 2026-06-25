@@ -221,6 +221,13 @@ export async function GET(request: NextRequest) {
 
         const transcodeInWave = transcodeStatus === 'QUEUED' || transcodeStatus === 'PROCESSING'
 
+        // Stalled: the DB says this video is mid-transcode but no queue job (active
+        // or waiting) backs it. The worker died and the BullMQ job is gone, so
+        // nothing will ever finish it. Surfaced so the UI can offer a manual clear
+        // for a state that is otherwise a dead zone (neither clear nor reprocess
+        // touch a PROCESSING video). The startup reconciler heals these too.
+        const stalled = video.status === 'PROCESSING' && !queueStatus
+
         const assets = (assetsByVideo.get(video.id) ?? []).slice().sort(
           (a, b) => assetStatusRank[a.status] - assetStatusRank[b.status] || a.fileName.localeCompare(b.fileName),
         )
@@ -256,6 +263,7 @@ export async function GET(request: NextRequest) {
           // Phase drives the transcode-side label; null once only assets remain.
           processingPhase: transcodeInWave ? processingPhase : null,
           transcodeInWave,
+          stalled,
           assets,
           assetTotal,
           assetActive,
@@ -300,6 +308,9 @@ export async function GET(request: NextRequest) {
         status: job.status,
         processingProgress: job.processingProgress,
         processingPhase: job.processingPhase,
+        // True only for orphaned PROCESSING rows (no backing queue job) — lets the
+        // UI surface a manual clear that resets the video to ERROR for reprocessing.
+        stalled: job.stalled,
         allocatedThreads,
         threadBudget: allocatedThreads ? configuredThreadPool : null,
         // Composite asset rollup (preview + timeline legs per asset).
@@ -566,11 +577,30 @@ export async function POST(request: NextRequest) {
         return forbidden()
       }
 
-      if (video.status !== 'QUEUED') {
-        return NextResponse.json({ error: 'Only queued video jobs can be cleared' }, { status: 409 })
+      // Clearable states: QUEUED (waiting to start) and a stalled PROCESSING row
+      // (worker died mid-transcode, no backing queue job). A genuinely-running
+      // PROCESSING video — one with an active BullMQ job — must not be cleared.
+      if (video.status !== 'QUEUED' && video.status !== 'PROCESSING') {
+        return NextResponse.json({ error: 'Only queued or stalled processing jobs can be cleared' }, { status: 409 })
       }
 
       const videoQueue = getVideoQueue()
+
+      // Re-check the queue server-side (don't trust the client's stalled flag):
+      // if a worker is actively processing this video, refuse — clearing would
+      // race the live transcode. Such a job self-heals via BullMQ stalled
+      // detection if its worker has in fact died.
+      if (video.status === 'PROCESSING') {
+        const activeJobs = await videoQueue.getJobs(['active'])
+        const hasActiveJob = activeJobs.some((job) => job?.data?.videoId === id)
+        if (hasActiveJob) {
+          return NextResponse.json(
+            { error: 'This video is still being processed by a worker. Wait for it to finish or fail.' },
+            { status: 409 },
+          )
+        }
+      }
+
       const queuedJobs = await videoQueue.getJobs(['waiting', 'prioritized', 'delayed'])
       let removedJobs = 0
 
@@ -581,12 +611,19 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // QUEUED → READY (nothing was produced; the original is intact). A stalled
+      // PROCESSING → ERROR: a half-finished transcode leaves incomplete previews,
+      // so mark it failed (eligible for the Reprocess action) rather than READY,
+      // which would present an unplayable video as good.
       await prisma.video.update({
         where: { id },
         data: {
-          status: 'READY',
+          status: video.status === 'PROCESSING' ? 'ERROR' : 'READY',
           processingPhase: null,
-          processingError: null,
+          processingProgress: 0,
+          processingError: video.status === 'PROCESSING'
+            ? 'Processing was interrupted (worker stopped) and cleared manually. Reprocess to retry.'
+            : null,
         },
       })
 

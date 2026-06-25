@@ -6,7 +6,7 @@ import { validateRequest, createCommentSchema } from '@/lib/validation'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { sanitizeComment } from '@/lib/comment-sanitization'
-import { batchResolveFileSizes } from '@/lib/stored-file'
+import { batchResolveFileSizes, getUserIdsWithAvatar } from '@/lib/stored-file'
 import { getSafeguardLimits } from '@/lib/settings'
 import { checkBodySize } from '@/lib/api-guard'
 import {
@@ -178,6 +178,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Resolve which authors have an avatar so we don't emit 404-ing avatar URLs for users
+    // on default initials.
+    const usersWithAvatar = await getUserIdsWithAvatar([...new Set(
+      allComments
+        .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
+        .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
+    )])
     // Sanitize the response data
     const sanitizedComments = allComments.map((comment: any) =>
       sanitizeComment(
@@ -185,6 +192,7 @@ export async function GET(request: NextRequest) {
         isAdmin,
         isAuthenticated,
         fallbackName,
+        usersWithAvatar,
       )
     )
 
@@ -499,9 +507,16 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Resolve which authors have an avatar so we don't emit 404-ing avatar URLs for users
+    // on default initials.
+    const usersWithAvatar = await getUserIdsWithAvatar([...new Set(
+      allComments
+        .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
+        .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
+    )])
     // Sanitize the response data
     const sanitizedComments = allComments.map((comment: any) =>
-      sanitizeComment(comment, isAdmin, isAuthenticated, fallbackName)
+      sanitizeComment(comment, isAdmin, isAuthenticated, fallbackName, usersWithAvatar)
     )
 
     return NextResponse.json(sanitizedComments, { headers: noStoreHeaders })

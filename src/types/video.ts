@@ -59,4 +59,9 @@ export interface Video {
   processingError?: string | null
   viewCount?: number
   downloadCount?: number
+  // HLS packaging state (S3 mode only). hlsReady=false on a READY video means segmented
+  // playback failed/was never built — it falls back to the single-file MP4 stream.
+  // hlsVersion 0 = legacy/none, >=1 = keyframe-aligned (ABR-safe).
+  hlsReady?: boolean
+  hlsVersion?: number
 }

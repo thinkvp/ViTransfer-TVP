@@ -33,6 +33,7 @@ interface AdminVideoManagerProps {
   maxRevisions?: number
   enableRevisions?: boolean
   watermarkEnabled?: boolean
+  s3Mode?: boolean
 }
 
 export default function AdminVideoManager({
@@ -49,6 +50,7 @@ export default function AdminVideoManager({
   maxRevisions,
   enableRevisions,
   watermarkEnabled = true,
+  s3Mode = false,
 }: AdminVideoManagerProps) {
   const router = useRouter()
 
@@ -483,6 +485,7 @@ export default function AdminVideoManager({
                     canApprove={canFullControl}
                     canManageAllowApproval={canFullControl}
                     watermarkEnabled={watermarkEnabled}
+                    s3Mode={s3Mode}
                   />
                 </div>
               </CardContent>

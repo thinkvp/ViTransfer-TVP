@@ -1,6 +1,26 @@
+'use client'
+
 import Image from 'next/image'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+
+// Matches the user-avatar endpoint URL so we can check existence before rendering the <img>.
+const USER_AVATAR_URL_RE = /^\/api\/users\/([^/?#]+)\/avatar(?:[?#].*)?$/
+
+// Module-level cache (deduped across every avatar instance): userId → Promise<hasAvatar>.
+// Persists for the session; an avatar uploaded mid-session shows after the next reload.
+const avatarExistsCache = new Map<string, Promise<boolean>>()
+function checkUserAvatarExists(userId: string): Promise<boolean> {
+  let p = avatarExistsCache.get(userId)
+  if (!p) {
+    p = fetch(`/api/users/${encodeURIComponent(userId)}/avatar/exists`)
+      .then((r) => (r.ok ? r.json() : { exists: false }))
+      .then((d) => d?.exists === true)
+      .catch(() => false)
+    avatarExistsCache.set(userId, p)
+  }
+  return p
+}
 
 function getUserInitials(name?: string | null, email?: string | null): string {
   const cleanedName = String(name || '').trim()
@@ -59,14 +79,32 @@ export function InitialsAvatar(props: {
 
   const [imgError, setImgError] = useState(false)
 
+  // For a user-avatar URL, confirm the avatar exists before rendering the <img>, so users on
+  // default initials don't trigger a 404. Any other URL is used directly (legacy behaviour).
+  const userId = avatarUrl ? (avatarUrl.match(USER_AVATAR_URL_RE)?.[1] ?? null) : null
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(
+    avatarUrl && !userId ? avatarUrl : null,
+  )
+  useEffect(() => {
+    setImgError(false)
+    if (!avatarUrl) { setResolvedSrc(null); return }
+    if (!userId) { setResolvedSrc(avatarUrl); return }
+    let cancelled = false
+    setResolvedSrc(null)
+    checkUserAvatarExists(userId).then((exists) => {
+      if (!cancelled) setResolvedSrc(exists ? avatarUrl : null)
+    })
+    return () => { cancelled = true }
+  }, [avatarUrl, userId])
+
   const initials = getUserInitials(name, email)
   const bg = typeof displayColor === 'string' && displayColor.trim() ? displayColor : '#64748b'
   const label = (title ?? String(name || email || '').trim()) || 'Recipient'
 
-  if (avatarUrl && !imgError) {
+  if (resolvedSrc && !imgError) {
     return (
       <Image
-        src={avatarUrl}
+        src={resolvedSrc}
         alt={label}
         title={label}
         aria-label={label}

@@ -97,6 +97,9 @@ type UnifiedJob = {
   sublabel?: string
   detail: string
   status: JobStatus
+  /** Transcode whose worker died mid-run (no backing queue job). Rendered with a
+   * warning icon instead of a spinner, and offers a manual clear. */
+  stalled?: boolean
   progress: number
   indeterminate: boolean
   /** Number of discrete items this job represents (1 for most; the batch size for grouped preview/social jobs). Drives project roll-up progress. */
@@ -193,6 +196,8 @@ function CompactJobRow({
             <CheckCircle2 className="w-3.5 h-3.5 text-success" />
           ) : isFailed ? (
             <XCircle className="w-3.5 h-3.5 text-destructive" />
+          ) : job.stalled ? (
+            <AlertTriangle className="w-3.5 h-3.5 text-warning" />
           ) : isActive ? (
             <Loader2 className="w-3.5 h-3.5 text-primary animate-spin" />
           ) : (
@@ -314,6 +319,8 @@ function JobRow({
               <CheckCircle2 className="w-4 h-4 text-success" />
             ) : isFailed ? (
               <XCircle className="w-4 h-4 text-destructive" />
+            ) : job.stalled ? (
+              <AlertTriangle className="w-4 h-4 text-warning" />
             ) : isActive ? (
               <Loader2 className="w-4 h-4 text-primary animate-spin" />
             ) : (
@@ -534,6 +541,11 @@ function normalizeProcessing(
   const assetText = hasAssets ? `${assetDone}/${assetTotal} asset${assetTotal === 1 ? '' : 's'}` : ''
   const activeStatusLine = [transcodeText, assetText].filter(Boolean).join(' · ') || phaseLabel || 'Processing'
 
+  // A stalled transcode (worker died, no backing queue job) is clearable like a
+  // queued one, but stays in the active section with a warning icon and label.
+  const isStalled = !!job.stalled && !isQueued
+  const clearable = isQueued || isStalled
+
   return {
     key: `transcode:${job.id}`,
     itemCount: 1 + assetTotal,
@@ -542,15 +554,18 @@ function normalizeProcessing(
     projectName: job.projectName,
     label: job.videoName,
     sublabel,
-    detail: job.projectName,
     status: isQueued ? 'queued' : 'active',
-    progress: isQueued ? 0 : progressPercent,
+    stalled: isStalled,
+    progress: isQueued || isStalled ? 0 : progressPercent,
     indeterminate: false,
-    statusLine: isQueued ? 'Queued for processing' : activeStatusLine,
-    statusLineRight: !isQueued && progressPercent > 0 ? `${progressPercent}%` : undefined,
+    detail: job.projectName,
+    statusLine: isStalled
+      ? 'Stalled — worker stopped. Clear to reset for reprocessing.'
+      : isQueued ? 'Queued for processing' : activeStatusLine,
+    statusLineRight: !isQueued && !isStalled && progressPercent > 0 ? `${progressPercent}%` : undefined,
     completedAt: 0,
-    canClear: isQueued && !!onClear,
-    onClear: isQueued ? onClear : undefined,
+    canClear: clearable && !!onClear,
+    onClear: clearable ? onClear : undefined,
     canDismiss: false,
     canPause: false,
     canResume: false,
@@ -1174,7 +1189,7 @@ export default function RunningJobsBell() {
       jobs.push(
         normalizeProcessing(
           p,
-          p.status === 'QUEUED' ? () => handleClearJob({ type: 'processing', id: p.id }) : undefined,
+          p.status === 'QUEUED' || p.stalled ? () => handleClearJob({ type: 'processing', id: p.id }) : undefined,
         ),
       )
     }

@@ -1111,6 +1111,11 @@ export default function VideoPlayer({
   // This keeps the mobile controls row from getting too cramped once Download is shown.
   const shouldHideSpeedControls = !isAdmin && !isGuest && isVideoApproved
 
+  // Suppress the native long-press/right-click "Save/Download Video" affordances for clients
+  // AND for the admin share *preview* (which passes hideDownloadButton to mirror the client).
+  // Admins on their own project views keep native save.
+  const suppressDownloadUi = !isAdmin || hideDownloadButton
+
   // Compute available qualities from the selected video's stream URLs
   const availableQualities = useMemo(() => {
     if (!selectedVideo) return [] as ('480p' | '720p' | '1080p')[]
@@ -2384,7 +2389,7 @@ export default function VideoPlayer({
                 }}
                 onPause={() => setIsPlaying(false)}
                 onEnded={() => setIsPlaying(false)}
-                onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
+                onContextMenu={suppressDownloadUi ? (e) => e.preventDefault() : undefined}
                 playsInline
                 preload={!isAdmin || hideDownloadButton ? 'auto' : 'metadata'}
                 onPointerDown={handleVideoPointerDown}
@@ -2397,12 +2402,12 @@ export default function VideoPlayer({
                 // disable PiP, block the context menu on the element, and the iOS-only
                 // touch-callout CSS. The long-press-to-2x gesture is pointer-event based,
                 // so it keeps working.
-                controlsList={!isAdmin ? 'nodownload noplaybackrate noremoteplayback' : undefined}
-                disablePictureInPicture={!isAdmin}
+                controlsList={suppressDownloadUi ? 'nodownload noplaybackrate noremoteplayback' : undefined}
+                disablePictureInPicture={suppressDownloadUi}
                 style={{
                   objectFit: 'contain',
                   backgroundColor: isLgViewport ? '#000' : 'transparent',
-                  ...(!isAdmin
+                  ...(suppressDownloadUi
                     ? { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }
                     : {}),
                 }}
