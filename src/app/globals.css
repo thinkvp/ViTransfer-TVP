@@ -226,6 +226,38 @@ input.no-picker-icon::-webkit-inner-spin-button {
     }
   }
 
+  /* YouTube-style double-tap seek indicator: pop in then fade away */
+  @keyframes yt-seek-pop {
+    0% {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+    25% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.1);
+    }
+  }
+
+  /* Centred play/pause tap flash */
+  @keyframes yt-tap-pulse {
+    0% {
+      opacity: 0;
+      transform: scale(0.7);
+    }
+    30% {
+      opacity: 0.95;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.3);
+    }
+  }
+
   /* Draft handle entrance animation for comment timelines */
   @keyframes comment-range-handle-left-nudge {
     0%,

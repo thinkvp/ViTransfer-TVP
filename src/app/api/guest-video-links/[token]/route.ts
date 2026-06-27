@@ -47,8 +47,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           title: true,
           status: true,
           enableVideos: true,
-          watermarkEnabled: true,
-          timelinePreviewsEnabled: true,
         },
       },
       video: {
@@ -159,7 +157,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   // Build tokenized URLs (mirrors /share/* behavior but for a single video and public access).
   // Preview existence is resolved at content-delivery time via StoredFile.
-  const wantTimeline = Boolean(link.project.timelinePreviewsEnabled) && Boolean(link.video.timelinePreviewsReady)
+  const wantTimeline = Boolean(link.video.timelinePreviewsReady)
 
   // Resolve StoredFile paths so we can mint direct-to-R2 stream URLs (Option B) in
   // addition to the token-gated /api/content URLs used as a fallback.
@@ -207,8 +205,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       id: link.project.id,
       title: link.project.title,
       status: link.project.status,
-      watermarkEnabled: link.project.watermarkEnabled,
-      timelinePreviewsEnabled: link.project.timelinePreviewsEnabled,
     },
     video: {
       id: link.video.id,

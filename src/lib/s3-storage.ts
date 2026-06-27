@@ -68,6 +68,12 @@ export function getS3Client(): S3Client {
     // calculate/validate checksums unless the server explicitly requests them.
     requestChecksumCalculation: 'WHEN_REQUIRED' as any,
     responseChecksumValidation: 'WHEN_REQUIRED' as any,
+    // R2 returns transient 500 InternalError under load. Give the SDK more attempts
+    // than the default (3) with adaptive backoff. Note: this only helps *replayable*
+    // bodies (Buffers/strings); a consumed stream still can't be retried by the SDK —
+    // which is why stream uploads use s3UploadFileWithRetry (re-opens the body).
+    maxAttempts: 5,
+    retryMode: 'adaptive',
   })
 
   return g.__s3Client
@@ -110,6 +116,66 @@ export async function s3UploadFile(
       ContentLength: size,
     })
   )
+}
+
+/**
+ * True for the transient S3/R2 failures that are worth retrying: server-side 5xx
+ * (notably R2's `InternalError` 500s under load), throttling, request timeouts, and
+ * dropped TCP connections. Deterministic 4xx (auth, not-found, bad request) are not
+ * retried — re-issuing them only wastes time.
+ */
+export function isRetryableS3Error(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as { name?: string; Code?: string; code?: string; $metadata?: { httpStatusCode?: number } }
+  const status = e.$metadata?.httpStatusCode
+  if (typeof status === 'number' && status >= 500) return true
+  const tag = e.name || e.Code || e.code || ''
+  return /InternalError|Throttling|SlowDown|RequestTimeout|RequestTimeTooSkewed|ServiceUnavailable|PriorRequestNotComplete|ECONNRESET|ETIMEDOUT|EPIPE|ECONNREFUSED|EAI_AGAIN|TimeoutError/i.test(tag)
+}
+
+/** Run `fn`, retrying transient S3 errors with exponential backoff + jitter. */
+export async function withS3Retry<T>(
+  fn: (attempt: number) => Promise<T>,
+  opts: { attempts?: number; baseDelayMs?: number; label?: string } = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 5
+  const baseDelayMs = opts.baseDelayMs ?? 500
+  let lastErr: unknown
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn(attempt)
+    } catch (err) {
+      lastErr = err
+      if (attempt >= attempts || !isRetryableS3Error(err)) throw err
+      const backoff = baseDelayMs * 2 ** (attempt - 1)
+      const delay = backoff + Math.floor(Math.random() * baseDelayMs)
+      console.warn(
+        `[S3] transient error on ${opts.label ?? 'operation'} (attempt ${attempt}/${attempts}), retrying in ${delay}ms:`,
+        (err as { name?: string; Code?: string })?.name || (err as { Code?: string })?.Code || err,
+      )
+      await new Promise((r) => setTimeout(r, delay))
+    }
+  }
+  throw lastErr
+}
+
+/**
+ * Upload a file whose body comes from a *factory*, so each retry re-creates a fresh body.
+ * This is the only safe way to retry a stream upload: once a `Readable` is consumed it
+ * can't be replayed (the SDK reports "non-retryable streaming request"), so callers pass
+ * `() => fs.createReadStream(path)` and we re-open it per attempt.
+ */
+export async function s3UploadFileWithRetry(
+  key: string,
+  bodyFactory: () => Readable | Buffer,
+  contentType: string,
+  size: number,
+  opts: { attempts?: number } = {},
+): Promise<void> {
+  await withS3Retry(() => s3UploadFile(key, bodyFactory(), contentType, size), {
+    attempts: opts.attempts,
+    label: `upload ${key}`,
+  })
 }
 
 /** Download a file from S3. Returns the stream and the object's byte length (0 if unknown). */
@@ -656,6 +722,35 @@ export async function s3SumPrefixSize(prefix: string): Promise<number> {
   } while (continuationToken)
 
   return Math.max(0, total)
+}
+
+/**
+ * List every object under `prefix`, returning a map of full key → byte size. One paginated
+ * LIST instead of a HEAD per object — used to verify a whole bundle (e.g. HLS) cheaply.
+ */
+export async function s3ListPrefixSizes(prefix: string): Promise<Map<string, number>> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+  const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`
+
+  const out = new Map<string, number>()
+  let continuationToken: string | undefined
+  do {
+    const listResponse = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: normalizedPrefix,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      })
+    )
+    for (const obj of listResponse.Contents ?? []) {
+      if (obj.Key) out.set(obj.Key, Number(obj.Size || 0))
+    }
+    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  return out
 }
 
 // ---------------------------------------------------------------------------

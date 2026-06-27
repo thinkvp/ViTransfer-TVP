@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
         updatedAt: true,
         totalBytes: true,
         previewBytes: true,
-        diskBytes: true, watermarkEnabled: true,
+        diskBytes: true,
         sharePassword: true,
         authMode: true,
         hideFeedback: true,
@@ -91,8 +91,6 @@ export async function GET(request: NextRequest) {
             name: true,
           },
         },
-        maxRevisions: true,
-        enableRevisions: true,
         assignedUsers: {
           orderBy: { createdAt: 'asc' },
           select: {
@@ -247,8 +245,6 @@ export async function POST(request: NextRequest) {
       enableVideos,
       enablePhotos,
       enableUploads,
-      enableRevisions,
-      maxRevisions,
       restrictCommentsToLatestVersion,
       allowClientDeleteComments,
       isShareOnly,
@@ -440,14 +436,11 @@ export async function POST(request: NextRequest) {
       ? null
       : (trimmedPassword || null)
 
-    // Fetch default settings for watermark and preview resolution
+    // Fetch default settings for preview resolution
     const settings = await prisma.settings.findUnique({
       where: { id: 'default' },
       select: {
         defaultPreviewResolutions: true,
-        defaultWatermarkEnabled: true,
-        defaultWatermarkText: true,
-        defaultTimelinePreviewsEnabled: true,
         defaultAllowClientDeleteComments: true,
         defaultEnableClientUploads: true,
         defaultAllowClientUploadFiles: true,
@@ -479,8 +472,6 @@ export async function POST(request: NextRequest) {
           enableUploads: finalEnableUploads,
           sharePassword: encryptedSharePassword,
           authMode: resolvedAuthMode,
-          enableRevisions: isShareOnly ? false : (enableRevisions || false),
-          maxRevisions: isShareOnly ? 0 : (enableRevisions ? (maxRevisions || 3) : 0),
           restrictCommentsToLatestVersion: isShareOnly ? false : (restrictCommentsToLatestVersion || false),
           allowClientDeleteComments: isShareOnly ? false : (allowClientDeleteComments ?? settings?.defaultAllowClientDeleteComments ?? false),
           enableClientUploads: isShareOnly ? false : (settings?.defaultEnableClientUploads ?? true),
@@ -491,9 +482,6 @@ export async function POST(request: NextRequest) {
           hideFeedback: isShareOnly ? true : false,
           approvedAt: isShareOnly ? new Date() : null,
           previewResolutions: settings?.defaultPreviewResolutions || '[\"720p\"]',
-          watermarkEnabled: settings?.defaultWatermarkEnabled ?? true,
-          watermarkText: settings?.defaultWatermarkText || null,
-          timelinePreviewsEnabled: settings?.defaultTimelinePreviewsEnabled ?? false,
           clientNotificationSchedule: settings?.defaultClientNotificationSchedule || 'HOURLY',
           clientNotificationTime: settings?.defaultClientNotificationTime || null,
           startDate: startDate ? (parseProjectStartDateInput(startDate) ?? new Date()) : new Date(),

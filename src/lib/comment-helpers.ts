@@ -178,7 +178,7 @@ export async function sanitizeAndValidateContent(params: {
   // Sanitize HTML content
   const sanitizedContent = sanitizeCommentHtml(content)
 
-  // Sanitize authorName (same rules as watermark text)
+  // Sanitize authorName (alphanumeric, spaces, and safe punctuation only)
   let sanitizedAuthorName = authorName || null
   if (sanitizedAuthorName) {
     // Remove invalid characters

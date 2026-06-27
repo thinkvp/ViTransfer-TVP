@@ -14,12 +14,6 @@ const RESOLUTION_OPTIONS = [
 interface VideoProcessingSettingsSectionProps {
   defaultPreviewResolutions: string[]
   setDefaultPreviewResolutions: (value: string[]) => void
-  defaultWatermarkEnabled: boolean
-  setDefaultWatermarkEnabled: (value: boolean) => void
-  defaultTimelinePreviewsEnabled: boolean
-  setDefaultTimelinePreviewsEnabled: (value: boolean) => void
-  defaultWatermarkText: string
-  setDefaultWatermarkText: (value: string) => void
   defaultAllowClientDeleteComments: boolean
   setDefaultAllowClientDeleteComments: (value: boolean) => void
   defaultEnableClientUploads: boolean
@@ -51,12 +45,6 @@ interface VideoProcessingSettingsSectionProps {
 export function VideoProcessingSettingsSection({
   defaultPreviewResolutions,
   setDefaultPreviewResolutions,
-  defaultWatermarkEnabled,
-  setDefaultWatermarkEnabled,
-  defaultTimelinePreviewsEnabled,
-  setDefaultTimelinePreviewsEnabled,
-  defaultWatermarkText,
-  setDefaultWatermarkText,
   defaultAllowClientDeleteComments,
   setDefaultAllowClientDeleteComments,
   defaultEnableClientUploads,
@@ -133,52 +121,6 @@ export function VideoProcessingSettingsSection({
                 New projects will generate previews for these resolutions. Multiple resolutions enable a quality selector in the video player. Can be overridden per project.
               </p>
             </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label htmlFor="watermarkEnabled">Enable Watermarks</Label>
-                <p className="text-xs text-muted-foreground">
-                  Add watermarks to processed videos
-                </p>
-              </div>
-              <Switch
-                id="watermarkEnabled"
-                checked={defaultWatermarkEnabled}
-                onCheckedChange={setDefaultWatermarkEnabled}
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-2 mt-2 border-t border-border">
-              <div className="space-y-0.5">
-                <Label htmlFor="defaultTimelinePreviewsEnabled">Enable Timeline Previews</Label>
-                <p className="text-xs text-muted-foreground">
-                  Show preview thumbnails when hovering or scrubbing the timeline
-                </p>
-              </div>
-              <Switch
-                id="defaultTimelinePreviewsEnabled"
-                checked={defaultTimelinePreviewsEnabled}
-                onCheckedChange={setDefaultTimelinePreviewsEnabled}
-              />
-            </div>
-
-            {defaultWatermarkEnabled && (
-              <div className="space-y-2 pt-2 mt-2 border-t border-border">
-                <Label htmlFor="watermark">Custom Watermark Text</Label>
-                <Input
-                  id="watermark"
-                  value={defaultWatermarkText}
-                  onChange={(e) => setDefaultWatermarkText(e.target.value)}
-                  placeholder="e.g., PREVIEW, CONFIDENTIAL"
-                  maxLength={100}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Leave empty to use project-specific format. New projects will use this as default.
-                  <br />
-                  <span className="text-warning">Only letters, numbers, spaces, and these characters: - _ . ( )</span>
-                </p>
-              </div>
-            )}
           </div>
 
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">

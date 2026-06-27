@@ -1,28 +1,23 @@
 import { Job } from 'bullmq'
 import { VideoProcessingJob } from '../lib/queue'
-import { prisma } from '../lib/db'
 import {
   TempFiles,
   isVideoRecordMissingError,
   downloadAndValidateVideo,
   fetchProcessingSettings,
   filterRequestedResolutions,
-  calculateOutputDimensions,
-  processPreview,
+  isPreviewResolutionStillRequested,
   processThumbnail,
   processTimelinePreviews,
-  processHlsPackaging,
-  finalizeVideo,
+  packageVideoHlsFromOriginal,
   finalizeVideoWithoutPreview,
   updateVideoStatus,
   updateVideoRecord,
   cleanupTempFiles,
   handleProcessingError,
   debugLog,
-  PreviewResolutionCancelledError,
-  type Resolution,
 } from './video-processor-helpers'
-import { getPreviewProcessingPhase, PROCESSING_PHASES } from '@/lib/video-processing-phase'
+import { PROCESSING_PHASES } from '@/lib/video-processing-phase'
 import { recalculateAndStoreProjectTotalBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectDiskBytes } from '@/lib/project-total-bytes'
 import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation, getDynamicThreadsPerJob } from '@/lib/cpu-config'
 import { isS3Mode } from '@/lib/s3-storage'
@@ -59,7 +54,7 @@ function makeDownloadProgressCallback(videoId: string) {
  * 1. Download and validate video file
  * 2. Fetch processing settings from database
  * 3. Calculate output dimensions
- * 4. Process preview with watermark
+ * 4. Process preview
  * 5. Generate thumbnail
  * 6. Finalize and update database
  * 7. Cleanup temporary files
@@ -144,59 +139,27 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
     )
 
-    // Stage 4+5: Process previews for each selected resolution
-    const previewResults: { resolution: string; path: string }[] = []
-    const completedResolutions = new Set<Resolution>()
+    const finalSettings = await fetchProcessingSettings(projectId, videoId)
+    const resolutions = filterRequestedResolutions(requestedPreviewResolutions, finalSettings.resolutions)
 
-    while (true) {
-      const settings = await fetchProcessingSettings(projectId, videoId)
-      const pendingResolutions = filterRequestedResolutions(requestedPreviewResolutions, settings.resolutions)
-        .filter((resolution) => !completedResolutions.has(resolution))
-
-      if (pendingResolutions.length === 0) {
-        break
-      }
-
-      const resolution = pendingResolutions[0]
-      const phaseUpdated = await updateVideoRecord(
+    // Stage 4+5: Encode each selected resolution DIRECTLY to an HLS rendition (no MP4 preview
+    // is written to storage anymore). Skips a resolution that's deselected mid-encode.
+    let hlsReady = false
+    if (regenerateHls !== false && resolutions.length > 0) {
+      const result = await packageVideoHlsFromOriginal({
         videoId,
-        {
-          processingProgress: 0,
-          processingPhase: getPreviewProcessingPhase(resolution),
-        },
-        { context: `starting ${resolution} preview generation`, ignoreMissing: true }
-      )
-      if (!phaseUpdated) return
-
-      const dimensions = calculateOutputDimensions(videoInfo.metadata, resolution)
-      console.log(`[WORKER] Processing ${resolution} preview for video ${videoId}`)
-
-      try {
-        const previewPath = await processPreview(
-          videoId,
-          projectId,
-          videoInfo.path,
-          dimensions,
-          { ...settings, resolution },
-          tempFiles,
-          videoInfo.metadata.duration,
-          requestedPreviewResolutions
-        )
-        if (previewPath) {
-          previewResults.push({ resolution, path: previewPath })
-          completedResolutions.add(resolution)
-        }
-      } catch (error) {
-        if (error instanceof PreviewResolutionCancelledError) {
-          continue
-        }
-        throw error
-      }
+        projectId,
+        originalLocalPath: videoInfo.path,
+        metadata: videoInfo.metadata,
+        resolutions,
+        tempFiles,
+        shouldSkipResolution: async (resolution) =>
+          !(await isPreviewResolutionStillRequested(projectId, requestedPreviewResolutions, resolution)),
+      })
+      hlsReady = result.ready
     }
 
-    const finalSettings = await fetchProcessingSettings(projectId, videoId)
-
-    // Stage 6: Generate and upload thumbnail
+    // Stage 6: Generate and upload thumbnail (from the original — best quality)
     let thumbnailPath: string | null = null
     if (regenerateThumbnail !== false) {
       thumbnailPath = await processThumbnail(
@@ -208,10 +171,10 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       )
     }
 
-    // Stage 6.5: Generate timeline previews (optional)
-    // Uses the original video file (not the transcoded preview) for best quality.
+    // Stage 6.5: Generate timeline previews (always on)
+    // Uses the original video file (not a transcoded preview) for best quality.
     let timelineResult: { vttPath: string; spritesPath: string; ready: boolean } | null = null
-    if (regenerateTimelinePreviews !== false && finalSettings.timelinePreviewsEnabled) {
+    if (regenerateTimelinePreviews !== false) {
       console.log(`[WORKER] Starting timeline preview generation for video ${videoId}`)
       timelineResult = await processTimelinePreviews(
         videoId,
@@ -225,40 +188,29 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       }
     }
 
-    // Stage 7: Finalize - update database with results for each resolution
-    for (const result of previewResults) {
-      await finalizeVideo(
-        videoId,
-        result.path,
-        thumbnailPath,
-        videoInfo.metadata,
-        result.resolution
-      )
-    }
+    // Stage 7: Finalize — set READY + metadata + thumbnail. No PREVIEW_* rows exist anymore;
+    // playback is HLS-only.
+    await finalizeVideoWithoutPreview(videoId, thumbnailPath, videoInfo.metadata)
 
-    if (previewResults.length === 0) {
-      await finalizeVideoWithoutPreview(videoId, thumbnailPath, videoInfo.metadata)
+    // Persist HLS readiness (only when we actually (re)packaged it).
+    if (regenerateHls !== false) {
+      const updated = await updateVideoRecord(
+        videoId,
+        { hlsReady, hlsVersion: hlsReady ? HLS_PACKAGE_VERSION : 0, processingPhase: null },
+        { context: 'persisting HLS ready flag', ignoreMissing: true },
+      )
+      if (!updated) return
     }
 
     // Persist timeline previews ready flag (paths are stored in StoredFile by processTimelinePreviews)
-    if (regenerateTimelinePreviews !== false && finalSettings.timelinePreviewsEnabled && timelineResult?.ready) {
+    if (regenerateTimelinePreviews !== false) {
       const updated = await updateVideoRecord(
         videoId,
-        { timelinePreviewsReady: true },
+        { timelinePreviewsReady: timelineResult?.ready === true },
         { context: 'persisting timeline preview ready flag', ignoreMissing: true }
       )
       if (!updated) return
-    } else if (regenerateTimelinePreviews !== false) {
-      const updated = await updateVideoRecord(
-        videoId,
-        { timelinePreviewsReady: false },
-        { context: 'clearing timeline preview ready flag', ignoreMissing: true }
-      )
-      if (!updated) return
     }
-
-    // Stage 8: Package HLS from the finalized previews (S3 mode only; non-fatal).
-    await maybePackageHls(videoId, projectId, tempFiles, regenerateHls)
 
     await Promise.all([
       recalculateAndStoreProjectTotalBytes(projectId),
@@ -290,59 +242,61 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
 
 /**
  * Package the just-generated MP4 previews into an HLS bundle and flag readiness.
- * HLS is an enhancement layered on the previews (it fixes seeking behind Range-hostile
- * proxies); a failure here must never fail the job — the MP4 path still works. Only runs
- * in S3 mode, since HLS is delivered direct-from-R2 (no benefit on local disk).
+ * HLS is now the sole playback path (in both S3 and local mode), so a failure here leaves
+ * the video unplayable until repackaged — but it must still never fail the encode job (the
+ * original/thumbnails are already persisted). On failure we clear hlsReady; the hls-reconcile
+ * sweep then re-packages it automatically.
  */
-async function maybePackageHls(
-  videoId: string,
-  projectId: string,
-  tempFiles: TempFiles,
-  regenerateHls?: boolean,
-): Promise<void> {
-  if (regenerateHls === false) return
-  if (!isS3Mode()) return
-  try {
-    const result = await processHlsPackaging(videoId, projectId, tempFiles)
-    await updateVideoRecord(
-      videoId,
-      {
-        hlsReady: result.ready,
-        // Stamp the packaging version so the player knows the renditions are keyframe-aligned
-        // (ABR-safe). Previews are always transcoded with alignment now, so a successful
-        // packaging implies an aligned, ABR-ready bundle.
-        hlsVersion: result.ready ? HLS_PACKAGE_VERSION : 0,
-        processingPhase: null,
-      },
-      { context: 'persisting HLS ready flag', ignoreMissing: true },
-    )
-  } catch (err) {
-    console.error(`[WORKER] HLS packaging failed for video ${videoId}:`, err)
-    await updateVideoRecord(
-      videoId,
-      { hlsReady: false, hlsVersion: 0, processingPhase: null },
-      { context: 'clearing HLS ready flag after failure', ignoreMissing: true },
-    ).catch(() => {})
-  }
-}
-
 /**
- * HLS-only job: (re)package HLS from a video's existing previews without transcoding.
- * The video keeps its current status (typically READY) — there's no playback interruption.
- * Used by the backfill and to recover HLS for already-processed videos.
+ * HLS-only job: re-encode a video's HLS bundle directly from its retained ORIGINAL (there are
+ * no stored MP4 previews to remux anymore). The video keeps its current status (typically
+ * READY) — there's no playback interruption. Used by the hls-reconcile sweep, the manual
+ * repackage button, and the backfill to recover/regenerate HLS for already-processed videos.
  */
 async function processHlsOnly(videoId: string, projectId: string) {
-  console.log(`[WORKER] HLS-only packaging for video ${videoId}`)
+  console.log(`[WORKER] HLS (re)packaging for video ${videoId}`)
   const tempFiles: TempFiles = {}
   incrementActiveVideoJobs()
   try {
-    await maybePackageHls(videoId, projectId, tempFiles)
+    const videoInfo = await downloadAndValidateVideo(
+      videoId,
+      '',
+      tempFiles,
+      isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined,
+    )
+    const settings = await fetchProcessingSettings(projectId, videoId)
+    const resolutions = filterRequestedResolutions(undefined, settings.resolutions)
+
+    let hlsReady = false
+    if (resolutions.length > 0) {
+      const result = await packageVideoHlsFromOriginal({
+        videoId,
+        projectId,
+        originalLocalPath: videoInfo.path,
+        metadata: videoInfo.metadata,
+        resolutions,
+        tempFiles,
+      })
+      hlsReady = result.ready
+    }
+
+    await updateVideoRecord(
+      videoId,
+      { hlsReady, hlsVersion: hlsReady ? HLS_PACKAGE_VERSION : 0, processingPhase: null },
+      { context: 'persisting HLS ready flag (hls-only)', ignoreMissing: true },
+    )
   } catch (error) {
     if (isVideoRecordMissingError(error)) {
       console.warn(`[WORKER] Video ${videoId} was deleted during HLS packaging; skipping.`)
       return
     }
-    throw error
+    // Leave hlsReady=false so the hls-reconcile sweep retries; don't fail the job.
+    console.error(`[WORKER] HLS (re)packaging failed for video ${videoId}:`, error)
+    await updateVideoRecord(
+      videoId,
+      { hlsReady: false, hlsVersion: 0, processingPhase: null },
+      { context: 'clearing HLS ready flag after failure', ignoreMissing: true },
+    ).catch(() => {})
   } finally {
     decrementActiveVideoJobs()
     await cleanupTempFiles(tempFiles)
@@ -381,75 +335,36 @@ async function processPreviewOnly(
       isS3Mode() ? makeDownloadProgressCallback(videoId) : undefined
     )
 
-    const previewResults: { resolution: string; path: string }[] = []
-    const completedResolutions = new Set<Resolution>()
+    const settings = await fetchProcessingSettings(projectId, videoId)
+    const resolutions = filterRequestedResolutions(requestedPreviewResolutions, settings.resolutions)
 
-    while (true) {
-      const settings = await fetchProcessingSettings(projectId, videoId)
-      const pendingResolutions = filterRequestedResolutions(requestedPreviewResolutions, settings.resolutions)
-        .filter((resolution) => !completedResolutions.has(resolution))
-
-      if (pendingResolutions.length === 0) {
-        break
-      }
-
-      const resolution = pendingResolutions[0]
-      const phaseUpdated = await updateVideoRecord(
+    // Re-encode the HLS renditions directly from the original to match the requested set.
+    let hlsReady = false
+    if (resolutions.length > 0) {
+      const result = await packageVideoHlsFromOriginal({
         videoId,
-        {
-          processingProgress: 0,
-          processingPhase: getPreviewProcessingPhase(resolution),
-        },
-        { context: `starting ${resolution} preview-only generation`, ignoreMissing: true }
-      )
-      if (!phaseUpdated) return
-
-      const dimensions = calculateOutputDimensions(videoInfo.metadata, resolution)
-      console.log(`[WORKER] Generating ${resolution} preview for video ${videoId}`)
-
-      try {
-        const previewPath = await processPreview(
-          videoId,
-          projectId,
-          videoInfo.path,
-          dimensions,
-          { ...settings, resolution },
-          tempFiles,
-          videoInfo.metadata.duration,
-          requestedPreviewResolutions
-        )
-        if (previewPath) {
-          previewResults.push({ resolution, path: previewPath })
-          completedResolutions.add(resolution)
-        }
-      } catch (error) {
-        if (error instanceof PreviewResolutionCancelledError) {
-          continue
-        }
-        throw error
-      }
+        projectId,
+        originalLocalPath: videoInfo.path,
+        metadata: videoInfo.metadata,
+        resolutions,
+        tempFiles,
+        shouldSkipResolution: async (resolution) =>
+          !(await isPreviewResolutionStillRequested(projectId, requestedPreviewResolutions, resolution)),
+      })
+      hlsReady = result.ready
     }
 
-    for (const result of previewResults) {
-      await finalizeVideo(
-        videoId,
-        result.path,
-        null,
-        videoInfo.metadata,
-        result.resolution
-      )
-    }
-
-    if (previewResults.length === 0) {
-      await updateVideoRecord(
-        videoId,
-        { status: 'READY', processingPhase: null, processingProgress: 100 },
-        { context: 'finalizing no-op preview-only generation', ignoreMissing: true }
-      )
-    }
-
-    // Previews just changed — re-package HLS to match (S3 mode only; non-fatal).
-    await maybePackageHls(videoId, projectId, tempFiles)
+    await updateVideoRecord(
+      videoId,
+      {
+        status: 'READY',
+        processingPhase: null,
+        processingProgress: 100,
+        hlsReady,
+        hlsVersion: hlsReady ? HLS_PACKAGE_VERSION : 0,
+      },
+      { context: 'finalizing preview-only (HLS) generation', ignoreMissing: true }
+    )
 
     await Promise.all([
       recalculateAndStoreProjectTotalBytes(projectId),

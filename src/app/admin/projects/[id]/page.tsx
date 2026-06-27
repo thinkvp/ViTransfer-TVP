@@ -876,9 +876,6 @@ export default function ProjectPage() {
                     fetchProject()
                   }}
                   sortMode={sortMode}
-                  maxRevisions={project.maxRevisions}
-                  enableRevisions={project.enableRevisions}
-                  watermarkEnabled={project.watermarkEnabled}
                   s3Mode={project.s3Mode}
                 />
               </div>

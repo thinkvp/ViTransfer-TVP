@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { apiFetch } from '@/lib/api-client'
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/token-store'
+import { clearTokens, getAccessToken, getRefreshToken, requestSessionFromPeers, setTokens } from '@/lib/token-store'
 
 interface User {
   id: string
@@ -71,10 +71,18 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
 
   const bootstrap = useCallback(async () => {
     setLoading(true)
-    const refreshToken = getRefreshToken()
+    let refreshToken = getRefreshToken()
     const hasAccess = getAccessToken()
 
-    if (!hasAccess && refreshToken) {
+    // No local session yet — a sibling window (same browser) may already be
+    // logged in and can hand its session over via the BroadcastChannel handshake,
+    // sparing us a fresh login when opening a new window/tab.
+    if (!hasAccess && !refreshToken) {
+      const adopted = await requestSessionFromPeers()
+      if (adopted) refreshToken = getRefreshToken()
+    }
+
+    if (!getAccessToken() && refreshToken) {
       await refreshWithToken(refreshToken)
     }
 

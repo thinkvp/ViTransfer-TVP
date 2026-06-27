@@ -43,8 +43,6 @@ interface Project {
   updatedAt: string | Date
   totalBytes?: number | null
   diskBytes?: number | null
-  maxRevisions: number
-  enableRevisions: boolean
   videos: any[]
   recipients: any[]
   assignedUsers?: ProjectAssignedUser[]

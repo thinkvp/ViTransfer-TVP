@@ -6,20 +6,15 @@ import { formatDuration, formatFileSize } from '@/lib/utils'
 import { Progress } from './ui/progress'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
-import { ReprocessModal } from './ReprocessModal'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download, RotateCw, Loader2 } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
 import { withDownloadTracking } from '@/lib/download-url'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
-
-// Minimum hlsVersion considered keyframe-aligned / ABR-safe. Mirrors HLS_PACKAGE_VERSION
-// in src/lib/video-stream-url.ts (kept local because that module pulls in server-only deps).
-const HLS_ABR_MIN_VERSION = 1
 
 interface VideoListProps {
   videos: Video[]
@@ -28,7 +23,6 @@ interface VideoListProps {
   canDelete?: boolean
   canApprove?: boolean
   canManageAllowApproval?: boolean
-  watermarkEnabled?: boolean
   s3Mode?: boolean
 }
 
@@ -39,8 +33,6 @@ export default function VideoList({
   canDelete,
   canApprove,
   canManageAllowApproval,
-  watermarkEnabled = true,
-  s3Mode = false,
 }: VideoListProps) {
   const effectiveCanDelete = canDelete ?? isAdmin
   const effectiveCanApprove = canApprove ?? isAdmin
@@ -53,9 +45,6 @@ export default function VideoList({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [savingId, setSavingId] = useState<string | null>(null)
-  const [showReprocessModal, setShowReprocessModal] = useState(false)
-  const [pendingVideoUpdate, setPendingVideoUpdate] = useState<{ videoId: string; newLabel: string } | null>(null)
-  const [reprocessing, setReprocessing] = useState(false)
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null)
   const [notesEditValue, setNotesEditValue] = useState('')
   const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
@@ -65,10 +54,9 @@ export default function VideoList({
   const [expandedVideoIds, setExpandedVideoIds] = useState<string[]>([])
   const [pendingDeleteVideoId, setPendingDeleteVideoId] = useState<string | null>(null)
   const [pendingApprovalVideo, setPendingApprovalVideo] = useState<{ id: string; approved: boolean } | null>(null)
-  const [repackagingHlsId, setRepackagingHlsId] = useState<string | null>(null)
 
   // S3 version label rename confirmation
-  const [versionRenameConfirm, setVersionRenameConfirm] = useState<{ videoId: string; newLabel: string; shouldReprocess: boolean } | null>(null)
+  const [versionRenameConfirm, setVersionRenameConfirm] = useState<{ videoId: string; newLabel: string } | null>(null)
   const [versionRenameConfirming, setVersionRenameConfirming] = useState(false)
 
   // Polling removed from VideoList to prevent duplicate polling
@@ -253,72 +241,29 @@ export default function VideoList({
       return
     }
 
-    // Only show reprocessing modal if watermarks are enabled, since version label affects watermark text
-    if (!watermarkEnabled) {
-      // Watermarks disabled — save the label directly without prompting for reprocess
-      await saveVersionLabel(videoId, editValue.trim(), false)
-      return
-    }
-
-    setPendingVideoUpdate({ videoId, newLabel: editValue.trim() })
-    setShowReprocessModal(true)
+    // Version labels are metadata only — save directly. (S3 mode may still ask to confirm
+    // the background file rename below.)
+    await saveVersionLabel(videoId, editValue.trim())
   }
 
-  const saveVersionLabel = async (videoId: string, newLabel: string, shouldReprocess: boolean) => {
+  const saveVersionLabel = async (videoId: string, newLabel: string) => {
     setSavingId(videoId)
     try {
       const result = await apiPatch<any>(`/api/videos/${videoId}`, { versionLabel: newLabel })
 
       // S3 mode: server returns 202 asking user to confirm the background rename
       if (result?.requiresJobConfirmation) {
-        setShowReprocessModal(false)
-        setVersionRenameConfirm({ videoId, newLabel, shouldReprocess })
+        setVersionRenameConfirm({ videoId, newLabel })
         return
-      }
-
-      // Reprocess if requested
-      if (shouldReprocess) {
-        await reprocessVideo(videoId)
       }
 
       setEditingId(null)
       setEditValue('')
-      setPendingVideoUpdate(null)
-      setShowReprocessModal(false)
       await onRefresh?.()
     } catch (error) {
       toast.error('Failed to update version label')
     } finally {
       setSavingId(null)
-    }
-  }
-
-  const reprocessVideo = async (videoId: string) => {
-    setReprocessing(true)
-    try {
-      const video = videos.find(v => v.id === videoId)
-      if (!video) return
-
-      await apiPost(`/api/projects/${video.projectId}/reprocess-previews`, { videoIds: [videoId] })
-
-    } catch (err) {
-      // Don't throw - we still want to save the label
-    } finally {
-      setReprocessing(false)
-    }
-  }
-
-  const handleRepackageHls = async (videoId: string) => {
-    if (repackagingHlsId) return
-    setRepackagingHlsId(videoId)
-    try {
-      await apiPost(`/api/videos/${videoId}/repackage-hls`, {})
-      toast.success('HLS repackaging queued — track progress in Running Jobs.')
-      onRefresh?.()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to queue HLS repackaging')
-    } finally {
-      setRepackagingHlsId(null)
     }
   }
 
@@ -520,46 +465,6 @@ export default function VideoList({
                       <Download className="w-3 h-3" />
                     </span>
                   </div>
-                )}
-                {/* HLS readiness (S3 mode only — HLS isn't packaged on local disk). */}
-                {isAdmin && s3Mode && video.status === 'READY' && (
-                  video.hlsReady ? (
-                    <span
-                      className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-success-visible text-success border-2 border-success-visible"
-                      title={
-                        (video.hlsVersion ?? 0) >= HLS_ABR_MIN_VERSION
-                          ? 'Segmented HLS playback ready (adaptive bitrate)'
-                          : 'Segmented HLS playback ready (legacy bundle — no adaptive bitrate; reprocess to upgrade)'
-                      }
-                    >
-                      {(video.hlsVersion ?? 0) >= HLS_ABR_MIN_VERSION ? 'HLS' : 'HLS · legacy'}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1">
-                      <span
-                        className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-warning-visible text-warning border-2 border-warning-visible"
-                        title="HLS packaging failed or is missing — this version falls back to single-file MP4 playback."
-                      >
-                        MP4 only
-                      </span>
-                      {effectiveCanManageAllowApproval && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleRepackageHls(video.id)}
-                          disabled={repackagingHlsId === video.id}
-                          className="h-6 w-6 text-warning hover:text-warning hover:bg-warning-visible"
-                          title="Repackage HLS from existing previews"
-                        >
-                          {repackagingHlsId === video.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <RotateCw className="w-3 h-3" />
-                          )}
-                        </Button>
-                      )}
-                    </span>
-                  )
                 )}
                 {video.approved && (
                   <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-success-visible text-success border-2 border-success-visible">
@@ -769,28 +674,6 @@ export default function VideoList({
         })()
       ))}
 
-      <ReprocessModal
-        show={showReprocessModal}
-        onCancel={() => {
-          setShowReprocessModal(false)
-          setPendingVideoUpdate(null)
-          setSavingId(null)
-        }}
-        onSaveWithoutReprocess={() => {
-          if (!pendingVideoUpdate) return
-          saveVersionLabel(pendingVideoUpdate.videoId, pendingVideoUpdate.newLabel, false)
-        }}
-        onSaveAndReprocess={() => {
-          if (!pendingVideoUpdate) return
-          saveVersionLabel(pendingVideoUpdate.videoId, pendingVideoUpdate.newLabel, true)
-        }}
-        saving={savingId !== null}
-        reprocessing={reprocessing}
-        title="Version Label Changed"
-        description="Version labels appear in watermarks. The change will only apply to newly uploaded videos."
-        isSingleVideo={true}
-      />
-
       <ConfirmDialog
         open={pendingDeleteVideoId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteVideoId(null) }}
@@ -822,12 +705,8 @@ export default function VideoList({
               versionLabel: versionRenameConfirm.newLabel,
               confirmed: true,
             })
-            if (versionRenameConfirm.shouldReprocess) {
-              await reprocessVideo(versionRenameConfirm.videoId)
-            }
             setEditingId(null)
             setEditValue('')
-            setPendingVideoUpdate(null)
             setVersionRenameConfirm(null)
             await onRefresh?.()
           } catch (e) {

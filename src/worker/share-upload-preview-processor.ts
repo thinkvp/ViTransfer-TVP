@@ -3,29 +3,29 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { prisma } from '@/lib/db'
-import { generateThumbnail, getVideoMetadata, transcodeVideo } from '@/lib/ffmpeg'
+import { generateThumbnail } from '@/lib/ffmpeg'
 import { buildUploadPreviewStoragePath, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import { recalculateAndStoreProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { getFilePath, uploadFile } from '@/lib/storage'
 import { getStoredFilePath } from '@/lib/stored-file'
 import { registerStoredFile } from '@/lib/stored-file'
-import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import type { ShareUploadPreviewJob } from '@/lib/queue'
-import { calculateOutputDimensions, parseResolutions, packageAssetHls, type TempFiles } from './video-processor-helpers'
+import { parseResolutions, packageAssetHlsFromOriginal, type Resolution, type TempFiles } from './video-processor-helpers'
 
 /**
- * Package a video asset's freshly-generated MP4 playback preview into a single-rendition HLS
- * bundle (S3 mode only; HLS is delivered direct-from-R2). Non-fatal — the MP4 still plays if
- * this fails. Skips when an HLS bundle already exists unless `force` (set after a fresh encode).
+ * Encode a video asset's HLS bundle DIRECTLY from its original (single rendition; no MP4
+ * preview is produced anymore). Both S3 and local mode — HLS is the sole playback path.
+ * Non-fatal — the hls-reconcile sweep retries on failure. Skips when an HLS bundle already
+ * exists unless `force` (set after a fresh upload).
  */
 async function maybePackageAssetHls(
   assetId: string,
   projectId: string,
   videoId: string,
+  resolution: Resolution,
   opts?: { force?: boolean },
 ): Promise<void> {
-  if (!isS3Mode()) return
   try {
     if (!opts?.force) {
       const existing = await prisma.storedFile.findUnique({
@@ -36,13 +36,22 @@ async function maybePackageAssetHls(
     }
     const tempFiles: TempFiles = {}
     try {
-      await packageAssetHls(assetId, projectId, videoId, tempFiles)
+      await packageAssetHlsFromOriginal(assetId, projectId, videoId, tempFiles, resolution)
     } finally {
       if (tempFiles.hlsDir) await fs.promises.rm(tempFiles.hlsDir, { recursive: true, force: true }).catch(() => {})
     }
   } catch (err) {
     console.error(`[PREVIEW] HLS packaging failed for asset ${assetId}:`, err)
   }
+}
+
+/** Whether a video asset already has a registered HLS bundle. */
+async function assetHlsBundleExists(assetId: string): Promise<boolean> {
+  const existing = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'HLS_PLAYLIST' } },
+    select: { id: true },
+  })
+  return !!existing
 }
 
 let sharp: typeof import('sharp') | null = null
@@ -82,10 +91,6 @@ function getUploadPreviewStoragePath(projectId: string, uploadFileId: string): s
 
 function getVideoAssetPreviewStoragePath(projectId: string, videoId: string, assetId: string): string {
   return buildVideoAssetPreviewStoragePath(projectId, videoId, assetId)
-}
-
-function getVideoAssetPlaybackPreviewStoragePath(projectId: string, videoId: string, assetId: string): string {
-  return buildVideoAssetPreviewStoragePath(projectId, videoId, assetId, '.mp4')
 }
 
 function getThumbnailCaptureTimestamp(durationSeconds?: number | null): number {
@@ -157,47 +162,6 @@ async function generateVideoPreview(
   await generateThumbnail(inputArg, tempOutputPath, timestamp)
 }
 
-async function generatePlayableVideoPreview(
-  sourcePath: string,
-  tempOutputPath: string,
-  project: {
-    previewResolutions: string
-    watermarkEnabled: boolean
-    watermarkText: string | null
-    title: string
-  },
-): Promise<void> {
-  // In S3 mode sourcePath is a raw object key — FFmpeg can't reach it directly.
-  // Materialize to a local temp file first, then clean up afterwards.
-  const tempDir = path.join(os.tmpdir(), 'vitransfer-asset-preview-src')
-  const materialized = await materializeStoragePathToLocalFile({
-    rawPath: sourcePath,
-    tempDir,
-    suggestedName: path.basename(sourcePath),
-  })
-  const localInputPath = materialized.localPath
-  try {
-    const metadata = await getVideoMetadata(localInputPath)
-    const resolution = getHighestSelectedResolution(project.previewResolutions)
-    const dimensions = calculateOutputDimensions(metadata, resolution)
-    const watermarkText = project.watermarkEnabled
-      ? (project.watermarkText || `PREVIEW-${project.title || 'PROJECT'}`)
-      : undefined
-
-    await transcodeVideo({
-      inputPath: localInputPath,
-      outputPath: tempOutputPath,
-      width: dimensions.width,
-      height: dimensions.height,
-      watermarkText,
-    })
-  } finally {
-    if (materialized.isTemporary) {
-      await fs.promises.rm(materialized.localPath, { force: true }).catch(() => undefined)
-    }
-  }
-}
-
 async function updateRecordSuccess(
   type: 'shareUploadFile' | 'videoAsset',
   recordId: string,
@@ -224,29 +188,11 @@ async function updateRecordSuccess(
       previewError: null,
     } })
 
-    const isMp4 = previewPath.toLowerCase().endsWith('.mp4')
-    if (isMp4) {
-      // Register the playback MP4
-      await registerStoredFile({
-        entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_MP4',
-        storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
-      })
-
-      // Also register the companion JPG thumbnail that was uploaded alongside the MP4.
-      // The JPG path is derived by swapping .mp4 → .jpg on the same preview path.
-      // This companion file is uploaded but was never registered in StoredFile — it would
-      // be missed on asset deletion, leaving an orphaned file on storage.
-      const companionJpgPath = previewPath.replace(/\.mp4$/i, '.jpg')
-      await registerStoredFile({
-        entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
-        storagePath: companionJpgPath, fileSize: null, status: 'READY', generatedAt: new Date(),
-      })
-    } else {
-      await registerStoredFile({
-        entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
-        storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
-      })
-    }
+    // The asset's preview is its poster JPG; playback is the separately-registered HLS bundle.
+    await registerStoredFile({
+      entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
+      storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
+    })
   }
 }
 
@@ -307,8 +253,6 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
               companyName: true,
               storagePath: true,
               previewResolutions: true,
-              watermarkEnabled: true,
-              watermarkText: true,
               client: { select: { name: true } },
             },
           },
@@ -330,8 +274,6 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
                   companyName: true,
                   storagePath: true,
                   previewResolutions: true,
-                  watermarkEnabled: true,
-                  watermarkText: true,
                   client: { select: { name: true } },
                 },
               },
@@ -355,13 +297,10 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
   const resolvedFileName = record.fileName || fileName
 
   let previewStoragePath: string
-  let playbackPreviewStoragePath: string | null = null
   let projectIdForPreviewBytes: string | null = null
   let videoIdForAsset: string | null = null
   let videoAssetPreviewProject: {
     previewResolutions: string
-    watermarkEnabled: boolean
-    watermarkText: string | null
     title: string
   } | null = null
   if ('project' in record) {
@@ -372,12 +311,9 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
     videoIdForAsset = videoRecord.id
     videoAssetPreviewProject = {
       previewResolutions: videoRecord.project.previewResolutions,
-      watermarkEnabled: videoRecord.project.watermarkEnabled,
-      watermarkText: videoRecord.project.watermarkText,
       title: videoRecord.project.title,
     }
     previewStoragePath = getVideoAssetPreviewStoragePath(videoRecord.projectId, videoRecord.id, recordId)
-    playbackPreviewStoragePath = getVideoAssetPlaybackPreviewStoragePath(videoRecord.projectId, videoRecord.id, recordId)
   }
 
   const isImage = String(resolvedFileType || '').toLowerCase().startsWith('image/')
@@ -391,60 +327,34 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
   }
 
   // Idempotency:
-  // - video assets with video input must have both playback mp4 and thumbnail jpg
+  // - video assets need their poster JPG AND an HLS bundle (no MP4 preview anymore)
   // - all other previewable files require a single preview output
   if (shouldGenerateVideoAssetPlaybackPreview) {
-    const playbackExists = Boolean(playbackPreviewStoragePath) && await previewExists(playbackPreviewStoragePath!)
+    const hlsExists = await assetHlsBundleExists(recordId)
     const thumbnailExists = await previewExists(previewStoragePath)
-    if (playbackExists && thumbnailExists) {
+    if (hlsExists && thumbnailExists) {
       // Both exist — already fully complete.
-      const size = await getPreviewFileSize(playbackPreviewStoragePath!)
-      await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, size)
+      const size = await getPreviewFileSize(previewStoragePath)
+      await updateRecordSuccess(type, recordId, previewStoragePath, size)
       if (projectIdForPreviewBytes) {
         await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
-      }
-      // Backfill HLS for an already-encoded asset that doesn't have a bundle yet (no re-encode).
-      if (videoIdForAsset && projectIdForPreviewBytes) {
-        await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset)
       }
       console.log(`[PREVIEW] Already exists for ${type}:${recordId}, marked READY`)
       return
     }
-    if (playbackExists && !thumbnailExists) {
-      // MP4 playback already exists; generate only the missing companion JPG thumbnail
-      // without re-encoding the full video (which would be expensive).
+    if (thumbnailExists && !hlsExists && videoIdForAsset && projectIdForPreviewBytes && videoAssetPreviewProject) {
+      // Poster already present; the expensive part (HLS encode) is what's missing — build it
+      // from the original without regenerating the poster.
       await updateRecordProcessing(type, recordId)
-      const fastTempDir = path.join(os.tmpdir(), 'vitransfer-preview')
-      await fs.promises.mkdir(fastTempDir, { recursive: true })
-      const fastSafeName = path.basename(resolvedFileName || resolvedStoragePath).replace(/[^\w.-]/g, '_')
-      const fastTempThumbnailPath = path.join(fastTempDir, `${recordId}-${Date.now()}-${fastSafeName}.jpg`)
-      try {
-        await generateVideoPreview(resolvedStoragePath, fastTempThumbnailPath, durationSeconds)
-        const thumbnailStat = fs.statSync(fastTempThumbnailPath)
-        if (!thumbnailStat.isFile() || thumbnailStat.size === 0) {
-          throw new Error('Companion thumbnail output file is empty')
-        }
-        await uploadFile(previewStoragePath, fs.createReadStream(fastTempThumbnailPath) as any, thumbnailStat.size, 'image/jpeg')
-        const size = await getPreviewFileSize(playbackPreviewStoragePath!)
-        await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, size)
-        if (projectIdForPreviewBytes) {
-          await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
-        }
-        // MP4 already present — backfill its HLS bundle if missing (no re-encode).
-        if (videoIdForAsset && projectIdForPreviewBytes) {
-          await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset)
-        }
-        console.log(`[PREVIEW] Generated missing companion JPG for ${type}:${recordId} → ${previewStoragePath} (${thumbnailStat.size} bytes)`)
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[PREVIEW] Failed to generate companion JPG for ${type}:${recordId}:`, msg)
-        await updateRecordFailed(type, recordId, msg)
-        throw err
-      } finally {
-        try { fs.unlinkSync(fastTempThumbnailPath) } catch { /* ignore */ }
-      }
+      const resolution = getHighestSelectedResolution(videoAssetPreviewProject.previewResolutions)
+      await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset, resolution, { force: true })
+      const size = await getPreviewFileSize(previewStoragePath)
+      await updateRecordSuccess(type, recordId, previewStoragePath, size)
+      await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
+      console.log(`[PREVIEW] (Re)built HLS bundle for ${type}:${recordId}`)
       return
     }
+    // else: poster missing → fall through to full (re)generation (poster + HLS)
   } else if (await previewExists(previewStoragePath)) {
     const size = await getPreviewFileSize(previewStoragePath)
     await updateRecordSuccess(type, recordId, previewStoragePath, size)
@@ -462,8 +372,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
   const safeName = path.basename(resolvedFileName || resolvedStoragePath).replace(/[^\w.-]/g, '_')
   const tempBaseName = `${recordId}-${Date.now()}-${safeName}`
   const tempThumbnailPath = path.join(tempDir, `${tempBaseName}.jpg`)
-  const tempPlaybackPath = path.join(tempDir, `${tempBaseName}.mp4`)
-  const tempFilesToCleanup = [tempThumbnailPath, tempPlaybackPath]
+  const tempFilesToCleanup = [tempThumbnailPath]
 
   try {
     if (isImage) {
@@ -478,33 +387,23 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
       await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
     } else {
       if (videoAssetPreviewProject) {
-        await generatePlayableVideoPreview(resolvedStoragePath, tempPlaybackPath, {
-          previewResolutions: videoAssetPreviewProject.previewResolutions,
-          watermarkEnabled: videoAssetPreviewProject.watermarkEnabled,
-          watermarkText: videoAssetPreviewProject.watermarkText,
-          title: videoAssetPreviewProject.title,
-        })
-
-        // Persist a dedicated image thumbnail for grid cards while keeping the mp4 playback preview.
+        // Poster JPG for grid cards. Playback is HLS, encoded directly from the original
+        // below — no MP4 preview is produced or stored.
         await generateVideoPreview(resolvedStoragePath, tempThumbnailPath, durationSeconds)
 
-        const playbackStat = fs.statSync(tempPlaybackPath)
-        if (!playbackStat.isFile() || playbackStat.size === 0) {
-          throw new Error('Playback preview output file is empty')
-        }
         const thumbnailStat = fs.statSync(tempThumbnailPath)
         if (!thumbnailStat.isFile() || thumbnailStat.size === 0) {
           throw new Error('Thumbnail preview output file is empty')
         }
 
         await uploadFile(previewStoragePath, fs.createReadStream(tempThumbnailPath) as any, thumbnailStat.size, 'image/jpeg')
-        await uploadFile(playbackPreviewStoragePath!, fs.createReadStream(tempPlaybackPath) as any, playbackStat.size, 'video/mp4')
+        const previewFileSize = BigInt(thumbnailStat.size)
+        await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
 
-        const previewFileSize = BigInt(playbackStat.size)
-        await updateRecordSuccess(type, recordId, playbackPreviewStoragePath!, previewFileSize)
-        // Fresh MP4 encode → (re)build the asset's HLS bundle from it.
+        // Encode the asset's HLS bundle straight from the original (single rendition).
         if (videoIdForAsset && projectIdForPreviewBytes) {
-          await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset, { force: true })
+          const resolution = getHighestSelectedResolution(videoAssetPreviewProject.previewResolutions)
+          await maybePackageAssetHls(recordId, projectIdForPreviewBytes, videoIdForAsset, resolution, { force: true })
         }
       } else {
         await generateVideoPreview(resolvedStoragePath, tempThumbnailPath, durationSeconds)
@@ -524,14 +423,8 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
       await recalculateAndStoreProjectPreviewBytes(projectIdForPreviewBytes).catch(() => {})
     }
 
-    if (shouldGenerateVideoAssetPlaybackPreview) {
-      const playbackStat = fs.statSync(tempPlaybackPath)
-      const thumbnailStat = fs.statSync(tempThumbnailPath)
-      console.log(`[PREVIEW] Generated preview for ${type}:${recordId} → ${playbackPreviewStoragePath} (${playbackStat.size} bytes), thumbnail → ${previewStoragePath} (${thumbnailStat.size} bytes)`)
-    } else {
-      const stat = fs.statSync(tempThumbnailPath)
-      console.log(`[PREVIEW] Generated preview for ${type}:${recordId} → ${previewStoragePath} (${stat.size} bytes)`)
-    }
+    const stat = fs.statSync(tempThumbnailPath)
+    console.log(`[PREVIEW] Generated preview for ${type}:${recordId} → ${previewStoragePath} (${stat.size} bytes)`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error(`[PREVIEW] Failed for ${type}:${recordId}:`, msg)
@@ -649,14 +542,11 @@ export async function reconcileShareUploadPreviews(): Promise<{ queued: number }
     if (needsRetry) {
       videoAssetsVideoToQueue.push(asset)
     } else if (asset.previewStatus === 'READY') {
-      // Check StoredFile for companion JPG
-      const mp4Path = await getStoredFilePath('VIDEO_ASSET', asset.id, 'PREVIEW_MP4')
-      if (mp4Path) {
-        const companionJpgPath = mp4Path.replace(/\.mp4$/i, '.jpg')
-        const companionExists = await previewExists(companionJpgPath)
-        if (!companionExists) {
-          videoAssetsVideoToQueue.push(asset)
-        }
+      // READY = poster done; re-queue if the HLS bundle (the playback path) is missing, so a
+      // failed/legacy asset self-heals into HLS.
+      const hasHls = await getStoredFilePath('VIDEO_ASSET', asset.id, 'HLS_PLAYLIST')
+      if (!hasHls) {
+        videoAssetsVideoToQueue.push(asset)
       }
     }
   }

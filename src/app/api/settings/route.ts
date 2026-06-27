@@ -168,9 +168,6 @@ export async function PATCH(request: NextRequest) {
       mainCompanyDomain,
       defaultPreviewResolutions,
       defaultPreviewResolution,
-      defaultWatermarkEnabled,
-      defaultTimelinePreviewsEnabled,
-      defaultWatermarkText,
       defaultAllowClientDeleteComments,
       defaultEnableClientUploads,
       defaultAllowClientUploadFiles,
@@ -297,14 +294,6 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    // SECURITY: Validate defaultTimelinePreviewsEnabled is boolean
-    if (defaultTimelinePreviewsEnabled !== undefined && typeof defaultTimelinePreviewsEnabled !== 'boolean') {
-      return NextResponse.json(
-        { error: 'Invalid value for defaultTimelinePreviewsEnabled. Must be a boolean.' },
-        { status: 400 }
-      )
-    }
-
     // SECURITY: Validate emailTrackingPixelsEnabled is boolean
     if (emailTrackingPixelsEnabled !== undefined && typeof emailTrackingPixelsEnabled !== 'boolean') {
       return NextResponse.json(
@@ -351,33 +340,6 @@ export async function PATCH(request: NextRequest) {
       if (!Number.isInteger(adminNotificationDay) || adminNotificationDay < 0 || adminNotificationDay > 6) {
         return NextResponse.json(
           { error: 'Invalid day. Must be 0-6 (Sunday-Saturday).' },
-          { status: 400 }
-        )
-      }
-    }
-
-    // SECURITY: Validate watermark text (same rules as FFmpeg sanitization)
-    // Only allow alphanumeric, spaces, and safe punctuation: - _ . ( )
-    if (defaultWatermarkText) {
-      const invalidChars = defaultWatermarkText.match(/[^a-zA-Z0-9\s\-_.()]/g)
-      if (invalidChars) {
-        const uniqueInvalid = [...new Set(invalidChars)].join(', ')
-        return NextResponse.json(
-          {
-            error: 'Invalid characters in watermark text',
-            details: `Watermark text contains invalid characters: ${uniqueInvalid}. Only letters, numbers, spaces, and these characters are allowed: - _ . ( )`
-          },
-          { status: 400 }
-        )
-      }
-
-      // Additional length check (prevent excessively long watermarks)
-      if (defaultWatermarkText.length > 100) {
-        return NextResponse.json(
-          {
-            error: 'Watermark text too long',
-            details: 'Watermark text must be 100 characters or less'
-          },
           { status: 400 }
         )
       }
@@ -475,9 +437,6 @@ export async function PATCH(request: NextRequest) {
       defaultPreviewResolutions: defaultPreviewResolutions !== undefined
         ? JSON.stringify(defaultPreviewResolutions)
         : (defaultPreviewResolution !== undefined ? JSON.stringify([defaultPreviewResolution]) : undefined),
-      defaultWatermarkEnabled,
-      defaultTimelinePreviewsEnabled,
-      defaultWatermarkText,
       defaultAllowClientDeleteComments,
       defaultEnableClientUploads,
       defaultAllowClientUploadFiles,
@@ -547,7 +506,6 @@ export async function PATCH(request: NextRequest) {
         defaultPreviewResolutions: defaultPreviewResolutions !== undefined
           ? JSON.stringify(defaultPreviewResolutions)
           : (defaultPreviewResolution !== undefined ? JSON.stringify([defaultPreviewResolution]) : '["720p"]'),
-        defaultWatermarkText,
         defaultAllowClientDeleteComments,
         defaultEnableClientUploads,
         defaultAllowClientUploadFiles,

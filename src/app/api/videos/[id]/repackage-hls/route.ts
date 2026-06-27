@@ -3,7 +3,6 @@ import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
-import { isS3Mode } from '@/lib/s3-storage'
 import { getVideoQueue } from '@/lib/queue'
 
 export const runtime = 'nodejs'
@@ -30,11 +29,6 @@ export async function POST(
     'video-repackage-hls',
   )
   if (rateLimitResult) return rateLimitResult
-
-  // HLS is only delivered direct-from-R2; there's nothing to package on local disk.
-  if (!isS3Mode()) {
-    return NextResponse.json({ error: 'HLS packaging is only available in S3 storage mode.' }, { status: 409 })
-  }
 
   const { id: videoId } = await params
   const video = await prisma.video.findUnique({

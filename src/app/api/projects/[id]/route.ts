@@ -74,8 +74,6 @@ const updateProjectSchema = z.object({
   description: z.string().max(2000).nullable().optional(),
   clientId: z.string().regex(/^c[a-z0-9]{24}$/).optional(),
   status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED']).optional(),
-  enableRevisions: z.boolean().optional(),
-  maxRevisions: z.number().int().min(0).max(50).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),
   hideFeedback: z.boolean().optional(),
   useFullTimecode: z.boolean().optional(),
@@ -86,9 +84,6 @@ const updateProjectSchema = z.object({
   maxClientUploadAllocationMB: z.number().int().min(0).max(1000000).optional(),
   previewResolution: z.enum(['480p', '720p', '1080p']).optional(),
   previewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
-  watermarkEnabled: z.boolean().optional(),
-  watermarkText: z.string().max(100).nullable().optional(),
-  timelinePreviewsEnabled: z.boolean().optional(),
   sharePassword: z.string().max(200).nullable().optional(),
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
   enableVideos: z.boolean().optional(),
@@ -441,7 +436,6 @@ export async function PATCH(
         enableVideos: true,
         enablePhotos: true,
         previewResolutions: true,
-        timelinePreviewsEnabled: true,
         clientId: true,
         companyName: true,
         storagePath: true,
@@ -692,14 +686,6 @@ export async function PATCH(
       }
     }
 
-    // Handle revision settings
-    if (validatedBody.enableRevisions !== undefined) {
-      updateData.enableRevisions = validatedBody.enableRevisions
-    }
-    if (validatedBody.maxRevisions !== undefined) {
-      updateData.maxRevisions = validatedBody.maxRevisions
-    }
-
     // Handle comment restrictions
     if (validatedBody.restrictCommentsToLatestVersion !== undefined) {
       updateData.restrictCommentsToLatestVersion = validatedBody.restrictCommentsToLatestVersion
@@ -732,45 +718,6 @@ export async function PATCH(
     } else if (validatedBody.previewResolution !== undefined) {
       // Legacy single-value support
       updateData.previewResolutions = JSON.stringify([validatedBody.previewResolution])
-    }
-
-    if (validatedBody.timelinePreviewsEnabled !== undefined) {
-      updateData.timelinePreviewsEnabled = validatedBody.timelinePreviewsEnabled
-    }
-
-    if (validatedBody.watermarkEnabled !== undefined) {
-      updateData.watermarkEnabled = validatedBody.watermarkEnabled
-    }
-
-    if (validatedBody.watermarkText !== undefined) {
-      // SECURITY: Validate watermark text (same rules as FFmpeg sanitization)
-      // Only allow alphanumeric, spaces, and safe punctuation: - _ . ( )
-      if (validatedBody.watermarkText) {
-        const invalidChars = validatedBody.watermarkText.match(/[^a-zA-Z0-9\s\-_.()]/g)
-        if (invalidChars) {
-          const uniqueInvalid = [...new Set(invalidChars)].join(', ')
-          return NextResponse.json(
-            {
-              error: 'Invalid characters in watermark text',
-              details: `Watermark text contains invalid characters: ${uniqueInvalid}. Only letters, numbers, spaces, and these characters are allowed: - _ . ( )`
-            },
-            { status: 400 }
-          )
-        }
-
-        // Additional length check (prevent excessively long watermarks)
-        if (validatedBody.watermarkText.length > 100) {
-          return NextResponse.json(
-            {
-              error: 'Watermark text too long',
-              details: 'Watermark text must be 100 characters or less'
-            },
-            { status: 400 }
-          )
-        }
-      }
-
-      updateData.watermarkText = validatedBody.watermarkText || null
     }
 
     // Handle password and authMode settings updates
@@ -1331,10 +1278,8 @@ export async function PATCH(
 
             const regenerateThumbnail = !stored.has('THUMBNAIL')
             const regenerateTimelinePreviews = Boolean(
-              currentProject.timelinePreviewsEnabled && (
-                !stored.has('TIMELINE_VTT') ||
-                !stored.has('TIMELINE_SPRITES')
-              )
+              !stored.has('TIMELINE_VTT') ||
+              !stored.has('TIMELINE_SPRITES')
             )
 
             if (

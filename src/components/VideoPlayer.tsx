@@ -70,7 +70,6 @@ interface VideoPlayerProps {
   projectTitle?: string
   clientName?: string
   isPasswordProtected?: boolean
-  watermarkEnabled?: boolean
   isAdmin?: boolean // Admin users can see all versions (default: false for clients)
   isGuest?: boolean // Guest mode - limited view (videos only, no downloads)
   activeVideoName?: string // The video name (for maintaining selection after reload)
@@ -146,7 +145,6 @@ export default function VideoPlayer({
   projectTitle,
   clientName,
   isPasswordProtected,
-  watermarkEnabled = true,
   isAdmin = false, // Default to false (client view)
   isGuest = false, // Default to false (full client view)
   activeVideoName,
@@ -169,8 +167,13 @@ export default function VideoPlayer({
   onStreamError,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
-  const [videoUrl, setVideoUrl] = useState<string>('')
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
+  // YouTube-style double-tap seek + tap feedback overlays. `key` is bumped on each
+  // trigger so React remounts the node and the CSS animation replays.
+  const [seekIndicator, setSeekIndicator] = useState<
+    { side: 'left' | 'right'; amount: number; key: number } | null
+  >(null)
+  const [centerPulse, setCenterPulse] = useState<{ kind: 'play' | 'pause'; key: number } | null>(null)
   const [showShortcutsDialog, setShowShortcutsDialog] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [durationSeconds, setDurationSeconds] = useState<number>(0)
@@ -189,6 +192,9 @@ export default function VideoPlayer({
   // element's own src and needs no instance.
   const hlsInstanceRef = useRef<Hls | null>(null)
   const [hlsLevelsReady, setHlsLevelsReady] = useState(false)
+  // Rendition heights parsed from the HLS master (hls.js/MSE only) — the source of truth for
+  // the quality menu now that MP4 stream URLs no longer exist.
+  const [hlsLevelHeights, setHlsLevelHeights] = useState<number[]>([])
   // Playback-capability probe, resolved client-side on mount. `mse` → hls.js can run
   // (desktop incl. desktop-Safari); `native` → element plays .m3u8 directly (iOS Safari).
   const [hlsSupport, setHlsSupport] = useState<{ mse: boolean; native: boolean }>({ mse: false, native: false })
@@ -216,6 +222,11 @@ export default function VideoPlayer({
   const [isDesktopControlsNarrow, setIsDesktopControlsNarrow] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement>(null)
+  // The inner box that exactly matches the video's aspect ratio. Measured so the
+  // sprite-frame overlay shown while (non-precision) scrubbing can be letterboxed
+  // to fit the player just like the <video> element.
+  const playerFrameBoxRef = useRef<HTMLDivElement>(null)
+  const [playerFrameBoxSize, setPlayerFrameBoxSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isPseudoFullscreen, setIsPseudoFullscreen] = useState(false)
   const [isFullscreenChatOpen, setIsFullscreenChatOpen] = useState(false)
@@ -260,6 +271,27 @@ export default function VideoPlayer({
 
   const scrubRafRef = useRef<number | null>(null)
   const pendingScrubClientXRef = useRef<number | null>(null)
+  // Precision ("fine") dragging: while a timeline drag is active and Shift is held,
+  // cursor movement is scaled down so each pixel maps to a fraction of a second
+  // instead of (on long videos) several. Anchored to the cursor position where Shift
+  // engaged so the marker doesn't jump on press. The anchor lives in a ref because
+  // every time computation funnels through getTimeFromScrubEvent (scrub RAF, IN/OUT
+  // handle moves, hover preview) and must agree. The state mirror drives the on-screen
+  // "fine control" cue. Releasing Shift mid-drag clears the anchor, so the marker snaps
+  // back to the raw cursor — that's why the cue tells users to release Shift, not the
+  // mouse, to keep their fine-tuned position.
+  const precisionDragAnchorRef = useRef<{ clientX: number; time: number } | null>(null)
+  const [isPrecisionDragging, setIsPrecisionDragging] = useState(false)
+  // When precision (Shift) engages, the real <video> hasn't seeked to the target
+  // frame yet, so its last-rendered frame would flash before the seek lands. We
+  // keep the sprite overlay up until the first `seeked` fires after engaging —
+  // this flips true then, and resets to false whenever precision disengages.
+  const [precisionFrameReady, setPrecisionFrameReady] = useState(false)
+  // True if precision was engaged at any point during the current scrub gesture.
+  // Survives the pointerUp (which clears the anchor) so the trailing click — which
+  // would otherwise re-seek the playhead to the raw cursor position — can be skipped,
+  // preserving the fine-tuned spot. Reset at the start of each new scrub press.
+  const precisionUsedThisGestureRef = useRef(false)
   const [timelineCues, setTimelineCues] = useState<
     Array<{
       start: number
@@ -327,6 +359,11 @@ export default function VideoPlayer({
   const commentRangeStartRef = useRef(0)
   const commentRangeEndRef = useRef(0)
   const commentRangeHasExplicitSelectionRef = useRef(false)
+  // True while the point marker is "attached" to the playhead (just activated and
+  // not yet moved). When true, the IN/OUT brackets ride the ball so the marker and
+  // the timecode above the comment box never disagree. Any deliberate placement —
+  // dragging a handle, keyboard-nudging, or typing an exact time — detaches it.
+  const commentPointFollowsPlayheadRef = useRef(false)
   const keepTimelineHoverPinnedRef = useRef(false)
   const isRangeFramePreviewActiveRef = useRef(false)
   const rangeFramePreviewOriginalPlayheadRef = useRef<number | null>(null)
@@ -357,8 +394,11 @@ export default function VideoPlayer({
       draggingRangeHandle.current = null
       isScrubbingRef.current = false
       keepTimelineHoverPinnedRef.current = false
+      precisionDragAnchorRef.current = null
       setActiveRangeDragHandle(null)
       setIsScrubbingPlayhead(false)
+      setIsPrecisionDragging(false)
+      setPrecisionFrameReady(false)
     }
     const onVisibility = () => { if (document.hidden) endStuckDrags() }
     window.addEventListener('pointerup', endStuckDrags)
@@ -373,16 +413,17 @@ export default function VideoPlayer({
     }
   }, [])
 
-  // While dragging a comment IN/OUT handle or scrubbing the playhead, draw the
-  // live (already-seeked) video frame into the preview canvas each animation
-  // frame. This makes the timeline preview match the main player exactly — the
-  // sprite sheet is too coarse to track scene changes mid-drag. Passive hover
-  // keeps using sprites (we don't seek the playing video just to hover).
+  // While *precision* (Shift) dragging a comment IN/OUT handle or scrubbing the
+  // playhead, draw the live (already-seeked) video frame into the preview canvas
+  // each animation frame, so the timeline preview matches the main player exactly.
+  // Non-precision drags (the default) don't seek the video — they show sprite tiles
+  // instead (see preview render + the player overlay), so there's nothing live to
+  // draw and we skip the rAF loop. Passive hover also keeps using sprites.
   useEffect(() => {
     const isDragging = activeRangeDragHandle !== null || isScrubbingPlayhead
-    // Only desktop renders the live-frame canvas; on touch we show sprites
-    // instead (see preview render), so there's nothing to draw into there.
-    if (!isDragging || !canShowTimelineHover) return
+    // Only desktop precision drags render the live-frame canvas; everything else
+    // (non-precision drags, touch) shows sprites, so there's nothing to draw.
+    if (!isDragging || !isPrecisionDragging || !canShowTimelineHover) return
     let raf = 0
     const draw = () => {
       const video = videoRef.current
@@ -397,7 +438,7 @@ export default function VideoPlayer({
     }
     raf = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(raf)
-  }, [activeRangeDragHandle, isScrubbingPlayhead, canShowTimelineHover])
+  }, [activeRangeDragHandle, isScrubbingPlayhead, isPrecisionDragging, canShowTimelineHover])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -440,6 +481,25 @@ export default function VideoPlayer({
     observer.observe(container)
     return () => observer.disconnect()
   }, [isLgViewport])
+
+  // Track the rendered size of the aspect-ratio video box so the scrub sprite
+  // overlay can be sized/letterboxed to match the <video> exactly.
+  useEffect(() => {
+    const box = playerFrameBoxRef.current
+    if (!box) return
+    const update = () => setPlayerFrameBoxSize({ w: box.clientWidth, h: box.clientHeight })
+    update()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update)
+      return () => window.removeEventListener('resize', update)
+    }
+    const observer = new ResizeObserver(() => update())
+    observer.observe(box)
+    return () => observer.disconnect()
+    // The box div is rendered unconditionally with the player; the ResizeObserver
+    // catches every later size change (layout, fullscreen, viewport), so this only
+    // needs to wire up once.
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -485,10 +545,17 @@ export default function VideoPlayer({
       const { time, width } = getTimeFromScrubEvent(x)
       const snapped = snapPlayheadToHandles(time, width)
       if (videoRef.current) {
-        try {
-          videoRef.current.currentTime = snapped
-        } catch {
-          // ignore
+        // Default (non-precision) drag: don't seek the real video — that fetches
+        // full-resolution frames over the network on every move. Just advance the
+        // playhead UI; the sprite overlay/hover show the frame. Only a precision
+        // (Shift) drag seeks the actual video for an exact frame. The trailing
+        // onClick after release lands one final real seek at the snapped position.
+        if (precisionDragAnchorRef.current) {
+          try {
+            videoRef.current.currentTime = snapped
+          } catch {
+            // ignore
+          }
         }
         currentTimeRef.current = snapped
         setCurrentTimeSeconds(snapped)
@@ -564,6 +631,19 @@ export default function VideoPlayer({
   const suppressNextToggleRef = useRef(false)
   const HOLD_SPEED_BOOST_DELAY_MS = 220
 
+  // Double-tap / double-click to seek (YouTube-style). A single tap is delayed by
+  // DOUBLE_TAP_MS so a follow-up tap can be recognised as a double-tap before the
+  // play/pause toggle fires (avoids a play/pause flicker on double-tap).
+  const SEEK_STEP_SECONDS = 10
+  const DOUBLE_TAP_MS = 280
+  const lastTapRef = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
+  const pendingSingleTapRef = useRef<number | null>(null)
+  // Accumulated seek amount for the current chain of taps on the same side, so the
+  // indicator can show "20 seconds" etc. when the viewer taps repeatedly.
+  const seekChainAmountRef = useRef(0)
+  const seekIndicatorTimeoutRef = useRef<number | null>(null)
+  const centerPulseTimeoutRef = useRef<number | null>(null)
+
   // If ANY video is approved, only show approved videos (for both admin and client)
   const hasAnyApprovedVideo = videos.some((v: any) => v.approved === true)
   const displayVideos = hasAnyApprovedVideo
@@ -577,8 +657,9 @@ export default function VideoPlayer({
   const effectiveDurationSeconds =
     durationSeconds || (selectedVideo?.duration as number | undefined) || 0
 
-  // HLS master-playlist URL handed back by the share/guest/admin token routes (empty
-  // when packaging isn't ready or HLS is disabled — the player then uses the MP4 path).
+  // HLS master-playlist URL handed back by the share/guest/admin token routes. HLS is the
+  // sole playback path now — when this is empty (packaging not yet ready) the player shows a
+  // "preparing stream" state rather than falling back to a single-file MP4.
   const selectedVideoHlsUrl = (selectedVideo?.hlsUrl as string | undefined) || undefined
   // Whether this video's HLS renditions are keyframe-aligned and safe for hls.js auto-ABR.
   // Legacy (non-aligned) bundles stay pinned to avoid glitchy automatic switching.
@@ -592,19 +673,17 @@ export default function VideoPlayer({
     return null
   }, [selectedVideoHlsUrl, hlsSupport])
 
-  // Resolve the <video> element's src:
-  //  - HLS available but capability probe not resolved yet → hold off (don't load MP4)
+  // Resolve the <video> element's src (HLS only — there is no MP4 fallback):
+  //  - capability probe not resolved yet → hold off
   //  - hls.js (MSE) → no src; the Hls instance feeds the element via MSE
   //  - native HLS → the master playlist URL directly
-  //  - otherwise → the selected MP4 stream URL (existing behaviour / fallback)
+  //  - no HLS available → undefined (the "preparing stream" placeholder shows instead)
   const videoElementSrc =
-    selectedVideoHlsUrl && !hlsResolved
+    !hlsResolved
       ? undefined
-      : hlsMode === 'mse'
-        ? undefined
-        : hlsMode === 'native'
-          ? selectedVideoHlsUrl
-          : videoUrl || undefined
+      : hlsMode === 'native'
+        ? selectedVideoHlsUrl
+        : undefined
 
   const effectiveFps = selectedVideo?.fps as number | undefined
 
@@ -787,6 +866,7 @@ export default function VideoPlayer({
 
       // Deactivate any active comment range when switching videos
       setCommentRangeActive(false)
+      commentPointFollowsPlayheadRef.current = false
       draggingRangeHandle.current = null
       setActiveRangeDragHandle(null)
     }
@@ -800,7 +880,6 @@ export default function VideoPlayer({
     if (!activeVideoName) return
     if (previousVideoNameRef.current && previousVideoNameRef.current !== activeVideoName) {
       setSelectedVideoIndex(0)
-      setVideoUrl('')
       currentTimeRef.current = 0
     }
     previousVideoNameRef.current = activeVideoName
@@ -832,6 +911,8 @@ export default function VideoPlayer({
       const end = start
       setCommentRangeActive(true)
       commentRangeHasExplicitSelectionRef.current = false
+      // Fresh point sits on the playhead and should ride it until placed.
+      commentPointFollowsPlayheadRef.current = true
       keepTimelineHoverPinnedRef.current = false
       // Start with a visible gap; still treated as a point until the user explicitly drags a handle.
       setCommentRangeStart(start)
@@ -845,6 +926,7 @@ export default function VideoPlayer({
     const handleDeactivate = () => {
       setCommentRangeActive(false)
       commentRangeHasExplicitSelectionRef.current = false
+      commentPointFollowsPlayheadRef.current = false
       keepTimelineHoverPinnedRef.current = false
       isRangeFramePreviewActiveRef.current = false
       rangeFramePreviewOriginalPlayheadRef.current = null
@@ -874,6 +956,8 @@ export default function VideoPlayer({
       const delta = typeof e.detail?.deltaSeconds === 'number' ? e.detail.deltaSeconds : 0
       if (!handle || !Number.isFinite(delta) || delta === 0) return
 
+      // A deliberate nudge detaches the marker from the playhead.
+      commentPointFollowsPlayheadRef.current = false
       const duration = effectiveDurationSeconds
       const tinyGap = 0.1
       if (!commentRangeActiveRef.current) {
@@ -912,17 +996,87 @@ export default function VideoPlayer({
       emitRangeChanged(start, nextEnd)
     }
 
+    // Set the in/out handles to absolute times (driven by the comment-time editor modal).
+    // `start`/`end` are seconds. `end: null` collapses to a point marker on the IN time.
+    const handleSetFromInput = (event: Event) => {
+      const e = event as CustomEvent<{ start?: number; end?: number | null }>
+      const detail = e.detail || {}
+      const duration = effectiveDurationSeconds
+      const clampToDuration = (v: number) => {
+        const lo = Math.max(0, v)
+        return duration > 0 ? Math.min(lo, duration) : lo
+      }
+
+      if (!commentRangeActiveRef.current) {
+        setCommentRangeActive(true)
+        keepTimelineHoverPinnedRef.current = false
+      }
+      // A typed time is a deliberate placement — detach from the playhead.
+      commentPointFollowsPlayheadRef.current = false
+
+      let start = commentRangeStartRef.current
+      let end = commentRangeEndRef.current
+
+      if (typeof detail.start === 'number' && Number.isFinite(detail.start)) {
+        start = clampToDuration(detail.start)
+      }
+
+      if (detail.end === null) {
+        // Collapse OUT back onto IN — a single point marker.
+        end = start
+        commentRangeHasExplicitSelectionRef.current = false
+      } else if (typeof detail.end === 'number' && Number.isFinite(detail.end)) {
+        end = Math.max(start, clampToDuration(detail.end))
+        commentRangeHasExplicitSelectionRef.current = (end - start) >= 0.5
+      } else {
+        if (end < start) end = start
+        commentRangeHasExplicitSelectionRef.current = (end - start) >= 0.5
+      }
+
+      setCommentRangeStart(start)
+      commentRangeStartRef.current = start
+      setCommentRangeEnd(end)
+      commentRangeEndRef.current = end
+      emitRangeChanged(start, end)
+    }
+
     window.addEventListener('activateCommentRange', handleActivate)
     window.addEventListener('deactivateCommentRange', handleDeactivate)
     window.addEventListener('resetCommentRangeOut', handleResetOut)
     window.addEventListener('adjustCommentRangeHandle', handleAdjustFromInput)
+    window.addEventListener('setCommentRange', handleSetFromInput)
     return () => {
       window.removeEventListener('activateCommentRange', handleActivate)
       window.removeEventListener('deactivateCommentRange', handleDeactivate)
       window.removeEventListener('resetCommentRangeOut', handleResetOut)
       window.removeEventListener('adjustCommentRangeHandle', handleAdjustFromInput)
+      window.removeEventListener('setCommentRange', handleSetFromInput)
     }
   }, [disableCommentsUI, effectiveDurationSeconds])
+
+  // While the point marker is still attached to the playhead, keep the IN/OUT
+  // brackets flanking the ball as it moves — so the marker and the timecode shown
+  // above the comment box (which also tracks the playhead) never disagree. A
+  // deliberate placement (handle drag, nudge, or typed time) detaches it.
+  useEffect(() => {
+    if (!commentRangeActive) return
+    if (!commentPointFollowsPlayheadRef.current) return
+    if (
+      commentRangeStartRef.current === currentTimeSeconds &&
+      commentRangeEndRef.current === currentTimeSeconds
+    ) {
+      return
+    }
+    setCommentRangeStart(currentTimeSeconds)
+    commentRangeStartRef.current = currentTimeSeconds
+    setCommentRangeEnd(currentTimeSeconds)
+    commentRangeEndRef.current = currentTimeSeconds
+    // Keep the comment-box timecode locked to the marker (a point, so no `end`),
+    // rather than relying on the video element's slightly-delayed timeupdate.
+    window.dispatchEvent(
+      new CustomEvent('commentRangeChanged', { detail: { start: currentTimeSeconds } })
+    )
+  }, [currentTimeSeconds, commentRangeActive])
 
   const isInFullscreen = isFullscreen || isPseudoFullscreen
   const prevIsInFullscreenRef = useRef(false)
@@ -1117,26 +1271,36 @@ export default function VideoPlayer({
   const suppressDownloadUi = !isAdmin || hideDownloadButton
 
   // Compute available qualities from the selected video's stream URLs
+  // Map HLS rendition heights → quality labels, low→high. This is the real playback ladder.
+  const hlsQualities = useMemo(() => {
+    const set = new Set<'480p' | '720p' | '1080p'>()
+    for (const h of hlsLevelHeights) set.add(h >= 1080 ? '1080p' : h >= 720 ? '720p' : '480p')
+    return (['480p', '720p', '1080p'] as const).filter((q) => set.has(q))
+  }, [hlsLevelHeights])
+
   const availableQualities = useMemo(() => {
     if (!selectedVideo) return [] as ('480p' | '720p' | '1080p')[]
+    // HLS is the playback path — prefer its rendition ladder. Fall back to legacy MP4 stream
+    // URLs only when there's no HLS (e.g. native HLS hasn't exposed levels, or pre-HLS video).
+    if (selectedVideoHlsUrl && hlsQualities.length > 0) return [...hlsQualities]
     const q: ('480p' | '720p' | '1080p')[] = []
     if (selectedVideo.streamUrl480p) q.push('480p')
     if (selectedVideo.streamUrl720p) q.push('720p')
     if (selectedVideo.streamUrl1080p) q.push('1080p')
     return q
-  }, [selectedVideo])
+  }, [selectedVideo, selectedVideoHlsUrl, hlsQualities])
 
-  // True when no preview resolutions are available but the original video stream is present.
-  // In this case the quality selector shows "Original" instead of Auto/480p/720p/1080p.
+  // True when there are no selectable renditions but the original video stream is present —
+  // the selector then shows "Original". Never the case while HLS is the active source.
   const hasOriginalOnly = useMemo(() => {
-    if (!selectedVideo) return false
+    if (!selectedVideo || selectedVideoHlsUrl) return false
     const hasPreviews = !!(
       selectedVideo.streamUrl480p ||
       selectedVideo.streamUrl720p ||
       selectedVideo.streamUrl1080p
     )
     return !hasPreviews && !!selectedVideo.streamUrlOriginal
-  }, [selectedVideo])
+  }, [selectedVideo, selectedVideoHlsUrl])
 
   const showQualitySelector = availableQualities.length > 1 || hasOriginalOnly
 
@@ -1247,7 +1411,12 @@ export default function VideoPlayer({
     }
     const onPlaying = () => clearBufferingState()
     const onCanPlay = () => clearBufferingState()
-    const onSeeked = () => clearBufferingState()
+    const onSeeked = () => {
+      clearBufferingState()
+      // First real frame after engaging precision has landed — safe to reveal the
+      // <video> and drop the bridging sprite overlay without a stale-frame flash.
+      if (precisionDragAnchorRef.current) setPrecisionFrameReady(true)
+    }
     const onTimeUpdate = () => clearBufferingState()
     video.addEventListener('waiting', onWaiting)
     video.addEventListener('playing', onPlaying)
@@ -1262,7 +1431,7 @@ export default function VideoPlayer({
       video.removeEventListener('seeked', onSeeked)
       video.removeEventListener('timeupdate', onTimeUpdate)
     }
-  }, [videoUrl]) // re-attach when video src changes
+  }, [selectedVideo?.id]) // re-attach when the video (and thus the element) changes
 
   // Close quality menu on click outside
   useEffect(() => {
@@ -1278,64 +1447,6 @@ export default function VideoPlayer({
     document.addEventListener('pointerdown', handleClickOutside)
     return () => document.removeEventListener('pointerdown', handleClickOutside)
   }, [showQualityMenu])
-
-  // Load video URL with optimization
-  useEffect(() => {
-    async function loadVideoUrl() {
-      try {
-        // Safety check: ensure selectedVideo exists
-        if (!selectedVideo) {
-          return
-        }
-
-        // Use token-based URLs from the video object
-        // These are generated by the share API with secure tokens
-        // Respect the effective quality (manual selection or auto-resolved)
-        let url: string | undefined
-
-        if (effectiveQuality === '1080p') {
-          url = selectedVideo.streamUrl1080p || selectedVideo.streamUrl720p || selectedVideo.streamUrl480p || selectedVideo.streamUrlOriginal
-        } else if (effectiveQuality === '480p') {
-          url = selectedVideo.streamUrl480p || selectedVideo.streamUrl720p || selectedVideo.streamUrl1080p || selectedVideo.streamUrlOriginal
-        } else {
-          url = selectedVideo.streamUrl720p || selectedVideo.streamUrl1080p || selectedVideo.streamUrl480p || selectedVideo.streamUrlOriginal
-        }
-
-        if (url) {
-          // Preserve playback position when switching quality on the same video
-          const currentVideo = videoRef.current
-          const currentPos = currentVideo ? currentVideo.currentTime : 0
-          const wasPlaying = currentVideo ? !currentVideo.paused : false
-
-          // Update video URL - this will trigger React to update the video element's src
-          setVideoUrl((prev) => {
-            if (prev === url) return prev // No change needed
-            setIsBuffering(false)
-            suppressAutoDowngradeUntilRef.current = Date.now() + 1500
-            // Schedule seek to preserved position after src change
-            if (prev && currentPos > 0) {
-              requestAnimationFrame(() => {
-                const v = videoRef.current
-                if (v) {
-                  const onLoaded = () => {
-                    v.currentTime = currentPos
-                    if (wasPlaying) v.play().catch(() => {})
-                    v.removeEventListener('loadedmetadata', onLoaded)
-                  }
-                  v.addEventListener('loadedmetadata', onLoaded)
-                }
-              })
-            }
-            return url
-          })
-        }
-      } catch (error) {
-        // Video load error - player will show error state
-      }
-    }
-
-    loadVideoUrl()
-  }, [selectedVideo, effectiveQuality])
 
   // Ask the parent to re-mint tokens after an unrecoverable stream failure. Latches per
   // videoId (cleared on the next successful loadedmetadata) so an error→refresh→error
@@ -1380,7 +1491,11 @@ export default function VideoPlayer({
 
     hls.attachMedia(video)
     hls.on(Hls.Events.MEDIA_ATTACHED, () => hls.loadSource(selectedVideoHlsUrl))
-    hls.on(Hls.Events.MANIFEST_PARSED, () => setHlsLevelsReady(true))
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      setHlsLevelsReady(true)
+      // Capture the rendition heights so the quality menu reflects the actual HLS ladder.
+      setHlsLevelHeights((hls.levels || []).map((l) => l.height || 0).filter((h) => h > 0))
+    })
     // Keep the "Auto (xxx)" label in sync with the level hls.js actually plays (esp. under ABR).
     hls.on(Hls.Events.LEVEL_SWITCHED, (_e, data) => {
       const height = hls.levels?.[data.level]?.height
@@ -1399,6 +1514,7 @@ export default function VideoPlayer({
 
     return () => {
       setHlsLevelsReady(false)
+      setHlsLevelHeights([])
       try { hls.destroy() } catch { /* ignore */ }
       if (hlsInstanceRef.current === hls) hlsInstanceRef.current = null
     }
@@ -1488,11 +1604,74 @@ export default function VideoPlayer({
     }
   }, [timelineCues, selectedVideoTimelineSpriteUrl])
 
+  // Fraction of raw cursor movement applied while precision (Shift) dragging on a
+  // video with no FPS metadata (can't snap to frames). 0.15 turns a move that would
+  // jump ~3s on a 30-min video into ~0.45s.
+  const PRECISION_DRAG_FACTOR = 0.15
+  // Frame-by-frame precision: pixels of cursor travel that advance the playhead by one
+  // frame. Independent of video length, so a 30-min clip steps frames just as finely as
+  // a short one. Higher = slower/finer.
+  const PIXELS_PER_FRAME = 6
+
+  // Engage/disengage precision dragging based on the live Shift state. Called from
+  // every active timeline-drag move handler. Engaging captures an anchor at the
+  // current cursor so the marker stays put at the moment Shift is pressed.
+  const syncPrecisionAnchor = (clientX: number, shiftKey: boolean) => {
+    if (!shiftKey) {
+      if (precisionDragAnchorRef.current) {
+        precisionDragAnchorRef.current = null
+        setIsPrecisionDragging(false)
+        setPrecisionFrameReady(false)
+      }
+      return
+    }
+    if (precisionDragAnchorRef.current) return
+    const el = scrubBarRef.current
+    const duration = (videoRef.current?.duration || durationSeconds || selectedVideo?.duration || 0) as number
+    if (!el || !duration || duration <= 0) return
+    const rect = el.getBoundingClientRect()
+    const x = Math.min(Math.max(clientX - rect.left, 0), rect.width)
+    const time = rect.width > 0 ? (x / rect.width) * duration : 0
+    precisionDragAnchorRef.current = { clientX, time }
+    precisionUsedThisGestureRef.current = true
+    setIsPrecisionDragging(true)
+    // Engaging: hold the sprite overlay until the real video seeks to the target
+    // frame (see the `seeked` listener), so we don't flash its stale last frame.
+    setPrecisionFrameReady(false)
+  }
+
+  const clearPrecisionAnchor = () => {
+    if (precisionDragAnchorRef.current) {
+      precisionDragAnchorRef.current = null
+      setIsPrecisionDragging(false)
+      setPrecisionFrameReady(false)
+    }
+  }
+
   const getTimeFromScrubEvent = (clientX: number) => {
     const el = scrubBarRef.current
     const duration = (videoRef.current?.duration || durationSeconds || selectedVideo?.duration || 0) as number
     if (!el || !duration || duration <= 0) return { time: 0, left: 0, width: 0 }
     const rect = el.getBoundingClientRect()
+    // Precision drag: map movement relative to the anchor, scaled down, so the
+    // marker tracks a fraction of the cursor's travel. left is derived from the
+    // resulting time so the preview/playhead stay visually aligned with the marker.
+    const anchor = precisionDragAnchorRef.current
+    if (anchor && rect.width > 0) {
+      const deltaPx = clientX - anchor.clientX
+      const fps = (selectedVideo?.fps as number | undefined) || 0
+      if (fps > 0) {
+        // Frame-by-frame: map cursor travel to whole-frame steps and snap the result
+        // onto the exact frame grid, so the playhead/marker lands on real frames.
+        const rawTime = anchor.time + (deltaPx / PIXELS_PER_FRAME) / fps
+        const frame = Math.round(rawTime * fps)
+        const time = Math.min(duration, Math.max(0, frame / fps))
+        return { time, left: (time / duration) * rect.width, width: rect.width }
+      }
+      // No FPS metadata — can't snap to frames; fall back to scaled-time fine control.
+      const time = Math.min(duration, Math.max(0, anchor.time + (deltaPx / rect.width) * duration * PRECISION_DRAG_FACTOR))
+      return { time, left: (time / duration) * rect.width, width: rect.width }
+    }
     const x = Math.min(Math.max(clientX - rect.left, 0), rect.width)
     const ratio = rect.width > 0 ? x / rect.width : 0
     return { time: ratio * duration, left: x, width: rect.width }
@@ -1666,6 +1845,9 @@ export default function VideoPlayer({
   // bracket reaches furthest: its full width outward from the point.
   const TIMELINE_EDGE_INSET_PX = RANGE_HANDLE_WIDTH_PX
   const snapHandleTimeToPlayhead = (candidateSeconds: number, barWidthPx: number) => {
+    // Precision (Shift) dragging is for landing on an exact frame — snapping to the
+    // playhead would fight that, so it's disabled while Shift is held.
+    if (precisionDragAnchorRef.current) return candidateSeconds
     const playhead = currentTimeRef.current
     if (!Number.isFinite(playhead) || barWidthPx <= 0 || effectiveDurationSeconds <= 0) return candidateSeconds
     const snapSeconds = (SNAP_TO_PLAYHEAD_PX / barWidthPx) * effectiveDurationSeconds
@@ -1676,6 +1858,8 @@ export default function VideoPlayer({
   // active, the playhead gently snaps to the nearest visible IN/OUT handle within
   // the same ~6px threshold, so it's easy to line the playhead up with a marker.
   const snapPlayheadToHandles = (candidateSeconds: number, barWidthPx: number) => {
+    // Disabled during a precision (Shift) drag — see snapHandleTimeToPlayhead.
+    if (precisionDragAnchorRef.current) return candidateSeconds
     if (!commentRangeActiveRef.current || barWidthPx <= 0 || effectiveDurationSeconds <= 0) return candidateSeconds
     const snapSeconds = (SNAP_TO_PLAYHEAD_PX / barWidthPx) * effectiveDurationSeconds
     const start = commentRangeStartRef.current
@@ -1717,7 +1901,7 @@ export default function VideoPlayer({
 
   // Handle initial seek from URL parameters (only once on mount)
   useEffect(() => {
-    if (initialSeekTime !== null && videoRef.current && videoUrl && !hasInitiallySeenRef.current) {
+    if (initialSeekTime !== null && videoRef.current && selectedVideoHlsUrl && !hasInitiallySeenRef.current) {
       const videoEl = videoRef.current
       const handleLoadedMetadata = () => {
         if (initialSeekTime !== null) {
@@ -1746,7 +1930,7 @@ export default function VideoPlayer({
         videoEl.removeEventListener('loadedmetadata', handleLoadedMetadata)
       }
     }
-  }, [initialSeekTime, videoUrl])
+  }, [initialSeekTime, selectedVideoHlsUrl])
 
 
   // Expose current time for CommentSection
@@ -1762,6 +1946,25 @@ export default function VideoPlayer({
       window.removeEventListener('getCurrentTime' as any, handleGetCurrentTime as EventListener)
     }
   }, [])
+
+  // Expose duration/fps/current-time for the comment time editor (validation + format).
+  useEffect(() => {
+    const handleGetContext = (e: CustomEvent) => {
+      if (e.detail?.callback) {
+        e.detail.callback({
+          duration: effectiveDurationSeconds,
+          fps: effectiveFps,
+          currentTime: currentTimeRef.current,
+          videoId: selectedVideoIdRef.current,
+        })
+      }
+    }
+
+    window.addEventListener('getCommentTimeContext' as any, handleGetContext as EventListener)
+    return () => {
+      window.removeEventListener('getCommentTimeContext' as any, handleGetContext as EventListener)
+    }
+  }, [effectiveDurationSeconds, effectiveFps])
 
   // Expose selected video ID for approval
   useEffect(() => {
@@ -1939,6 +2142,39 @@ export default function VideoPlayer({
         return
       }
 
+      // Space (no modifiers): Play/Pause — but never steal it from a text field
+      // (the comment box) or an interactive control where Space is the activation key.
+      if (e.code === 'Space' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        const target = (e.target as HTMLElement | null) || (document.activeElement as HTMLElement | null)
+        const tag = target?.tagName
+        const role = target?.getAttribute?.('role')
+        const isTypingOrControl =
+          !!target &&
+          (tag === 'INPUT' ||
+            tag === 'TEXTAREA' ||
+            tag === 'SELECT' ||
+            tag === 'BUTTON' ||
+            tag === 'A' ||
+            target.isContentEditable ||
+            role === 'button' ||
+            role === 'textbox' ||
+            role === 'menuitem' ||
+            role === 'option' ||
+            // Anything inside an open dialog/popover (the comment-time editor, modals).
+            !!target.closest?.('[role="dialog"],[aria-modal="true"]'))
+        if (isTypingOrControl) return
+
+        e.preventDefault()
+        e.stopPropagation()
+        if (video.paused) {
+          restorePlayheadAfterRangePreview()
+          video.play()
+        } else {
+          video.pause()
+        }
+        return
+      }
+
       // Ctrl+, or Ctrl+<: Decrease speed by 0.25x
       if (e.ctrlKey && (e.code === 'Comma' || e.key === '<')) {
         e.preventDefault()
@@ -1992,7 +2228,11 @@ export default function VideoPlayer({
       const now = Date.now()
       // Throttle to update max every 200ms instead of 60 times per second
       if (now - lastTimeUpdateRef.current > 200) {
-        if (isRangeFramePreviewActiveRef.current) {
+        // While actively scrubbing the playhead, the scrub handler owns the
+        // playhead position (a default/non-precision drag doesn't seek the video,
+        // so a still-playing video's timeupdate would otherwise fight it). Same
+        // reasoning as the range-frame-preview guard below.
+        if (isRangeFramePreviewActiveRef.current || isScrubbingRef.current) {
           lastTimeUpdateRef.current = now
           return
         }
@@ -2034,6 +2274,92 @@ export default function VideoPlayer({
     }
   }
 
+  // Briefly flash the seek indicator on the tapped half of the player.
+  const triggerSeekIndicator = (side: 'left' | 'right', amount: number) => {
+    setSeekIndicator({ side, amount, key: Date.now() })
+    if (seekIndicatorTimeoutRef.current !== null) {
+      window.clearTimeout(seekIndicatorTimeoutRef.current)
+    }
+    seekIndicatorTimeoutRef.current = window.setTimeout(() => {
+      setSeekIndicator(null)
+      seekIndicatorTimeoutRef.current = null
+    }, 1200)
+  }
+
+  // Briefly flash the centred play/pause icon (mirrors the YouTube single-tap cue).
+  const flashPlayPauseIcon = (kind: 'play' | 'pause') => {
+    setCenterPulse({ kind, key: Date.now() })
+    if (centerPulseTimeoutRef.current !== null) {
+      window.clearTimeout(centerPulseTimeoutRef.current)
+    }
+    centerPulseTimeoutRef.current = window.setTimeout(() => {
+      setCenterPulse(null)
+      centerPulseTimeoutRef.current = null
+    }, 1000)
+  }
+
+  // Tap/click on the video surface. A single tap (after a short delay to rule out a
+  // double-tap) toggles play/pause; a double-tap on the left/right half seeks ∓10s,
+  // with repeated taps on the same side chaining (+10s each), YouTube-style.
+  const handleVideoClick = (e: React.MouseEvent<HTMLVideoElement>) => {
+    // A hold-to-2x release ends in a click — swallow it and don't count it as a tap.
+    if (suppressNextToggleRef.current) {
+      suppressNextToggleRef.current = false
+      return
+    }
+
+    const video = videoRef.current
+    if (!video) return
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    const side: 'left' | 'right' = e.clientX - rect.left < rect.width / 2 ? 'left' : 'right'
+    const now = Date.now()
+
+    const last = lastTapRef.current
+    const isDoubleTap = !!last && now - last.time < DOUBLE_TAP_MS && last.side === side
+
+    if (isDoubleTap) {
+      // Cancel the pending single-tap play/pause toggle.
+      if (pendingSingleTapRef.current !== null) {
+        window.clearTimeout(pendingSingleTapRef.current)
+        pendingSingleTapRef.current = null
+      }
+
+      const duration = effectiveDurationSeconds
+      const delta = side === 'left' ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS
+      const upperBound = duration > 0 ? duration : Number.MAX_SAFE_INTEGER
+      const target = Math.min(upperBound, Math.max(0, (video.currentTime || 0) + delta))
+      try {
+        video.currentTime = target
+      } catch {
+        // ignore seek failures
+      }
+      currentTimeRef.current = target
+      setCurrentTimeSeconds(target)
+
+      seekChainAmountRef.current += SEEK_STEP_SECONDS
+      triggerSeekIndicator(side, seekChainAmountRef.current)
+
+      // Keep the chain alive so further taps on this side accumulate.
+      lastTapRef.current = { time: now, side }
+      return
+    }
+
+    // First tap: remember it, reset the chain, and delay the play/pause toggle so a
+    // follow-up tap can still be recognised as a double-tap.
+    lastTapRef.current = { time: now, side }
+    seekChainAmountRef.current = 0
+    if (pendingSingleTapRef.current !== null) {
+      window.clearTimeout(pendingSingleTapRef.current)
+    }
+    pendingSingleTapRef.current = window.setTimeout(() => {
+      pendingSingleTapRef.current = null
+      const v = videoRef.current
+      if (v) flashPlayPauseIcon(v.paused ? 'play' : 'pause')
+      void togglePlayPause()
+    }, DOUBLE_TAP_MS)
+  }
+
   const stopHoldSpeedBoost = useCallback((pointerId?: number) => {
     if (typeof pointerId === 'number' && holdBoostPointerIdRef.current !== pointerId) return
 
@@ -2073,6 +2399,12 @@ export default function VideoPlayer({
     holdBoostTimeoutRef.current = window.setTimeout(() => {
       if (holdBoostPointerIdRef.current !== e.pointerId) return
       if (!videoRef.current || videoRef.current.paused) return
+      // A deliberate hold is not a tap — cancel any pending single-tap toggle.
+      if (pendingSingleTapRef.current !== null) {
+        window.clearTimeout(pendingSingleTapRef.current)
+        pendingSingleTapRef.current = null
+      }
+      lastTapRef.current = null
       isHoldBoostingRef.current = true
       setPlaybackSpeed(2.0)
       holdBoostTimeoutRef.current = null
@@ -2113,6 +2445,18 @@ export default function VideoPlayer({
       if (holdBoostTimeoutRef.current !== null) {
         window.clearTimeout(holdBoostTimeoutRef.current)
         holdBoostTimeoutRef.current = null
+      }
+      if (pendingSingleTapRef.current !== null) {
+        window.clearTimeout(pendingSingleTapRef.current)
+        pendingSingleTapRef.current = null
+      }
+      if (seekIndicatorTimeoutRef.current !== null) {
+        window.clearTimeout(seekIndicatorTimeoutRef.current)
+        seekIndicatorTimeoutRef.current = null
+      }
+      if (centerPulseTimeoutRef.current !== null) {
+        window.clearTimeout(centerPulseTimeoutRef.current)
+        centerPulseTimeoutRef.current = null
       }
     }
   }, [])
@@ -2253,6 +2597,7 @@ export default function VideoPlayer({
           }
         >
           <div
+            ref={playerFrameBoxRef}
             className={
               isInFullscreen
                 ? 'relative w-full h-full'
@@ -2293,7 +2638,7 @@ export default function VideoPlayer({
             // <video> and its container). Non-admin only, so admins keep native save.
             onContextMenu={!isAdmin ? (e) => e.preventDefault() : undefined}
           >
-            {(videoUrl || selectedVideoHlsUrl) ? (
+            {selectedVideoHlsUrl ? (
               <video
                 key={selectedVideo?.id}
                 ref={videoRef}
@@ -2324,11 +2669,11 @@ export default function VideoPlayer({
                   }
                 }}
                 onError={() => {
-                  // A failed source (commonly an expired /api/content stream token) leaves the
+                  // A failed source (e.g. an expired token on the native-HLS path) leaves the
                   // element unplayable even on a manual retry. Ask the parent to re-mint tokens,
                   // but only once per source to avoid an error→refresh→error loop.
                   const vid = selectedVideo?.id
-                  if (!vid || !videoUrl) return
+                  if (!vid || !selectedVideoHlsUrl) return
                   if (streamErrorRecoveryRef.current === vid) return
                   streamErrorRecoveryRef.current = vid
                   onStreamError?.(vid)
@@ -2396,7 +2741,7 @@ export default function VideoPlayer({
                 onPointerUp={handleVideoPointerUp}
                 onPointerCancel={handleVideoPointerCancel}
                 onLostPointerCapture={handleVideoLostPointerCapture}
-                onClick={togglePlayPause}
+                onClick={handleVideoClick}
                 // Mirror the asset lightbox's proven recipe for suppressing the native
                 // "Save/Download Video" menu on non-admin players: fuller controlsList,
                 // disable PiP, block the context menu on the element, and the iOS-only
@@ -2407,6 +2752,10 @@ export default function VideoPlayer({
                 style={{
                   objectFit: 'contain',
                   backgroundColor: isLgViewport ? '#000' : 'transparent',
+                  // Stop the browser from claiming a finger-drag as a scroll/pan gesture,
+                  // which would fire pointercancel mid-hold and drop the 2x speed boost.
+                  // Also suppresses native double-tap-zoom (helps the double-tap-to-seek).
+                  touchAction: 'none',
                   ...(suppressDownloadUi
                     ? { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }
                     : {}),
@@ -2414,7 +2763,7 @@ export default function VideoPlayer({
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-card-foreground">
-                Loading video...
+                Preparing video stream…
               </div>
             )}
 
@@ -2432,10 +2781,95 @@ export default function VideoPlayer({
               />
             ) : null}
 
+            {/* Scrub sprite overlay — while dragging the playhead or a comment IN/OUT
+                marker WITHOUT Shift, show the lightweight timeline sprite tile stretched
+                over the player instead of seeking the real (full-resolution) video. The
+                sprite tile shares the video's aspect ratio, so we letterbox it to fit the
+                player exactly like the <video>. Holding Shift (precision) hides this and
+                lets the real seeked frame show through. Reuses the cue already computed in
+                `timelineHover` for the current drag time. */}
+            {(isScrubbingPlayhead || activeRangeDragHandle !== null)
+              && (!isPrecisionDragging || !precisionFrameReady)
+              && timelineHover.visible
+              && timelineHover.spriteUrl
+              && playerFrameBoxSize.w > 0
+              && timelineHover.w > 0
+              && timelineHover.h > 0
+              && (() => {
+                const boxW = playerFrameBoxSize.w
+                const boxH = playerFrameBoxSize.h
+                const tileAspect = timelineHover.w / timelineHover.h
+                // Letterbox the tile inside the player box (object-fit: contain).
+                let dispW = boxW
+                let dispH = boxW / tileAspect
+                if (dispH > boxH) {
+                  dispH = boxH
+                  dispW = boxH * tileAspect
+                }
+                const scale = dispW / timelineHover.w
+                return (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                    style={{ backgroundColor: isLgViewport ? '#000' : 'transparent' }}
+                  >
+                    <div
+                      style={{
+                        width: dispW,
+                        height: dispH,
+                        backgroundImage: `url(${timelineHover.spriteUrl})`,
+                        backgroundSize: `${dispW * 10}px auto`,
+                        backgroundPosition: `-${Math.round(timelineHover.x * scale)}px -${Math.round(timelineHover.y * scale)}px`,
+                        backgroundRepeat: 'no-repeat',
+                      }}
+                    />
+                  </div>
+                )
+              })()}
+
             {/* Playback Speed Indicator - Show when speed is not 1.0x */}
             {playbackSpeed !== 1.0 && (
               <div className="absolute top-4 right-4 bg-black/80 text-white px-3 py-1.5 rounded-md text-sm font-medium pointer-events-none">
                 {playbackSpeed.toFixed(2)}x
+              </div>
+            )}
+
+            {/* Double-tap seek indicator (YouTube-style) on the tapped half. */}
+            {seekIndicator && (
+              <div
+                key={seekIndicator.key}
+                className={cn(
+                  'absolute inset-y-0 w-1/2 flex flex-col items-center justify-center gap-1 pointer-events-none text-white',
+                  seekIndicator.side === 'left' ? 'left-0' : 'right-0',
+                )}
+                style={{ animation: 'yt-seek-pop 1200ms ease-out forwards' }}
+              >
+                <div className="flex items-center justify-center w-16 h-16 rounded-full bg-black/60">
+                  {seekIndicator.side === 'left' ? (
+                    <Rewind className="w-8 h-8 fill-current" />
+                  ) : (
+                    <FastForward className="w-8 h-8 fill-current" />
+                  )}
+                </div>
+                <span className="text-sm font-medium drop-shadow">{seekIndicator.amount} seconds</span>
+              </div>
+            )}
+
+            {/* Centred play/pause flash on single tap. */}
+            {centerPulse && (
+              <div
+                key={centerPulse.key}
+                className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              >
+                <div
+                  className="flex items-center justify-center w-16 h-16 rounded-full bg-black/60 text-white"
+                  style={{ animation: 'yt-tap-pulse 1000ms ease-out forwards' }}
+                >
+                  {centerPulse.kind === 'play' ? (
+                    <Play className="w-8 h-8 fill-current" />
+                  ) : (
+                    <Pause className="w-8 h-8 fill-current" />
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -2607,9 +3041,11 @@ export default function VideoPlayer({
                     if (e.buttons === 0) { // released outside our handlers — abort stale scrub
                       isScrubbingRef.current = false
                       setIsScrubbingPlayhead(false)
+                      clearPrecisionAnchor()
                       return
                     }
                     e.preventDefault()
+                    syncPrecisionAnchor(e.clientX, e.shiftKey)
                     scheduleScrubToClientX(e.clientX)
                     return
                   }
@@ -2624,6 +3060,7 @@ export default function VideoPlayer({
                 onPointerLeave={() => {
                   isScrubbingRef.current = false
                   setIsScrubbingPlayhead(false)
+                  clearPrecisionAnchor()
                   if (keepTimelineHoverPinnedRef.current) return
                   setTimelineHover((prev) => ({ ...prev, visible: false }))
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
@@ -2642,6 +3079,8 @@ export default function VideoPlayer({
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
                   isScrubbingRef.current = true
                   setIsScrubbingPlayhead(true)
+                  precisionUsedThisGestureRef.current = false
+                  syncPrecisionAnchor(e.clientX, e.shiftKey)
                   scheduleScrubToClientX(e.clientX)
                   if (!canShowTimelineHover) {
                     updateHoverFromClientX(e.clientX, true)
@@ -2653,6 +3092,7 @@ export default function VideoPlayer({
                   } catch {}
                   isScrubbingRef.current = false
                   setIsScrubbingPlayhead(false)
+                  clearPrecisionAnchor()
                   if (!canShowTimelineHover) {
                     setTimelineHover((prev) => ({ ...prev, visible: false }))
                   }
@@ -2663,6 +3103,7 @@ export default function VideoPlayer({
                   } catch {}
                   isScrubbingRef.current = false
                   setIsScrubbingPlayhead(false)
+                  clearPrecisionAnchor()
                   setTimelineHover((prev) => ({ ...prev, visible: false }))
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
@@ -2670,6 +3111,13 @@ export default function VideoPlayer({
                   if (isTimelineSeekSuppressed()) {
                     e.preventDefault()
                     e.stopPropagation()
+                    return
+                  }
+                  // After a precision (Shift) drag the playhead already sits at the
+                  // fine-tuned spot; the trailing click's raw cursor position is coarse,
+                  // so skip it to avoid yanking the playhead back to the mouse.
+                  if (precisionUsedThisGestureRef.current) {
+                    precisionUsedThisGestureRef.current = false
                     return
                   }
                   // If the user is seeking, show actual video frames (not the poster overlay).
@@ -2760,6 +3208,7 @@ export default function VideoPlayer({
                         beginRangeFramePreview()
                         draggingRangeHandle.current = 'start'
                         setActiveRangeDragHandle('start')
+                        commentPointFollowsPlayheadRef.current = false
                         videoRef.current?.pause()
                       }}
                       onPointerMove={(e) => {
@@ -2768,8 +3217,10 @@ export default function VideoPlayer({
                           draggingRangeHandle.current = null
                           setActiveRangeDragHandle(null)
                           keepTimelineHoverPinnedRef.current = false
+                          clearPrecisionAnchor()
                           return
                         }
+                        syncPrecisionAnchor(e.clientX, e.shiftKey)
                         const { time, width } = getTimeFromScrubEvent(e.clientX)
                         const snapped = snapHandleTimeToPlayhead(time, width)
                         const newStart = Math.max(0, Math.min(snapped, commentRangeEnd - 0.1))
@@ -2781,7 +3232,9 @@ export default function VideoPlayer({
                         window.dispatchEvent(new CustomEvent('commentRangeChanged', {
                           detail: { start: newStart, ...(commentRangeHasExplicitSelectionRef.current ? { end: commentRangeEnd } : {}) }
                         }))
-                        previewVideoFrameAt(newStart)
+                        // Only a precision (Shift) drag seeks the real video for an
+                        // exact frame; the default drag shows the sprite tile instead.
+                        if (precisionDragAnchorRef.current) previewVideoFrameAt(newStart)
                         // Mirror the playhead-snap feel: while snapped, hold the preview at
                         // the committed (snapped) time instead of tracking the cursor, so a
                         // tiny move inside the snap zone doesn't jiggle the displayed time.
@@ -2798,6 +3251,7 @@ export default function VideoPlayer({
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
+                        clearPrecisionAnchor()
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
@@ -2808,6 +3262,7 @@ export default function VideoPlayer({
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
+                        clearPrecisionAnchor()
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
@@ -2846,6 +3301,7 @@ export default function VideoPlayer({
                         beginRangeFramePreview()
                         draggingRangeHandle.current = 'end'
                         setActiveRangeDragHandle('end')
+                        commentPointFollowsPlayheadRef.current = false
                         videoRef.current?.pause()
                       }}
                       onPointerMove={(e) => {
@@ -2854,8 +3310,10 @@ export default function VideoPlayer({
                           draggingRangeHandle.current = null
                           setActiveRangeDragHandle(null)
                           keepTimelineHoverPinnedRef.current = false
+                          clearPrecisionAnchor()
                           return
                         }
+                        syncPrecisionAnchor(e.clientX, e.shiftKey)
                         const { time, width } = getTimeFromScrubEvent(e.clientX)
                         const snapped = snapHandleTimeToPlayhead(time, width)
                         const duration = effectiveDurationSeconds
@@ -2870,7 +3328,9 @@ export default function VideoPlayer({
                         window.dispatchEvent(new CustomEvent('commentRangeChanged', {
                           detail: { start: commentRangeStart, ...(commentRangeHasExplicitSelectionRef.current ? { end: newEnd } : {}) }
                         }))
-                        previewVideoFrameAt(newEnd)
+                        // Only a precision (Shift) drag seeks the real video for an
+                        // exact frame; the default drag shows the sprite tile instead.
+                        if (precisionDragAnchorRef.current) previewVideoFrameAt(newEnd)
                         // Mirror the playhead-snap feel: while snapped, hold the preview at
                         // the committed (snapped) time instead of tracking the cursor, so a
                         // tiny move inside the snap zone doesn't jiggle the displayed time.
@@ -2887,6 +3347,7 @@ export default function VideoPlayer({
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
+                        clearPrecisionAnchor()
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
@@ -2897,6 +3358,7 @@ export default function VideoPlayer({
                         draggingRangeHandle.current = null
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
+                        clearPrecisionAnchor()
                         suppressTimelineSeekForHandleDrag()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
@@ -3138,11 +3600,27 @@ export default function VideoPlayer({
                     return (
                     <>
                       {highlight && (
-                        <div
-                          className="mb-1 rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-wide shadow-elevation-sm whitespace-nowrap"
-                          style={{ backgroundColor: accentColor, color: accentTextColor }}
-                        >
-                          {highlightLabel}
+                        <div className="mb-1 flex flex-col items-center gap-1">
+                          <div
+                            className="rounded-md px-2.5 py-1 text-xs font-bold uppercase tracking-wide shadow-elevation-sm whitespace-nowrap"
+                            style={{ backgroundColor: accentColor, color: accentTextColor }}
+                          >
+                            {highlightLabel}
+                          </div>
+                          {dragKind !== null && canShowTimelineHover && (
+                            <div
+                              className="rounded px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal whitespace-nowrap shadow-elevation-sm"
+                              style={{
+                                backgroundColor: isPrecisionDragging ? accentColor : 'hsl(var(--card))',
+                                color: isPrecisionDragging ? accentTextColor : 'hsl(var(--muted-foreground))',
+                                border: `1px solid ${isPrecisionDragging ? accentColor : 'hsl(var(--border))'}`,
+                              }}
+                            >
+                              {isPrecisionDragging
+                                ? 'Frame-by-frame — release mouse, then Shift'
+                                : 'Hold Shift for precise positioning'}
+                            </div>
+                          )}
                         </div>
                       )}
                       <div
@@ -3164,12 +3642,12 @@ export default function VideoPlayer({
                               }
                         }
                       >
-                        {dragKind !== null && canShowTimelineHover ? (
-                          // Desktop drag/scrub: paint the exact live video frame (kept in
-                          // sync by the rAF effect) so the preview matches the main player.
-                          // On touch we fall back to the sprite below — drawing a paused,
-                          // rapidly-seeking video to canvas is unreliable on mobile (stale
-                          // or blank frame), whereas a sprite tile always renders.
+                        {dragKind !== null && canShowTimelineHover && isPrecisionDragging && precisionFrameReady ? (
+                          // Desktop precision (Shift) drag: paint the exact live video frame
+                          // (kept in sync by the rAF effect) so the preview matches the main
+                          // player. Default drags and touch fall back to the sprite below —
+                          // they don't seek the video, and drawing a paused/rapidly-seeking
+                          // video to canvas is unreliable on mobile anyway.
                           <canvas
                             ref={previewFrameCanvasRef}
                             width={displayW}
@@ -3252,6 +3730,20 @@ export default function VideoPlayer({
                         {formatTimestampForDuration(anchorSeconds, effectiveDurationSeconds)}
                       </div>
                     </div>
+                    {dragKind !== null && canShowTimelineHover && (
+                      <div
+                        className="mt-1 rounded px-2 py-0.5 text-[10px] font-medium whitespace-nowrap shadow-elevation-sm"
+                        style={{
+                          backgroundColor: isPrecisionDragging ? accentColor : 'hsl(var(--card))',
+                          color: isPrecisionDragging ? accentTextColor : 'hsl(var(--muted-foreground))',
+                          border: `1px solid ${isPrecisionDragging ? accentColor : 'hsl(var(--border))'}`,
+                        }}
+                      >
+                        {isPrecisionDragging
+                          ? 'Frame-by-frame — release mouse, then Shift'
+                          : 'Hold Shift for precise positioning'}
+                      </div>
+                    )}
                   </div>
                 )
               })()}
@@ -3733,7 +4225,10 @@ export default function VideoPlayer({
           <div className="space-y-3 text-sm">
             <div className="flex justify-between items-center py-2 border-b border-border">
               <span className="text-muted-foreground">Play / Pause</span>
-              <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Ctrl+Space</kbd>
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Space</kbd>
+                <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Ctrl+Space</kbd>
+              </span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-border">
               <span className="text-muted-foreground">Decrease Speed</span>

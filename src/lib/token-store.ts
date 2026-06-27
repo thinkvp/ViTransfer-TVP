@@ -11,6 +11,17 @@ const listeners = new Set<TokenChangeListener>()
 let tokenChannel: BroadcastChannel | null = null
 let tokenChannelInitialized = false
 
+// Resolvers for in-flight requestSessionFromPeers() calls, settled when a peer
+// window answers a 'request' with an 'offer'.
+const pendingPeerRequests = new Set<(adopted: boolean) => void>()
+
+function resolvePendingPeerRequests(adopted: boolean) {
+  if (pendingPeerRequests.size === 0) return
+  const resolvers = Array.from(pendingPeerRequests)
+  pendingPeerRequests.clear()
+  resolvers.forEach(resolve => resolve(adopted))
+}
+
 function isCurrentWindowSessionTimedOutUnsafe(): boolean {
   if (typeof window === 'undefined') return false
   try {
@@ -88,6 +99,37 @@ function ensureTokenChannel(): BroadcastChannel | null {
         cachedRefreshToken = null
         persistReceivedRefreshToken(null)
         notifyListeners()
+      }
+
+      if (data.type === 'request') {
+        // A freshly-loaded sibling window is asking for the current session.
+        // Only answer if we actually hold a live session — a window whose
+        // inactivity timer expired has no business seeding new windows.
+        if (isCurrentWindowSessionTimedOutUnsafe()) return
+        if (!inMemoryAccessToken || !cachedRefreshToken) return
+        try {
+          tokenChannel?.postMessage({
+            type: 'offer',
+            accessToken: inMemoryAccessToken,
+            refreshToken: cachedRefreshToken,
+          })
+        } catch {
+          // ignore
+        }
+      }
+
+      if (data.type === 'offer') {
+        // Adopt a session handed to us by a live sibling — but only while we're
+        // still tokenless, so a stale/duplicate offer can't clobber a session
+        // we just established ourselves.
+        if (inMemoryAccessToken || cachedRefreshToken) return
+        if (typeof data.accessToken !== 'string' || typeof data.refreshToken !== 'string') return
+        setCurrentWindowSessionTimedOutFlag(false)
+        inMemoryAccessToken = data.accessToken
+        cachedRefreshToken = data.refreshToken
+        persistReceivedRefreshToken(cachedRefreshToken)
+        notifyListeners()
+        resolvePendingPeerRequests(true)
       }
     }
   } catch {
@@ -207,6 +249,42 @@ export function getRefreshToken(): string | null {
   // storage event listeners. Fall back to storage only on first load (cold start).
   if (cachedRefreshToken) return cachedRefreshToken
   return syncRefreshFromStorage()
+}
+
+/**
+ * Ask any already-open sibling window (same origin / browser profile) to hand over
+ * its current session via the BroadcastChannel handshake. Resolves true once an
+ * 'offer' has been adopted, or false if no peer answers within `timeoutMs`.
+ *
+ * Lets a freshly-opened window (e.g. middle-click → new tab) inherit a live session
+ * instead of forcing a fresh login, without ever persisting the token to disk.
+ */
+export function requestSessionFromPeers(timeoutMs = 300): Promise<boolean> {
+  if (typeof window === 'undefined') return Promise.resolve(false)
+  const channel = ensureTokenChannel()
+  if (!channel) return Promise.resolve(false)
+  // Already have a session — nothing to request.
+  if (inMemoryAccessToken || cachedRefreshToken) return Promise.resolve(true)
+
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const finish = (adopted: boolean) => {
+      if (settled) return
+      settled = true
+      pendingPeerRequests.delete(finish)
+      clearTimeout(timer)
+      resolve(adopted)
+    }
+
+    pendingPeerRequests.add(finish)
+    const timer = setTimeout(() => finish(false), timeoutMs)
+
+    try {
+      channel.postMessage({ type: 'request' })
+    } catch {
+      finish(false)
+    }
+  })
 }
 
 export function setTokens(tokens: { accessToken: string; refreshToken: string }) {

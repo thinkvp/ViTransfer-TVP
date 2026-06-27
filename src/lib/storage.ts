@@ -3,7 +3,7 @@ import * as path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
-import { isS3Mode, s3UploadFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile } from '@/lib/s3-storage'
+import { isS3Mode, s3UploadFile, s3UploadFileWithRetry, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile, s3GetFileSize, s3ListPrefixSizes } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -150,8 +150,14 @@ export async function moveUploadedFile(
         `File size mismatch before S3 upload: expected ${expectedSize} bytes, got ${stat.size} bytes.`
       )
     }
-    const readStream = fs.createReadStream(srcAbsPath)
-    await s3UploadFile(destLogicalPath, readStream, 'application/octet-stream', expectedSize)
+    // Re-open the stream per attempt: a consumed Readable can't be replayed, so a
+    // transient R2 500 mid-upload would otherwise be a "non-retryable streaming request".
+    await s3UploadFileWithRetry(
+      destLogicalPath,
+      () => fs.createReadStream(srcAbsPath),
+      'application/octet-stream',
+      expectedSize,
+    )
     await fs.promises.unlink(srcAbsPath).catch(() => {})
     await fs.promises.unlink(`${srcAbsPath}.json`).catch(() => {})
     console.log(`[STORAGE] Uploaded TUS temp file to S3: ${destLogicalPath}`)
@@ -381,6 +387,56 @@ export async function moveDirectory(
 
 export function getFilePath(filePath: string): string {
   return validatePath(filePath)
+}
+
+/**
+ * Storage-agnostic size probe: returns the byte length of a stored file, or null when it
+ * does not exist. Works in both local and S3 mode — used to verify a bundle (e.g. HLS) is
+ * fully written before marking it ready.
+ */
+export async function getStoredFileSize(filePath: string): Promise<number | null> {
+  if (isS3Mode()) return s3GetFileSize(filePath)
+  try {
+    const stats = await fs.promises.stat(validatePath(filePath))
+    return stats.isFile() ? stats.size : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * List every stored file under `prefix`, returning a map of logical path → byte size. One
+ * directory walk (local) or paginated LIST (S3) instead of a stat/HEAD per file — used to
+ * verify a whole bundle (e.g. an HLS bundle's many segments) in a single round trip.
+ */
+export async function listStoredFileSizes(prefix: string): Promise<Map<string, number>> {
+  if (isS3Mode()) return s3ListPrefixSizes(prefix)
+
+  const normalizedPrefix = prefix.replace(/\/+$/, '')
+  const out = new Map<string, number>()
+  const root = validatePath(prefix)
+
+  async function walk(absDir: string, relBase: string): Promise<void> {
+    let entries: fs.Dirent[]
+    try {
+      entries = await fs.promises.readdir(absDir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const abs = path.join(absDir, entry.name)
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        await walk(abs, rel)
+      } else if (entry.isFile()) {
+        const stats = await fs.promises.stat(abs).catch(() => null)
+        if (stats) out.set(`${normalizedPrefix}/${rel}`, stats.size)
+      }
+    }
+  }
+
+  await walk(root, '')
+  return out
 }
 
 // Returns the absolute path inside STORAGE_ROOT without validation redirects.

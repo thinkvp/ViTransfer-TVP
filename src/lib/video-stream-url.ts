@@ -87,39 +87,20 @@ export async function getDirectStreamUrl(params: {
   return presignCachedStreamUrl(path, `stream_url:${params.sessionId}:${params.videoId}:${params.quality}:${path}`)
 }
 
-/**
- * Asset playback variant of Option B: a video asset's generated playback preview
- * (PREVIEW_MP4) is streamed via /api/content?assetPlayback=1, which in S3 mode takes
- * the same 302→R2 redirect — so seeking through asset videos breaks behind the same
- * proxies. Hand the lightbox player a direct presigned URL instead.
- *
- * Returns null (caller keeps the /api/content URL) in local mode, when disabled, or
- * when there is no playback preview path.
- */
-export async function getDirectAssetStreamUrl(params: {
-  previewPath: string | null
-  sessionId: string
-  assetId: string
-}): Promise<string | null> {
-  if (!directStreamingEnabled()) return null
-  if (!params.previewPath) return null
-
-  return presignCachedStreamUrl(params.previewPath, `stream_url:${params.sessionId}:asset:${params.assetId}:${params.previewPath}`)
-}
-
 function directStreamingEnabled(): boolean {
   return isS3Mode() && process.env.STREAM_DIRECT_FROM_R2 !== 'false'
 }
 
 /**
- * HLS (segmented) delivery is offered when running in S3 mode and not explicitly
- * disabled. Mirrors directStreamingEnabled() — `STREAM_HLS=false` is a no-redeploy
- * kill-switch that reverts every viewer to the single-file MP4 path. HLS is the
- * proxy-robust path: segments are fetched as full-file 200 GETs (no Range), so it
- * survives corporate gateways that mangle Range/206 seeking.
+ * HLS (segmented) delivery is the sole playback path and is offered in BOTH storage modes
+ * unless explicitly disabled. `STREAM_HLS=false` is a no-redeploy kill-switch (escape hatch
+ * only — there is no MP4 fallback anymore). HLS is the proxy-robust path: segments are
+ * fetched as full-file 200 GETs (no Range), so it survives corporate gateways that mangle
+ * Range/206 seeking. In S3 mode segments are presigned direct-from-R2; in local mode they
+ * are served same-origin through /api/hls.
  */
 export function hlsStreamingEnabled(): boolean {
-  return isS3Mode() && process.env.STREAM_HLS !== 'false'
+  return process.env.STREAM_HLS !== 'false'
 }
 
 /** Same-origin, token-scoped master-playlist URL the player hands to hls.js. */

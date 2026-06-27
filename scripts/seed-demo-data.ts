@@ -348,7 +348,6 @@ async function main() {
         authMode: 'PASSWORD',
         enableVideos: true,
         enablePhotos: Math.random() > 0.5,
-        watermarkEnabled: true,
       },
     })
 

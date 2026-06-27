@@ -10,8 +10,6 @@ type ResolvePayload = {
     id: string
     title: string
     status: any
-    watermarkEnabled?: boolean
-    timelinePreviewsEnabled?: boolean
   }
   video: {
     id: string
@@ -202,7 +200,6 @@ export function GuestVideoViewer({ token }: { token: string }) {
             videos={[videoForPlayer as any]}
             projectId={data.project.id}
             projectStatus={data.project.status}
-            watermarkEnabled={data.project.watermarkEnabled ?? true}
             isAdmin={false}
             isGuest={true}
             hideDownloadButton={true}

@@ -1,8 +1,6 @@
 import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
-import os from 'os'
-import crypto from 'crypto'
 import { getCpuAllocation, getDynamicThreadsPerJob } from './cpu-config'
 
 // Debug mode - outputs verbose FFmpeg logs
@@ -25,41 +23,6 @@ export interface VideoMetadata {
   height: number
   fps?: number
   codec?: string
-}
-
-/**
- * Validate and sanitize watermark text for FFmpeg
- * Defense-in-depth: validates even if upstream validation exists
- *
- * @param text - The watermark text to validate
- * @returns Sanitized text safe for FFmpeg
- * @throws Error if text contains invalid characters or exceeds length limit
- */
-function validateAndSanitizeWatermarkText(text: string): string {
-  // Length check (prevent excessively long watermarks)
-  if (text.length > 100) {
-    throw new Error('Watermark text exceeds 100 character limit')
-  }
-
-  // Check for invalid characters (only alphanumeric, spaces, and safe punctuation)
-  const invalidChars = text.match(/[^a-zA-Z0-9\s\-_.()]/g)
-  if (invalidChars) {
-    const uniqueInvalid = [...new Set(invalidChars)].join(', ')
-    throw new Error(`Watermark text contains invalid characters: ${uniqueInvalid}`)
-  }
-
-  // Sanitize by removing any potentially dangerous characters (should be none at this point)
-  const sanitized = text.replace(/[^a-zA-Z0-9\s\-_.()]/g, '')
-
-  // Escape for FFmpeg drawtext filter (defense-in-depth)
-  // Escape all special characters that FFmpeg might interpret
-  return sanitized
-    .replace(/\\/g, '\\\\')  // Backslash first (prevents double-escaping)
-    .replace(/'/g, "\\'")    // Single quote
-    .replace(/:/g, '\\:')    // Colon (used in filter syntax)
-    .replace(/%/g, '\\%')    // Percent (used in FFmpeg expressions)
-    .replace(/\[/g, '\\[')   // Square brackets (used in filter syntax)
-    .replace(/\]/g, '\\]')
 }
 
 export async function getVideoMetadata(inputPath: string): Promise<VideoMetadata> {
@@ -180,15 +143,24 @@ export async function getVideoMetadata(inputPath: string): Promise<VideoMetadata
 
 export interface TranscodeOptions {
   inputPath: string
-  outputPath: string
+  /** MP4 output file. Required unless `hlsOutputDir` is set (direct-to-HLS mode). */
+  outputPath?: string
   width: number
   height: number
-  watermarkText?: string
   onProgress?: (progress: number) => void | Promise<void>
   shouldAbort?: () => boolean | Promise<boolean>
   // When true, force keyframes at a fixed interval and disable scene-cut keyframes so this
   // rendition's segments align with every other rendition's (required for HLS ABR).
   alignKeyframes?: boolean
+  /**
+   * Direct-to-HLS mode: when set, the encoder writes a VOD HLS rendition (index.m3u8 +
+   * init.mp4 + seg-*.m4s) into this directory in a single pass, instead of an MP4 to
+   * `outputPath`. Same encode/filter/keyframe flags — only the output muxer differs. This
+   * removes the redundant "encode MP4 → upload → download → remux" round-trip.
+   */
+  hlsOutputDir?: string
+  /** HLS segment target duration in seconds (default 4). Only used with `hlsOutputDir`. */
+  segmentDurationSeconds?: number
 }
 
 export class FFmpegCancellationError extends Error {
@@ -306,11 +278,16 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     outputPath,
     width,
     height,
-    watermarkText,
     onProgress,
     shouldAbort,
     alignKeyframes,
+    hlsOutputDir,
+    segmentDurationSeconds = 4,
   } = options
+
+  if (!hlsOutputDir && !outputPath) {
+    throw new Error('transcodeVideo requires either outputPath (MP4) or hlsOutputDir (HLS)')
+  }
 
   if (DEBUG) {
     console.log('[FFMPEG DEBUG] Starting transcodeVideo with options:', {
@@ -318,7 +295,6 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
       outputPath,
       width,
       height,
-      watermarkText,
       hasProgressCallback: !!onProgress
     })
   }
@@ -365,37 +341,6 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
   // Scale video
   filters.push(`scale=${width}:${height}`)
 
-  // Add watermark if specified
-  let watermarkTextFile: string | null = null
-  if (watermarkText) {
-    // Validate and sanitize watermark text (defense-in-depth)
-    const validatedText = validateAndSanitizeWatermarkText(watermarkText)
-
-    // SECURITY: Write watermark to secure temp directory instead of inline
-    // mkdtempSync creates a directory with restricted permissions (0700)
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'watermark-'))
-    watermarkTextFile = path.join(tmpDir, 'text.txt')
-    fs.writeFileSync(watermarkTextFile, validatedText, 'utf-8')
-
-    const isVertical = height > width
-    const centerFontSize = isVertical ? Math.round(width * 0.08) : Math.round(width * 0.04)
-    const cornerFontSize = isVertical ? Math.round(width * 0.05) : Math.round(width * 0.025)
-
-    // Center watermark - use textfile instead of inline text
-    filters.push(
-      `drawtext=textfile='${watermarkTextFile}':fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:fontsize=${centerFontSize}:fontcolor=white@0.3:x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black@0.5:shadowx=2:shadowy=2`
-    )
-
-    // Corner watermarks
-    const spacing = isVertical ? 30 : 50
-    filters.push(
-      `drawtext=textfile='${watermarkTextFile}':fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:fontsize=${cornerFontSize}:fontcolor=white@0.2:x=${spacing}:y=${spacing}:shadowcolor=black@0.3:shadowx=1:shadowy=1`
-    )
-    filters.push(
-      `drawtext=textfile='${watermarkTextFile}':fontfile=/usr/share/fonts/dejavu/DejaVuSans.ttf:fontsize=${cornerFontSize}:fontcolor=white@0.2:x=w-text_w-${spacing}:y=h-text_h-${spacing}:shadowcolor=black@0.3:shadowx=1:shadowy=1`
-    )
-  }
-
   const filterComplex = filters.join(',')
 
   if (DEBUG) {
@@ -428,12 +373,29 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     '-c:a', 'aac',
     '-b:a', '128k', // Reduced from 192k to 128k (sufficient for most use cases, saves bandwidth)
     '-ar', '48000', // Standard audio sample rate
-    '-movflags', '+faststart', // Enable progressive download (moov atom at start)
     '-max_muxing_queue_size', '1024', // Prevent muxing errors on high-bitrate videos
     '-progress', 'pipe:2',
     '-threads:v', threads.toString(),
-    '-y', // Overwrite output file
-    outputPath
+    // Output muxer: HLS (fMP4/CMAF) directly, or a faststart MP4. The HLS flags mirror
+    // packageHlsRendition exactly, so a direct encode is byte-compatible with the old
+    // encode-then-remux pipeline the delivery route expects.
+    ...(hlsOutputDir
+      ? [
+          '-f', 'hls',
+          '-hls_time', String(segmentDurationSeconds),
+          '-hls_playlist_type', 'vod',
+          '-hls_segment_type', 'fmp4',
+          '-hls_flags', 'independent_segments',
+          '-hls_fmp4_init_filename', 'init.mp4',
+          '-hls_segment_filename', path.join(hlsOutputDir, 'seg-%05d.m4s'),
+          '-y',
+          path.join(hlsOutputDir, 'index.m3u8'),
+        ]
+      : [
+          '-movflags', '+faststart', // Enable progressive download (moov atom at start)
+          '-y', // Overwrite output file
+          outputPath as string,
+        ])
   ]
 
   if (DEBUG) {
@@ -543,20 +505,6 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
     ffmpeg.on('close', (code) => {
       clearAbortTimers()
 
-      // Cleanup watermark temp file and directory
-      if (watermarkTextFile && fs.existsSync(watermarkTextFile)) {
-        try {
-          const tmpDir = path.dirname(watermarkTextFile)
-          fs.unlinkSync(watermarkTextFile)
-          fs.rmdirSync(tmpDir)
-          if (DEBUG) {
-            console.log('[FFMPEG DEBUG] Cleaned up watermark temp file:', watermarkTextFile)
-          }
-        } catch (cleanupErr) {
-          console.error('Failed to cleanup watermark temp file:', cleanupErr)
-        }
-      }
-
       if (DEBUG) {
         console.log('[FFMPEG DEBUG] Process exited with code:', code)
       }
@@ -582,17 +530,6 @@ export async function transcodeVideo(options: TranscodeOptions): Promise<void> {
 
     ffmpeg.on('error', (err) => {
       clearAbortTimers()
-
-      // Cleanup watermark temp file and directory on error
-      if (watermarkTextFile && fs.existsSync(watermarkTextFile)) {
-        try {
-          const tmpDir = path.dirname(watermarkTextFile)
-          fs.unlinkSync(watermarkTextFile)
-          fs.rmdirSync(tmpDir)
-        } catch (cleanupErr) {
-          console.error('Failed to cleanup watermark temp file:', cleanupErr)
-        }
-      }
 
       if (DEBUG) {
         console.error('[FFMPEG DEBUG] Failed to spawn FFmpeg:', err)

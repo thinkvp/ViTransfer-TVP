@@ -962,7 +962,7 @@ export async function renderProjectApprovedEmail({
       </p>
 
       <p style="margin: 0 0 24px 0; font-size: 15px; color: #374151; line-height: 1.6;">
-        Great news! Your project <strong>${escapeHtml(projectTitle)}</strong> has been approved. You can now download the final version without watermarks.
+        Great news! Your project <strong>${escapeHtml(projectTitle)}</strong> has been approved. You can now download the final version.
       </p>
 
       ${autoCloseCalloutHtml}

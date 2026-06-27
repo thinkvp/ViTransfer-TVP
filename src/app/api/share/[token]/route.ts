@@ -297,8 +297,6 @@ export async function GET(
       companyName: project.companyName || null,
       recipients: allRecipients,
 
-      enableRevisions: project.enableRevisions,
-      maxRevisions: project.maxRevisions,
       restrictCommentsToLatestVersion: project.restrictCommentsToLatestVersion,
       hideFeedback: project.hideFeedback || project.status === 'SHARE_ONLY',
       useFullTimecode: (project as any).useFullTimecode ?? false,
@@ -306,9 +304,6 @@ export async function GET(
       enableClientUploads: project.enableClientUploads ?? true,
       allowClientUploadFiles: project.allowClientUploadFiles,
       previewResolutions: project.previewResolutions,
-      watermarkEnabled: project.watermarkEnabled,
-
-      timelinePreviewsEnabled: project.timelinePreviewsEnabled,
 
       videos: effectiveVideos,
       videosByName: effectiveVideosByName,

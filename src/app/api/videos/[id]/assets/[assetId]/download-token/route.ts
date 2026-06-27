@@ -4,7 +4,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFilePathForProject } from '@/lib/stored-file'
-import { getDirectAssetStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl } from '@/lib/video-stream-url'
+import { hlsStreamingEnabled, buildHlsMasterUrl } from '@/lib/video-stream-url'
 
 /**
  * Generate a temporary download token for asset downloads (admins and share users)
@@ -54,12 +54,10 @@ export async function POST(
     const isPreviewableImage = normalizedFileType.startsWith('image/') || imageExtensions.includes(fileNameExt)
     const isPreviewableVideo = normalizedFileType.startsWith('video/') || videoExtensions.includes(fileNameExt)
     const isAudioAsset = normalizedFileType.startsWith('audio/') || audioExtensions.includes(fileNameExt)
-    // Check StoredFile for preview paths
-    const previewMp4 = await getStoredFilePathForProject('VIDEO_ASSET', assetId, 'PREVIEW_MP4', project.id)
+    // Check StoredFile for preview paths. Playback is HLS now — there's no MP4 preview.
     const previewImage = await getStoredFilePathForProject('VIDEO_ASSET', assetId, 'PREVIEW_IMAGE', project.id)
-    const hasReadyGeneratedPlaybackPreview =
-      asset.previewStatus === 'READY'
-      && !!previewMp4
+    const hlsPlaylist = await getStoredFilePathForProject('VIDEO_ASSET', assetId, 'HLS_PLAYLIST', project.id).catch(() => null)
+    const hasReadyHls = asset.previewStatus === 'READY' && !!hlsPlaylist && hlsStreamingEnabled()
     const hasReadyGeneratedPreview =
       asset.previewStatus === 'READY'
       && (
@@ -109,29 +107,18 @@ export async function POST(
       ? `/api/content/${token}?assetId=${assetId}&assetPreview=1`
       : null
 
-    // Option B for asset videos: in S3 mode hand back a direct presigned R2 URL for the
-    // generated playback preview so seeking doesn't break behind redirect-mangling
-    // proxies. Falls back to the token-gated /api/content?assetPlayback=1 redirect.
-    const directPlaybackUrl = isPreviewableVideo && hasReadyGeneratedPlaybackPreview
-      ? await getDirectAssetStreamUrl({ previewPath: previewMp4, sessionId, assetId }).catch(() => null)
-      : null
+    // HLS (proxy-robust segmented) playback — single rendition, served as a same-origin
+    // token-scoped master playlist. This is the sole generated playback path now; the player
+    // prefers it and falls back to streaming the original (inlineAssetUrl) when HLS isn't ready.
+    let hlsUrl = ''
+    if (isPreviewableVideo && hasReadyHls) {
+      const hlsToken = await generateVideoAccessToken(videoId, project.id, 'hls', request, sessionId, undefined, 'asset', assetId).catch(() => '')
+      if (hlsToken) hlsUrl = buildHlsMasterUrl(hlsToken)
+    }
 
     const playbackUrl = isPreviewableVideo
-      ? (hasReadyGeneratedPlaybackPreview
-          ? (directPlaybackUrl || `/api/content/${token}?assetId=${assetId}&assetPlayback=1`)
-          : inlineAssetUrl)
+      ? inlineAssetUrl
       : (isAudioAsset ? inlineAssetUrl : null)
-
-    // HLS (proxy-robust segmented) playback for the asset preview — single rendition, served
-    // as a same-origin token-scoped master playlist. The player prefers it over playbackUrl.
-    let hlsUrl = ''
-    if (isPreviewableVideo && hasReadyGeneratedPlaybackPreview && hlsStreamingEnabled()) {
-      const hasHls = !!(await getStoredFilePathForProject('VIDEO_ASSET', assetId, 'HLS_PLAYLIST', project.id).catch(() => null))
-      if (hasHls) {
-        const hlsToken = await generateVideoAccessToken(videoId, project.id, 'hls', request, sessionId, undefined, 'asset', assetId).catch(() => '')
-        if (hlsToken) hlsUrl = buildHlsMasterUrl(hlsToken)
-      }
-    }
 
     // Return download URL with asset ID parameter
     const response = NextResponse.json({

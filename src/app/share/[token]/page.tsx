@@ -2103,8 +2103,6 @@ export default function SharePage() {
     if (project?.enableVideos === false) return videos
     if (!shareToken) return videos
 
-    const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
-
     // Prefer the direct-to-R2 stream URL when the server provides one (Option B);
     // otherwise fall back to the token-gated /api/content redirect.
     const buildStreamUrl = (s: { token: string; streamUrl: string }): string =>
@@ -2180,7 +2178,7 @@ export default function SharePage() {
 
             let timelineVttUrl = null
             let timelineSpriteUrl = null
-            if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
+            if (video.timelinePreviewsReady) {
               const [vttToken, spriteToken] = await Promise.all([
                 fetchVideoToken(video.id, 'timeline-vtt'),
                 fetchVideoToken(video.id, 'timeline-sprite'),
@@ -3177,7 +3175,6 @@ export default function SharePage() {
                     projectTitle={project.title}
                     clientName={project.clientName}
                     isPasswordProtected={isPasswordProtected || false}
-                    watermarkEnabled={project.watermarkEnabled}
                     activeVideoName={activeVideoName}
                     onApprove={fetchProjectData}
                     initialSeekTime={initialSeekTime}
@@ -3537,7 +3534,6 @@ function ShareFeedbackGrid({
               projectTitle={project.title}
               clientName={project.clientName}
               isPasswordProtected={isPasswordProtected}
-              watermarkEnabled={project.watermarkEnabled}
               activeVideoName={activeVideoName}
               onApprove={onApprove}
               initialSeekTime={initialSeekTime}
@@ -3580,6 +3576,8 @@ function ShareFeedbackGrid({
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
                 onClearRange={management.handleClearRange}
+                onSetTimes={management.handleSetCommentTimes}
+                videoDurationSeconds={typeof selectedVideo?.duration === 'number' ? selectedVideo.duration : undefined}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={effectiveUseFullTimecode}
@@ -3678,6 +3676,8 @@ function ShareFeedbackGrid({
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
                 onClearRange={management.handleClearRange}
+                onSetTimes={management.handleSetCommentTimes}
+                videoDurationSeconds={typeof selectedVideo?.duration === 'number' ? selectedVideo.duration : undefined}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={effectiveUseFullTimecode}

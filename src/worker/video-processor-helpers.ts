@@ -1,13 +1,12 @@
 import { prisma } from '../lib/db'
-import { getFilePath, moveUploadedFile, deleteDirectory } from '../lib/storage'
+import { getFilePath, moveUploadedFile, deleteDirectory, getStoredFileSize, downloadFile, listStoredFileSizes } from '../lib/storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { isS3Mode, s3FileExists } from '../lib/s3-storage'
-import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, packageHlsRendition, FFmpegCancellationError } from '../lib/ffmpeg'
+import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
 import { Prisma, type VideoStatus, type EntityType } from '@prisma/client'
 import {
   buildProjectStorageRoot,
   buildVideoOriginalStoragePath,
-  buildVideoPreviewStoragePath,
   buildVideoThumbnailStoragePath,
   buildVideoTimelineStorageRoot,
   buildVideoHlsStorageRoot,
@@ -16,7 +15,6 @@ import {
 import { registerStoredFile, registerStoredFiles, type FileRole, type RegisterStoredFileParams } from '@/lib/stored-file'
 import fs from 'fs'
 import path from 'path'
-import { pipeline } from 'stream/promises'
 import { TEMP_DIR } from './cleanup'
 import {
   getPreviewProcessingPhase,
@@ -85,8 +83,6 @@ export interface TempFiles {
 
 export interface ProcessingSettings {
   resolutions: Resolution[]
-  watermarkText?: string
-  timelinePreviewsEnabled: boolean
 }
 
 export class PreviewResolutionCancelledError extends Error {
@@ -259,30 +255,6 @@ export async function updateVideoRecord(
   }
 }
 
-/**
- * Move a file from the worker temp directory to its final storage location.
- * Uses atomic fs.rename when both paths are on the same filesystem (zero-cost),
- * with a stream-copy + unlink fallback for cross-device (EXDEV) edge cases.
- */
-async function moveToStorage(srcPath: string, destPath: string): Promise<void> {
-  const destDir = path.dirname(destPath)
-  await fs.promises.mkdir(destDir, { recursive: true })
-
-  try {
-    await fs.promises.rename(srcPath, destPath)
-  } catch (err: any) {
-    if (err?.code === 'EXDEV') {
-      // Cross-device fallback: stream-copy then remove original
-      const readStream = fs.createReadStream(srcPath)
-      const writeStream = fs.createWriteStream(destPath)
-      await pipeline(readStream, writeStream)
-      await fs.promises.unlink(srcPath).catch(() => {})
-    } else {
-      throw err
-    }
-  }
-}
-
 async function moveTempFileToLogicalStorage(srcPath: string, destLogicalPath: string): Promise<void> {
   const stats = await fs.promises.stat(srcPath)
   await moveUploadedFile(srcPath, destLogicalPath, stats.size)
@@ -378,7 +350,7 @@ export async function downloadAndValidateVideo(
  */
 export async function fetchProcessingSettings(
   projectId: string,
-  videoId: string
+  _videoId: string
 ): Promise<ProcessingSettings> {
   debugLog('Fetching processing settings...')
 
@@ -387,15 +359,7 @@ export async function fetchProcessingSettings(
     select: {
       title: true,
       previewResolutions: true,
-      watermarkEnabled: true,
-      watermarkText: true,
-      timelinePreviewsEnabled: true,
     },
-  })
-
-  const video = await prisma.video.findUnique({
-    where: { id: videoId },
-    select: { versionLabel: true },
   })
 
   const resolutions = parseResolutions(project?.previewResolutions)
@@ -403,20 +367,10 @@ export async function fetchProcessingSettings(
   debugLog('Project settings:', {
     title: project?.title,
     resolutions,
-    watermarkEnabled: project?.watermarkEnabled
   })
-
-  // Determine watermark text (only if watermarks are enabled)
-  const watermarkText = project?.watermarkEnabled
-    ? (project.watermarkText || `PREVIEW-${project.title || 'PROJECT'}-${video?.versionLabel || 'v1'}`)
-    : undefined
-
-  debugLog('Final watermark text:', watermarkText || '(no watermark)')
 
   return {
     resolutions,
-    watermarkText,
-    timelinePreviewsEnabled: project?.timelinePreviewsEnabled ?? false,
   }
 }
 
@@ -465,9 +419,9 @@ export async function processTimelinePreviews(
   metadata: VideoMetadata,
   tempFiles: TempFiles
 ): Promise<{ vttPath: string; spritesPath: string; ready: boolean } | null> {
-  // Capture one timeline thumbnail every 2 seconds (30 per minute) for dense
-  // hover previews. With a 10×10 sprite sheet that's 200s of video per sheet.
-  const intervalSeconds = 2
+  // Capture one timeline thumbnail every second (60 per minute) for dense
+  // hover/scrub previews. With a 10×10 sprite sheet that's 100s of video per sheet.
+  const intervalSeconds = 1
   const tileColumns = 10
   const tileRows = 10
   const framesPerSprite = tileColumns * tileRows
@@ -606,13 +560,6 @@ export async function registerTimelineStoredFiles(
   }
 }
 
-/** Renditions we package into HLS, smallest first (the master lists them low→high). */
-const HLS_RENDITIONS: Array<{ role: FileRole; label: string }> = [
-  { role: 'PREVIEW_480', label: '480' },
-  { role: 'PREVIEW_720', label: '720' },
-  { role: 'PREVIEW_1080', label: '1080' },
-]
-
 /** Conservative per-rendition bandwidth (bits/s) when probing can't derive one. */
 function estimateBandwidthFallback(label: string): number {
   switch (label) {
@@ -623,164 +570,79 @@ function estimateBandwidthFallback(label: string): number {
   }
 }
 
+/** Map a preview resolution setting to its HLS folder label. */
+function resolutionToHlsLabel(resolution: string): string {
+  return resolution === '1080p' ? '1080' : resolution === '480p' ? '480' : '720'
+}
+
+type HlsVariant = { label: string; bandwidth: number; width: number; height: number }
+
 /**
- * Package a video's existing MP4 previews into an HLS bundle — a master playlist plus
- * one fMP4 (CMAF) rendition per available preview — using a fast `-c copy` remux (no
- * re-encode, no quality loss, ~byte-identical). Source previews are resolved from the
- * StoredFile registry, so this works both inline (right after finalizeVideo) and from
- * the standalone backfill. Returns { ready: false } when the video has no previews.
- *
- * On-disk URIs are relative; the /api/hls delivery endpoint rewrites them at request
- * time (variant → same-origin, segment → presigned R2). Renditions are independent —
- * no cross-rendition keyframe alignment, so this needs no transcode changes.
+ * Encode one rendition of the original **directly** to an HLS rendition (index.m3u8 +
+ * init.mp4 + seg-*.m4s) in a single ffmpeg pass — no intermediate MP4 written to storage —
+ * then upload every produced file under `{hlsRoot}/{label}/`. Returns the variant metadata
+ * for the master playlist plus the logical paths uploaded (for the completeness gate).
  */
-export async function processHlsPackaging(
-  videoId: string,
-  projectId: string,
-  tempFiles: TempFiles,
-): Promise<{ ready: boolean }> {
-  const previewRows = await prisma.storedFile.findMany({
-    where: {
-      entityType: 'VIDEO',
-      entityId: videoId,
-      fileRole: { in: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080'] },
-    },
-    select: { fileRole: true, storagePath: true },
+async function encodeHlsRenditionFromOriginal(params: {
+  originalLocalPath: string
+  hlsRoot: string
+  label: string
+  width: number
+  height: number
+  durationSeconds: number
+  tempDir: string
+  onProgress?: (progress: number) => void | Promise<void>
+  shouldAbort?: () => Promise<boolean>
+}): Promise<{ variant: HlsVariant; uploadedPaths: string[] }> {
+  const { originalLocalPath, hlsRoot, label, width, height, durationSeconds, tempDir } = params
+
+  const renditionDir = path.join(tempDir, label)
+  await fs.promises.mkdir(renditionDir, { recursive: true })
+
+  await transcodeVideo({
+    inputPath: originalLocalPath,
+    hlsOutputDir: renditionDir,
+    width,
+    height,
+    // Keyframe-align every rendition so the HLS bundle supports seamless ABR switching.
+    alignKeyframes: true,
+    onProgress: params.onProgress,
+    shouldAbort: params.shouldAbort,
   })
-  const pathByRole = new Map(previewRows.map((r) => [r.fileRole, r.storagePath]))
-  const renditions = HLS_RENDITIONS.filter((r) => pathByRole.has(r.role))
-  if (renditions.length === 0) {
-    return { ready: false }
+
+  // Upload every produced file (index.m3u8, init.mp4, seg-*.m4s) and tally bytes for bandwidth.
+  const generated = await fs.promises.readdir(renditionDir)
+  const uploadedPaths: string[] = []
+  let totalBytes = 0
+  for (const file of generated) {
+    const abs = path.join(renditionDir, file)
+    totalBytes += await fs.promises.stat(abs).then((s) => s.size).catch(() => 0)
+    const dest = `${hlsRoot}/${label}/${file}`
+    await moveTempFileToLogicalStorage(abs, dest)
+    uploadedPaths.push(dest)
   }
 
-  await updateVideoRecord(
-    videoId,
-    { processingProgress: 0, processingPhase: PROCESSING_PHASES.hls },
-    { context: 'starting HLS packaging', ignoreMissing: true },
-  )
-
-  const tempDir = path.join(TEMP_DIR, `${videoId}-hls`)
-  tempFiles.hlsDir = tempDir
-  await fs.promises.mkdir(tempDir, { recursive: true })
-
-  return packageHlsBundle({
-    entityType: 'VIDEO',
-    entityId: videoId,
-    hlsRoot: buildVideoHlsStorageRoot(projectId, videoId),
-    // Multi-rendition: labels are known from the role, ascending for the master.
-    sources: renditions.map((r) => ({ label: r.label, storagePath: pathByRole.get(r.role)! })),
-    tempDir,
-  })
+  const bandwidth = durationSeconds > 0 ? Math.round((totalBytes * 8) / durationSeconds) : 0
+  return {
+    variant: { label, bandwidth: bandwidth || estimateBandwidthFallback(label), width, height },
+    uploadedPaths,
+  }
 }
 
 /**
- * Package a video *asset's* MP4 playback preview into a single-rendition HLS bundle. Assets
- * only ever get one preview resolution, so there's no ABR — but HLS still fixes seeking behind
- * Range-hostile proxies, which is the point. Returns { ready: false } when the asset has no
- * playback preview (e.g. image/audio assets, or video assets whose preview hasn't run yet).
+ * Write the master playlist for `variants`, upload it, verify the whole bundle is present,
+ * then register HLS_PLAYLIST/HLS_SEGMENTS. Shared by the video and asset packagers.
  */
-export async function packageAssetHls(
-  assetId: string,
-  projectId: string,
-  videoId: string,
-  tempFiles: TempFiles,
-): Promise<{ ready: boolean }> {
-  const mp4 = await prisma.storedFile.findUnique({
-    where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'PREVIEW_MP4' } },
-    select: { storagePath: true },
-  })
-  if (!mp4?.storagePath) return { ready: false }
-
-  const tempDir = path.join(TEMP_DIR, `asset-${assetId}-hls`)
-  tempFiles.hlsDir = tempDir
-  await fs.promises.mkdir(tempDir, { recursive: true })
-
-  return packageHlsBundle({
-    entityType: 'VIDEO_ASSET',
-    entityId: assetId,
-    hlsRoot: buildVideoAssetHlsStorageRoot(projectId, videoId, assetId),
-    // Single rendition — label is derived from the preview's probed height inside the bundler.
-    sources: [{ storagePath: mp4.storagePath }],
-    tempDir,
-  })
-}
-
-/** Map a rendition height to its HLS folder label (must be one of the labels /api/hls serves). */
-function heightToHlsLabel(height: number | undefined): string {
-  const h = height || 0
-  if (h >= 1080) return '1080'
-  if (h >= 720) return '720'
-  return '480'
-}
-
-/**
- * Entity-agnostic core: remux a set of MP4 preview sources into an HLS bundle (one fMP4
- * rendition each + a master playlist) under `hlsRoot`, then register HLS_PLAYLIST/HLS_SEGMENTS
- * for the given entity. Used by both the VIDEO and VIDEO_ASSET packagers. On-disk URIs stay
- * relative; the /api/hls delivery endpoint rewrites them at request time.
- */
-async function packageHlsBundle(params: {
+async function finalizeHlsMaster(params: {
   entityType: EntityType
   entityId: string
   hlsRoot: string
-  sources: Array<{ storagePath: string; label?: string }>
+  variants: HlsVariant[]
+  uploadedPaths: string[]
   tempDir: string
-}): Promise<{ ready: boolean }> {
-  const { entityType, entityId, hlsRoot, sources, tempDir } = params
+}): Promise<void> {
+  const { entityType, entityId, hlsRoot, variants, uploadedPaths, tempDir } = params
 
-  // Clean slate: drop any previous HLS bundle so a shrunk rendition set (e.g. a resolution
-  // removed from project settings, then reprocessed) can't leave stale segments behind.
-  // Best-effort; runs regardless of how packaging was triggered, so the bundle always matches.
-  await deleteDirectory(hlsRoot).catch(() => {})
-
-  const variants: Array<{ label: string; bandwidth: number; width: number; height: number }> = []
-
-  for (const source of sources) {
-    // Bring the preview to a local file (downloads from R2 in S3 mode; no copy locally).
-    const { localPath, isTemporary } = await materializeStoragePathToLocalFile({
-      rawPath: source.storagePath,
-      tempDir,
-      suggestedName: `src-${variants.length}.mp4`,
-    })
-
-    try {
-      const meta = await getVideoMetadata(localPath).catch(() => null)
-      const label = source.label ?? heightToHlsLabel(meta?.height)
-      const renditionDir = path.join(tempDir, label)
-      await fs.promises.mkdir(renditionDir, { recursive: true })
-
-      await packageHlsRendition({ inputPath: localPath, outputDir: renditionDir })
-
-      const size = await fs.promises.stat(localPath).then((s) => s.size).catch(() => 0)
-      const duration = meta?.duration && meta.duration > 0 ? meta.duration : 0
-      const bandwidth = duration > 0 ? Math.round((size * 8) / duration) : 0
-
-      // Move every generated file (index.m3u8, init.mp4, seg-*.m4s) into storage.
-      const generated = await fs.promises.readdir(renditionDir)
-      for (const file of generated) {
-        await moveTempFileToLogicalStorage(path.join(renditionDir, file), `${hlsRoot}/${label}/${file}`)
-      }
-
-      variants.push({
-        label,
-        bandwidth: bandwidth || estimateBandwidthFallback(label),
-        width: meta?.width || 0,
-        height: meta?.height || 0,
-      })
-    } finally {
-      // materialize returns the real local preview path in local mode — only remove
-      // the temporary R2 download, never the source of truth.
-      if (isTemporary) {
-        await fs.promises.unlink(localPath).catch(() => {})
-      }
-    }
-  }
-
-  if (variants.length === 0) {
-    return { ready: false }
-  }
-
-  // Master playlist referencing each variant's index.m3u8 by relative path.
   const masterLines = ['#EXTM3U', '#EXT-X-VERSION:7', '#EXT-X-INDEPENDENT-SEGMENTS']
   for (const v of variants) {
     const res = v.width > 0 && v.height > 0 ? `,RESOLUTION=${v.width}x${v.height}` : ''
@@ -793,9 +655,231 @@ async function packageHlsBundle(params: {
   const masterPath = `${hlsRoot}/master.m3u8`
   await moveTempFileToLogicalStorage(tempMasterPath, masterPath)
 
-  await registerHlsStoredFiles(entityType, entityId, masterPath, hlsRoot)
+  // Completeness gate: confirm every file we wrote is present and non-empty before flagging
+  // ready. A half-uploaded bundle (e.g. a transient R2 500 the retries couldn't beat) must
+  // never be marked playable — throw so the caller leaves hlsReady=false and the reconcile
+  // sweep re-packages it.
+  await verifyHlsBundleComplete([...uploadedPaths, masterPath])
 
+  await registerHlsStoredFiles(entityType, entityId, masterPath, hlsRoot)
+}
+
+/**
+ * Package a video's HLS bundle by encoding the original **directly** to one keyframe-aligned
+ * fMP4 rendition per requested resolution (no intermediate MP4 persisted anywhere) plus a
+ * master playlist. Replaces the old "transcode to MP4 → upload → download → remux" flow.
+ * The original is materialized once by the caller and passed in. Returns { ready: false }
+ * when no renditions were produced (e.g. every resolution was cancelled mid-flight).
+ */
+export async function packageVideoHlsFromOriginal(params: {
+  videoId: string
+  projectId: string
+  originalLocalPath: string
+  metadata: VideoMetadata
+  resolutions: Resolution[]
+  tempFiles: TempFiles
+  /** Skip a resolution that's been deselected from project settings mid-processing. */
+  shouldSkipResolution?: (resolution: Resolution) => Promise<boolean>
+}): Promise<{ ready: boolean }> {
+  const { videoId, projectId, originalLocalPath, metadata, resolutions, tempFiles } = params
+
+  const hlsRoot = buildVideoHlsStorageRoot(projectId, videoId)
+  const tempDir = path.join(TEMP_DIR, `${videoId}-hls`)
+  tempFiles.hlsDir = tempDir
+  await fs.promises.mkdir(tempDir, { recursive: true })
+
+  // Clean slate: drop any previous bundle so a shrunk rendition set can't leave stale segments.
+  await deleteDirectory(hlsRoot).catch(() => {})
+
+  const duration = metadata.duration && metadata.duration > 0 ? metadata.duration : 0
+  const variants: HlsVariant[] = []
+  const uploadedPaths: string[] = []
+
+  for (const resolution of resolutions) {
+    if (params.shouldSkipResolution && (await params.shouldSkipResolution(resolution))) continue
+
+    const dims = calculateOutputDimensions(metadata, resolution)
+    const label = resolutionToHlsLabel(resolution)
+
+    await updateVideoRecord(
+      videoId,
+      { processingProgress: 0, processingPhase: getPreviewProcessingPhase(resolution) },
+      { context: `starting ${resolution} HLS encode`, ignoreMissing: true },
+    )
+
+    let lastProgressUpdate = 0
+    let progressWriteInFlight = false
+    try {
+      const { variant, uploadedPaths: paths } = await encodeHlsRenditionFromOriginal({
+        originalLocalPath,
+        hlsRoot,
+        label,
+        width: dims.width,
+        height: dims.height,
+        durationSeconds: duration,
+        tempDir,
+        shouldAbort: params.shouldSkipResolution
+          ? () => params.shouldSkipResolution!(resolution)
+          : undefined,
+        onProgress: async (progress) => {
+          const now = Date.now()
+          if (progressWriteInFlight || (now - lastProgressUpdate < 3000 && progress < 1)) return
+          progressWriteInFlight = true
+          lastProgressUpdate = now
+          try {
+            await updateVideoRecord(
+              videoId,
+              { processingProgress: progress, processingPhase: getPreviewProcessingPhase(resolution) },
+              { context: 'updating HLS encode progress', ignoreMissing: true },
+            )
+          } catch {
+            /* best-effort */
+          } finally {
+            progressWriteInFlight = false
+          }
+        },
+      })
+      variants.push(variant)
+      uploadedPaths.push(...paths)
+    } catch (error) {
+      if (error instanceof FFmpegCancellationError) {
+        console.log(`[WORKER] Cancelled ${resolution} HLS encode for video ${videoId} (settings changed)`)
+        continue
+      }
+      throw error
+    }
+  }
+
+  if (variants.length === 0) return { ready: false }
+
+  await finalizeHlsMaster({ entityType: 'VIDEO', entityId: videoId, hlsRoot, variants, uploadedPaths, tempDir })
   return { ready: true }
+}
+
+/**
+ * Encode a video asset's original **directly** to a single-rendition HLS bundle (assets have no
+ * ABR — one resolution — but HLS still fixes proxy seeking). The asset original is materialized
+ * from its ORIGINAL StoredFile and capped at `resolution` (fit-to-box, mirroring the old MP4
+ * preview). Returns { ready: false } when the asset has no usable video original.
+ */
+export async function packageAssetHlsFromOriginal(
+  assetId: string,
+  projectId: string,
+  videoId: string,
+  tempFiles: TempFiles,
+  resolution: Resolution = '1080p',
+): Promise<{ ready: boolean }> {
+  const original = await prisma.storedFile.findUnique({
+    where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'ORIGINAL' } },
+    select: { storagePath: true },
+  })
+  if (!original?.storagePath) return { ready: false }
+
+  const hlsRoot = buildVideoAssetHlsStorageRoot(projectId, videoId, assetId)
+  const tempDir = path.join(TEMP_DIR, `asset-${assetId}-hls`)
+  tempFiles.hlsDir = tempDir
+  await fs.promises.mkdir(tempDir, { recursive: true })
+
+  await deleteDirectory(hlsRoot).catch(() => {})
+
+  const { localPath, isTemporary } = await materializeStoragePathToLocalFile({
+    rawPath: original.storagePath,
+    tempDir,
+    suggestedName: `asset-${assetId}-src.bin`,
+  })
+
+  try {
+    const meta = await getVideoMetadata(localPath).catch(() => null)
+    if (!meta || !meta.width || !meta.height) return { ready: false }
+
+    const dims = calculateOutputDimensions(meta, resolution)
+    const label = resolutionToHlsLabel(resolution)
+    const duration = meta.duration && meta.duration > 0 ? meta.duration : 0
+
+    const { variant, uploadedPaths } = await encodeHlsRenditionFromOriginal({
+      originalLocalPath: localPath,
+      hlsRoot,
+      label,
+      width: dims.width,
+      height: dims.height,
+      durationSeconds: duration,
+      tempDir,
+    })
+
+    await finalizeHlsMaster({
+      entityType: 'VIDEO_ASSET',
+      entityId: assetId,
+      hlsRoot,
+      variants: [variant],
+      uploadedPaths,
+      tempDir,
+    })
+    return { ready: true }
+  } finally {
+    if (isTemporary) await fs.promises.unlink(localPath).catch(() => {})
+  }
+}
+
+/**
+ * Throw unless every path in `paths` exists in storage with a non-zero size. Used as the
+ * final gate of HLS packaging (and reused by the reconcile sweep's deletion safety check).
+ */
+export async function verifyHlsBundleComplete(paths: string[]): Promise<void> {
+  const sizes = await Promise.all(paths.map((p) => getStoredFileSize(p).catch(() => null)))
+  const missing = paths.filter((_, i) => !sizes[i] || (sizes[i] as number) <= 0)
+  if (missing.length > 0) {
+    throw new Error(`HLS bundle incomplete — ${missing.length} file(s) missing/empty: ${missing.slice(0, 5).join(', ')}`)
+  }
+}
+
+async function readStoredText(storagePath: string): Promise<string> {
+  const stream = await downloadFile(storagePath)
+  const chunks: Buffer[] = []
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks).toString('utf-8')
+}
+
+/**
+ * Verify a *previously stored* HLS bundle is complete by walking its own playlists: read
+ * master.m3u8 → each variant index.m3u8 → every init/segment URI, and confirm all exist
+ * with non-zero size. Returns true when the bundle is fully playable. Used by the reconcile
+ * sweep as the safety gate before deleting a video's MP4 previews. Best-effort: any read
+ * failure means "not verified" (returns false) so we never delete previews on a bad read.
+ */
+export async function verifyStoredHlsBundle(hlsRoot: string): Promise<boolean> {
+  try {
+    // One listing of the whole bundle, then membership checks — avoids a HEAD per segment.
+    const present = await listStoredFileSizes(hlsRoot)
+    const isPresent = (p: string) => (present.get(p) ?? 0) > 0
+
+    const masterPath = `${hlsRoot}/master.m3u8`
+    if (!isPresent(masterPath)) return false
+    const master = await readStoredText(masterPath)
+    const labels = [...master.matchAll(/^(\d+)\/index\.m3u8\s*$/gm)].map((m) => m[1])
+    if (labels.length === 0) return false
+
+    for (const label of labels) {
+      const indexPath = `${hlsRoot}/${label}/index.m3u8`
+      if (!isPresent(indexPath)) return false
+      const variant = await readStoredText(indexPath)
+      const mapNames = [...variant.matchAll(/URI="([^"]+)"/g)].map((m) => m[1])
+      const segNames = variant
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith('#') && /\.(m4s|mp4)$/i.test(l))
+      const names = Array.from(new Set([...mapNames, ...segNames]))
+      if (names.length === 0) return false
+      for (const n of names) {
+        if (!isPresent(`${hlsRoot}/${label}/${n}`)) return false
+      }
+    }
+
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Persist HLS master playlist + segment directory to the StoredFile registry. */
@@ -866,108 +950,6 @@ export function calculateOutputDimensions(
   })
 
   return dimensions
-}
-
-/**
- * Transcode video and upload preview
- */
-export async function processPreview(
-  videoId: string,
-  projectId: string,
-  inputPath: string,
-  dimensions: OutputDimensions,
-  settings: ProcessingSettings & { resolution: Resolution },
-  tempFiles: TempFiles,
-  duration: number,
-  requestedPreviewResolutions?: Array<'480p' | '720p' | '1080p'>
-): Promise<string | null> {
-  const resolution = settings.resolution
-  const tempPreviewPath = path.join(TEMP_DIR, `${videoId}-preview-${resolution}.mp4`)
-  tempFiles.preview = tempPreviewPath
-
-  debugLog('Starting video transcoding...')
-  debugLog('Temp preview path:', tempPreviewPath)
-
-  const transcodeStart = Date.now()
-
-  // Throttle progress DB writes to avoid exhausting the Prisma connection pool.
-  // FFmpeg emits progress many times per second; we only persist every 3 seconds.
-  let lastProgressUpdate = 0
-  let progressWriteInFlight = false
-
-  try {
-    await transcodeVideo({
-      inputPath,
-      outputPath: tempPreviewPath,
-      width: dimensions.width,
-      height: dimensions.height,
-      watermarkText: settings.watermarkText,
-      // Keyframe-align every rendition so the HLS bundle supports seamless ABR switching.
-      alignKeyframes: true,
-      shouldAbort: async () => {
-        const stillRequested = await isPreviewResolutionStillRequested(
-          projectId,
-          requestedPreviewResolutions,
-          resolution
-        )
-        return !stillRequested
-      },
-      onProgress: async (progress) => {
-        debugLog(`Transcode progress: ${(progress * 100).toFixed(1)}%`)
-
-        const now = Date.now()
-        // Skip if another write is still in flight or if less than 3 s since last write
-        // Always allow the final progress update (progress >= 1)
-        if (progressWriteInFlight || (now - lastProgressUpdate < 3000 && progress < 1)) {
-          return
-        }
-
-        progressWriteInFlight = true
-        lastProgressUpdate = now
-        try {
-          await updateVideoRecord(
-            videoId,
-            {
-              processingProgress: progress,
-              processingPhase: getPreviewProcessingPhase(resolution),
-            },
-            { context: 'updating transcode progress', ignoreMissing: true }
-          )
-        } catch (err) {
-          console.error(`[WORKER] Failed to update progress for ${videoId}:`, err)
-        } finally {
-          progressWriteInFlight = false
-        }
-      },
-    })
-  } catch (error) {
-    if (error instanceof FFmpegCancellationError) {
-      console.log(`[WORKER] Cancelled ${resolution} preview generation for video ${videoId} because project settings changed`)
-      throw new PreviewResolutionCancelledError(resolution)
-    }
-    throw error
-  }
-
-  const transcodeTime = Date.now() - transcodeStart
-  console.log(`[WORKER] Generated ${resolution} preview for video ${videoId} in ${(transcodeTime / 1000).toFixed(2)}s`)
-
-  const transcodeStats = fs.statSync(tempPreviewPath)
-  debugLog('Transcoded file size:', (transcodeStats.size / 1024 / 1024).toFixed(2) + ' MB')
-
-  // Move preview to storage (atomic rename on same filesystem, stream-copy fallback)
-  const previewPath = buildVideoPreviewStoragePath(projectId, videoId, resolution)
-
-  debugLog('Moving preview to logical path:', previewPath)
-
-  const moveStart = Date.now()
-  await moveTempFileToLogicalStorage(tempPreviewPath, previewPath)
-  // File has been moved — remove from tempFiles so cleanup doesn't try to delete a missing file
-  delete tempFiles.preview
-  const moveTime = Date.now() - moveStart
-
-  debugLog('Preview moved in:', (moveTime / 1000).toFixed(2) + ' s')
-
-  return previewPath
 }
 
 /**

@@ -25,6 +25,7 @@ import { processTaskCommentNotifications } from './task-comment-notifications'
 import { cleanupOldTempFiles, ensureTempDir } from './cleanup'
 import { cleanupStaleTrackedDownloads } from '@/lib/download-tracking'
 import { processAutoCloseApprovedProjects } from './auto-close-projects'
+import { processHlsReconcile } from './hls-reconcile'
 import { processProjectKeyDateReminders } from './project-key-date-reminders'
 import { processUserKeyDateReminders } from './user-key-date-reminders'
 import { processSalesReminders } from './sales-reminders'
@@ -459,6 +460,7 @@ async function main() {
       if (job.name === 'quickbooks-refresh-token') return true
       if (job.name === 's3-multipart-cleanup') return true
       if (job.name === 'share-upload-preview-reconcile') return true
+      if (job.name === 'hls-reconcile') return true
       return false
     })
 
@@ -573,6 +575,23 @@ async function main() {
         pattern: '30 4 * * *',
       },
       jobId: 'reconcile-project-total-bytes',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
+  // HLS reconciliation sweep — re-package failed/missing HLS bundles and reclaim the
+  // now-redundant MP4 previews once HLS verifies complete (every 15 minutes). This is the
+  // safety net that makes HLS-only playback viable: a transient packaging failure self-heals
+  // without manual intervention. Runs in both S3 and local mode (gated by hlsStreamingEnabled).
+  await notificationQueue.add(
+    'hls-reconcile',
+    {},
+    {
+      repeat: {
+        pattern: '*/15 * * * *',
+      },
+      jobId: 'hls-reconcile',
       removeOnComplete: true,
       removeOnFail: true,
     }
@@ -698,6 +717,15 @@ async function main() {
           }),
         ])
         console.log('[TOTALS] Reconciliation completed', { ...result, accountingFilesBytes: accountingBytes.toString() })
+        return
+      }
+
+      if (job.name === 'hls-reconcile') {
+        try {
+          await processHlsReconcile()
+        } catch (e) {
+          console.error('[HLS-RECONCILE] Sweep failed:', e instanceof Error ? e.message : e)
+        }
         return
       }
 

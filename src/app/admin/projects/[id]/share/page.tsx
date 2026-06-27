@@ -342,7 +342,6 @@ export default function AdminSharePage() {
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     const sessionId = sessionIdRef.current
-    const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -428,7 +427,7 @@ export default function AdminSharePage() {
 
             let timelineVttUrl = null
             let timelineSpriteUrl = null
-            if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
+            if (video.timelinePreviewsReady) {
               const [vttToken, spriteToken] = await Promise.all([
                 getAdminVideoToken(video.id, 'timeline-vtt'),
                 getAdminVideoToken(video.id, 'timeline-sprite'),
@@ -465,10 +464,9 @@ export default function AdminSharePage() {
         return request
       })
     )
-  }, [id, project, getAdminVideoToken])
+  }, [id, getAdminVideoToken])
 
   const fetchSidebarVideos = useCallback(async (videos: any[]) => {
-    const shouldFetchTimelinePreviews = !!project?.timelinePreviewsEnabled
 
     return Promise.all(
       videos.map(async (video: any) => {
@@ -497,7 +495,7 @@ export default function AdminSharePage() {
 
             let timelineVttUrl = null
             let timelineSpriteUrl = null
-            if (shouldFetchTimelinePreviews && video.timelinePreviewsReady) {
+            if (video.timelinePreviewsReady) {
               const [vttToken, spriteToken] = await Promise.all([
                 getAdminVideoToken(video.id, 'timeline-vtt'),
                 getAdminVideoToken(video.id, 'timeline-sprite'),
@@ -526,7 +524,7 @@ export default function AdminSharePage() {
         return request
       })
     )
-  }, [project?.timelinePreviewsEnabled, getAdminVideoToken])
+  }, [getAdminVideoToken])
 
   // Load project data, settings, and admin user
   useEffect(() => {
@@ -2418,7 +2416,6 @@ export default function AdminSharePage() {
                       projectTitle={project.title}
                       clientName={project.clientName}
                       isPasswordProtected={(project.authMode === 'PASSWORD' || project.authMode === 'BOTH') && !!project.sharePassword}
-                      watermarkEnabled={project.watermarkEnabled}
                       activeVideoName={activeVideoName}
                       initialSeekTime={initialSeekTime}
                       initialVideoIndex={initialVideoIndex}
@@ -2706,7 +2703,6 @@ function AdminShareFeedbackGrid({
               projectTitle={project.title}
               clientName={project.clientName}
               isPasswordProtected={(project.authMode === 'PASSWORD' || project.authMode === 'BOTH') && !!project.sharePassword}
-              watermarkEnabled={project.watermarkEnabled}
               activeVideoName={activeVideoName}
               initialSeekTime={initialSeekTime}
               initialVideoIndex={initialVideoIndex}
@@ -2745,6 +2741,8 @@ function AdminShareFeedbackGrid({
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
                 onClearRange={management.handleClearRange}
+                onSetTimes={management.handleSetCommentTimes}
+                videoDurationSeconds={typeof selectedVideo?.duration === 'number' ? selectedVideo.duration : undefined}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={effectiveUseFullTimecode}
@@ -2841,6 +2839,8 @@ function AdminShareFeedbackGrid({
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
                 onClearRange={management.handleClearRange}
+                onSetTimes={management.handleSetCommentTimes}
+                videoDurationSeconds={typeof selectedVideo?.duration === 'number' ? selectedVideo.duration : undefined}
                 showTimestampReset={management.shouldShowTimestampReset}
                 selectedVideoFps={management.selectedVideoFps}
                 useFullTimecode={effectiveUseFullTimecode}

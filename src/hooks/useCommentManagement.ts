@@ -84,6 +84,16 @@ export function useCommentManagement({
   const [uploadStatusText, setUploadStatusText] = useState<string>('')
   const previousSelectedVideoIdRef = useRef<string | null>(null)
   const commentDraftAnchorTimestampRef = useRef<number | null>(null)
+  // True when the user has typed an exact in/out time in the editor. While
+  // pinned, playback must not drift the point timestamp or clear the range.
+  // The ref is read synchronously in event handlers; the state drives the
+  // Reset affordance so the user can return to playhead-following.
+  const selectionPinnedRef = useRef(false)
+  const [selectionPinned, setSelectionPinned] = useState(false)
+  const setPinned = useCallback((value: boolean) => {
+    selectionPinnedRef.current = value
+    setSelectionPinned(value)
+  }, [])
 
   const [clientUploadQuota, setClientUploadQuota] = useState<{ usedBytes: number; limitMB: number } | null>(null)
 
@@ -397,6 +407,7 @@ export function useCommentManagement({
         setSelectedTimestamp(0)
         setCommentDraftAnchorTimestamp(null)
         commentDraftAnchorTimestampRef.current = null
+        setPinned(false)
         setHasAutoFilledTimestamp(false)
       }
     }
@@ -405,7 +416,7 @@ export function useCommentManagement({
     return () => {
       window.removeEventListener('videoChanged', handleVideoChange as EventListener)
     }
-  }, [selectedVideoId])
+  }, [selectedVideoId, setPinned])
 
   // Listen for video selection from admin page (message icon clicks)
   useEffect(() => {
@@ -427,6 +438,7 @@ export function useCommentManagement({
     const handleAddComment = (e: CustomEvent) => {
       setSelectedVideoId(e.detail.videoId)
       setSelectedTimestamp(e.detail.timestamp)
+      setPinned(false)
       const anchor = typeof e.detail.timestamp === 'number' ? e.detail.timestamp : 0
       setCommentDraftAnchorTimestamp(anchor)
       commentDraftAnchorTimestampRef.current = anchor
@@ -437,7 +449,7 @@ export function useCommentManagement({
     return () => {
       window.removeEventListener('addComment', handleAddComment as EventListener)
     }
-  }, [])
+  }, [setPinned])
 
   // Listen for range updates from VideoPlayer timeline handles
   useEffect(() => {
@@ -475,6 +487,8 @@ export function useCommentManagement({
       if (!videoId || videoId !== selectedVideoId) return
       // Keep the unsaved range display stable while a range is active.
       if (selectedEndTimestamp !== null) return
+      // The user typed an exact time in the editor — don't let playback drift it.
+      if (selectionPinnedRef.current) return
       setSelectedTimestamp(time)
     }
 
@@ -510,8 +524,9 @@ export function useCommentManagement({
     setSelectedEndTimestamp(null)
     setCommentDraftAnchorTimestamp(null)
     commentDraftAnchorTimestampRef.current = null
+    setPinned(false)
     window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
-  }, [])
+  }, [setPinned])
 
   const hasUnsentComment = Boolean(newComment.trim() || attachedFiles.length > 0 || voiceNoteDraft)
 
@@ -520,7 +535,7 @@ export function useCommentManagement({
       // If they resumed playback without drafting anything, clear the temporary range overlay.
       // Exception: if the user has explicitly selected an in/out range, preserve it so they
       // can play through the segment and still post a range-scoped comment.
-      if (!hasUnsentComment && selectedEndTimestamp === null) {
+      if (!hasUnsentComment && selectedEndTimestamp === null && !selectionPinnedRef.current) {
         setSelectedEndTimestamp(null)
         window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
       }
@@ -795,6 +810,11 @@ export function useCommentManagement({
   const handleReply = (commentId: string, videoId: string) => {
     setReplyingToCommentId(commentId)
     setSelectedVideoId(videoId)
+    // A reply threads under its parent and has no timeline position, so drop any
+    // active comment-range marker/selection (it doesn't apply to a reply).
+    setSelectedEndTimestamp(null)
+    setPinned(false)
+    window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
   }
 
   const handleCancelReply = () => {
@@ -820,10 +840,29 @@ export function useCommentManagement({
 
   const handleClearTimestamp = () => {
     setSelectedEndTimestamp(null)
+    setPinned(false)
     // Reset should clear the draft timeline marker and follow the current playhead.
     window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
     syncTimestampToCurrentPlayhead()
   }
+
+  // Set the comment in/out times directly (driven by the time-editor modal).
+  // `endSeconds === null` means a point comment (in === out). Also moves the
+  // timeline marker/handles so the change is visible before the comment is sent.
+  const handleSetCommentTimes = useCallback((startSeconds: number, endSeconds: number | null) => {
+    const start = Math.max(0, startSeconds)
+    const end = endSeconds === null ? null : Math.max(start, endSeconds)
+    setPinned(true)
+    setSelectedTimestamp(start)
+    setSelectedEndTimestamp(end)
+    if (commentDraftAnchorTimestampRef.current === null) {
+      commentDraftAnchorTimestampRef.current = start
+      setCommentDraftAnchorTimestamp(start)
+    }
+    window.dispatchEvent(
+      new CustomEvent('setCommentRange', { detail: { start, end } })
+    )
+  }, [setPinned])
 
   const findCommentById = (commentId: string): CommentWithReplies | null => {
     for (const comment of comments) {
@@ -968,16 +1007,19 @@ export function useCommentManagement({
 
   const handleClearRange = () => {
     setSelectedEndTimestamp(null)
+    setPinned(false)
     // Reset should clear the draft timeline marker and follow the current playhead.
     window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
     syncTimestampToCurrentPlayhead()
   }
 
   const shouldShowTimestampReset =
-    commentDraftAnchorTimestamp !== null &&
-    selectedTimestamp !== null &&
-    selectedEndTimestamp === null &&
-    Math.abs(selectedTimestamp - commentDraftAnchorTimestamp) > 0.05
+    // A pinned point (typed exact time) always offers a way back to playhead-following.
+    (selectionPinned && selectedEndTimestamp === null) ||
+    (commentDraftAnchorTimestamp !== null &&
+      selectedTimestamp !== null &&
+      selectedEndTimestamp === null &&
+      Math.abs(selectedTimestamp - commentDraftAnchorTimestamp) > 0.05)
 
   return {
     comments,
@@ -1001,6 +1043,7 @@ export function useCommentManagement({
     handleCancelReply,
     handleClearTimestamp,
     handleClearRange,
+    handleSetCommentTimes,
     handleDeleteComment,
     pendingDeleteCommentId,
     setPendingDeleteCommentId,

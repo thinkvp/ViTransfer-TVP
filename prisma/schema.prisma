@@ -247,10 +247,6 @@ model Project {
   enablePhotos Boolean @default(false)
   enableUploads Boolean @default(true)  // Master switch for the UPLOADS folder; when false it is hidden from admins and clients
 
-  // Revision tracking (optional)
-  enableRevisions Boolean @default(false)
-  maxRevisions    Int     @default(3)
-
   status          ProjectStatus @default(NOT_STARTED)
   startDate       DateTime?
   createdAt       DateTime      @default(now())
@@ -286,9 +282,6 @@ model Project {
 
   // Video processing settings
   previewResolutions      String  @default("[\"720p\"]") // JSON array of resolutions: ["480p","720p","1080p"]
-  watermarkEnabled        Boolean @default(true) // Enable/disable watermarks for this project
-  watermarkText           String? // Custom watermark text (null = use default format)
-  timelinePreviewsEnabled Boolean @default(false) // Generate timeline preview thumbnails for this project
 
   // Asset download settings
   allowAssetDownload Boolean @default(true) // Allow clients to download video assets when project is approved
@@ -964,9 +957,6 @@ model Settings {
 
   // Default Video Processing Settings
   defaultPreviewResolutions      String? @default("[\"720p\"]")
-  defaultWatermarkEnabled        Boolean @default(true)
-  defaultTimelinePreviewsEnabled Boolean @default(false)
-  defaultWatermarkText           String?
 
   // Default project behavior
   defaultAllowClientDeleteComments   Boolean @default(false)

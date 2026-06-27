@@ -45,9 +45,6 @@ interface Settings {
   emailTrackingPixelsEnabled: boolean | null
   appDomain: string | null
   defaultPreviewResolution: string | null
-  defaultWatermarkEnabled: boolean | null
-  defaultTimelinePreviewsEnabled: boolean | null
-  defaultWatermarkText: string | null
   defaultAllowClientDeleteComments: boolean | null
   defaultAllowClientUploadFiles: boolean | null
   defaultAllowAuthenticatedProjectSwitching: boolean | null
@@ -165,9 +162,6 @@ export default function GlobalSettingsPage() {
   const [appDomain, setAppDomain] = useState('')
   const [mainCompanyDomain, setMainCompanyDomain] = useState('')
   const [defaultPreviewResolutions, setDefaultPreviewResolutions] = useState<string[]>(['720p'])
-  const [defaultWatermarkEnabled, setDefaultWatermarkEnabled] = useState(true)
-  const [defaultTimelinePreviewsEnabled, setDefaultTimelinePreviewsEnabled] = useState(false)
-  const [defaultWatermarkText, setDefaultWatermarkText] = useState('')
   const [defaultAllowClientDeleteComments, setDefaultAllowClientDeleteComments] = useState(false)
   const [defaultEnableClientUploads, setDefaultEnableClientUploads] = useState(true)
   const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
@@ -307,8 +301,7 @@ export default function GlobalSettingsPage() {
     accentColor, accentTextMode, emailHeaderColor, emailHeaderTextMode,
     smtpServer, smtpPort, smtpUsername, smtpPassword, emailTrackingPixelsEnabled,
     emailCustomFooterText, smtpFromAddress, smtpSecure, appDomain, mainCompanyDomain,
-    defaultPreviewResolutions, defaultWatermarkEnabled, defaultTimelinePreviewsEnabled,
-    defaultWatermarkText, defaultAllowClientDeleteComments, defaultAllowClientUploadFiles,
+    defaultPreviewResolutions, defaultAllowClientDeleteComments, defaultAllowClientUploadFiles,
     defaultAllowAuthenticatedProjectSwitching, defaultMaxClientUploadAllocationMB,
     autoApproveProject, autoDeletePreviewsOnClose, excludeInternalIpsFromAnalytics,
     uploadChunkSizeMB, downloadChunkSizeMB, autoCloseApprovedProjectsEnabled,
@@ -379,9 +372,6 @@ export default function GlobalSettingsPage() {
             return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['720p']
           } catch { return ['720p'] }
         })())
-        setDefaultWatermarkEnabled(data.defaultWatermarkEnabled ?? true)
-        setDefaultTimelinePreviewsEnabled(data.defaultTimelinePreviewsEnabled ?? false)
-        setDefaultWatermarkText(data.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(data.defaultAllowClientDeleteComments ?? false)
         setDefaultEnableClientUploads(data.defaultEnableClientUploads ?? true)
         setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
@@ -713,9 +703,6 @@ export default function GlobalSettingsPage() {
         appDomain: appDomain || null,
         mainCompanyDomain: mainCompanyDomain || null,
         defaultPreviewResolutions: defaultPreviewResolutions.length > 0 ? defaultPreviewResolutions : ['720p'],
-        defaultWatermarkEnabled: defaultWatermarkEnabled,
-        defaultTimelinePreviewsEnabled: defaultTimelinePreviewsEnabled,
-        defaultWatermarkText: defaultWatermarkText || null,
         defaultAllowClientDeleteComments,
         defaultEnableClientUploads,
         defaultAllowClientUploadFiles,
@@ -849,9 +836,6 @@ export default function GlobalSettingsPage() {
             return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['720p']
           } catch { return ['720p'] }
         })())
-        setDefaultWatermarkEnabled(refreshedData.defaultWatermarkEnabled ?? true)
-        setDefaultTimelinePreviewsEnabled(refreshedData.defaultTimelinePreviewsEnabled ?? false)
-        setDefaultWatermarkText(refreshedData.defaultWatermarkText || '')
         setDefaultAllowClientDeleteComments(refreshedData.defaultAllowClientDeleteComments ?? false)
         setDefaultEnableClientUploads(refreshedData.defaultEnableClientUploads ?? true)
         setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
@@ -1192,12 +1176,6 @@ export default function GlobalSettingsPage() {
           <VideoProcessingSettingsSection
             defaultPreviewResolutions={defaultPreviewResolutions}
             setDefaultPreviewResolutions={setDefaultPreviewResolutions}
-            defaultWatermarkEnabled={defaultWatermarkEnabled}
-            setDefaultWatermarkEnabled={setDefaultWatermarkEnabled}
-            defaultTimelinePreviewsEnabled={defaultTimelinePreviewsEnabled}
-            setDefaultTimelinePreviewsEnabled={setDefaultTimelinePreviewsEnabled}
-            defaultWatermarkText={defaultWatermarkText}
-            setDefaultWatermarkText={setDefaultWatermarkText}
             defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
             setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
             defaultEnableClientUploads={defaultEnableClientUploads}
@@ -1530,12 +1508,6 @@ export default function GlobalSettingsPage() {
               <VideoProcessingSettingsSection
                 defaultPreviewResolutions={defaultPreviewResolutions}
                 setDefaultPreviewResolutions={setDefaultPreviewResolutions}
-                defaultWatermarkEnabled={defaultWatermarkEnabled}
-                setDefaultWatermarkEnabled={setDefaultWatermarkEnabled}
-                defaultTimelinePreviewsEnabled={defaultTimelinePreviewsEnabled}
-                setDefaultTimelinePreviewsEnabled={setDefaultTimelinePreviewsEnabled}
-                defaultWatermarkText={defaultWatermarkText}
-                setDefaultWatermarkText={setDefaultWatermarkText}
                 defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
                 setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
                 defaultEnableClientUploads={defaultEnableClientUploads}

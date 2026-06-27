@@ -22,8 +22,6 @@ type Project = {
   startDate?: string | Date | null
   createdAt: string | Date
   updatedAt: string | Date
-  maxRevisions: number
-  enableRevisions: boolean
   videos: any[]
   recipients: any[]
   assignedUsers?: Array<{

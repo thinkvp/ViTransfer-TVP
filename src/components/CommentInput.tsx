@@ -7,11 +7,12 @@ import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
 import { Send, Paperclip, Clock, ChevronDown, Check, Trash2, Keyboard, Mic, Square } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
 import VoiceNotePlayer from './VoiceNotePlayer'
-import { secondsToTimecode } from '@/lib/timecode'
+import { secondsToTimecode, timecodeToSeconds } from '@/lib/timecode'
+import { useTimeDisplayMode, type TimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { cn, formatTimestamp } from '@/lib/utils'
 
@@ -40,6 +41,8 @@ interface CommentInputProps {
   selectedEndTimestamp?: number | null
   onClearTimestamp: () => void
   onClearRange?: () => void
+  onSetTimes?: (startSeconds: number, endSeconds: number | null) => void
+  videoDurationSeconds?: number
   showTimestampReset?: boolean
   selectedVideoFps: number // FPS of the currently selected video
 
@@ -106,6 +109,8 @@ export default function CommentInput({
   selectedEndTimestamp = null,
   onClearTimestamp,
   onClearRange,
+  onSetTimes,
+  videoDurationSeconds,
   showTimestampReset = false,
   selectedVideoFps,
   useFullTimecode = false,
@@ -159,6 +164,117 @@ export default function CommentInput({
   const streamRef = useRef<MediaStream | null>(null)
   const hasSavedRecordingRef = useRef(false)
   const customNameInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Comment in/out time editor ───────────────────────────────────────────
+  // Shared display-mode hook: the Time/Timecode toggle here syncs with the
+  // player and the comment list across the whole share page.
+  const { timeDisplayMode, setTimeDisplayMode } = useTimeDisplayMode(useFullTimecode)
+  const fps = selectedVideoFps > 0 ? selectedVideoFps : 24
+  const canUseTimecode = selectedVideoFps > 0
+  const isTimecodeMode = timeDisplayMode === 'timecode' && canUseTimecode
+
+  const [timePopoverOpen, setTimePopoverOpen] = useState(false)
+  const timePopoverRef = useRef<HTMLDivElement>(null)
+  const [inSegs, setInSegs] = useState<string[]>([])
+  const [outSegs, setOutSegs] = useState<string[]>([])
+  const [outActive, setOutActive] = useState(false)
+  const [timeError, setTimeError] = useState('')
+  // Authoritative duration pulled from the player on open (the prop may be
+  // missing in some contexts); used to validate against the real video length.
+  const [playerDuration, setPlayerDuration] = useState<number | null>(null)
+  // Per-segment <input> refs so a filled segment can auto-advance to the next.
+  const segRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  const effectiveDuration =
+    playerDuration !== null
+      ? playerDuration
+      : typeof videoDurationSeconds === 'number' && videoDurationSeconds > 0
+        ? videoDurationSeconds
+        : null
+
+  const showHours =
+    (effectiveDuration ?? 0) >= 3600 ||
+    (selectedTimestamp ?? 0) >= 3600 ||
+    (selectedEndTimestamp ?? 0) >= 3600
+
+  const pad2 = (n: number) => String(n).padStart(2, '0')
+
+  // The ordered segment boxes shown in the editor for the active mode.
+  const segDefs = useMemo<Array<{ key: string; max: number; label: string }>>(() => {
+    if (isTimecodeMode) {
+      return [
+        { key: 'h', max: 99, label: 'hours' },
+        { key: 'm', max: 59, label: 'minutes' },
+        { key: 's', max: 59, label: 'seconds' },
+        { key: 'f', max: Math.max(1, Math.round(fps)) - 1, label: 'frames' },
+      ]
+    }
+    if (showHours) {
+      return [
+        { key: 'h', max: 99, label: 'hours' },
+        { key: 'm', max: 59, label: 'minutes' },
+        { key: 's', max: 59, label: 'seconds' },
+      ]
+    }
+    return [
+      { key: 'm', max: 59, label: 'minutes' },
+      { key: 's', max: 59, label: 'seconds' },
+    ]
+  }, [isTimecodeMode, showHours, fps])
+
+  // Helper text shows only the shape that applies to this video.
+  const formatHelper = isTimecodeMode ? 'HH:MM:SS:FF' : showHours ? 'HH:MM:SS' : 'MM:SS'
+
+  // Format seconds for the active display mode (badge above the box).
+  const formatForMode = (totalSeconds: number) => {
+    const s = Math.max(0, totalSeconds)
+    if (isTimecodeMode) return secondsToTimecode(s, fps)
+    const whole = Math.floor(s)
+    const h = Math.floor(whole / 3600)
+    const m = Math.floor((whole % 3600) / 60)
+    const sec = whole % 60
+    if (showHours) return `${h}:${pad2(m)}:${pad2(sec)}`
+    return `${m}:${pad2(sec)}`
+  }
+
+  // Split seconds into the per-segment 2-digit strings for the active mode.
+  const secondsToSegs = (totalSeconds: number): string[] => {
+    const s = Math.max(0, totalSeconds)
+    if (isTimecodeMode) {
+      return secondsToTimecode(s, fps).replace(';', ':').split(':')
+    }
+    const whole = Math.floor(s)
+    const sec = whole % 60
+    if (showHours) {
+      const h = Math.floor(whole / 3600)
+      const m = Math.floor((whole % 3600) / 60)
+      return [pad2(h), pad2(m), pad2(sec)]
+    }
+    return [pad2(Math.floor(whole / 60)), pad2(sec)]
+  }
+
+  // Join the per-segment strings back into seconds (empty = 0). Returns null if
+  // a segment is out of range for its unit (e.g. 75 seconds, or frame ≥ fps).
+  const segsToSeconds = (segs: string[]): number | null => {
+    const nums = segDefs.map((_, i) => {
+      const raw = (segs[i] ?? '').trim()
+      if (raw === '') return 0
+      if (!/^\d+$/.test(raw)) return NaN
+      return parseInt(raw, 10)
+    })
+    if (nums.some((n) => Number.isNaN(n))) return null
+    if (segDefs.some((d, i) => nums[i] > d.max)) return null
+    if (isTimecodeMode) {
+      const [h, m, s, f] = nums
+      return timecodeToSeconds(`${pad2(h)}:${pad2(m)}:${pad2(s)}:${pad2(f)}`, fps)
+    }
+    if (showHours) {
+      const [h, m, s] = nums
+      return h * 3600 + m * 60 + s
+    }
+    const [m, s] = nums
+    return m * 60 + s
+  }
 
   const baseRecipientOptions = useMemo(() => {
     const unique: Array<{ id?: string; name: string }> = []
@@ -494,6 +610,172 @@ export default function CommentInput({
     }
   }, [])
 
+  // Seed the popover inputs from the current selection each time it opens, and
+  // pull the authoritative duration/fps from the player.
+  useEffect(() => {
+    if (!timePopoverOpen) return
+    const inSec = Math.max(0, selectedTimestamp ?? 0)
+    const hasOut = selectedEndTimestamp !== null
+    setInSegs(secondsToSegs(inSec))
+    setOutActive(hasOut)
+    setOutSegs(secondsToSegs(hasOut ? (selectedEndTimestamp as number) : inSec))
+    setTimeError('')
+    window.dispatchEvent(
+      new CustomEvent('getCommentTimeContext', {
+        detail: {
+          callback: (ctx: { duration?: number } | undefined) => {
+            if (ctx && typeof ctx.duration === 'number' && ctx.duration > 0) {
+              setPlayerDuration(ctx.duration)
+            }
+          },
+        },
+      })
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timePopoverOpen])
+
+  // The comment-time pill is hidden while replying, so close the popover too.
+  useEffect(() => {
+    if (replyingToComment) setTimePopoverOpen(false)
+  }, [replyingToComment])
+
+  // Close the popover on outside click or Escape.
+  useEffect(() => {
+    if (!timePopoverOpen) return
+    const onPointerDown = (e: PointerEvent) => {
+      if (timePopoverRef.current && !timePopoverRef.current.contains(e.target as Node)) {
+        setTimePopoverOpen(false)
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTimePopoverOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [timePopoverOpen])
+
+  // Re-derive the segment boxes when the display mode is toggled while open
+  // (the number of segments changes between Time and Timecode).
+  useEffect(() => {
+    if (!timePopoverOpen) return
+    const inSec = Math.max(0, selectedTimestamp ?? 0)
+    const hasOut = selectedEndTimestamp !== null
+    setInSegs(secondsToSegs(inSec))
+    setOutSegs(secondsToSegs(hasOut ? (selectedEndTimestamp as number) : inSec))
+    setTimeError('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeDisplayMode])
+
+  const exceedsDuration = (seconds: number) =>
+    effectiveDuration !== null && seconds > effectiveDuration + 0.5
+
+  const focusSeg = (field: 'in' | 'out', index: number) => {
+    const el = segRefs.current[`${field}-${index}`]
+    if (el) {
+      el.focus()
+      el.select()
+    }
+  }
+
+  // Apply a field's segments to the timeline live, with validation.
+  const applySegs = (field: 'in' | 'out', inSegsNow: string[], outSegsNow: string[]) => {
+    if (field === 'in') {
+      const total = segsToSeconds(inSegsNow)
+      if (total === null) return
+      if (exceedsDuration(total)) {
+        setTimeError('Past the end of the video.')
+        return
+      }
+      if (!outActive) {
+        // No OUT set yet: mirror IN → OUT and drop a single point marker.
+        setOutSegs(secondsToSegs(total))
+        setTimeError('')
+        onSetTimes?.(total, null)
+        return
+      }
+      const outSec = segsToSeconds(outSegsNow)
+      if (outSec !== null && total > outSec + 0.001) {
+        setTimeError('In can’t be after out.')
+        return
+      }
+      setTimeError('')
+      onSetTimes?.(total, outSec)
+      return
+    }
+
+    const total = segsToSeconds(outSegsNow)
+    if (total === null) return
+    if (exceedsDuration(total)) {
+      setTimeError('Past the end of the video.')
+      return
+    }
+    const inSec = segsToSeconds(inSegsNow) ?? Math.max(0, selectedTimestamp ?? 0)
+    if (total + 0.001 < inSec) {
+      setTimeError('Out can’t be before in.')
+      return
+    }
+    setTimeError('')
+    onSetTimes?.(inSec, total)
+  }
+
+  const handleSegChange = (field: 'in' | 'out', index: number, rawValue: string) => {
+    const def = segDefs[index]
+    let digits = rawValue.replace(/\D/g, '').slice(0, 2)
+    if (digits !== '' && parseInt(digits, 10) > def.max) digits = String(def.max)
+
+    const base = field === 'in' ? inSegs : outSegs
+    const next = segDefs.map((_, i) => (i === index ? digits : base[i] ?? ''))
+
+    if (field === 'in') {
+      setInSegs(next)
+      applySegs('in', next, outSegs)
+    } else {
+      setOutActive(true)
+      setOutSegs(next)
+      applySegs('out', inSegs, next)
+    }
+
+    // Auto-advance once this segment can't take another digit.
+    const full =
+      digits.length === 2 || (digits.length === 1 && parseInt(digits, 10) * 10 > def.max)
+    if (full && index < segDefs.length - 1) {
+      focusSeg(field, index + 1)
+    }
+  }
+
+  // On blur, pad to two digits (or revert to the applied selection if invalid).
+  const handleSegBlur = (field: 'in' | 'out', e: React.FocusEvent<HTMLInputElement>) => {
+    // Skip while moving between segments of the same field — that avoids
+    // clobbering a just-typed digit during auto-advance (state hasn't flushed yet).
+    const related = e.relatedTarget as HTMLElement | null
+    if (related && segDefs.some((_, i) => segRefs.current[`${field}-${i}`] === related)) return
+    if (field === 'out' && !outActive) return
+    const segs = field === 'in' ? inSegs : outSegs
+    const setSegs = field === 'in' ? setInSegs : setOutSegs
+    const total = segsToSeconds(segs)
+    if (total === null) {
+      const fallback =
+        field === 'in'
+          ? Math.max(0, selectedTimestamp ?? 0)
+          : selectedEndTimestamp !== null
+            ? (selectedEndTimestamp as number)
+            : Math.max(0, selectedTimestamp ?? 0)
+      setSegs(secondsToSegs(fallback))
+      return
+    }
+    const clamped = effectiveDuration !== null ? Math.min(total, effectiveDuration) : total
+    setSegs(secondsToSegs(clamped))
+  }
+
+  const handleToggleMode = (mode: TimeDisplayMode) => {
+    if (mode === 'timecode' && !canUseTimecode) return
+    setTimeDisplayMode(mode)
+  }
+
   if (commentsDisabled) return null
 
   const hasRequiredName = !showAuthorInput || Boolean(authorName.trim())
@@ -517,13 +799,9 @@ export default function CommentInput({
 
   const displayedStartTimestamp = selectedTimestamp ?? 0
   const displayedEndTimestamp = selectedEndTimestamp
-  const displayTime = useFullTimecode
-    ? secondsToTimecode(displayedStartTimestamp, selectedVideoFps || 24)
-    : formatTimestamp(displayedStartTimestamp)
+  const displayTime = formatForMode(displayedStartTimestamp)
   const displayRangeTime = displayedEndTimestamp !== null
-    ? `${displayTime} - ${useFullTimecode
-      ? secondsToTimecode(displayedEndTimestamp, selectedVideoFps || 24)
-      : formatTimestamp(displayedEndTimestamp)}`
+    ? `${displayTime} - ${formatForMode(displayedEndTimestamp)}`
     : displayTime
 
   return (
@@ -743,11 +1021,146 @@ export default function CommentInput({
           </Dialog>
 
           <div>
-            {!currentVideoRestricted && (
+            {/* Replies thread under a parent comment and carry no timeline position,
+                so the comment-time pill doesn't apply while replying — hide it. */}
+            {!currentVideoRestricted && !replyingToComment && (
               <div className="w-full rounded-t-lg border border-input border-b-0 bg-muted/35 px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs">
-                <div className="min-w-0 inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-amber-300 font-medium tabular-nums">
-                  <Clock className="w-3 h-3 flex-shrink-0" />
-                  <span className="truncate">{displayRangeTime}</span>
+                <div className="relative min-w-0" ref={timePopoverRef}>
+                  <button
+                    type="button"
+                    onClick={() => setTimePopoverOpen((o) => !o)}
+                    className="min-w-0 inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-amber-300 font-medium tabular-nums hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                    title="Edit comment in/out time"
+                    aria-label="Edit comment in and out time"
+                    aria-haspopup="dialog"
+                    aria-expanded={timePopoverOpen}
+                  >
+                    <Clock className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate">{displayRangeTime}</span>
+                  </button>
+
+                  {timePopoverOpen && (
+                    <div
+                      role="dialog"
+                      aria-label="Comment time"
+                      className="absolute bottom-full left-0 z-50 mb-2 w-80 max-w-[calc(100vw-2rem)] space-y-3 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-elevation-lg"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-foreground">Comment time</span>
+                        <div className="inline-flex flex-shrink-0 rounded-md border border-border bg-muted/40 p-0.5 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleMode('duration')}
+                            className={cn(
+                              'rounded px-2.5 py-1 transition-colors',
+                              timeDisplayMode === 'duration'
+                                ? 'bg-background text-foreground font-medium shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground'
+                            )}
+                          >
+                            Time
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleMode('timecode')}
+                            disabled={!canUseTimecode}
+                            title={!canUseTimecode ? 'Timecode requires FPS metadata on this video' : undefined}
+                            className={cn(
+                              'rounded px-2.5 py-1 transition-colors',
+                              timeDisplayMode === 'timecode' && canUseTimecode
+                                ? 'bg-background text-foreground font-medium shadow-sm'
+                                : 'text-muted-foreground hover:text-foreground',
+                              !canUseTimecode && 'opacity-40 cursor-not-allowed hover:text-muted-foreground'
+                            )}
+                          >
+                            TC
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={cn('flex gap-3', isTimecodeMode ? 'flex-col' : 'flex-row')}>
+                        <div className="flex-1 space-y-1">
+                          <span className="text-xs font-medium text-foreground">Comment in</span>
+                          <div className="flex items-center gap-0.5">
+                            {segDefs.map((def, i) => (
+                              <Fragment key={`in-${def.key}`}>
+                                {i > 0 && (
+                                  <span className="text-muted-foreground" aria-hidden>
+                                    :
+                                  </span>
+                                )}
+                                <input
+                                  ref={(el) => {
+                                    segRefs.current[`in-${i}`] = el
+                                  }}
+                                  inputMode="numeric"
+                                  autoComplete="off"
+                                  aria-label={`Comment in ${def.label}`}
+                                  value={inSegs[i] ?? ''}
+                                  placeholder="00"
+                                  onChange={(e) => handleSegChange('in', i, e.target.value)}
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onBlur={(e) => handleSegBlur('in', e)}
+                                  className="h-9 w-8 rounded-md border border-input bg-background text-center text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                                />
+                              </Fragment>
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground tabular-nums">{formatHelper}</p>
+                        </div>
+                        <div className="flex-1 space-y-1">
+                          <span className="text-xs font-medium text-foreground">Comment out</span>
+                          <div className="flex items-center gap-0.5">
+                            {segDefs.map((def, i) => (
+                              <Fragment key={`out-${def.key}`}>
+                                {i > 0 && (
+                                  <span
+                                    className={cn(!outActive ? 'text-muted-foreground/60' : 'text-muted-foreground')}
+                                    aria-hidden
+                                  >
+                                    :
+                                  </span>
+                                )}
+                                <input
+                                  ref={(el) => {
+                                    segRefs.current[`out-${i}`] = el
+                                  }}
+                                  inputMode="numeric"
+                                  autoComplete="off"
+                                  aria-label={`Comment out ${def.label}`}
+                                  value={outSegs[i] ?? ''}
+                                  placeholder="00"
+                                  onChange={(e) => handleSegChange('out', i, e.target.value)}
+                                  onFocus={(e) => e.currentTarget.select()}
+                                  onBlur={(e) => handleSegBlur('out', e)}
+                                  className={cn(
+                                    'h-9 w-8 rounded-md border border-input bg-background text-center text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                                    !outActive && 'text-muted-foreground'
+                                  )}
+                                />
+                              </Fragment>
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground tabular-nums">{formatHelper}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="min-w-0 flex-1 text-xs leading-tight text-destructive">
+                          {timeError}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="default"
+                          size="sm"
+                          className="flex-shrink-0"
+                          onClick={() => setTimePopoverOpen(false)}
+                        >
+                          Done
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 min-w-0">
@@ -784,11 +1197,13 @@ export default function CommentInput({
               onChange={(e) => onCommentChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onFocus={() => {
+                // A reply has no timeline position — don't spawn a comment-range marker.
+                if (replyingToComment) return
                 window.dispatchEvent(new CustomEvent('activateCommentRange'))
               }}
               className={cn(
                 'resize-none',
-                !currentVideoRestricted && 'rounded-t-none border-t-0'
+                !currentVideoRestricted && !replyingToComment && 'rounded-t-none border-t-0'
               )}
               rows={2}
               disabled={loading}

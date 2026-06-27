@@ -319,9 +319,6 @@ export async function GET(
           if (!filePath) return NextResponse.json({ error: 'Access denied' }, { status: 404 })
           contentType = 'text/vtt'
         } else {
-          if (!v.project.timelinePreviewsEnabled) {
-            return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-          }
           filePath = storedPaths.get('TIMELINE_VTT') ?? null
           contentType = 'text/vtt'
         }
@@ -356,9 +353,6 @@ export async function GET(
           filePath = `${spriteDir(rawPath)}${spriteFile}`
           contentType = 'image/jpeg'
         } else {
-          if (!v.project.timelinePreviewsEnabled) {
-            return NextResponse.json({ error: 'Access denied' }, { status: 403 })
-          }
           const spritesBasePath = storedPaths.get('TIMELINE_SPRITES')
           if (!spritesBasePath) {
             return NextResponse.json({ error: 'Access denied' }, { status: 404 })

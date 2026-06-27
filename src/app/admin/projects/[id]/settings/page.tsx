@@ -9,14 +9,13 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
-import { ReprocessModal } from '@/components/ReprocessModal'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
 import { SharePasswordRequirements } from '@/components/SharePasswordRequirements'
 import { apiFetch } from '@/lib/api-client'
 import { sanitizeSlug } from '@/lib/utils'
 import { apiPatch, apiPost } from '@/lib/api-client'
 import Link from 'next/link'
-import { AlertTriangle, ArrowLeft, FolderSync, Save, RefreshCw, Copy, Check, ChevronDown, ChevronUp, FileText, Bell, Video, GitBranch, MessageSquare, Shield } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, FolderSync, Save, RefreshCw, Copy, Check, ChevronDown, ChevronUp, FileText, Bell, Video, MessageSquare, Shield } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -85,8 +84,6 @@ interface Project {
   enablePhotos?: boolean
   enableUploads?: boolean
   _count?: { videos: number; albums: number; shareUploadFiles: number }
-  enableRevisions: boolean
-  maxRevisions: number
   restrictCommentsToLatestVersion: boolean
   hideFeedback: boolean
   useFullTimecode: boolean
@@ -99,9 +96,6 @@ interface Project {
   authMode: string
   globalAllowAuthenticatedProjectSwitching?: boolean
   previewResolutions: string
-  watermarkEnabled: boolean
-  watermarkText: string | null
-  timelinePreviewsEnabled: boolean
   clientNotificationSchedule: string
   clientNotificationTime: string | null
   clientNotificationDay: number | null
@@ -134,8 +128,6 @@ export default function ProjectSettingsPage() {
   const [clientSuggestions, setClientSuggestions] = useState<Array<{ id: string; name: string }>>([])
   const clientSearchRef = useRef<HTMLDivElement>(null)
   const [clientsLoading, setClientsLoading] = useState(false)
-  const [enableRevisions, setEnableRevisions] = useState(false)
-  const [maxRevisions, setMaxRevisions] = useState<number | ''>('')
   const [restrictCommentsToLatestVersion, setRestrictCommentsToLatestVersion] = useState(false)
   const [hideFeedback, setHideFeedback] = useState(false)
   const [useFullTimecode, setUseFullTimecode] = useState(false)
@@ -149,10 +141,6 @@ export default function ProjectSettingsPage() {
   const [useCustomSlug, setUseCustomSlug] = useState(false) // Toggle for custom slug
   const [customSlugValue, setCustomSlugValue] = useState('') // Store custom slug value
   const [previewResolutions, setPreviewResolutions] = useState<string[]>(['720p'])
-  const [watermarkEnabled, setWatermarkEnabled] = useState(true)
-  const [watermarkText, setWatermarkText] = useState('')
-  const [useCustomWatermark, setUseCustomWatermark] = useState(false)
-  const [timelinePreviewsEnabled, setTimelinePreviewsEnabled] = useState(false)
 
   // Notification settings state
   const [clientNotificationSchedule, setClientNotificationSchedule] = useState('HOURLY')
@@ -168,12 +156,11 @@ export default function ProjectSettingsPage() {
   const [savedSnapshot, setSavedSnapshot] = useState('')
   const currentSnapshot = JSON.stringify({
     title, description, companyName, enableVideos, enablePhotos, enableUploads, selectedClientId,
-    enableRevisions, maxRevisions, restrictCommentsToLatestVersion, hideFeedback,
+    restrictCommentsToLatestVersion, hideFeedback,
     useFullTimecode, allowClientDeleteComments, allowClientUploadFiles,
     allowAuthenticatedProjectSwitching, maxClientUploadAllocationMB, sharePassword,
     authMode, useCustomSlug, customSlugValue,
-    previewResolutions, watermarkEnabled, watermarkText, useCustomWatermark,
-    timelinePreviewsEnabled, clientNotificationSchedule, clientNotificationTime,
+    previewResolutions, clientNotificationSchedule, clientNotificationTime,
     clientNotificationDay,
   })
   const hasUnsavedChanges = savedSnapshot !== '' && currentSnapshot !== savedSnapshot
@@ -183,7 +170,6 @@ export default function ProjectSettingsPage() {
   const [showProjectDetails, setShowProjectDetails] = useState(false)
   const [showClientInfo, setShowClientInfo] = useState(false)
   const [showVideoProcessing, setShowVideoProcessing] = useState(false)
-  const [showRevisionTracking, setShowRevisionTracking] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
   const [showSecurity, setShowSecurity] = useState(false)
 
@@ -194,17 +180,10 @@ export default function ProjectSettingsPage() {
   const [originalSettings, setOriginalSettings] = useState({
     title: '',
     previewResolutions: ['720p'] as string[],
-    watermarkEnabled: true,
-    watermarkText: null as string | null,
-    timelinePreviewsEnabled: false,
   })
 
   // Reprocessing state
-  const [showReprocessModal, setShowReprocessModal] = useState(false)
-  const [pendingUpdates, setPendingUpdates] = useState<any>(null)
   const [reprocessing, setReprocessing] = useState(false)
-  const [reprocessModalTitle, setReprocessModalTitle] = useState('Video Processing Settings Changed')
-  const [reprocessModalDescription, setReprocessModalDescription] = useState("You've changed settings that affect how videos are processed. These changes will only apply to newly uploaded videos.")
   const isProjectClosed = project?.status === 'CLOSED'
 
   // S3 rename confirmation modal
@@ -255,8 +234,6 @@ export default function ProjectSettingsPage() {
         setEnablePhotos(data.enablePhotos === true)
         setEnableUploads(data.enableUploads !== false)
         setSelectedClientId(data.clientId || null)
-        setEnableRevisions(data.enableRevisions)
-        setMaxRevisions(data.maxRevisions)
         setRestrictCommentsToLatestVersion(data.restrictCommentsToLatestVersion)
         setHideFeedback(data.hideFeedback || false)
         setUseFullTimecode(data.useFullTimecode ?? false)
@@ -271,10 +248,6 @@ export default function ProjectSettingsPage() {
             return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['720p']
           } catch { return ['720p'] }
         })())
-        setWatermarkEnabled(data.watermarkEnabled ?? true)
-        setWatermarkText(data.watermarkText || '')
-        setUseCustomWatermark(!!data.watermarkText)
-        setTimelinePreviewsEnabled(data.timelinePreviewsEnabled ?? false)
         setAuthMode(data.authMode || 'PASSWORD')
         setSharePassword(data.sharePassword || '')
 
@@ -287,9 +260,6 @@ export default function ProjectSettingsPage() {
               return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['720p']
             } catch { return ['720p'] }
           })(),
-          watermarkEnabled: data.watermarkEnabled ?? true,
-          watermarkText: data.watermarkText,
-          timelinePreviewsEnabled: data.timelinePreviewsEnabled ?? false,
         })
 
         // Check if slug was manually customized (different from auto-generated from title)
@@ -376,7 +346,7 @@ export default function ProjectSettingsPage() {
 
   // Reset active desktop section when video sections become unavailable
   useEffect(() => {
-    const videoOnlySections = ['video-processing', 'revision-tracking', 'feedback']
+    const videoOnlySections = ['video-processing', 'feedback']
     if (!enableVideos && videoOnlySections.includes(activeSection)) {
       setActiveSection('project-details')
     }
@@ -419,16 +389,6 @@ export default function ProjectSettingsPage() {
         return
       }
 
-      // Ensure revision values are valid numbers before saving
-      const finalMaxRevisions = typeof maxRevisions === 'number' ? maxRevisions : parseInt(String(maxRevisions), 10) || 1
-
-      // Validate: maxRevisions must be at least 1
-      if (enableRevisions && finalMaxRevisions < 1) {
-        setError('Maximum revisions must be at least 1')
-        setSaving(false)
-        return
-      }
-
       const updates: any = {
         title,
         slug: sanitizedSlug,
@@ -437,8 +397,6 @@ export default function ProjectSettingsPage() {
         enableVideos,
         enablePhotos,
         enableUploads,
-        enableRevisions,
-        maxRevisions: enableRevisions ? finalMaxRevisions : 0,
         restrictCommentsToLatestVersion,
         hideFeedback,
         useFullTimecode,
@@ -450,9 +408,6 @@ export default function ProjectSettingsPage() {
           ? maxClientUploadAllocationMB
           : parseInt(String(maxClientUploadAllocationMB), 10) || 0,
         previewResolutions,
-        watermarkEnabled,
-        watermarkText: useCustomWatermark ? watermarkText : null,
-        timelinePreviewsEnabled,
         sharePassword: sharePassword || null,
         authMode,
         clientNotificationSchedule,
@@ -460,38 +415,18 @@ export default function ProjectSettingsPage() {
         clientNotificationDay: null,
       }
 
-      // Changing preview content itself needs a full reprocess; resolution list changes alone do not.
-      const currentWatermarkText = useCustomWatermark ? watermarkText : null
+      // Resolution list changes only need previews generated for the newly-added resolutions.
       const addedPreviewResolutions = previewResolutions.filter(
         (resolution) => !originalSettings.previewResolutions.includes(resolution)
       )
       const removedPreviewResolutions = originalSettings.previewResolutions.filter(
         (resolution) => !previewResolutions.includes(resolution)
       )
-      const titleAffectsExistingPreviewWatermarks =
-        title !== originalSettings.title &&
-        watermarkEnabled &&
-        currentWatermarkText === null &&
-        originalSettings.watermarkText === null
-      const fullPreviewReprocessNeeded =
-        watermarkEnabled !== originalSettings.watermarkEnabled ||
-        currentWatermarkText !== originalSettings.watermarkText ||
-        titleAffectsExistingPreviewWatermarks
-
-      if (fullPreviewReprocessNeeded && !isProjectClosed) {
-        setPendingUpdates(updates)
-        setReprocessModalTitle('Preview Content Needs Reprocessing')
-        setReprocessModalDescription("You've changed settings that affect existing preview files. Save now to apply the settings for future uploads, or reprocess existing previews so they match immediately.")
-        setShowReprocessModal(true)
-        setSaving(false)
-        return
-      }
 
       if (addedPreviewResolutions.length > 0 || removedPreviewResolutions.length > 0) {
         updates.addedPreviewResolutions = addedPreviewResolutions
       }
 
-      // Otherwise save normally (timeline preview change handled inside saveSettings)
       await saveSettings(updates)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings')
@@ -510,8 +445,6 @@ export default function ProjectSettingsPage() {
 
       // If S3 mode and a rename is needed, the server returns 202 asking us to confirm.
       if (patchResult?.requiresJobConfirmation) {
-        setShowReprocessModal(false)
-        setPendingUpdates(null)
         setPendingRenameReprocess(shouldReprocess)
         setPendingRenameUpdates(updates)
         setPendingRenameTitle(patchResult.proposedTitle ?? title)
@@ -559,24 +492,6 @@ export default function ProjectSettingsPage() {
         }
       }
 
-      // Handle timeline previews toggle independently of full reprocess.
-      // Turning OFF  → delete existing sprites from disk + clear DB fields.
-      // Turning ON   → queue lightweight timeline-only generation jobs.
-      const timelineToggleChanged =
-        updates.timelinePreviewsEnabled !== originalSettings.timelinePreviewsEnabled
-      if (timelineToggleChanged) {
-        try {
-          if (!updates.timelinePreviewsEnabled) {
-            await apiPost(`/api/projects/${projectId}/timeline-previews`, { action: 'remove' })
-          } else if (!isProjectClosed) {
-            await apiPost(`/api/projects/${projectId}/timeline-previews`, { action: 'generate' })
-          }
-        } catch (err) {
-          console.error('Error managing timeline previews:', err)
-          // Non-fatal — settings were saved, previews can be retried
-        }
-      }
-
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
 
@@ -589,10 +504,6 @@ export default function ProjectSettingsPage() {
         const refreshedData = await refreshResponse.json()
         setProject(refreshedData)
         setAllowAuthenticatedProjectSwitching(refreshedData.allowAuthenticatedProjectSwitching ?? true)
-        setWatermarkEnabled(refreshedData.watermarkEnabled ?? true)
-        setWatermarkText(refreshedData.watermarkText || '')
-        setUseCustomWatermark(!!refreshedData.watermarkText)
-        setTimelinePreviewsEnabled(refreshedData.timelinePreviewsEnabled ?? false)
 
         // Update original settings
         setOriginalSettings({
@@ -603,18 +514,11 @@ export default function ProjectSettingsPage() {
               return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['720p']
             } catch { return ['720p'] }
           })(),
-          watermarkEnabled: refreshedData.watermarkEnabled ?? true,
-          watermarkText: refreshedData.watermarkText,
-          timelinePreviewsEnabled: refreshedData.timelinePreviewsEnabled ?? false,
         })
       }
 
       // Refresh the page
       router.refresh()
-
-      // Close modal and reset pending updates
-      setShowReprocessModal(false)
-      setPendingUpdates(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings')
     } finally {
@@ -651,7 +555,6 @@ export default function ProjectSettingsPage() {
     { id: 'notifications', label: 'Notifications', description: 'Set notification schedule for client recipients', icon: Bell },
     ...(enableVideos ? [
       { id: 'video-processing', label: 'Video Processing', description: 'Configure how videos are processed and displayed', icon: Video },
-      { id: 'revision-tracking', label: 'Revision Tracking', description: 'Manage how video revisions are tracked and limited', icon: GitBranch },
       { id: 'feedback', label: 'Feedback & Client Uploads', description: "Control clients ability to see or leave feedback and upload files", icon: MessageSquare },
     ] : []),
     { id: 'security', label: 'Security', description: 'Password protection for the share page', icon: Shield },
@@ -1026,152 +929,6 @@ export default function ProjectSettingsPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="watermarkEnabled">Enable Watermarks</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Add watermarks to processed videos
-                        </p>
-                      </div>
-                      <Switch
-                        id="watermarkEnabled"
-                        checked={watermarkEnabled}
-                        onCheckedChange={setWatermarkEnabled}
-                      />
-                    </div>
-
-                    {watermarkEnabled && (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-0.5">
-                            <Label htmlFor="customWatermark">Custom Watermark Text</Label>
-                            <p className="text-xs text-muted-foreground">
-                              Override default watermark format
-                            </p>
-                          </div>
-                          <Switch
-                            id="customWatermark"
-                            checked={useCustomWatermark}
-                            onCheckedChange={setUseCustomWatermark}
-                          />
-                        </div>
-
-                        {useCustomWatermark && (
-                          <div className="space-y-2">
-                            <Input
-                              value={watermarkText}
-                              onChange={(e) => setWatermarkText(e.target.value)}
-                              placeholder="e.g., CONFIDENTIAL, DRAFT, REVIEW COPY"
-                              className="font-mono"
-                              maxLength={100}
-                            />
-                            <p className="text-xs text-muted-foreground">
-                              Leave empty to use default format: PREVIEW-{project?.title}-[version]
-                              <br />
-                              <span className="text-warning">Only letters, numbers, spaces, and these characters: - _ . ( )</span>
-                            </p>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="timelinePreviewsEnabled">Enable Timeline Previews</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Show preview thumbnails when hovering or scrubbing the timeline
-                        </p>
-                      </div>
-                      <Switch
-                        id="timelinePreviewsEnabled"
-                        checked={timelinePreviewsEnabled}
-                        onCheckedChange={setTimelinePreviewsEnabled}
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-                )}
-              </Card>
-
-              {/* Revision Settings */}
-              <Card className="border-border">
-                <CardHeader
-                  className="cursor-pointer hover:bg-accent/50 transition-colors"
-                  onClick={() => setShowRevisionTracking(!showRevisionTracking)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Revision Tracking</CardTitle>
-                      <CardDescription>
-                        Manage how video revisions are tracked and limited
-                      </CardDescription>
-                    </div>
-                    {showRevisionTracking ? (
-                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                    ) : (
-                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-                    )}
-                  </div>
-                </CardHeader>
-
-                {showRevisionTracking && (
-                  <CardContent className="space-y-6 border-t pt-4">
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="enableRevisions">Enable Revision Tracking</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Track and limit the number of video revisions
-                        </p>
-                      </div>
-                      <Switch
-                        id="enableRevisions"
-                        checked={enableRevisions}
-                        onCheckedChange={setEnableRevisions}
-                      />
-                    </div>
-
-                    {enableRevisions && (
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="maxRevisions">Maximum Revisions</Label>
-                          <Input
-                            id="maxRevisions"
-                            type="number"
-                            min="1"
-                            max="20"
-                            value={maxRevisions}
-                            onChange={(e) => {
-                              const val = e.target.value
-                              if (val === '') {
-                                setMaxRevisions('')
-                              } else {
-                                const num = parseInt(val, 10)
-                                if (!isNaN(num)) setMaxRevisions(num)
-                              }
-                            }}
-                            onBlur={(e) => {
-                              // Only validate on blur - ensure at least 1
-                              const val = e.target.value
-                              if (val === '') {
-                                setMaxRevisions(1)
-                              } else {
-                                const num = parseInt(val, 10)
-                                if (isNaN(num) || num < 1) setMaxRevisions(1)
-                                else if (num > 20) setMaxRevisions(20)
-                              }
-                            }}
-                          />
-                          <p className="text-xs text-muted-foreground">
-                            Must be at least 1. Applies to each video name independently.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </CardContent>
                 )}
               </Card>
@@ -1640,71 +1397,6 @@ export default function ProjectSettingsPage() {
                     </div>
                   </div>
 
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="watermarkEnabled-d">Enable Watermarks</Label>
-                        <p className="text-xs text-muted-foreground">Add watermarks to processed videos</p>
-                      </div>
-                      <Switch id="watermarkEnabled-d" checked={watermarkEnabled} onCheckedChange={setWatermarkEnabled} />
-                    </div>
-                    {watermarkEnabled && (
-                      <>
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-0.5">
-                            <Label htmlFor="customWatermark-d">Custom Watermark Text</Label>
-                            <p className="text-xs text-muted-foreground">Override default watermark format</p>
-                          </div>
-                          <Switch id="customWatermark-d" checked={useCustomWatermark} onCheckedChange={setUseCustomWatermark} />
-                        </div>
-                        {useCustomWatermark && (
-                          <div className="space-y-2">
-                            <Input value={watermarkText} onChange={(e) => setWatermarkText(e.target.value)} placeholder="e.g., CONFIDENTIAL, DRAFT, REVIEW COPY" className="font-mono" maxLength={100} />
-                            <p className="text-xs text-muted-foreground">Leave empty to use default format: PREVIEW-{project?.title}-[version]<br /><span className="text-warning">Only letters, numbers, spaces, and these characters: - _ . ( )</span></p>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label htmlFor="timelinePreviewsEnabled-d">Enable Timeline Previews</Label>
-                        <p className="text-xs text-muted-foreground">Show preview thumbnails when hovering or scrubbing the timeline</p>
-                      </div>
-                      <Switch id="timelinePreviewsEnabled-d" checked={timelinePreviewsEnabled} onCheckedChange={setTimelinePreviewsEnabled} />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {activeSection === 'revision-tracking' && (
-              <Card className="border-border">
-                <CardHeader>
-                  <CardTitle>Revision Tracking</CardTitle>
-                  <CardDescription>Manage how video revisions are tracked and limited</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6 border-t pt-4">
-                  <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="enableRevisions-d">Enable Revision Tracking</Label>
-                        <p className="text-xs text-muted-foreground">Track and limit the number of video revisions</p>
-                      </div>
-                      <Switch id="enableRevisions-d" checked={enableRevisions} onCheckedChange={setEnableRevisions} />
-                    </div>
-                    {enableRevisions && (
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="maxRevisions-d">Maximum Revisions</Label>
-                          <Input id="maxRevisions-d" type="number" min="1" max="20" value={maxRevisions} onChange={(e) => { const val = e.target.value; if (val === '') { setMaxRevisions('') } else { const num = parseInt(val, 10); if (!isNaN(num)) setMaxRevisions(num) } }} onBlur={(e) => { const val = e.target.value; if (val === '') { setMaxRevisions(1) } else { const num = parseInt(val, 10); if (isNaN(num) || num < 1) setMaxRevisions(1); else if (num > 20) setMaxRevisions(20) } }} />
-                          <p className="text-xs text-muted-foreground">Must be at least 1. Applies to each video name independently.</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
                 </CardContent>
               </Card>
             )}
@@ -1878,21 +1570,6 @@ export default function ProjectSettingsPage() {
             {saving ? 'Saving...' : 'Save All Changes'}
           </Button>
         </div>
-
-        <ReprocessModal
-          show={showReprocessModal}
-          onCancel={() => {
-            setShowReprocessModal(false)
-            setPendingUpdates(null)
-            setSaving(false)
-          }}
-          onSaveWithoutReprocess={() => saveSettings(pendingUpdates, false)}
-          onSaveAndReprocess={() => saveSettings(pendingUpdates, true)}
-          saving={saving}
-          reprocessing={reprocessing}
-          title={reprocessModalTitle}
-          description={reprocessModalDescription}
-        />
 
         {/* S3 folder rename confirmation modal */}
         {renameConfirmOpen && (

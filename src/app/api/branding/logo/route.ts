@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { getFilePath } from '@/lib/storage'
-import { isS3Mode, s3DownloadFile, s3FileExists } from '@/lib/s3-storage'
+import { isS3Mode, s3GetPresignedStreamUrl, s3FileExists } from '@/lib/s3-storage'
 // SETTINGS_BRANDING has no project association — getStoredFilePathForProject() would return null.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath } from '@/lib/stored-file'
@@ -152,36 +152,18 @@ export async function GET(request: NextRequest) {
     }
 
     if (isS3Mode()) {
+      // Redirect to a presigned stream URL so the bytes flow client↔R2 instead of
+      // round-tripping through this Node process. Verify the object exists first so a
+      // missing logo returns a clean 404 rather than a 302 to a URL that then 403s.
       const exists = await s3FileExists(logoPath)
       if (!exists) {
         return NextResponse.json({ error: 'Logo not found' }, { status: 404 })
       }
-      const { stream: s3Stream, contentLength } = await s3DownloadFile(logoPath)
-      let closed = false
-      const readableStream = new ReadableStream({
-        start(controller) {
-          s3Stream.on('data', (chunk) => {
-            if (!closed) controller.enqueue(chunk)
-          })
-          s3Stream.on('end', () => {
-            if (!closed) { closed = true; controller.close() }
-          })
-          s3Stream.on('error', (err) => {
-            if (!closed) { closed = true; controller.error(err) }
-          })
-        },
-        cancel() {
-          closed = true
-          s3Stream.destroy()
-        },
+      const presignedUrl = await s3GetPresignedStreamUrl(logoPath, 3600, contentTypeFromPath(logoPath))
+      return NextResponse.redirect(presignedUrl, {
+        status: 302,
+        headers: { 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=600' },
       })
-      const headers: Record<string, string> = {
-        'Content-Type': contentTypeFromPath(logoPath),
-        'X-Content-Type-Options': 'nosniff',
-        'Cache-Control': 'public, max-age=3600',
-      }
-      if (contentLength > 0) headers['Content-Length'] = contentLength.toString()
-      return new NextResponse(readableStream, { headers })
     }
 
     const fullPath = getFilePath(logoPath)

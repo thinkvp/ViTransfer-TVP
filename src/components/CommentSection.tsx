@@ -10,6 +10,7 @@ import { CheckCircle2, Info, Lock, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
+import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { formatDate, formatTimestamp, formatDateTime, formatFileSize } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
@@ -211,7 +212,10 @@ export function CommentSectionView({
   const [localComments, setLocalComments] = useState<CommentWithReplies[]>(initialComments)
 
   const [commentSortMode, setCommentSortMode] = useState<'timecode' | 'date'>('timecode')
-  const showFrames = useFullTimecode
+  // Follow the shared Time/Timecode toggle so flipping it anywhere on the share
+  // page (e.g. the comment time editor) reformats the comment list too.
+  const { timeDisplayMode } = useTimeDisplayMode(useFullTimecode)
+  const showFrames = timeDisplayMode === 'timecode'
   const [showVideoInfo, setShowVideoInfo] = useState(false)
 
   // Open video info dialog via custom event (triggered from page-level header)
@@ -989,6 +993,8 @@ export function CommentSectionView({
                   selectedEndTimestamp={selectedEndTimestamp}
                   onClearTimestamp={handleClearTimestamp}
                   onClearRange={management.handleClearRange}
+                  onSetTimes={management.handleSetCommentTimes}
+                  videoDurationSeconds={selectedVideoId ? videoDurationById.get(selectedVideoId) : undefined}
                   showTimestampReset={management.shouldShowTimestampReset}
                   selectedVideoFps={selectedVideoFps}
                   useFullTimecode={useFullTimecode}
@@ -1300,6 +1306,8 @@ export function CommentSectionView({
             selectedEndTimestamp={selectedEndTimestamp}
             onClearTimestamp={handleClearTimestamp}
             onClearRange={management.handleClearRange}
+            onSetTimes={management.handleSetCommentTimes}
+            videoDurationSeconds={selectedVideoId ? videoDurationById.get(selectedVideoId) : undefined}
             showTimestampReset={management.shouldShowTimestampReset}
             selectedVideoFps={selectedVideoFps}
             useFullTimecode={useFullTimecode}

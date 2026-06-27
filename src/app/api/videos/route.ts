@@ -116,17 +116,6 @@ export async function POST(request: NextRequest) {
     // Calculate next version number for this specific video name
     const nextVersion = project.videos.length > 0 ? project.videos[0].version + 1 : 1
 
-    // Check if revisions are enabled and validate (per-video tracking)
-    if (project.enableRevisions && project.maxRevisions > 0) {
-      const existingVersionCount = await prisma.video.count({ where: { projectId, name: videoName } })
-      if (existingVersionCount >= project.maxRevisions) {
-        return NextResponse.json(
-          { error: `Maximum revisions (${project.maxRevisions}) exceeded for this video` },
-          { status: 400 }
-        )
-      }
-    }
-
     const existingVersionFolder = await prisma.video.findFirst({
       where: { projectId, name: videoName },
       select: { storageFolderName: true, name: true },

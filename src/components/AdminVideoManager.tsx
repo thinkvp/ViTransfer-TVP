@@ -30,9 +30,6 @@ interface AdminVideoManagerProps {
   onVideoSelect?: (videoName: string, videos: any[]) => void
   onRefresh?: () => void
   sortMode?: 'status' | 'alphabetical'
-  maxRevisions?: number
-  enableRevisions?: boolean
-  watermarkEnabled?: boolean
   s3Mode?: boolean
 }
 
@@ -47,9 +44,6 @@ export default function AdminVideoManager({
   onVideoSelect,
   onRefresh,
   sortMode = 'alphabetical',
-  maxRevisions,
-  enableRevisions,
-  watermarkEnabled = true,
   s3Mode = false,
 }: AdminVideoManagerProps) {
   const router = useRouter()
@@ -390,9 +384,6 @@ export default function AdminVideoManager({
                     <p className="text-sm text-muted-foreground mt-1">
                       {groupVideos.length} {groupVideos.length === 1 ? 'version' : 'versions'} •
                       Latest: {latestVideo.versionLabel || `v${latestVideo.version}`}
-                      {enableRevisions && maxRevisions && (
-                        <> • Revisions {groupVideos.length}/{maxRevisions}</>
-                      )}
                     </p>
                   )}
                 </div>
@@ -484,7 +475,6 @@ export default function AdminVideoManager({
                     canDelete={canFullControl}
                     canApprove={canFullControl}
                     canManageAllowApproval={canFullControl}
-                    watermarkEnabled={watermarkEnabled}
                     s3Mode={s3Mode}
                   />
                 </div>
