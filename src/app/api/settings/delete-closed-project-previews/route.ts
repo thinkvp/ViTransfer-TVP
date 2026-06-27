@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { deleteFile, deleteDirectory } from '@/lib/storage'
 import type { FileRole } from '@/lib/stored-file'
-import { getStoredFileRecords, deleteStoredFilesByCriteria } from '@/lib/stored-file'
+import { getStoredFileRecords, deleteStoredFilesByCriteria, deleteStoredFilesByIds } from '@/lib/stored-file'
 import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 
 export const runtime = 'nodejs'
@@ -69,25 +69,39 @@ export async function POST(request: NextRequest) {
     // Thumbnails, timeline sprites/VTT and asset still images are intentionally kept.
     const videoPreviewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080']
     const assetPreviewRoles: FileRole[] = ['PREVIEW_MP4']
-    // HLS bundles (hls/ dir per video + per asset) are heavy playable renditions too.
+    // HLS bundles (hls/ dir per video + per asset) are heavy playable renditions too —
+    // since direct-to-HLS they're usually the ONLY playable rendition, so they must be
+    // counted and deleted alongside any legacy MP4 previews.
     const hlsDirRoles: FileRole[] = ['HLS_SEGMENTS']
     const [videoStored, assetStored, videoHlsDirs, assetHlsDirs] = await Promise.all([
-      videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: videoPreviewRoles, select: { storagePath: true, entityId: true } }) : [],
-      assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: assetPreviewRoles, select: { storagePath: true, entityId: true } }) : [],
-      videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: hlsDirRoles, select: { storagePath: true } }) : [],
-      assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: hlsDirRoles, select: { storagePath: true } }) : [],
+      videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: videoPreviewRoles, select: { id: true, storagePath: true, entityId: true } }) : [],
+      assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: assetPreviewRoles, select: { id: true, storagePath: true, entityId: true } }) : [],
+      videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: hlsDirRoles, select: { id: true, storagePath: true, entityId: true } }) : [],
+      assetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', assetIds, { fileRoles: hlsDirRoles, select: { id: true, storagePath: true, entityId: true } }) : [],
     ])
 
-    // Each preview file annotated with the project it belongs to.
+    // Each individual MP4 preview file, annotated with its owning project + registry row id.
     const previewFiles = [
-      ...videoStored.map(sf => ({ projectId: videoToProject.get(sf.entityId) ?? null, storagePath: sf.storagePath })),
-      ...assetStored.map(sf => ({ projectId: assetToProject.get(sf.entityId) ?? null, storagePath: sf.storagePath })),
+      ...videoStored.map(sf => ({ id: sf.id as string, projectId: videoToProject.get(sf.entityId) ?? null, storagePath: sf.storagePath })),
+      ...assetStored.map(sf => ({ id: sf.id as string, projectId: assetToProject.get(sf.entityId) ?? null, storagePath: sf.storagePath })),
     ]
+    // Each HLS bundle directory, annotated with its owning project + entity. Deleted as a whole tree.
+    const hlsBundles = [
+      ...videoHlsDirs.map(sf => ({ entityType: 'VIDEO' as const, entityId: sf.entityId as string, projectId: videoToProject.get(sf.entityId) ?? null, storagePath: sf.storagePath })),
+      ...assetHlsDirs.map(sf => ({ entityType: 'VIDEO_ASSET' as const, entityId: sf.entityId as string, projectId: assetToProject.get(sf.entityId) ?? null, storagePath: sf.storagePath })),
+    ]
+    // Total deletable artifacts (MP4 files + HLS bundles) — drives the UI's "preview files" count.
+    const totalArtifacts = previewFiles.length + hlsBundles.length
 
-    // Aggregate for the summary the settings UI renders.
-    const videosWithPreviews = new Set(videoStored.map(sf => sf.entityId)).size
+    // Aggregate for the summary the settings UI renders. A video/asset "has previews"
+    // if it has either an MP4 preview or an HLS bundle.
+    const videosWithRendition = new Set<string>([
+      ...videoStored.map(sf => sf.entityId),
+      ...videoHlsDirs.map(sf => sf.entityId),
+    ])
+    const videosWithPreviews = videosWithRendition.size
     const projectVideoCount = new Map<string, Set<string>>()
-    for (const sf of videoStored) {
+    for (const sf of [...videoStored, ...videoHlsDirs]) {
       const projectId = videoToProject.get(sf.entityId)
       if (!projectId) continue
       let set = projectVideoCount.get(projectId)
@@ -95,7 +109,7 @@ export async function POST(request: NextRequest) {
       set.add(sf.entityId)
     }
     const projectsWithPreviews = new Set(
-      previewFiles.map(f => f.projectId).filter((p): p is string => !!p)
+      [...previewFiles, ...hlsBundles].map(f => f.projectId).filter((p): p is string => !!p)
     ).size
     const sampleProjects = closedProjects
       .filter(p => projectVideoCount.has(p.id))
@@ -110,7 +124,7 @@ export async function POST(request: NextRequest) {
         closedProjects: closedProjects.length,
         projectsWithPreviews,
         videosWithPreviews,
-        previewFiles: previewFiles.length,
+        previewFiles: totalArtifacts,
         sample: { projects: sampleProjects },
       })
     }
@@ -119,11 +133,17 @@ export async function POST(request: NextRequest) {
     let deletedFilesFailed = 0
     const errors: Array<{ projectId: string; path: string; error: string }> = []
 
+    // Only drop a StoredFile row when its storage delete actually succeeded — a failed
+    // delete must leave the row intact so this action stays idempotent (a re-run retries
+    // it) instead of orphaning the file with no registry pointer to find it again. Storage
+    // deletes are no-ops on already-missing paths, so "already gone" still counts as success.
+    const deletedPreviewIds: string[] = []
     await Promise.allSettled(
       previewFiles.map(async (f) => {
         try {
           await deleteFile(f.storagePath)
           deletedFiles++
+          deletedPreviewIds.push(f.id)
         } catch (e: any) {
           deletedFilesFailed++
           errors.push({ projectId: f.projectId ?? 'unknown', path: f.storagePath, error: String(e?.message || e) })
@@ -131,21 +151,39 @@ export async function POST(request: NextRequest) {
       })
     )
 
-    // Delete the HLS bundle directories (whole hls/ trees).
+    // Delete the HLS bundle directories (whole hls/ trees). A successful delete removes the
+    // master playlist + every segment, so on success we drop BOTH the HLS_SEGMENTS and
+    // HLS_PLAYLIST rows for that entity and clear hlsReady.
+    const deletedVideoHlsIds: string[] = []
+    const deletedAssetHlsIds: string[] = []
     await Promise.allSettled(
-      [...videoHlsDirs, ...assetHlsDirs].map(f => deleteDirectory(f.storagePath).catch(() => {}))
+      hlsBundles.map(async (b) => {
+        try {
+          await deleteDirectory(b.storagePath)
+          deletedFiles++
+          if (b.entityType === 'VIDEO') deletedVideoHlsIds.push(b.entityId)
+          else deletedAssetHlsIds.push(b.entityId)
+        } catch (e: any) {
+          deletedFilesFailed++
+          errors.push({ projectId: b.projectId ?? 'unknown', path: b.storagePath, error: String(e?.message || e) })
+        }
+      })
     )
 
-    // Delete StoredFile records
-    if (videoIds.length > 0) {
-      await deleteStoredFilesByCriteria({
-        entityType: 'VIDEO', entityIds: videoIds, fileRoles: [...videoPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
-      })
+    // Drop the MP4 preview rows whose files were actually removed.
+    if (deletedPreviewIds.length > 0) {
+      await deleteStoredFilesByIds(deletedPreviewIds)
     }
-    if (assetIds.length > 0) {
-      await deleteStoredFilesByCriteria({
-        entityType: 'VIDEO_ASSET', entityIds: assetIds, fileRoles: [...assetPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
-      })
+    // Drop the HLS rows + clear hlsReady only for bundles actually removed, so the DB
+    // reflects reality and (on re-open) the reconcile/backfill sweep regenerates them —
+    // those sweeps skip CLOSED projects, so they won't rebuild while it stays closed.
+    if (deletedVideoHlsIds.length > 0) {
+      await deleteStoredFilesByCriteria({ entityType: 'VIDEO', entityIds: deletedVideoHlsIds, fileRoles: ['HLS_PLAYLIST', 'HLS_SEGMENTS'] })
+      await prisma.video.updateMany({ where: { id: { in: deletedVideoHlsIds } }, data: { hlsReady: false } }).catch(() => {})
+    }
+    if (deletedAssetHlsIds.length > 0) {
+      await deleteStoredFilesByCriteria({ entityType: 'VIDEO_ASSET', entityIds: deletedAssetHlsIds, fileRoles: ['HLS_PLAYLIST', 'HLS_SEGMENTS'] })
+      await prisma.videoAsset.updateMany({ where: { id: { in: deletedAssetHlsIds } }, data: { hlsReady: false } }).catch(() => {})
     }
 
     // Refresh precomputed storage totals per project so freed space shows up
@@ -164,7 +202,7 @@ export async function POST(request: NextRequest) {
       closedProjects: closedProjects.length,
       projectsWithPreviews,
       videosWithPreviews,
-      previewFiles: previewFiles.length,
+      previewFiles: totalArtifacts,
       deleted: { previewFiles: deletedFiles, previewFilesFailed: deletedFilesFailed },
       ...(errors.length > 0 ? { errors } : {}),
       sample: { projects: sampleProjects },

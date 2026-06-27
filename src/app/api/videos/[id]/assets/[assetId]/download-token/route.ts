@@ -4,7 +4,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFilePathForProject } from '@/lib/stored-file'
-import { hlsStreamingEnabled, buildHlsMasterUrl } from '@/lib/video-stream-url'
+import { buildHlsMasterUrl } from '@/lib/video-stream-url'
 
 /**
  * Generate a temporary download token for asset downloads (admins and share users)
@@ -57,7 +57,7 @@ export async function POST(
     // Check StoredFile for preview paths. Playback is HLS now — there's no MP4 preview.
     const previewImage = await getStoredFilePathForProject('VIDEO_ASSET', assetId, 'PREVIEW_IMAGE', project.id)
     const hlsPlaylist = await getStoredFilePathForProject('VIDEO_ASSET', assetId, 'HLS_PLAYLIST', project.id).catch(() => null)
-    const hasReadyHls = asset.previewStatus === 'READY' && !!hlsPlaylist && hlsStreamingEnabled()
+    const hasReadyHls = asset.previewStatus === 'READY' && !!hlsPlaylist
     const hasReadyGeneratedPreview =
       asset.previewStatus === 'READY'
       && (

@@ -271,6 +271,14 @@ export default function VideoPlayer({
 
   const scrubRafRef = useRef<number | null>(null)
   const pendingScrubClientXRef = useRef<number | null>(null)
+  // Distinguish a plain click from a drag: scrubbing visuals (the sprite overlay,
+  // live seeking) only engage once the pointer moves past this threshold. A plain
+  // click never shows the sprite — it just seeks the <video> once on release, which
+  // the browser renders by holding the current frame until the new one decodes, so
+  // there's no sprite pop / double flash.
+  const scrubStartClientXRef = useRef(0)
+  const scrubDidMoveRef = useRef(false)
+  const SCRUB_DRAG_THRESHOLD_PX = 4
   // Precision ("fine") dragging: while a timeline drag is active and Shift is held,
   // cursor movement is scaled down so each pixel maps to a fraction of a second
   // instead of (on long videos) several. Anchored to the cursor position where Shift
@@ -287,6 +295,16 @@ export default function VideoPlayer({
   // keep the sprite overlay up until the first `seeked` fires after engaging —
   // this flips true then, and resets to false whenever precision disengages.
   const [precisionFrameReady, setPrecisionFrameReady] = useState(false)
+  // Non-precision release bridge. When a normal (no-Shift) scrub is released, the
+  // real <video> hasn't finished seeking to the released frame yet, so dropping the
+  // sprite overlay immediately flashes the pre-seek frame. We keep the sprite up
+  // until the first `seeked` lands after release (mirrors precisionFrameReady), with
+  // a timeout safety net. `scrubSettlingRef` mirrors the state for the (stable)
+  // seeked listener; `finishScrubSettleRef` lets that listener call the latest closure.
+  const [scrubSettling, setScrubSettling] = useState(false)
+  const scrubSettlingRef = useRef(false)
+  const scrubSettleTimeoutRef = useRef<number | null>(null)
+  const finishScrubSettleRef = useRef<() => void>(() => {})
   // True if precision was engaged at any point during the current scrub gesture.
   // Survives the pointerUp (which clears the anchor) so the trailing click — which
   // would otherwise re-seek the playhead to the raw cursor position — can be skipped,
@@ -684,6 +702,23 @@ export default function VideoPlayer({
       : hlsMode === 'native'
         ? selectedVideoHlsUrl
         : undefined
+
+  // With no MP4 fallback, an empty hlsUrl drives a placeholder. That covers two cases: the
+  // parent is still minting the playback token (normal, brief) OR the video genuinely has no
+  // HLS bundle (failed packaging / streaming disabled). To avoid flashing a scary "not
+  // available" message on every healthy video during the token fetch, wait a short grace
+  // window before escalating the copy from "preparing" to "not available". The window resets
+  // per video and is cancelled the moment a real hlsUrl arrives.
+  const [hlsWaitElapsed, setHlsWaitElapsed] = useState(false)
+  useEffect(() => {
+    if (selectedVideoHlsUrl) {
+      setHlsWaitElapsed(false)
+      return
+    }
+    setHlsWaitElapsed(false)
+    const timer = setTimeout(() => setHlsWaitElapsed(true), 5000)
+    return () => clearTimeout(timer)
+  }, [selectedVideo?.id, selectedVideoHlsUrl])
 
   const effectiveFps = selectedVideo?.fps as number | undefined
 
@@ -1416,6 +1451,9 @@ export default function VideoPlayer({
       // First real frame after engaging precision has landed — safe to reveal the
       // <video> and drop the bridging sprite overlay without a stale-frame flash.
       if (precisionDragAnchorRef.current) setPrecisionFrameReady(true)
+      // Same idea for a normal (no-Shift) scrub release: the released frame has
+      // landed, so end the bridge and drop the sprite overlay.
+      if (scrubSettlingRef.current) finishScrubSettleRef.current()
     }
     const onTimeUpdate = () => clearBufferingState()
     video.addEventListener('waiting', onWaiting)
@@ -1646,6 +1684,41 @@ export default function VideoPlayer({
       setIsPrecisionDragging(false)
       setPrecisionFrameReady(false)
     }
+  }
+
+  // End the post-release bridge: drop the sprite overlay (the <video> now shows the
+  // released frame) and clear the safety timeout. On touch, also retire the preview
+  // tooltip that the desktop path leaves up while hovering.
+  const finishScrubSettle = () => {
+    scrubSettlingRef.current = false
+    setScrubSettling(false)
+    if (scrubSettleTimeoutRef.current !== null) {
+      window.clearTimeout(scrubSettleTimeoutRef.current)
+      scrubSettleTimeoutRef.current = null
+    }
+    if (!canShowTimelineHover) {
+      setTimelineHover((prev) => ({ ...prev, visible: false }))
+    }
+  }
+  finishScrubSettleRef.current = finishScrubSettle
+
+  // Start the post-release bridge after a normal (non-precision) scrub release. If the
+  // video has already reached the released frame there's nothing to bridge, so finish
+  // immediately; otherwise hold the sprite overlay until `seeked` (or the timeout).
+  const beginScrubSettle = () => {
+    const video = videoRef.current
+    if (!video || !video.seeking) {
+      finishScrubSettle()
+      return
+    }
+    scrubSettlingRef.current = true
+    setScrubSettling(true)
+    if (scrubSettleTimeoutRef.current !== null) {
+      window.clearTimeout(scrubSettleTimeoutRef.current)
+    }
+    scrubSettleTimeoutRef.current = window.setTimeout(() => {
+      finishScrubSettleRef.current()
+    }, 600)
   }
 
   const getTimeFromScrubEvent = (clientX: number) => {
@@ -2458,6 +2531,10 @@ export default function VideoPlayer({
         window.clearTimeout(centerPulseTimeoutRef.current)
         centerPulseTimeoutRef.current = null
       }
+      if (scrubSettleTimeoutRef.current !== null) {
+        window.clearTimeout(scrubSettleTimeoutRef.current)
+        scrubSettleTimeoutRef.current = null
+      }
     }
   }, [])
 
@@ -2526,7 +2603,11 @@ export default function VideoPlayer({
     return Date.now() < suppressTimelineSeekUntilRef.current
   }, [])
 
-  const suppressTimelineSeekForHandleDrag = useCallback(() => {
+  // Suppress the trailing onClick seek that fires after a pointer gesture on the
+  // timeline (a range-handle drag, or a playhead click/drag release that already
+  // issued its own single seek). Wrapped so the impure Date.now() isn't called in
+  // render (react-hooks/purity).
+  const suppressNextTimelineSeek = useCallback(() => {
     suppressTimelineSeekUntilRef.current = Date.now() + 250
   }, [])
 
@@ -2763,7 +2844,7 @@ export default function VideoPlayer({
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-card-foreground">
-                Preparing video stream…
+                {hlsWaitElapsed ? 'This video is currently not available.' : 'Preparing video stream…'}
               </div>
             )}
 
@@ -2788,7 +2869,7 @@ export default function VideoPlayer({
                 player exactly like the <video>. Holding Shift (precision) hides this and
                 lets the real seeked frame show through. Reuses the cue already computed in
                 `timelineHover` for the current drag time. */}
-            {(isScrubbingPlayhead || activeRangeDragHandle !== null)
+            {(isScrubbingPlayhead || activeRangeDragHandle !== null || scrubSettling)
               && (!isPrecisionDragging || !precisionFrameReady)
               && timelineHover.visible
               && timelineHover.spriteUrl
@@ -3040,11 +3121,19 @@ export default function VideoPlayer({
                   if (isScrubbingRef.current) {
                     if (e.buttons === 0) { // released outside our handlers — abort stale scrub
                       isScrubbingRef.current = false
+                      scrubDidMoveRef.current = false
                       setIsScrubbingPlayhead(false)
                       clearPrecisionAnchor()
                       return
                     }
                     e.preventDefault()
+                    // Engage drag visuals + live seeking only once the pointer moves
+                    // past the click threshold, so a plain click never shows the sprite.
+                    if (!scrubDidMoveRef.current) {
+                      if (Math.abs(e.clientX - scrubStartClientXRef.current) < SCRUB_DRAG_THRESHOLD_PX) return
+                      scrubDidMoveRef.current = true
+                      setIsScrubbingPlayhead(true)
+                    }
                     syncPrecisionAnchor(e.clientX, e.shiftKey)
                     scheduleScrubToClientX(e.clientX)
                     return
@@ -3078,13 +3167,30 @@ export default function VideoPlayer({
                   setShowPosterOverlay(false)
                   ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
                   isScrubbingRef.current = true
-                  setIsScrubbingPlayhead(true)
-                  precisionUsedThisGestureRef.current = false
-                  syncPrecisionAnchor(e.clientX, e.shiftKey)
-                  scheduleScrubToClientX(e.clientX)
-                  if (!canShowTimelineHover) {
-                    updateHoverFromClientX(e.clientX, true)
+                  scrubStartClientXRef.current = e.clientX
+                  scrubDidMoveRef.current = false
+                  // Cancel any lingering release bridge from a previous gesture so its
+                  // safety timeout can't fire mid-drag.
+                  if (scrubSettleTimeoutRef.current !== null) {
+                    window.clearTimeout(scrubSettleTimeoutRef.current)
+                    scrubSettleTimeoutRef.current = null
                   }
+                  scrubSettlingRef.current = false
+                  setScrubSettling(false)
+                  precisionUsedThisGestureRef.current = false
+                  // Move the playhead UI (ball + time) to the press position right away,
+                  // so a click-and-hold updates the playhead before any mouse movement.
+                  // The real <video> seek is still deferred to release (or a drag) and no
+                  // sprite overlay is shown, so only the indicator moves — no flash.
+                  {
+                    const { time, width } = getTimeFromScrubEvent(e.clientX)
+                    const snapped = snapPlayheadToHandles(time, width)
+                    currentTimeRef.current = snapped
+                    setCurrentTimeSeconds(snapped)
+                  }
+                  // Don't seek or show the sprite yet — wait to see if this becomes a
+                  // drag (movement past the threshold) or a plain click (a single seek
+                  // on release). This keeps a click from flashing the scrub sprite.
                 }}
                 onPointerUp={(e) => {
                   try {
@@ -3092,9 +3198,56 @@ export default function VideoPlayer({
                   } catch {}
                   isScrubbingRef.current = false
                   setIsScrubbingPlayhead(false)
+                  // Precision (Shift) drags seek the real video live and bridge the
+                  // reveal via precisionFrameReady — leave that path untouched (its
+                  // trailing click is skipped by precisionUsedThisGestureRef).
+                  if (precisionUsedThisGestureRef.current) {
+                    clearPrecisionAnchor()
+                    if (!canShowTimelineHover) {
+                      setTimelineHover((prev) => ({ ...prev, visible: false }))
+                    }
+                    return
+                  }
                   clearPrecisionAnchor()
-                  if (!canShowTimelineHover) {
-                    setTimelineHover((prev) => ({ ...prev, visible: false }))
+                  const wasDrag = scrubDidMoveRef.current
+                  scrubDidMoveRef.current = false
+                  // Collapse the gesture into exactly ONE seek, issued synchronously
+                  // here. Cancel any pending scrub RAF and suppress the trailing onClick
+                  // so the playhead is never seeked twice — a double seek produced a
+                  // double frame-flash on a plain click.
+                  if (scrubRafRef.current != null) {
+                    window.cancelAnimationFrame(scrubRafRef.current)
+                    scrubRafRef.current = null
+                  }
+                  pendingScrubClientXRef.current = null
+                  const video = videoRef.current
+                  if (video) {
+                    const { time, width } = getTimeFromScrubEvent(e.clientX)
+                    const snapped = snapPlayheadToHandles(time, width)
+                    // A non-precision drag only moved the UI playhead (currentTimeRef);
+                    // the real <video> was NOT seeked. So land the seek by comparing
+                    // against the video's ACTUAL position, not currentTimeRef (which is
+                    // already at the dragged spot) — otherwise the seek is skipped and
+                    // playback resumes from the old position.
+                    if (Math.abs(snapped - video.currentTime) > 0.001) {
+                      try { video.currentTime = snapped } catch {}
+                    }
+                    currentTimeRef.current = snapped
+                    setCurrentTimeSeconds(snapped)
+                  }
+                  suppressNextTimelineSeek()
+                  if (wasDrag) {
+                    // The sprite overlay was covering the player during the drag — hold
+                    // it until this final seek lands, so the swap to the real frame is a
+                    // single clean cut (no pre-seek flash).
+                    beginScrubSettle()
+                  } else {
+                    // Plain click: no sprite was shown. Let the <video> seek directly —
+                    // the browser holds the current frame until the new one decodes, so
+                    // there's nothing to bridge.
+                    if (!canShowTimelineHover) {
+                      setTimelineHover((prev) => ({ ...prev, visible: false }))
+                    }
                   }
                 }}
                 onPointerCancel={(e) => {
@@ -3104,6 +3257,7 @@ export default function VideoPlayer({
                   isScrubbingRef.current = false
                   setIsScrubbingPlayhead(false)
                   clearPrecisionAnchor()
+                  finishScrubSettle()
                   setTimelineHover((prev) => ({ ...prev, visible: false }))
                   setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))
                 }}
@@ -3252,7 +3406,7 @@ export default function VideoPlayer({
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
                         clearPrecisionAnchor()
-                        suppressTimelineSeekForHandleDrag()
+                        suppressNextTimelineSeek()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
                       onPointerCancel={(e) => {
@@ -3263,7 +3417,7 @@ export default function VideoPlayer({
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
                         clearPrecisionAnchor()
-                        suppressTimelineSeekForHandleDrag()
+                        suppressNextTimelineSeek()
                         updateHoverFromTimeSeconds(commentRangeStartRef.current, 96)
                       }}
                       onClick={(e) => {
@@ -3348,7 +3502,7 @@ export default function VideoPlayer({
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
                         clearPrecisionAnchor()
-                        suppressTimelineSeekForHandleDrag()
+                        suppressNextTimelineSeek()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
                       onPointerCancel={(e) => {
@@ -3359,7 +3513,7 @@ export default function VideoPlayer({
                         setActiveRangeDragHandle(null)
                         keepTimelineHoverPinnedRef.current = false
                         clearPrecisionAnchor()
-                        suppressTimelineSeekForHandleDrag()
+                        suppressNextTimelineSeek()
                         updateHoverFromTimeSeconds(commentRangeEndRef.current, 96)
                       }}
                       onClick={(e) => {

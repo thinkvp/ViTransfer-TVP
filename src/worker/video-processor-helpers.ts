@@ -12,7 +12,7 @@ import {
   buildVideoHlsStorageRoot,
   buildVideoAssetHlsStorageRoot,
 } from '@/lib/project-storage-paths'
-import { registerStoredFile, registerStoredFiles, type FileRole, type RegisterStoredFileParams } from '@/lib/stored-file'
+import { registerStoredFile, registerStoredFiles } from '@/lib/stored-file'
 import fs from 'fs'
 import path from 'path'
 import { TEMP_DIR } from './cleanup'
@@ -1047,55 +1047,6 @@ async function videoHasCustomThumbnail(videoId: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/**
- * Update video record with final processing results.
- * Legacy path columns (preview*Path, thumbnailPath) have been dropped —
- * all file data is now stored exclusively in StoredFile via registerStoredFiles().
- */
-export async function finalizeVideo(
-  videoId: string,
-  previewPath: string,
-  thumbnailPath: string | null,
-  metadata: VideoMetadata,
-  resolution: string
-): Promise<void> {
-  const hasCustomThumbnail = await videoHasCustomThumbnail(videoId)
-
-  const updateData: any = {
-    status: 'READY',
-    processingProgress: 100,
-    processingPhase: null,
-    duration: metadata.duration,
-    width: metadata.width,
-    height: metadata.height,
-    fps: metadata.fps,
-    codec: metadata.codec,
-  }
-
-  // Stat the files for accurate fileSize before registering
-  const [previewSize, thumbSize] = await Promise.all([
-    fs.promises.stat(getFilePath(previewPath)).then(s => s.size).catch(() => null),
-    thumbnailPath !== null && !hasCustomThumbnail
-      ? fs.promises.stat(getFilePath(thumbnailPath)).then(s => s.size).catch(() => null)
-      : Promise.resolve(null),
-  ])
-
-  // Register the preview file in StoredFile registry
-  const previewRole: FileRole =
-    resolution === '480p' ? 'PREVIEW_480' : resolution === '720p' ? 'PREVIEW_720' : 'PREVIEW_1080'
-  const sfEntries: RegisterStoredFileParams[] = [
-    { entityType: 'VIDEO', entityId: videoId, fileRole: previewRole, storagePath: previewPath, status: 'READY', fileSize: previewSize },
-  ]
-  if (thumbnailPath !== null && !hasCustomThumbnail) {
-    sfEntries.push({ entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL', storagePath: thumbnailPath, status: 'READY', fileSize: thumbSize })
-  }
-  await registerStoredFiles(sfEntries)
-
-  debugLog('Updating database with final video data...')
-  await updateVideoRecord(videoId, updateData, { context: 'finalizing processed video' })
-  debugLog('Database updated to READY status')
 }
 
 export async function finalizeVideoWithoutPreview(

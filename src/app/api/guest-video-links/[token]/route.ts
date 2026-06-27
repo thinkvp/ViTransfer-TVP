@@ -8,7 +8,7 @@ import { getRedis } from '@/lib/redis'
 import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
 import { getStoredFilePathForProject, getStoredFileRecords } from '@/lib/stored-file'
-import { getDirectStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
+import { getDirectStreamUrl, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -191,7 +191,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // HLS (proxy-robust segmented) URL — same-origin, token-scoped master playlist.
   let hlsUrl = ''
   let hlsAbr = false
-  if (hlsStreamingEnabled() && storedPaths.has('HLS_PLAYLIST')) {
+  if (storedPaths.has('HLS_PLAYLIST')) {
     const hlsToken = await generateVideoAccessToken(link.video.id, link.project.id, 'hls', request, sessionId).catch(() => '')
     if (hlsToken) {
       hlsUrl = buildHlsMasterUrl(hlsToken)

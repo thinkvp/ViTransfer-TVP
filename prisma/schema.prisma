@@ -778,6 +778,11 @@ model VideoAsset {
   // Timeline hover previews (sprite sheets + VTT) — only for video-type assets
   timelinePreviewsReady      Boolean  @default(false)
 
+  // HLS bundle readiness for video-type assets. NULL = N/A (asset is not a video);
+  // false = should have an HLS bundle but doesn't (yet/failed) → eligible for the
+  // hls-reconcile retry sweep; true = a ready bundle is registered. Mirrors Video.hlsReady.
+  hlsReady Boolean?
+
   // Processing phase for Running Jobs visibility
   processingPhase    String?
   processingProgress Float?    @default(0)
@@ -788,6 +793,7 @@ model VideoAsset {
   @@index([videoId])
   @@index([videoId, category])
   @@index([previewStatus])
+  @@index([hlsReady])
 }
 
 enum VideoStatus {

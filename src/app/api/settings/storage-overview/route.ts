@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
       getStoredFileAggregate({ entityType: 'ALBUM_PHOTO', fileRole: { in: ['SOCIAL', 'THUMBNAIL'] } }),
       getStoredFileAggregate({ entityType: 'CLIENT_FILE' }),
       getStoredFileAggregate({ entityType: 'USER_FILE' } as any),
-      prisma.project.aggregate({ _sum: { totalBytes: true, previewBytes: true } }),
+      prisma.project.aggregate({ _sum: { totalBytes: true, previewBytes: true, diskBytes: true } }),
       // Accounting files total from StoredFile
       getStoredFileAggregate({ entityType: 'ACCOUNTING_ATTACHMENT' } as any),
     ])
@@ -85,14 +85,21 @@ export async function GET(request: NextRequest) {
     const videoPreviewsBytes = asNumber((projectTotals as any)._sum.previewBytes)
 
     const allProjectTotalBytes = asNumber((projectTotals as any)._sum.totalBytes)
-    // Preview bytes are part of the grand total in both modes, but reach it differently:
+    const allProjectDiskBytes = asNumber((projectTotals as any)._sum.diskBytes)
+    // Project-tree bytes (originals + all derived previews) reach the grand total differently
+    // per mode, because directory-style preview rows (HLS_SEGMENTS, TIMELINE_SPRITES) carry a
+    // null fileSize and so are NOT in project.totalBytes:
     //  - S3: preview StoredFile rows have null fileSize (uploaded to R2, never stat'd locally),
-    //    so they are NOT inside project.totalBytes → add videoPreviewsBytes here.
-    //  - Local: preview rows carry real fileSize (stat'd from disk at finalize), so they are
-    //    ALREADY inside project.totalBytes → do not add again (it would double-count).
+    //    so add videoPreviewsBytes (which sizes the HLS/sprite prefixes via the S3 API).
+    //  - Local: prefer the reconciled diskBytes — a true on-disk walk of the project + previews
+    //    trees that includes the HLS bundle and sprites. (totalBytes alone would miss those,
+    //    which since direct-to-HLS is the bulk of preview storage.) Fall back to totalBytes if
+    //    diskBytes hasn't been computed yet.
+    const projectBytes = isS3Provider
+      ? allProjectTotalBytes + videoPreviewsBytes
+      : (allProjectDiskBytes > 0 ? allProjectDiskBytes : allProjectTotalBytes)
     const totalBytes =
-      allProjectTotalBytes +
-      (isS3Provider ? videoPreviewsBytes : 0) +
+      projectBytes +
       clientFilesBytes + userFilesBytes + accountingFilesBytes
 
     let capacityBytes: number | null = null

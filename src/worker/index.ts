@@ -583,7 +583,7 @@ async function main() {
   // HLS reconciliation sweep — re-package failed/missing HLS bundles and reclaim the
   // now-redundant MP4 previews once HLS verifies complete (every 15 minutes). This is the
   // safety net that makes HLS-only playback viable: a transient packaging failure self-heals
-  // without manual intervention. Runs in both S3 and local mode (gated by hlsStreamingEnabled).
+  // without manual intervention. Runs in both S3 and local mode.
   await notificationQueue.add(
     'hls-reconcile',
     {},

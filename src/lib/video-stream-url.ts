@@ -91,18 +91,6 @@ function directStreamingEnabled(): boolean {
   return isS3Mode() && process.env.STREAM_DIRECT_FROM_R2 !== 'false'
 }
 
-/**
- * HLS (segmented) delivery is the sole playback path and is offered in BOTH storage modes
- * unless explicitly disabled. `STREAM_HLS=false` is a no-redeploy kill-switch (escape hatch
- * only — there is no MP4 fallback anymore). HLS is the proxy-robust path: segments are
- * fetched as full-file 200 GETs (no Range), so it survives corporate gateways that mangle
- * Range/206 seeking. In S3 mode segments are presigned direct-from-R2; in local mode they
- * are served same-origin through /api/hls.
- */
-export function hlsStreamingEnabled(): boolean {
-  return process.env.STREAM_HLS !== 'false'
-}
-
 /** Same-origin, token-scoped master-playlist URL the player hands to hls.js. */
 export function buildHlsMasterUrl(token: string): string {
   return `/api/hls/${token}/master.m3u8`

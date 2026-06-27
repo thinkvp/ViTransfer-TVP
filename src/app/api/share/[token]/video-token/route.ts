@@ -4,7 +4,7 @@ import { getShareContext } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFileRecords } from '@/lib/stored-file'
-import { getDirectStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
+import { getDirectStreamUrl, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -132,10 +132,10 @@ export async function GET(
 
     // HLS (proxy-robust segmented) URL — same-origin, token-scoped master playlist.
     // Per-video (not per-quality); the token is cached so repeated quality fetches
-    // return the same URL. Offered only when packaging exists and HLS is enabled.
+    // return the same URL. Offered only when a packaged bundle exists.
     let hlsUrl = ''
     let hlsAbr = false
-    if (hlsStreamingEnabled() && storedRoles.has('HLS_PLAYLIST')) {
+    if (storedRoles.has('HLS_PLAYLIST')) {
       const hlsToken = await generateVideoAccessToken(video!.id, project!.id, 'hls', request, sessionId).catch(() => '')
       if (hlsToken) {
         hlsUrl = buildHlsMasterUrl(hlsToken)

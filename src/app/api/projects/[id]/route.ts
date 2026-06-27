@@ -1249,6 +1249,7 @@ export async function PATCH(
           },
           select: {
             id: true,
+            hlsReady: true,
           },
         })
 
@@ -1287,6 +1288,18 @@ export async function PATCH(
               !regenerateThumbnail &&
               !regenerateTimelinePreviews
             ) {
+              // Thumbnail + timeline are intact (auto-close keeps them), but the HLS
+              // bundle may have been shed on close — rebuild it directly from the original
+              // so playback is restored immediately rather than waiting for the reconcile
+              // sweep. Same deterministic jobId as the sweep, so the two dedupe.
+              if (video.hlsReady === false) {
+                await videoQueue.add(
+                  'process-video',
+                  { videoId: video.id, projectId: project.id, storagePath: '', hlsOnly: true },
+                  { jobId: `hls-reconcile-${video.id}` },
+                ).catch(() => {})
+                queuedVideoPreviewJobs += 1
+              }
               continue
             }
 
@@ -1387,6 +1400,7 @@ export async function PATCH(
             fileType: true,
             fileName: true,
             previewStatus: true,
+            hlsReady: true,
           },
         })
 
@@ -1406,8 +1420,11 @@ export async function PATCH(
             if (!isPreviewableMediaFileType(normalizedType)) continue
 
             const previewRoles = vaPreviewMap.get(asset.id)
+            // Video assets play via HLS (no MP4 preview since direct-to-HLS), so their
+            // readiness is hlsReady — not the absent PREVIEW_MP4. Non-video assets still
+            // gate on the still-image / playback preview being present.
             const hasPlaybackPreview = normalizedType.startsWith('video/')
-              ? previewRoles?.has('PREVIEW_MP4')
+              ? asset.hlsReady === true
               : (previewRoles?.has('PREVIEW_IMAGE') || previewRoles?.has('PREVIEW_MP4'))
             const needsPreview = !hasPlaybackPreview || asset.previewStatus !== 'READY'
             if (!needsPreview) continue

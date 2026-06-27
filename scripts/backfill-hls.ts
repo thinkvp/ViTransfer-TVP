@@ -20,7 +20,7 @@
 
 import { prisma } from '../src/lib/db'
 import { isS3Mode } from '../src/lib/s3-storage'
-import { getVideoQueue } from '../src/lib/queue'
+import { getVideoQueue, enqueueShareUploadPreview } from '../src/lib/queue'
 import { HLS_PACKAGE_VERSION } from '../src/lib/video-stream-url'
 
 const DRY_RUN = process.env.DRY_RUN === '1'
@@ -33,8 +33,15 @@ async function main() {
   }
 
   // READY videos not yet at the current (keyframe-aligned, ABR-safe) packaging version.
+  // Closed projects are excluded: their share access is revoked and (with auto-delete)
+  // their renditions are deliberately shed, so a full re-transcode would just rebuild
+  // what the close threw away. Reopening a project makes its videos eligible again.
   const candidates = await prisma.video.findMany({
-    where: { status: 'READY', hlsVersion: { lt: HLS_PACKAGE_VERSION } },
+    where: {
+      status: 'READY',
+      hlsVersion: { lt: HLS_PACKAGE_VERSION },
+      project: { status: { not: 'CLOSED' } },
+    },
     select: { id: true, projectId: true },
   })
 
@@ -56,21 +63,59 @@ async function main() {
 
   if (DRY_RUN) {
     for (const v of slice) console.log(`  would reprocess ${v.id} (project ${v.projectId})`)
+  } else {
+    const queue = getVideoQueue()
+    let queued = 0
+    for (const v of slice) {
+      try {
+        // No special flags → full reprocess: aligned re-transcode + thumbnail + timeline + HLS.
+        await queue.add('process-video', { videoId: v.id, storagePath: originalByVideo.get(v.id)!, projectId: v.projectId })
+        queued++
+      } catch (err) {
+        console.error(`  failed to enqueue ${v.id}:`, err)
+      }
+    }
+    console.log(`[backfill-hls] enqueued ${queued} reprocess job(s).`)
+  }
+
+  // --- Video assets ---------------------------------------------------------
+  // Video-type assets play via their own single-rendition HLS bundle. Heal any in
+  // non-CLOSED projects that aren't marked ready (hlsReady false, or null for assets
+  // predating the column). Re-running the asset preview job is self-normalising: if a
+  // bundle already exists it early-returns and stamps hlsReady=true; otherwise it builds it.
+  const assetCandidates = await prisma.videoAsset.findMany({
+    where: {
+      fileType: { startsWith: 'video/' },
+      hlsReady: { not: true },
+      video: { project: { status: { not: 'CLOSED' } } },
+    },
+    select: { id: true, fileType: true, fileName: true },
+    ...(LIMIT ? { take: LIMIT } : {}),
+  })
+
+  console.log(
+    `[backfill-hls] ${assetCandidates.length} video asset(s) without a ready HLS bundle${DRY_RUN ? ' (dry run)' : ''}.`,
+  )
+
+  if (DRY_RUN) {
+    for (const a of assetCandidates) console.log(`  would (re)build asset HLS ${a.id}`)
     return
   }
 
-  const queue = getVideoQueue()
-  let queued = 0
-  for (const v of slice) {
+  let assetQueued = 0
+  for (const a of assetCandidates) {
     try {
-      // No special flags → full reprocess: aligned re-transcode + thumbnail + timeline + HLS.
-      await queue.add('process-video', { videoId: v.id, storagePath: originalByVideo.get(v.id)!, projectId: v.projectId })
-      queued++
+      // storagePath resolved from the StoredFile registry by the worker.
+      await enqueueShareUploadPreview(
+        { type: 'videoAsset', recordId: a.id, storagePath: '', fileType: a.fileType, fileName: a.fileName },
+        { forceRequeue: true },
+      )
+      assetQueued++
     } catch (err) {
-      console.error(`  failed to enqueue ${v.id}:`, err)
+      console.error(`  failed to enqueue asset ${a.id}:`, err)
     }
   }
-  console.log(`[backfill-hls] enqueued ${queued} reprocess job(s).`)
+  console.log(`[backfill-hls] enqueued ${assetQueued} asset preview job(s).`)
 }
 
 main()

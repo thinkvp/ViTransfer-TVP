@@ -39,8 +39,9 @@ export interface Video {
   streamUrl480p?: string
   streamUrl720p?: string
   streamUrl1080p?: string
-  // Same-origin HLS master playlist (proxy-robust segmented playback). When present the
-  // player prefers it over the single-file MP4 stream URLs above.
+  // Same-origin HLS master playlist (proxy-robust segmented playback). HLS is the sole
+  // playback path now — there is no single-file MP4 fallback, so when this is empty the
+  // player shows a placeholder instead of playing one of the stream URLs above.
   hlsUrl?: string
   // Whether the HLS bundle is keyframe-aligned (ABR-safe). When true the player lets hls.js
   // adapt bitrate automatically in "Auto"; when false it pins the level (legacy renditions).
@@ -59,8 +60,8 @@ export interface Video {
   processingError?: string | null
   viewCount?: number
   downloadCount?: number
-  // HLS packaging state (S3 mode only). hlsReady=false on a READY video means segmented
-  // playback failed/was never built — it falls back to the single-file MP4 stream.
+  // HLS packaging state. hlsReady=false on a READY video means the segmented bundle
+  // failed/was never built; the hls-reconcile sweep retries it (there is no MP4 fallback).
   // hlsVersion 0 = legacy/none, >=1 = keyframe-aligned (ABR-safe).
   hlsReady?: boolean
   hlsVersion?: number

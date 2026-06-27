@@ -6,7 +6,6 @@ import { Readable } from 'stream'
 import { downloadFile } from '@/lib/storage'
 import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { buildVideoHlsStorageRoot, buildVideoAssetHlsStorageRoot } from '@/lib/project-storage-paths'
-import { hlsStreamingEnabled } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,11 +64,6 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ token: string; path?: string[] }> },
 ) {
-  // Kill-switch / mode gate: if HLS isn't being served, behave as if the route doesn't exist.
-  if (!hlsStreamingEnabled()) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  }
-
   const limited = await rateLimit(request, { windowMs: 60_000, maxRequests: 600 }, 'hls-playlist')
   if (limited) return limited
 

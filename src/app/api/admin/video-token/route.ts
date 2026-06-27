@@ -5,7 +5,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireAnyActionAccess } from '@/lib/rbac-api'
 import { getStoredFileRecords } from '@/lib/stored-file'
-import { getDirectStreamUrl, hlsStreamingEnabled, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
+import { getDirectStreamUrl, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -149,10 +149,10 @@ export async function GET(request: NextRequest) {
     }).catch(() => null)
 
     // HLS (proxy-robust segmented) URL — same-origin, token-scoped master playlist.
-    // Per-video; offered only when packaging exists and HLS is enabled.
+    // Per-video; offered only when a packaged bundle exists.
     let hlsUrl = ''
     let hlsAbr = false
-    if (hlsStreamingEnabled() && storedRoles.has('HLS_PLAYLIST')) {
+    if (storedRoles.has('HLS_PLAYLIST')) {
       const hlsToken = await generateVideoAccessToken(videoId, projectId, 'hls', request, sessionId).catch(() => '')
       if (hlsToken) {
         hlsUrl = buildHlsMasterUrl(hlsToken)

@@ -555,11 +555,12 @@ export function StorageOverviewSection({
               <div className="space-y-0.5 min-w-0">
                 <Label>Delete previews for closed projects</Label>
                 <p className="text-xs text-muted-foreground">
-                  Finds all CLOSED projects that still have preview files (480p, 720p, 1080p)
-                  or video-asset playback previews on disk, and deletes them to reclaim storage.
-                  Timeline sprites are preserved since they are small. Database fields are
-                  cleared so previews will regenerate if the project is re-opened. Run a
-                  dry-run first to preview impact.
+                  Finds all CLOSED projects that still have playable renditions on disk — the
+                  HLS streaming bundles plus any legacy MP4 previews (480p, 720p, 1080p) and
+                  video-asset playback previews — and deletes them to reclaim storage.
+                  Originals, thumbnails, and timeline sprites are preserved. Database fields are
+                  cleared so renditions regenerate if the project is re-opened. Run a dry-run
+                  first to preview impact.
                 </p>
 
                 {closedPreviewsError ? (
@@ -661,7 +662,7 @@ export function StorageOverviewSection({
         open={pendingDeletePreviews}
         onOpenChange={(v) => { if (!v) setPendingDeletePreviews(false) }}
         title="Delete Closed Project Previews?"
-        description="Delete all preview files and timeline sprites for CLOSED projects? This cannot be undone."
+        description="Delete the HLS streaming bundles and any legacy MP4 previews for all CLOSED projects? Thumbnails, timeline sprites, and originals are kept. This cannot be undone."
         confirmLabel="Delete Previews"
         onConfirm={() => { setPendingDeletePreviews(false); void runClosedPreviewsCleanup(false) }}
       />

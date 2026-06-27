@@ -17,8 +17,7 @@
  * the candidate sets shrink to empty on subsequent runs.
  */
 import { prisma } from '@/lib/db'
-import { getVideoQueue } from '@/lib/queue'
-import { hlsStreamingEnabled } from '@/lib/video-stream-url'
+import { getVideoQueue, getShareUploadPreviewQueue } from '@/lib/queue'
 import { verifyStoredHlsBundle } from './video-processor-helpers'
 import { buildVideoHlsStorageRoot, buildVideoAssetHlsStorageRoot } from '@/lib/project-storage-paths'
 import { deleteStoredFilesByCriteria } from '@/lib/stored-file'
@@ -46,14 +45,12 @@ const RECLAIM_BATCH = 200
 
 export async function processHlsReconcile(): Promise<{
   requeued: number
+  requeuedAssets: number
   reclaimedVideos: number
   reclaimedAssets: number
 }> {
-  if (!hlsStreamingEnabled()) {
-    return { requeued: 0, reclaimedVideos: 0, reclaimedAssets: 0 }
-  }
-
   const requeued = await retryMissingVideoHls()
+  const requeuedAssets = await retryMissingAssetHls()
   let reclaimedVideos = 0
   let reclaimedAssets = 0
   if (RECLAIM_ENABLED) {
@@ -70,12 +67,12 @@ export async function processHlsReconcile(): Promise<{
     }
   }
 
-  if (requeued || reclaimedVideos || reclaimedAssets) {
+  if (requeued || requeuedAssets || reclaimedVideos || reclaimedAssets) {
     console.log(
-      `[HLS-RECONCILE] requeued=${requeued} reclaimedVideoPreviewSets=${reclaimedVideos} reclaimedAssetPreviews=${reclaimedAssets}`,
+      `[HLS-RECONCILE] requeued=${requeued} requeuedAssets=${requeuedAssets} reclaimedVideoPreviewSets=${reclaimedVideos} reclaimedAssetPreviews=${reclaimedAssets}`,
     )
   }
-  return { requeued, reclaimedVideos, reclaimedAssets }
+  return { requeued, requeuedAssets, reclaimedVideos, reclaimedAssets }
 }
 
 /**
@@ -84,9 +81,15 @@ export async function processHlsReconcile(): Promise<{
  * remux anymore), so a single path covers both fresh failures and reclaimed-preview videos.
  */
 async function retryMissingVideoHls(): Promise<number> {
+  // Closed projects are excluded: their renditions may have been deliberately shed on
+  // close (autoDeletePreviewsOnClose), so rebuilding HLS here would fight that intent.
+  // Reopening a project makes its videos eligible for the retry again.
   const broken = await prisma.video.findMany({
-    where: { status: 'READY', hlsReady: false },
+    where: { status: 'READY', hlsReady: false, project: { status: { not: 'CLOSED' } } },
     select: { id: true, projectId: true },
+    // Oldest-touched first so a large backlog rotates: a (re)processing attempt bumps the
+    // row's updatedAt, moving it to the back so chronic failures can't starve the rest.
+    orderBy: { updatedAt: 'asc' },
     take: RETRY_BATCH,
   })
   if (broken.length === 0) return 0
@@ -101,6 +104,42 @@ async function retryMissingVideoHls(): Promise<number> {
       { jobId: `hls-reconcile-${v.id}` },
     ).then(() => { requeued++ }).catch((e) => {
       console.warn(`[HLS-RECONCILE] hlsOnly enqueue failed for video ${v.id}:`, e instanceof Error ? e.message : e)
+    })
+  }
+  return requeued
+}
+
+/**
+ * Re-enqueue the asset-preview job for video assets whose HLS bundle is missing/failed
+ * (hlsReady=false). The asset preview processor re-runs `maybePackageAssetHls`, which
+ * re-encodes the bundle from the asset original (skipping the poster if it already exists).
+ * hlsReady is null for non-video assets, so they're never selected. Closed projects are
+ * excluded for the same reason as the video leg.
+ */
+async function retryMissingAssetHls(): Promise<number> {
+  const broken = await prisma.videoAsset.findMany({
+    where: { hlsReady: false, video: { project: { status: { not: 'CLOSED' } } } },
+    select: { id: true, fileType: true, fileName: true },
+    // Oldest-touched first so a large backlog rotates (see retryMissingVideoHls).
+    orderBy: { updatedAt: 'asc' },
+    take: RETRY_BATCH,
+  })
+  if (broken.length === 0) return 0
+
+  let requeued = 0
+  for (const a of broken) {
+    // Add to the queue directly with a deterministic jobId (matching enqueueShareUploadPreview's
+    // scheme) so a still-pending/recently-finished job blocks duplicates — throttling retries to
+    // ~once per job-retention window, exactly like the video leg. We deliberately DON'T go through
+    // enqueueShareUploadPreview here: it stamps previewStatus=PENDING + increments previewAttempts
+    // BEFORE the dedup, which would churn a permanently-failing asset's state every sweep tick.
+    // storagePath is resolved from the StoredFile registry by the worker.
+    await getShareUploadPreviewQueue().add(
+      'generate-preview',
+      { type: 'videoAsset', recordId: a.id, storagePath: '', fileType: a.fileType, fileName: a.fileName },
+      { jobId: `share-preview:videoAsset:${a.id}` },
+    ).then(() => { requeued++ }).catch((e) => {
+      console.warn(`[HLS-RECONCILE] asset HLS re-enqueue failed for ${a.id}:`, e instanceof Error ? e.message : e)
     })
   }
   return requeued
@@ -161,7 +200,8 @@ async function reclaimAssetPreviews(affectedProjects: Set<string>): Promise<numb
     const projectId = asset?.video?.projectId || row.projectId
     if (!asset || !asset.videoId || !projectId) continue
 
-    // Asset HLS readiness isn't a DB flag — it's the presence of a verified bundle.
+    // Verify the bundle on storage rather than trusting the `hlsReady` flag — reclaim
+    // deletes the MP4, so we must be certain the HLS copy is actually complete first.
     const hlsRoot = buildVideoAssetHlsStorageRoot(projectId, asset.videoId, asset.id)
     if (!(await verifyStoredHlsBundle(hlsRoot))) continue
 

@@ -32,16 +32,24 @@ async function maybePackageAssetHls(
         where: { entityType_entityId_fileRole: { entityType: 'VIDEO_ASSET', entityId: assetId, fileRole: 'HLS_PLAYLIST' } },
         select: { id: true },
       })
-      if (existing) return
+      if (existing) {
+        // Bundle already present — make sure the readiness flag reflects it.
+        await prisma.videoAsset.update({ where: { id: assetId }, data: { hlsReady: true } }).catch(() => {})
+        return
+      }
     }
     const tempFiles: TempFiles = {}
     try {
       await packageAssetHlsFromOriginal(assetId, projectId, videoId, tempFiles, resolution)
+      await prisma.videoAsset.update({ where: { id: assetId }, data: { hlsReady: true } }).catch(() => {})
     } finally {
       if (tempFiles.hlsDir) await fs.promises.rm(tempFiles.hlsDir, { recursive: true, force: true }).catch(() => {})
     }
   } catch (err) {
     console.error(`[PREVIEW] HLS packaging failed for asset ${assetId}:`, err)
+    // Record the failure (was previously swallowed with no trace) so the hls-reconcile
+    // sweep can find and retry this asset instead of leaving it permanently HLS-less.
+    await prisma.videoAsset.update({ where: { id: assetId }, data: { hlsReady: false } }).catch(() => {})
   }
 }
 
@@ -333,7 +341,9 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
     const hlsExists = await assetHlsBundleExists(recordId)
     const thumbnailExists = await previewExists(previewStoragePath)
     if (hlsExists && thumbnailExists) {
-      // Both exist — already fully complete.
+      // Both exist — already fully complete. Stamp the readiness flag (normalises
+      // legacy video assets whose bundle predates the hlsReady column → null).
+      await prisma.videoAsset.update({ where: { id: recordId }, data: { hlsReady: true } }).catch(() => {})
       const size = await getPreviewFileSize(previewStoragePath)
       await updateRecordSuccess(type, recordId, previewStoragePath, size)
       if (projectIdForPreviewBytes) {
