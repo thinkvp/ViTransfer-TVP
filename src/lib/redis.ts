@@ -32,15 +32,32 @@ export function getRedis(): IORedis {
     host: process.env.REDIS_HOST,
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD,
-    maxRetriesPerRequest: 3,
+    // Allow generous per-command retries; commands issued while the socket is
+    // briefly down are retried instead of failing outright.
+    maxRetriesPerRequest: 20,
     enableReadyCheck: true,
     lazyConnect: true,
+    // TCP keep-alive so a silently dropped link (e.g. worker on the NAS ↔ Redis
+    // on the VPS) is detected promptly rather than lingering as a half-open socket.
+    keepAlive: 10000,
+    // Never permanently give up. Previously this returned null after 3 attempts,
+    // which parked the connection in a "closed" state forever — fine on a single
+    // host, but fatal once the worker reaches Redis across a network that can
+    // blip. Retry indefinitely with a capped backoff so drops self-heal.
     retryStrategy: (times) => {
-      if (times > 3) {
-        console.error('Redis connection failed after 3 retries')
+      // Don't retry during the production build (no live Redis expected).
+      if (process.env.NEXT_PHASE === 'phase-production-build') {
         return null
       }
-      return Math.min(times * 100, 3000)
+      return Math.min(times * 200, 5000)
+    },
+    // Force a reconnect on errors that indicate the connection is unusable.
+    reconnectOnError: (error) => {
+      const message = error.message || ''
+      if (message.includes('READONLY') || message.includes('ETIMEDOUT') || message.includes('ECONNRESET')) {
+        return true
+      }
+      return false
     }
   })
 
@@ -114,6 +131,8 @@ export function getRedisForQueue(): any {
     maxRetriesPerRequest: null, // Required by BullMQ
     enableReadyCheck: false,     // Required by BullMQ
     lazyConnect: true,
+    // Detect a silently dropped NAS ↔ VPS link promptly (same rationale as getRedis).
+    keepAlive: 10000,
     retryStrategy: (times) => {
       // Only retry in production/runtime, not during build
       if (process.env.NEXT_PHASE === 'phase-production-build') {

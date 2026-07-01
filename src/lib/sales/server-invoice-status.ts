@@ -47,6 +47,29 @@ export async function recomputeInvoiceStoredStatus(
   })
   if (!inv) return null
 
+  // VOID is terminal: never recompute or write a revision for a voided invoice,
+  // otherwise a later payment recompute could silently un-void it.
+  if ((inv.status as InvoiceStatus) === 'VOID') {
+    const paymentsAgg = await tx.salesPayment.aggregate({
+      where: { invoiceId: id, excludeFromInvoiceBalance: false },
+      _sum: { amountCents: true },
+    })
+    const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
+      where: { invoiceDocId: id },
+      _sum: { invoiceAmountCents: true },
+    })
+    const paidLocalCents = Number(paymentsAgg?._sum?.amountCents ?? 0)
+    const paidStripeCents = Number(stripeAgg?._sum?.invoiceAmountCents ?? 0)
+    const paidCents = Math.max(0, Math.trunc(paidLocalCents + paidStripeCents))
+
+    const taxRatePercent = await getSalesTaxRatePercent(tx)
+    const items = Array.isArray(inv.itemsJson) ? inv.itemsJson : []
+    const invTaxEnabled = typeof (inv as any).taxEnabled === 'boolean' ? (inv as any).taxEnabled : true
+    const totalCents = sumLineItemsSubtotal(items as any) + (invTaxEnabled ? sumLineItemsTax(items as any, taxRatePercent) : 0)
+
+    return { status: 'VOID', paidCents, totalCents }
+  }
+
   const taxRatePercent = await getSalesTaxRatePercent(tx)
   const items = Array.isArray(inv.itemsJson) ? inv.itemsJson : []
   const invTaxEnabled = typeof (inv as any).taxEnabled === 'boolean' ? (inv as any).taxEnabled : true

@@ -46,6 +46,9 @@ export function invoiceEffectiveStatus(
   },
   nowMs: number = Date.now()
 ): InvoiceStatus {
+  // VOID is a terminal, manually-set status: never let payment/date logic override it.
+  if (input.status === 'VOID') return 'VOID'
+
   const baseStatus: InvoiceStatus = input.status === 'OPEN' || input.status === 'SENT'
     ? input.status
     : (input.sentAt ? 'SENT' : 'OPEN')

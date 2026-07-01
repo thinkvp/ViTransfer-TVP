@@ -1073,6 +1073,7 @@ enum SalesInvoiceStatus {
   OVERDUE
   PARTIALLY_PAID
   PAID
+  VOID
 }
 
 enum SalesPaymentSource {

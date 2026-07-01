@@ -16,6 +16,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   deleteSalesInvoice,
+  voidSalesInvoice,
   fetchSalesInvoice,
   fetchSalesRollup,
   fetchSalesSettings,
@@ -28,7 +29,7 @@ import { centsToDollars, formatMoney, sumLineItemsSubtotal, sumLineItemsTax } fr
 import { getCurrencySymbol } from '@/lib/sales/currency'
 import { fetchClientDetails, fetchClientOptions, fetchProjectOptions } from '@/lib/sales/lookups'
 import { downloadInvoicePdf } from '@/lib/sales/pdf'
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Ban, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Download, Eye, Filter, Send, Trash2 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
@@ -51,6 +52,7 @@ export default function SalesInvoicesPage() {
   const [sendOpen, setSendOpen] = useState(false)
   const [sendTarget, setSendTarget] = useState<SalesInvoiceWithVersion | null>(null)
   const [pendingDeleteInvoice, setPendingDeleteInvoice] = useState<SalesInvoiceWithVersion | null>(null)
+  const [pendingVoidInvoice, setPendingVoidInvoice] = useState<SalesInvoiceWithVersion | null>(null)
   const [loading, setLoading] = useState(true)
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
@@ -391,6 +393,28 @@ export default function SalesInvoicesPage() {
     setPendingDeleteInvoice(inv)
   }
 
+  const onVoid = (inv: SalesInvoiceWithVersion) => {
+    setPendingVoidInvoice(inv)
+  }
+
+  const confirmVoidInvoice = async () => {
+    const inv = pendingVoidInvoice!
+    setPendingVoidInvoice(null)
+    try {
+      const next = await voidSalesInvoice(inv.id, inv.version)
+      setInvoices((prev) => prev.map((x) => (x.id === inv.id ? { ...next, hasOpenedEmail: x.hasOpenedEmail } : x)))
+      toast.success('Invoice voided')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to void invoice'
+      if (msg === 'Conflict') {
+        toast.error('This invoice was updated in another session. Reloading.')
+        window.location.reload()
+        return
+      }
+      toast.error(msg)
+    }
+  }
+
   const confirmDeleteInvoice = async () => {
     const inv = pendingDeleteInvoice!
     setPendingDeleteInvoice(null)
@@ -625,6 +649,19 @@ export default function SalesInvoicesPage() {
                                 <Send className="h-4 w-4" />
                               </Button>
 
+                              {row.effectiveStatus !== 'VOID' && invoicePaidCents(row.invoice) === 0 ? (
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="outline"
+                                  onClick={() => onVoid(row.invoice)}
+                                  title="Void"
+                                  aria-label="Void"
+                                >
+                                  <Ban className="h-4 w-4" />
+                                </Button>
+                              ) : null}
+
                               <Button
                                 type="button"
                                 variant="outline"
@@ -733,6 +770,15 @@ export default function SalesInvoicesPage() {
         description="This action cannot be undone."
         confirmLabel="Delete"
         onConfirm={confirmDeleteInvoice}
+      />
+
+      <ConfirmDialog
+        open={pendingVoidInvoice !== null}
+        onOpenChange={(v) => { if (!v) setPendingVoidInvoice(null) }}
+        title={`Void Invoice ${pendingVoidInvoice?.invoiceNumber ?? ''}?`}
+        description="The invoice number and record are kept for your audit trail, the client's share link is revoked, and it is excluded from all accounting. You can un-void it from the invoice page."
+        confirmLabel="Void"
+        onConfirm={confirmVoidInvoice}
       />
     </>
   )

@@ -14,6 +14,8 @@ export function invoiceStatusBadgeClass(status: InvoiceStatus): string {
       return 'bg-cyan-600 text-white'
     case 'PAID':
       return 'bg-emerald-600 text-white'
+    case 'VOID':
+      return 'bg-slate-500 text-white'
   }
 }
 
@@ -31,6 +33,8 @@ export function invoiceStatusLabel(status: InvoiceStatus): string {
       return 'Partially Paid'
     case 'PAID':
       return 'Paid'
+    case 'VOID':
+      return 'Void'
   }
 }
 

@@ -109,6 +109,22 @@ export async function deleteSalesInvoice(id: string): Promise<void> {
   await apiDelete(`/api/admin/sales/invoices/${encodeURIComponent(id)}`)
 }
 
+export async function voidSalesInvoice(id: string, version: number): Promise<SalesInvoiceWithVersion> {
+  const res = await apiPost<{ ok: boolean; invoice: SalesInvoiceWithVersion }>(
+    `/api/admin/sales/invoices/${encodeURIComponent(id)}/void`,
+    { version, action: 'VOID' }
+  )
+  return res.invoice
+}
+
+export async function unvoidSalesInvoice(id: string, version: number): Promise<SalesInvoiceWithVersion> {
+  const res = await apiPost<{ ok: boolean; invoice: SalesInvoiceWithVersion }>(
+    `/api/admin/sales/invoices/${encodeURIComponent(id)}/void`,
+    { version, action: 'UNVOID' }
+  )
+  return res.invoice
+}
+
 export async function listSalesPayments(input?: { invoiceId?: string; clientId?: string; limit?: number }): Promise<SalesPayment[]> {
   const params = new URLSearchParams()
   if (input?.invoiceId) params.set('invoiceId', input.invoiceId)

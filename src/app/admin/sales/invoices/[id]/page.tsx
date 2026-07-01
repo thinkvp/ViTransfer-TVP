@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Copy, Download, Eye, GripVertical, Mail, Pencil, Tag, Trash2, X } from 'lucide-react'
+import { Ban, Check, Copy, Download, Eye, GripVertical, Mail, Pencil, RotateCcw, Tag, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,8 @@ import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
 import {
   deleteSalesInvoice,
+  voidSalesInvoice,
+  unvoidSalesInvoice,
   fetchSalesInvoice,
   fetchSalesRollup,
   fetchSalesSettings,
@@ -159,6 +161,7 @@ export default function InvoiceDetailPage() {
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
   const [showDeleteInvoiceConfirm, setShowDeleteInvoiceConfirm] = useState(false)
+  const [showVoidConfirm, setShowVoidConfirm] = useState(false)
   const [labels, setLabels] = useState<SalesLabel[]>([])
   const [libraryItems, setLibraryItems] = useState<SalesItem[]>([])
   const descInputRefs = useRef<Map<string, HTMLInputElement>>(new Map())
@@ -335,7 +338,7 @@ export default function InvoiceDetailPage() {
 
   const onDuplicate = () => {
     if (!invoice) return
-    const prefill = { notes, terms, items }
+    const prefill = { clientId, projectId, dueDate, notes, terms, items }
     try {
       sessionStorage.setItem('sales_invoice_prefill', JSON.stringify(prefill))
     } catch {
@@ -598,6 +601,52 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  // A void invoice keeps its number and record but is excluded from all
+  // accounting. Only unpaid invoices (no manual or Stripe payments) may be voided.
+  const canVoid = Boolean(invoice) && effectiveStatus !== 'VOID' && countablePayments.length === 0 && stripePayments.length === 0
+
+  const onVoid = () => {
+    if (!invoice) return
+    setShowVoidConfirm(true)
+  }
+
+  const confirmVoid = async () => {
+    if (!invoice) return
+    setShowVoidConfirm(false)
+    try {
+      const next = await voidSalesInvoice(invoice.id, invoice.version)
+      setInvoice({ ...next, hasOpenedEmail: invoice.hasOpenedEmail })
+      setStatus(next.status)
+      toast.success('Invoice voided')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to void invoice'
+      if (msg === 'Conflict') {
+        toast.error('This invoice was updated in another session. Reloading.')
+        window.location.reload()
+        return
+      }
+      toast.error(msg)
+    }
+  }
+
+  const onUnvoid = async () => {
+    if (!invoice) return
+    try {
+      const next = await unvoidSalesInvoice(invoice.id, invoice.version)
+      setInvoice({ ...next, hasOpenedEmail: invoice.hasOpenedEmail })
+      setStatus(next.status)
+      toast.success('Invoice restored')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to un-void invoice'
+      if (msg === 'Conflict') {
+        toast.error('This invoice was updated in another session. Reloading.')
+        window.location.reload()
+        return
+      }
+      toast.error(msg)
+    }
+  }
+
   const onViewPublic = async () => {
     if (!invoice) return
 
@@ -737,6 +786,7 @@ export default function InvoiceDetailPage() {
           <Button
             variant="outline"
             onClick={onSendEmail}
+            disabled={effectiveStatus === 'VOID'}
             aria-label="Send Email"
             title="Send Email"
             className="w-10 px-0 sm:w-auto sm:px-4"
@@ -754,6 +804,29 @@ export default function InvoiceDetailPage() {
             <Download className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">Download</span>
           </Button>
+          {effectiveStatus === 'VOID' ? (
+            <Button
+              variant="outline"
+              onClick={() => void onUnvoid()}
+              aria-label="Un-void invoice"
+              title="Restore this invoice to Open"
+              className="w-10 px-0 sm:w-auto sm:px-4"
+            >
+              <RotateCcw className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Un-void</span>
+            </Button>
+          ) : canVoid ? (
+            <Button
+              variant="outline"
+              onClick={onVoid}
+              aria-label="Void invoice"
+              title="Void this invoice (keeps the record, excludes from accounting)"
+              className="w-10 px-0 sm:w-auto sm:px-4"
+            >
+              <Ban className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Void</span>
+            </Button>
+          ) : null}
           <Button
             variant="destructive"
             onClick={onDelete}
@@ -764,7 +837,7 @@ export default function InvoiceDetailPage() {
             <Trash2 className="h-4 w-4 sm:mr-2" />
             <span className="hidden sm:inline">Delete</span>
           </Button>
-          <Button onClick={onSave} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+          <Button onClick={onSave} disabled={saving || effectiveStatus === 'VOID'}>{saving ? 'Saving…' : 'Save'}</Button>
         </div>
       </div>
 
@@ -1212,6 +1285,15 @@ export default function InvoiceDetailPage() {
         description="This action cannot be undone."
         confirmLabel="Delete"
         onConfirm={confirmDeleteInvoice}
+      />
+
+      <ConfirmDialog
+        open={showVoidConfirm}
+        onOpenChange={(v) => { if (!v) setShowVoidConfirm(false) }}
+        title={`Void Invoice ${invoice?.invoiceNumber ?? ''}?`}
+        description="The invoice number and record are kept for your audit trail, the client's share link is revoked, and it is excluded from all accounting. You can un-void it later, or re-issue a corrected copy with Duplicate."
+        confirmLabel="Void"
+        onConfirm={confirmVoid}
       />
     </>
   )

@@ -78,6 +78,9 @@ export default function NewInvoicePage() {
   const [projectId, setProjectId] = useState<string>('')
   const [issueDate, setIssueDate] = useState<string>(() => getTodayYmdLocal())
   const [dueDate, setDueDate] = useState<string>('')
+  // Holds a prefilled projectId (from Duplicate/re-issue) so the client-change
+  // effect can re-apply it after that client's projects load, instead of clearing it.
+  const prefillProjectIdRef = useRef<string | null>(null)
 
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
@@ -129,7 +132,11 @@ export default function NewInvoicePage() {
       const raw = sessionStorage.getItem('sales_invoice_prefill')
       if (!raw) return
       sessionStorage.removeItem('sales_invoice_prefill')
-      const prefill = JSON.parse(raw) as { notes?: string; terms?: string; items?: SalesLineItem[] }
+      const prefill = JSON.parse(raw) as { clientId?: string; projectId?: string; dueDate?: string; notes?: string; terms?: string; items?: SalesLineItem[] }
+      if (prefill.clientId) setClientId(prefill.clientId)
+      // Stash the project for the client-change effect to re-apply once projects load.
+      prefillProjectIdRef.current = prefill.projectId || null
+      if (prefill.dueDate) setDueDate(prefill.dueDate)
       if (prefill.notes !== undefined) setNotes(prefill.notes)
       if (prefill.terms !== undefined) setTerms(prefill.terms)
       if (Array.isArray(prefill.items) && prefill.items.length > 0) {
@@ -202,6 +209,7 @@ export default function NewInvoicePage() {
       if (!clientId) {
         setProjects([])
         setProjectId('')
+        prefillProjectIdRef.current = null
         return
       }
 
@@ -209,7 +217,11 @@ export default function NewInvoicePage() {
       try {
         const p = await fetchProjectOptionsForClient(clientId)
         setProjects(p)
-        setProjectId('')
+        // Re-apply a prefilled project (from re-issue) if it belongs to this client;
+        // otherwise reset the selection.
+        const desired = prefillProjectIdRef.current
+        prefillProjectIdRef.current = null
+        setProjectId(desired && p.some((x) => x.id === desired) ? desired : '')
       } finally {
         setLoadingProjects(false)
       }

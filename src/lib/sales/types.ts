@@ -1,7 +1,7 @@
 // NOTE: 'OPENED' is a derived/effective status (based on email open tracking),
 // and is not persisted as a SalesQuoteStatus/SalesInvoiceStatus in Prisma.
 export type QuoteStatus = 'OPEN' | 'SENT' | 'OPENED' | 'CLOSED' | 'ACCEPTED'
-export type InvoiceStatus = 'OPEN' | 'SENT' | 'OPENED' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID'
+export type InvoiceStatus = 'OPEN' | 'SENT' | 'OPENED' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID' | 'VOID'
 
 export type MoneyCents = number
 
