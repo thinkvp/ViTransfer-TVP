@@ -94,7 +94,7 @@ function OpenBadge({ count }: { count: number }) {
   return (
     <span
       title={`${count} open`}
-      className="inline-flex min-w-[1.25rem] flex-shrink-0 items-center justify-center rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-amber-400"
+      className="inline-flex min-w-[1.25rem] flex-shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground"
     >
       {count}
     </span>
@@ -138,10 +138,27 @@ export default function ProjectFeedbackList() {
       const loaded = (data.projects || []) as ProjectGroup[]
       setProjects(loaded)
 
-      // On first load, collapse projects with nothing open so the list leads with work.
+      // On first load, collapse anything with nothing open so the list leads with work:
+      // fully-done projects, and individual videos whose feedback is all done.
       if (!initialisedCollapse.current) {
         initialisedCollapse.current = true
         setCollapsedProjects(new Set(loaded.filter((p) => p.unresolvedCount === 0).map((p) => p.id)))
+        setCollapsedVideos(
+          new Set(
+            loaded.flatMap((p) =>
+              p.videos.filter((v) => v.unresolvedCount === 0).map((v) => `${p.id}::${v.name}`)
+            )
+          )
+        )
+        setCollapsedVersions(
+          new Set(
+            loaded.flatMap((p) =>
+              p.videos.flatMap((v) =>
+                v.versions.filter((ver) => ver.unresolvedCount === 0).map((ver) => ver.videoId)
+              )
+            )
+          )
+        )
       }
     } catch {
       setProjects([])
@@ -220,7 +237,7 @@ export default function ProjectFeedbackList() {
           <MessageSquare className="h-5 w-5" />
           Feedback
           {totalOpen > 0 ? (
-            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+            <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
               {totalOpen}
             </span>
           ) : (

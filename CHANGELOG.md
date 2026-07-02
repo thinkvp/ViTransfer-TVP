@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.5] - 2026-07-02
+
+### Changed
+
+- **Admin Projects "Feedback" list polish** — the open-comment count badges (the section-header total and the per-project/video/version counts) now render on the **primary colour** with **primary-foreground** text, replacing the amber pill, so the number auto-adapts to a light or dark label depending on the configured primary colour. The list also **collapses done branches on load**: alongside fully-resolved projects (existing behaviour), any **video** and any **version** whose feedback is all done now starts collapsed, so the list opens focused on outstanding work while anything with open comments stays expanded (all still manually toggleable). Touches `src/components/ProjectFeedbackList.tsx`.
+
 ## [2.1.4] - 2026-07-02
 
 ### Fixed
