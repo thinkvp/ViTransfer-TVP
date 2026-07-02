@@ -2150,17 +2150,23 @@ export default function SharePage() {
               hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || orig.hlsUrl || ''
               hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || orig.hlsAbr || false
             } else {
-              // Unapproved: only previews are accessible.
-              const [s480, s720, s1080] = await Promise.all([
+              // Unapproved: only previews are accessible (no original).
+              // Direct-to-HLS videos have no MP4 PREVIEW_* files, so the per-resolution
+              // fetches below are all skipped and we'd never obtain the HLS URL. In that
+              // case fetch one streaming token to mint the HLS master (the token response
+              // carries hlsUrl regardless of which streaming quality is requested).
+              const noMp4Previews = !video.preview480Path && !video.preview720Path && !video.preview1080Path
+              const [s480, s720, s1080, hls] = await Promise.all([
                 video.preview480Path ? fetchVideoStream(video.id, '480p') : emptyStream(),
                 video.preview720Path ? fetchVideoStream(video.id, '720p') : emptyStream(),
                 video.preview1080Path ? fetchVideoStream(video.id, '1080p') : emptyStream(),
+                noMp4Previews ? fetchVideoStream(video.id, '720p') : emptyStream(),
               ])
               streamUrl480p = buildStreamUrl(s480)
               streamUrl720p = buildStreamUrl(s720)
               streamUrl1080p = buildStreamUrl(s1080)
-              hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || ''
-              hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || false
+              hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || hls.hlsUrl || ''
+              hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || hls.hlsAbr || false
             }
 
             // Prefer the thumbnail URL minted into the share payload (no extra round-trip).

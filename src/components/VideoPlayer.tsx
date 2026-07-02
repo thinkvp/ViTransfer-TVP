@@ -659,6 +659,9 @@ export default function VideoPlayer({
   // Accumulated seek amount for the current chain of taps on the same side, so the
   // indicator can show "20 seconds" etc. when the viewer taps repeatedly.
   const seekChainAmountRef = useRef(0)
+  // Separate chain tracking for keyboard (Arrow-key) seeks so rapid presses on the
+  // same side accumulate the indicator ("20 seconds", …) without touching the tap chain.
+  const keySeekChainRef = useRef<{ side: 'left' | 'right'; time: number; amount: number } | null>(null)
   const seekIndicatorTimeoutRef = useRef<number | null>(null)
   const centerPulseTimeoutRef = useRef<number | null>(null)
 
@@ -2245,6 +2248,53 @@ export default function VideoPlayer({
         } else {
           video.pause()
         }
+        return
+      }
+
+      // ArrowLeft / ArrowRight (no modifiers): seek -/+ 10s (YouTube-style), mirroring the
+      // double-click-to-seek gesture. Skipped when typing in the comment box or focused on
+      // an interactive control — those need the arrows for the cursor / their own behaviour.
+      if ((e.code === 'ArrowLeft' || e.code === 'ArrowRight') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+        const target = (e.target as HTMLElement | null) || (document.activeElement as HTMLElement | null)
+        const tag = target?.tagName
+        const role = target?.getAttribute?.('role')
+        const isTypingOrControl =
+          !!target &&
+          (tag === 'INPUT' ||
+            tag === 'TEXTAREA' ||
+            tag === 'SELECT' ||
+            tag === 'BUTTON' ||
+            tag === 'A' ||
+            target.isContentEditable ||
+            role === 'button' ||
+            role === 'textbox' ||
+            role === 'menuitem' ||
+            role === 'option' ||
+            role === 'slider' ||
+            !!target.closest?.('[role="dialog"],[aria-modal="true"]'))
+        if (isTypingOrControl) return
+
+        e.preventDefault()
+        e.stopPropagation()
+
+        const side: 'left' | 'right' = e.code === 'ArrowLeft' ? 'left' : 'right'
+        const delta = side === 'left' ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS
+        const upperBound = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Number.MAX_SAFE_INTEGER
+        const targetTime = Math.min(upperBound, Math.max(0, (video.currentTime || 0) + delta))
+        try {
+          video.currentTime = targetTime
+        } catch {
+          // ignore seek failures
+        }
+        currentTimeRef.current = targetTime
+        setCurrentTimeSeconds(targetTime)
+
+        // Accumulate the on-screen indicator amount for rapid presses on the same side.
+        const now = Date.now()
+        const last = keySeekChainRef.current
+        const amount = last && last.side === side && now - last.time < 1000 ? last.amount + SEEK_STEP_SECONDS : SEEK_STEP_SECONDS
+        keySeekChainRef.current = { side, time: now, amount }
+        triggerSeekIndicator(side, amount)
         return
       }
 
@@ -4382,6 +4432,13 @@ export default function VideoPlayer({
               <span className="flex items-center gap-1">
                 <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Space</kbd>
                 <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">Ctrl+Space</kbd>
+              </span>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-border">
+              <span className="text-muted-foreground">Skip Back / Forward 10s</span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">←</kbd>
+                <kbd className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs font-mono">→</kbd>
               </span>
             </div>
             <div className="flex justify-between items-center py-2 border-b border-border">

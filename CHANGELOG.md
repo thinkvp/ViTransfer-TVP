@@ -5,6 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.4] - 2026-07-02
+
+### Fixed
+
+- **Clients can once again play in-review (unapproved) videos on the share page** — a regression surfacing after the direct-to-HLS migration (2.1.0/2.1.1): both the client share page and the share `video-token` endpoint still gated playback on the legacy MP4 preview roles (`PREVIEW_480/720/1080`), which no longer exist for videos encoded straight to HLS (or older videos whose MP4 previews were reclaimed). For an **unapproved** such video the client only requested a stream token when an MP4 preview path existed — so it requested none, never obtained an `hlsUrl`, and the player got no source (and the quality selector was stripped to nothing); even had it asked, `canIssueShareVideoToken` would have 404'd the streaming qualities. **Approved** videos were unaffected because they unconditionally fetch the `original` token, whose response also carries the HLS master URL — which is why "approved works, in-review doesn't." Two coordinated fixes: the server now allows the streaming qualities (480p/720p/1080p) whenever an `HLS_PLAYLIST` bundle exists (HLS segments *are* the preview; `original`/`download` stay approval-gated), and the client now fetches one streaming token for a direct-to-HLS video that has no MP4 previews so it obtains the HLS URL. Touches `src/app/api/share/[token]/video-token/route.ts` and `src/app/share/[token]/page.tsx`.
+
+- **Cleared "Client Email Footer Notice" now actually removes the notice** — the setting had a hard-coded default ("We proudly self-host…") that `renderEmailFooterNotice` fell back to whenever the stored value was `null`/empty, and the resolve step coerced an empty string to `null` — so `null` (fresh install) and `null` (admin cleared it) were indistinguishable and both re-showed the default. The admin's setting is now authoritative: only text actually entered is rendered; `null`/empty/whitespace shows no footer. (Takes effect once deployed to the app **and** worker; email settings are cached ~30s per process.) Touches `src/lib/email.ts`.
+
+### Added
+
+- **Arrow-key seek on the video players** — on the client share, admin share-preview, and guest players, **←/→** now seek −/+10s (with the same on-screen indicator and repeat-to-accumulate behaviour as the existing double-click-to-seek gesture). Reuses the Space-shortcut focus guard, so it never fires while typing in the comment box or a focused control/dialog. Listed in the keyboard-shortcuts dialog. On mobile this is a no-op (soft keyboards have no arrow keys); the double-tap gesture still covers touch. Touches `src/components/VideoPlayer.tsx`.
+
+### Changed
+
+- **Refined the admin Projects "Feedback" list** (from 2.1.3): the section now **stays visible once everything is done** (fully-resolved projects/videos remain, with an "All done" summary; only projects with no comments at all are hidden); repeated **"N open / N done" text is replaced by compact colour-coded badges** (amber count = open, green check = done, an eye toggle to reveal done comments) to cut the visual noise; groups sort **open-first alphabetically, then done alphabetically** at both project and video level; each project row shows its **client name**, and each version row gains **Play** (opens that version on the share page) and **Export** (SRT) actions; comments are ordered by **video timecode** with **ranges shown** (`0:10 – 0:25`); and **done videos** are visually de-emphasised (muted name, green left rail). Touches `src/components/ProjectFeedbackList.tsx` and `src/app/api/admin/feedback/route.ts`.
+
 ## [2.1.3] - 2026-07-02
 
 ### Added

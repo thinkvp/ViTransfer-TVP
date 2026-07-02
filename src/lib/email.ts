@@ -19,19 +19,16 @@ export const EMAIL_THEME = {
   border: '#e5e7eb',
 } as const
 
-const EMAIL_SELF_HOST_NOTICE_DEFAULT =
-  'We proudly self-host ViTransfer on our private server. The server may not be accessible during power or nbn outages.  If you are unable to access the server, please contact us for assistance.'
-
 /**
  * Render the optional client-facing footer notice.
- * - `null`  -> fall back to the built-in default text
- * - `''`    -> hide the notice entirely
- * - string  -> use the custom text
+ *
+ * The admin's "Client Email Footer Notice" setting is authoritative: only text the
+ * admin has actually entered is shown. `null` / `undefined` / empty / whitespace-only
+ * renders nothing — there is deliberately no hard-coded default, so clearing the field
+ * (and saving) removes the notice from client emails.
  */
 export function renderEmailFooterNotice(customText: string | null | undefined): string {
-  const text = customText === null || customText === undefined
-    ? EMAIL_SELF_HOST_NOTICE_DEFAULT
-    : customText.trim()
+  const text = (customText ?? '').trim()
   if (!text) return ''
   return `<p style="margin: 32px 0 0 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">${escapeHtml(text)}</p>`
 }

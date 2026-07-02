@@ -11,6 +11,8 @@ import {
   Clock,
   CornerDownRight,
   Download,
+  Eye,
+  EyeOff,
   FolderKanban,
   Loader2,
   MessageSquare,
@@ -32,6 +34,7 @@ type FeedbackComment = {
   authorName: string
   isInternal: boolean
   timecode: string
+  timecodeEnd: string | null
   parentId: string | null
   createdAt: string
   resolvedAt: string | null
@@ -81,6 +84,28 @@ function MarkDoneButton({ title, disabled, onClick }: { title: string; disabled:
     >
       <CheckCheck className="h-4 w-4" />
     </button>
+  )
+}
+
+// Compact status indicators — an amber number means "open", a green check means "done".
+// The word lives in the tooltip so the same badge can repeat down the tree without
+// the "N open / N done" text stacking up and becoming hard to read.
+function OpenBadge({ count }: { count: number }) {
+  return (
+    <span
+      title={`${count} open`}
+      className="inline-flex min-w-[1.25rem] flex-shrink-0 items-center justify-center rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-amber-400"
+    >
+      {count}
+    </span>
+  )
+}
+
+function DoneBadge() {
+  return (
+    <span title="All done" className="flex-shrink-0 text-success-solid">
+      <CheckCircle2 className="h-4 w-4" />
+    </span>
   )
 }
 
@@ -255,14 +280,6 @@ export default function ProjectFeedbackList() {
                     )}
                   </span>
                 </button>
-                <span
-                  className={cn(
-                    'flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-                    projDone ? 'bg-success-solid/15 text-success' : 'bg-amber-500/15 text-amber-400'
-                  )}
-                >
-                  {projDone ? 'Done' : `${proj.unresolvedCount} open`}
-                </span>
                 {canResolve && proj.unresolvedCount > 0 && (
                   <MarkDoneButton
                     title="Mark all feedback in this project done"
@@ -270,6 +287,7 @@ export default function ProjectFeedbackList() {
                     onClick={() => resolve(proj.id, {}, true)}
                   />
                 )}
+                {projDone ? <DoneBadge /> : <OpenBadge count={proj.unresolvedCount} />}
               </div>
 
               {!projCollapsed && (
@@ -277,8 +295,12 @@ export default function ProjectFeedbackList() {
                   {proj.videos.map((vid) => {
                     const videoKey = `${proj.id}::${vid.name}`
                     const vidCollapsed = collapsedVideos.has(videoKey)
+                    const vidDone = vid.unresolvedCount === 0
                     return (
-                      <div key={videoKey} className="border-l-2 border-primary/30 pl-3">
+                      <div
+                        key={videoKey}
+                        className={cn('border-l-2 pl-3', vidDone ? 'border-success-solid/50' : 'border-primary/30')}
+                      >
                         {/* Video header */}
                         <div className="group flex items-center gap-2">
                           <button
@@ -292,14 +314,8 @@ export default function ProjectFeedbackList() {
                               <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
                             )}
                             <VideoIcon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                            <span className="truncate text-sm font-medium">{vid.name}</span>
-                            {vid.unresolvedCount > 0 ? (
-                              <span className="flex-shrink-0 text-xs text-muted-foreground">
-                                {vid.unresolvedCount} open
-                              </span>
-                            ) : (
-                              <Check className="h-3.5 w-3.5 flex-shrink-0 text-success-solid" />
-                            )}
+                            <span className={cn('truncate text-sm font-medium', vidDone && 'text-muted-foreground')}>{vid.name}</span>
+                            {vid.unresolvedCount > 0 ? <OpenBadge count={vid.unresolvedCount} /> : <DoneBadge />}
                           </button>
                           {canResolve && vid.unresolvedCount > 0 && (
                             <MarkDoneButton
@@ -334,24 +350,27 @@ export default function ProjectFeedbackList() {
                                       <span className="flex-shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
                                         {ver.versionLabel || `v${ver.version}`}
                                       </span>
-                                      <span className="text-[11px] text-muted-foreground">
-                                        {ver.unresolvedCount > 0 ? `${ver.unresolvedCount} open` : 'All done'}
-                                      </span>
+                                      {/* Per-version count only when a video has multiple versions —
+                                          otherwise it just duplicates the video badge above. */}
+                                      {vid.versions.length > 1 &&
+                                        (ver.unresolvedCount > 0 ? (
+                                          <OpenBadge count={ver.unresolvedCount} />
+                                        ) : (
+                                          <DoneBadge />
+                                        ))}
                                     </button>
                                     {ver.resolvedCount > 0 && (
                                       <button
                                         type="button"
                                         onClick={() => toggle(showDoneVersions, setShowDoneVersions, ver.videoId)}
-                                        title={showDone ? 'Hide done comments' : 'Show done comments'}
+                                        title={showDone ? 'Hide done comments' : `Show ${ver.resolvedCount} done`}
                                         className={cn(
-                                          'flex flex-shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors',
-                                          showDone
-                                            ? 'bg-success-solid/15 text-success'
-                                            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                                          'flex flex-shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums transition-colors',
+                                          showDone ? 'text-success' : 'text-muted-foreground hover:text-foreground'
                                         )}
                                       >
-                                        <Check className="h-3 w-3" />
-                                        {ver.resolvedCount} done
+                                        {showDone ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                        {!showDone && ver.resolvedCount}
                                       </button>
                                     )}
                                     <Link
@@ -458,7 +477,12 @@ function FeedbackRow({
           {/* Timecode pill — same styling as the share-page comment timecode */}
           <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-400/50 bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium text-amber-400">
             <Clock className="h-3 w-3 flex-shrink-0" />
-            <span className="tabular-nums">{formatTimecodeDisplay(comment.timecode, { showFrames: false })}</span>
+            <span className="tabular-nums">
+              {formatTimecodeDisplay(comment.timecode, { showFrames: false })}
+              {comment.timecodeEnd
+                ? ` – ${formatTimecodeDisplay(comment.timecodeEnd, { showFrames: false })}`
+                : ''}
+            </span>
           </span>
         </span>
         <span className="break-words">{comment.content}</span>

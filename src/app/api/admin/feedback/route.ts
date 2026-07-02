@@ -3,7 +3,6 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
-import { projectStatusSortPriority } from '@/lib/project-status'
 
 // Order a version's comments by video timecode (chronological position in the video),
 // keeping each reply immediately after its parent.
@@ -62,6 +61,7 @@ type FeedbackComment = {
   authorName: string
   isInternal: boolean
   timecode: string
+  timecodeEnd: string | null
   parentId: string | null
   createdAt: Date
   resolvedAt: Date | null
@@ -144,6 +144,7 @@ export async function GET(request: NextRequest) {
         authorName: true,
         isInternal: true,
         timecode: true,
+        timecodeEnd: true,
         parentId: true,
         createdAt: true,
         resolvedAt: true,
@@ -214,6 +215,7 @@ export async function GET(request: NextRequest) {
         authorName,
         isInternal: row.isInternal,
         timecode: row.timecode,
+        timecodeEnd: row.timecodeEnd,
         parentId: row.parentId,
         createdAt: row.createdAt,
         resolvedAt: row.resolvedAt,
@@ -229,7 +231,8 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Sort + finalise.
+    // Sort + finalise. Groups with open comments come first (alphabetical),
+    // then fully-done groups (alphabetical) — at both project and video level.
     const projects = Array.from(projectsMap.values())
       .map((proj) => {
         for (const vid of proj.videos) {
@@ -238,13 +241,18 @@ export async function GET(request: NextRequest) {
             ver.comments = orderThreaded(ver.comments)
           }
         }
-        proj.videos.sort((a, b) => a.name.localeCompare(b.name))
+        proj.videos.sort((a, b) => {
+          const aDone = a.unresolvedCount === 0 ? 1 : 0
+          const bDone = b.unresolvedCount === 0 ? 1 : 0
+          if (aDone !== bDone) return aDone - bDone
+          return a.name.localeCompare(b.name)
+        })
         return proj
       })
       .sort((a, b) => {
-        const pa = projectStatusSortPriority(a.status)
-        const pb = projectStatusSortPriority(b.status)
-        if (pa !== pb) return pa - pb
+        const aDone = a.unresolvedCount === 0 ? 1 : 0
+        const bDone = b.unresolvedCount === 0 ? 1 : 0
+        if (aDone !== bDone) return aDone - bDone
         return a.title.localeCompare(b.title)
       })
 

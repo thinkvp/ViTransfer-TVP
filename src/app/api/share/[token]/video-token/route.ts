@@ -15,14 +15,21 @@ function canIssueShareVideoToken(
   quality: string,
 ): boolean {
   const canUseOriginal = approved
+  // Since the direct-to-HLS migration (2.1.0), a video's only preview is its HLS bundle —
+  // no MP4 PREVIEW_* roles are written. The HLS master URL is minted alongside any
+  // streaming-quality token (see below), so a streaming-quality request must be allowed
+  // whenever an HLS bundle exists; otherwise unapproved HLS-only videos can never obtain a
+  // stream and won't play for clients. HLS segments ARE the preview, so this exposes no
+  // more than the old MP4 preview roles did — the original/download cases stay approval-gated.
+  const hasHls = storedRoles.has('HLS_PLAYLIST')
 
   switch (quality) {
     case '480p':
-      return storedRoles.has('PREVIEW_480') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || canUseOriginal
+      return hasHls || storedRoles.has('PREVIEW_480') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || canUseOriginal
     case '720p':
-      return storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_480') || canUseOriginal
+      return hasHls || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_480') || canUseOriginal
     case '1080p':
-      return storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_480') || canUseOriginal
+      return hasHls || storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_480') || canUseOriginal
     case 'thumbnail':
       return storedRoles.has('THUMBNAIL')
     case 'timeline-vtt':
