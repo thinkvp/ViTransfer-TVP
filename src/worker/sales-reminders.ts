@@ -369,6 +369,12 @@ export async function processSalesReminders() {
         continue
       }
 
+      // VOID invoices are cancelled — never chase a client to pay one.
+      if (inv?.status === 'VOID') {
+        debugSkip('INVOICE', inv, 'voided')
+        continue
+      }
+
       // Eligibility is intentionally simple:
       // - due date exists and is past
       // - outstanding balance > 0

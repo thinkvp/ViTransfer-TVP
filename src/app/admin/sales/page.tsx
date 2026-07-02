@@ -213,7 +213,7 @@ export default function SalesDashboardPage() {
 
         return { invoice: inv, effectiveStatus, balanceCents: Math.max(0, Math.trunc(balance)) }
       })
-      .filter((r) => r.effectiveStatus !== 'PAID')
+      .filter((r) => r.effectiveStatus !== 'PAID' && r.effectiveStatus !== 'VOID')
       .sort((a, b) => {
         const ad = a.invoice.dueDate ?? '9999-12-31'
         const bd = b.invoice.dueDate ?? '9999-12-31'

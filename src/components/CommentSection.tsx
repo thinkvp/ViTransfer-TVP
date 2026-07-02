@@ -150,6 +150,37 @@ export function CommentSectionView({
     refreshClientUploadQuota,
   } = management
 
+  // Feedback "mark done" state (admin share page only). Optimistic per-comment overrides
+  // keyed by comment id; falls back to the server value when absent.
+  const [resolvedOverrides, setResolvedOverrides] = useState<Record<string, string | null>>({})
+  const effectiveResolvedAt = useCallback(
+    (c: any): string | null => (c && c.id in resolvedOverrides ? resolvedOverrides[c.id] : (c?.resolvedAt ?? null)),
+    [resolvedOverrides]
+  )
+  const handleToggleResolved = useCallback(
+    async (commentId: string, currentlyResolved: boolean) => {
+      const nextResolved = !currentlyResolved
+      setResolvedOverrides((prev) => ({ ...prev, [commentId]: nextResolved ? new Date().toISOString() : null }))
+      try {
+        const res = await apiFetch('/api/admin/feedback/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resolved: nextResolved, projectId, commentId }),
+        })
+        if (!res.ok) throw new Error('Failed')
+      } catch {
+        // Revert to the server value on failure.
+        setResolvedOverrides((prev) => {
+          const next = { ...prev }
+          delete next[commentId]
+          return next
+        })
+        toast.error('Could not update feedback status')
+      }
+    },
+    [projectId]
+  )
+
   const syncFullscreenStateFromDom = useCallback(() => {
     if (typeof window === 'undefined') return
 
@@ -1425,13 +1456,20 @@ export function CommentSectionView({
                 const allowAnyReplyDelete = canAdminDelete || canClientDelete
                 const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply))
 
+                // Apply optimistic "mark done" overrides for the admin share page tick.
+                const commentForBubble = {
+                  ...comment,
+                  resolvedAt: effectiveResolvedAt(comment),
+                  replies: comment.replies?.map((r: any) => ({ ...r, resolvedAt: effectiveResolvedAt(r) })),
+                }
+
                 return (
                   <div key={comment.id}>
                     {/* Parent Bubble that extends with replies */}
                     {!hasReplies ? (
                       // No replies - use normal MessageBubble
                       <MessageBubble
-                        comment={comment}
+                        comment={commentForBubble}
                         isReply={false}
                         isStudio={comment.isInternal}
                         studioCompanyName={companyName}
@@ -1454,11 +1492,13 @@ export function CommentSectionView({
                         showAuthorAvatar
                         showColorEdge={false}
                         avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}
+                        showResolveControl={isAdminView}
+                        onToggleResolved={handleToggleResolved}
                       />
                     ) : (
                       // Has replies - render extended bubble
                       <MessageBubble
-                        comment={comment}
+                        comment={commentForBubble}
                         isReply={false}
                         isStudio={comment.isInternal}
                         studioCompanyName={companyName}
@@ -1486,6 +1526,8 @@ export function CommentSectionView({
                         showAuthorAvatar
                         showColorEdge={false}
                         avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}
+                        showResolveControl={isAdminView}
+                        onToggleResolved={handleToggleResolved}
                       />
                     )}
                   </div>

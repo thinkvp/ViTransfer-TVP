@@ -79,6 +79,9 @@ export function sanitizeComment(
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     parentId: comment.parentId,
+    // Feedback resolution state (non-PII). Drives the admin share-page "mark done" tick;
+    // the control itself is admin-gated in the UI.
+    resolvedAt: comment.resolvedAt ?? null,
   }
 
   // Non-PII: expose display color for UI highlights.

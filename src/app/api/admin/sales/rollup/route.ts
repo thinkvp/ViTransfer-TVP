@@ -387,7 +387,8 @@ export async function GET(request: NextRequest) {
     const openQuoteDrafts = quotes.filter((q) => quoteEffectiveStatusById[q.id] === 'OPEN').length
 
     const invoiceRollups = Object.values(invoiceRollupById)
-    const openInvoices = invoiceRollups.filter((r) => r.effectiveStatus !== 'PAID')
+    // VOID invoices are cancelled — they must never count toward open/awaiting balances.
+    const openInvoices = invoiceRollups.filter((r) => r.effectiveStatus !== 'PAID' && r.effectiveStatus !== 'VOID')
     const overdueInvoices = invoiceRollups.filter((r) => r.effectiveStatus === 'OVERDUE')
     const openBalanceCents = openInvoices.reduce((acc, r) => acc + r.balanceCents, 0)
 

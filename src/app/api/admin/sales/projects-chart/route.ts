@@ -30,6 +30,8 @@ export async function GET(request: NextRequest) {
         select: { name: true },
       },
       salesInvoices: {
+        // VOID invoices are cancelled and excluded from invoiced totals.
+        where: { status: { not: 'VOID' } },
         select: {
           itemsJson: true,
           taxEnabled: true,

@@ -16,6 +16,9 @@ export function getInvoiceDashboardAmountCents(
   includeGst: boolean,
   rollup?: { totalCents?: number | null }
 ): number {
+  // VOID invoices are cancelled and contribute nothing to any revenue total.
+  if (invoice.status === 'VOID') return 0
+
   const subtotalCents = sumLineItemsSubtotal(invoice.items)
   if (!includeGst) return subtotalCents
 

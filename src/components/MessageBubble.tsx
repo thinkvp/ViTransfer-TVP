@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Comment } from '@prisma/client'
-import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download } from 'lucide-react'
+import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download, Check } from 'lucide-react'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import { CommentFileDisplay } from './FileDisplay'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -44,6 +44,29 @@ interface MessageBubbleProps {
   showAuthorAvatar?: boolean
   showColorEdge?: boolean
   avatarClassName?: string // Override avatar size/class
+
+  // Feedback "mark done" tick — only shown on the admin share page (never client).
+  // Applies per-comment (parent and each reply carry their own state).
+  showResolveControl?: boolean
+  onToggleResolved?: (commentId: string, currentlyResolved: boolean) => void
+}
+
+// Green circular "mark done" tick placed in the lower-left corner of a comment.
+function ResolveTick({ resolved, onClick }: { resolved: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={resolved ? 'Marked done — click to reopen' : 'Mark as done'}
+      className={`flex h-4 w-4 items-center justify-center rounded-full border transition-colors ${
+        resolved
+          ? 'border-success-solid bg-success-solid text-success-foreground'
+          : 'border-muted-foreground/40 text-transparent hover:border-success-solid hover:text-success-solid/70'
+      }`}
+    >
+      <Check className="h-2.5 w-2.5" />
+    </button>
+  )
 }
 
 function isVoiceNoteFile(fileName: string): boolean {
@@ -142,6 +165,8 @@ export default function MessageBubble({
   showAuthorAvatar = false,
   showColorEdge = true,
   avatarClassName,
+  showResolveControl = false,
+  onToggleResolved,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
 
@@ -389,6 +414,16 @@ export default function MessageBubble({
                             ))}
                           </div>
                         )}
+
+                        {/* Per-reply "mark done" tick (admin share page only) */}
+                        {showResolveControl && onToggleResolved && (
+                          <div className="mt-2 flex items-center">
+                            <ResolveTick
+                              resolved={!!(reply as any).resolvedAt}
+                              onClick={() => onToggleResolved(reply.id, !!(reply as any).resolvedAt)}
+                            />
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -398,26 +433,36 @@ export default function MessageBubble({
           )}
 
           {/* Actions row (inside the block) */}
-          {(!isReply && (!commentsDisabled || onDelete || onReply)) && (
-            <div className="mt-3 flex items-center justify-end gap-3">
-              {!isReply && !commentsDisabled && onReply && (
-                <button
-                  onClick={onReply}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
-                >
-                  Reply
-                </button>
-              )}
-              {onDelete && (
-                <button
-                  onClick={onDelete}
-                  className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium flex items-center gap-1"
-                  title="Delete comment"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  Delete
-                </button>
-              )}
+          {(!isReply && (showResolveControl || !commentsDisabled || onDelete || onReply)) && (
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="flex items-center">
+                {showResolveControl && onToggleResolved && (
+                  <ResolveTick
+                    resolved={!!(comment as any).resolvedAt}
+                    onClick={() => onToggleResolved(comment.id, !!(comment as any).resolvedAt)}
+                  />
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                {!isReply && !commentsDisabled && onReply && (
+                  <button
+                    onClick={onReply}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
+                  >
+                    Reply
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    onClick={onDelete}
+                    className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium flex items-center gap-1"
+                    title="Delete comment"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Delete
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>

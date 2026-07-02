@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { Download, Eye, FolderKanban, Image as ImageIcon, Layers, Plus, Video } from 'lucide-react'
 import ProjectsList from '@/components/ProjectsList'
+import ProjectFeedbackList from '@/components/ProjectFeedbackList'
 import ProjectsDashboardKeyDates from '@/components/ProjectsDashboardKeyDates'
 import { apiFetch } from '@/lib/api-client'
 import { Card, CardContent } from '@/components/ui/card'
@@ -383,6 +384,8 @@ export default function AdminPage() {
           </Card>
 
           <ProjectsList projects={projects} onFilteredProjectsChange={setFilteredProjects} analyticsMap={analyticsByProjectId} />
+
+          <ProjectFeedbackList />
 
           <KanbanBoard
             projects={(projects || []).map((p) => ({ id: p.id, title: p.title }))}

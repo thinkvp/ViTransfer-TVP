@@ -31,6 +31,7 @@ model User {
   projects                Project[]
   assignedProjects        ProjectUser[]
   comments                Comment[]
+  resolvedComments        Comment[]                @relation("CommentResolvedBy")
   internalProjectComments ProjectInternalComment[]
   passkeys                PasskeyCredential[]
   projectStatusChanges    ProjectStatusChange[]
@@ -836,6 +837,12 @@ model Comment {
   parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies  Comment[] @relation("CommentReplies")
 
+  // Feedback resolution (admin "mark done" task-list state). Per-comment: replies each
+  // carry their own state. null = open/todo, set = done.
+  resolvedAt   DateTime?
+  resolvedById String? // admin User who marked it done (nullable, history-safe)
+  resolvedBy   User?     @relation("CommentResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   files   CommentFile[] // Files uploaded with this comment
 
@@ -843,6 +850,8 @@ model Comment {
   @@index([videoId])
   @@index([projectId, videoId])
   @@index([parentId])
+  // Drives the "unresolved comments per project" query behind the admin Feedback list.
+  @@index([projectId, resolvedAt])
   // Serves the threaded-reply fetch in /api/comments (replies filtered by parentId,
   // ordered by createdAt) without a post-filter in-memory sort.
   @@index([parentId, createdAt])

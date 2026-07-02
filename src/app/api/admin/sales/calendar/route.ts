@@ -104,7 +104,8 @@ export async function GET(request: NextRequest) {
     prisma.salesInvoice.findMany({
       where: {
         dueDate: { not: null, gte: startYmd, lte: endYmd },
-        status: { not: 'PAID' },
+        // Exclude PAID (settled) and VOID (cancelled) invoices from the due-date calendar.
+        status: { notIn: ['PAID', 'VOID'] },
       },
       select: {
         id: true,
@@ -137,7 +138,7 @@ export async function GET(request: NextRequest) {
   }, {})
 
   const visibleInvoices = invoices.filter((inv) => {
-    if (inv.status === 'PAID') return false
+    if (inv.status === 'PAID' || inv.status === 'VOID') return false
 
     const items = parseLineItems((inv as any).itemsJson)
     const totalCents = sumLineItemsTotal(items, taxRatePercent)

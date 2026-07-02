@@ -639,6 +639,8 @@ export function useCommentManagement({
       parentId: replyingToCommentId,
       userId: null,
       timecodeEnd: null,
+      resolvedAt: null,
+      resolvedById: null,
       replies: [],
     }
 
