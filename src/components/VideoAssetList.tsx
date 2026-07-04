@@ -144,19 +144,19 @@ export function VideoAssetList({
     const category = asset.category?.toLowerCase() || ''
 
     if (category === 'thumbnail' || fileType.startsWith('image/')) {
-      return <FileImage className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileImage className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (category === 'project') {
-      return <FilePlay className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FilePlay className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (fileType.startsWith('video/')) {
-      return <FileVideo className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileVideo className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (fileType.startsWith('audio/')) {
-      return <FileMusic className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileMusic className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (
@@ -164,7 +164,7 @@ export function VideoAssetList({
       fileType === 'application/x-zip-compressed' ||
       fileName.endsWith('.zip')
     ) {
-      return <FileArchive className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileArchive className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (
@@ -174,10 +174,10 @@ export function VideoAssetList({
       fileName.endsWith('.txt') ||
       fileName.endsWith('.md')
     ) {
-      return <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
-    return <File className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+    return <File className="h-5 w-5 text-muted-foreground shrink-0" />
   }
 
   const triggerDownload = (url: string) => {
@@ -297,7 +297,7 @@ export function VideoAssetList({
                 <img
                   src={asset.thumbnailUrl}
                   alt={asset.fileName}
-                  className="h-10 w-10 flex-shrink-0 rounded border bg-muted object-cover"
+                  className="h-10 w-10 shrink-0 rounded border bg-muted object-cover"
                   loading="lazy"
                   onError={() => {
                     // Token likely expired — drop the URL so we show the file-type icon;
@@ -323,7 +323,7 @@ export function VideoAssetList({
                   <span>{getCategoryLabel(asset.category)}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
                 {canManage && canSetAsThumbnail(asset) && (
                   <Button
                     type="button"

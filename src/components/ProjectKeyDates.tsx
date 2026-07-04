@@ -494,7 +494,7 @@ export function ProjectKeyDates({
                         {formatTypeLabel(item.type)}
                       </span>
                     </td>
-                    <td className="px-3 py-2 min-w-[120px] whitespace-normal break-words">
+                    <td className="px-3 py-2 min-w-[120px] whitespace-normal wrap-break-word">
                       <span title={item.notes || ''}>{truncateNotes(item.notes, 120)}</span>
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">

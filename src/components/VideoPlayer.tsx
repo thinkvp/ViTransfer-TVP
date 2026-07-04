@@ -215,6 +215,10 @@ export default function VideoPlayer({
   // briefly, before the first frame. The paired ref carries the seek time (usually 0).
   const autoPlayRequestRef = useRef<string | null>(null)
   const autoPlaySeekRef = useRef<number>(0)
+  // State mirror of autoPlayRequestRef for the <video> poster prop (render-time read).
+  // Cleared on onPlay rather than onCanPlay: once playback has started the poster is
+  // never displayed again, so restoring it there cannot flash the thumbnail.
+  const [autoPlayRequestId, setAutoPlayRequestId] = useState<string | null>(null)
 
   const [canShowTimelineHover, setCanShowTimelineHover] = useState(true)
   const [isMobileViewport, setIsMobileViewport] = useState(false)
@@ -222,6 +226,9 @@ export default function VideoPlayer({
   const [isDesktopControlsNarrow, setIsDesktopControlsNarrow] = useState(false)
 
   const playerContainerRef = useRef<HTMLDivElement>(null)
+  // State mirror of playerContainerRef so render-time consumers (dialog portals) re-render
+  // once the container mounts.
+  const [playerContainerEl, setPlayerContainerEl] = useState<HTMLDivElement | null>(null)
   // The inner box that exactly matches the video's aspect ratio. Measured so the
   // sprite-frame overlay shown while (non-precision) scrubbing can be letterboxed
   // to fit the player just like the <video> element.
@@ -268,6 +275,18 @@ export default function VideoPlayer({
   const suppressAutoDowngradeUntilRef = useRef(0)
 
   const scrubBarRef = useRef<HTMLDivElement>(null)
+  // Scrub-bar width tracked in state so render-time tooltip positioning stays pure;
+  // event handlers that need clientX precision still measure the live rect.
+  const [scrubBarWidth, setScrubBarWidth] = useState(0)
+  useEffect(() => {
+    const el = scrubBarRef.current
+    if (!el) return
+    const update = () => setScrubBarWidth(el.getBoundingClientRect().width)
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   const scrubRafRef = useRef<number | null>(null)
   const pendingScrubClientXRef = useRef<number | null>(null)
@@ -1703,7 +1722,9 @@ export default function VideoPlayer({
       setTimelineHover((prev) => ({ ...prev, visible: false }))
     }
   }
-  finishScrubSettleRef.current = finishScrubSettle
+  useEffect(() => {
+    finishScrubSettleRef.current = finishScrubSettle
+  })
 
   // Start the post-release bridge after a normal (non-precision) scrub release. If the
   // video has already reached the released frame there's nothing to bridge, so finish
@@ -1754,17 +1775,16 @@ export default function VideoPlayer({
   }
 
   const getLeftPxForSeconds = (seconds: number, maxTooltipWidthPx: number) => {
-    const el = scrubBarRef.current
+    const width = scrubBarWidth
     const duration = effectiveDurationSeconds
-    if (!el || !duration || duration <= 0) return 0
-    const rect = el.getBoundingClientRect()
+    if (!duration || duration <= 0) return 0
     const ratio = Math.min(1, Math.max(0, seconds / duration))
-    const desiredLeft = ratio * rect.width
+    const desiredLeft = ratio * width
     const half = Math.max(0, maxTooltipWidthPx / 2)
 
-    if (rect.width <= 0) return 0
-    if (rect.width < maxTooltipWidthPx) return rect.width / 2
-    return Math.min(Math.max(desiredLeft, half), Math.max(half, rect.width - half))
+    if (width <= 0) return 0
+    if (width < maxTooltipWidthPx) return width / 2
+    return Math.min(Math.max(desiredLeft, half), Math.max(half, width - half))
   }
 
   const findCueForTime = (timeSeconds: number) => {
@@ -2078,6 +2098,7 @@ export default function VideoPlayer({
             // from its onCanPlay handler, rather than racing a fixed timeout. This also
             // keeps the poster suppressed for the whole switch (see the selection effect).
             autoPlayRequestRef.current = videoId
+            setAutoPlayRequestId(videoId)
             autoPlaySeekRef.current = timestamp
           }
           setSelectedVideoIndex(targetVideoIndex)
@@ -2167,9 +2188,10 @@ export default function VideoPlayer({
     }
   }, [])
 
+  const selectedVideoFps = selectedVideo?.fps
   const stepVideoFrame = useCallback((direction: -1 | 1) => {
     const video = videoRef.current
-    const fps = selectedVideo?.fps
+    const fps = selectedVideoFps
     if (!video || !fps) return
 
     if (!video.paused) {
@@ -2188,7 +2210,7 @@ export default function VideoPlayer({
     window.dispatchEvent(new CustomEvent('videoTimeUpdated', {
       detail: { time: currentTimeRef.current, videoId: selectedVideoIdRef.current },
     }))
-  }, [selectedVideo?.fps])
+  }, [selectedVideoFps])
 
   const handleStepFrameBackward = useCallback(() => {
     stepVideoFrame(-1)
@@ -2675,7 +2697,7 @@ export default function VideoPlayer({
       className={cn(
         'flex flex-col',
         fillContainer
-          ? `h-full min-h-0 ${mobileFullHeight ? 'max-h-[100dvh]' : 'max-h-[90dvh]'} lg:max-h-none`
+          ? `h-full min-h-0 ${mobileFullHeight ? 'max-h-dvh' : 'max-h-[90dvh]'} lg:max-h-none`
           : fitToContainerHeight
             ? 'gap-4 min-h-0 h-full'
             : 'space-y-4 max-h-full'
@@ -2687,7 +2709,10 @@ export default function VideoPlayer({
       }
     >
       <div
-        ref={playerContainerRef}
+        ref={(el) => {
+          playerContainerRef.current = el
+          setPlayerContainerEl(el)
+        }}
         data-video-player-container="true"
         className={
 
@@ -2715,7 +2740,7 @@ export default function VideoPlayer({
                   : 'flex items-center justify-center',
                 !fillContainer && (fitToContainerHeight
                   ? 'relative overflow-hidden flex-1'
-                  : 'flex-shrink')
+                  : 'shrink')
               )
           }
           style={
@@ -2778,7 +2803,7 @@ export default function VideoPlayer({
                 // poster on first load. Only suppress it when an autoplay request is pending
                 // for this video (responsive/mobile folder click) so it never flashes before
                 // the first frame. Desktop keeps the poster until the user presses play.
-                poster={autoPlayRequestRef.current === selectedVideo?.id ? undefined : (selectedVideo.thumbnailUrl || undefined)}
+                poster={autoPlayRequestId === selectedVideo?.id ? undefined : (selectedVideo.thumbnailUrl || undefined)}
                 className="w-full h-full"
                 onTimeUpdate={handleTimeUpdate}
                 onCanPlay={(e) => {
@@ -2842,6 +2867,7 @@ export default function VideoPlayer({
                 }}
                 onPlay={() => {
                   setIsPlaying(true)
+                  setAutoPlayRequestId(null)
                   window.dispatchEvent(new CustomEvent('videoPlaybackStarted'))
 
                   // Track a video view (play) for share-token sessions only.
@@ -3008,7 +3034,7 @@ export default function VideoPlayer({
 
         {/* Custom Controls + Timeline (enables hover thumbnails) */}
         <div
-          className="relative flex-shrink-0 pl-[calc(env(safe-area-inset-left)+0.5rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] lg:px-0"
+          className="relative shrink-0 pl-[calc(env(safe-area-inset-left)+0.5rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] lg:px-0"
           style={!isInFullscreen && controlsBottomPadding ? { paddingBottom: controlsBottomPadding } : undefined}
         >
           <div
@@ -3028,7 +3054,7 @@ export default function VideoPlayer({
               </Button>
 
               <div
-                className="relative flex-shrink-0"
+                className="relative shrink-0"
                 data-volume-control="true"
                 onMouseEnter={openVolumeSlider}
                 onMouseLeave={scheduleCloseVolumeSlider}
@@ -3359,7 +3385,7 @@ export default function VideoPlayer({
                     bar. */}
                 {effectiveDurationSeconds > 0 && (
                   <div
-                    className="pointer-events-auto absolute top-1/2 z-[25] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-md ring-2 ring-background transition-[width,height] duration-100 ease-out h-3 w-3 hover:h-[18px] hover:w-[18px] cursor-grab active:cursor-grabbing"
+                    className="pointer-events-auto absolute top-1/2 z-25 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-md ring-2 ring-background transition-[width,height] duration-100 ease-out h-3 w-3 hover:h-[18px] hover:w-[18px] cursor-grab active:cursor-grabbing"
                     style={{
                       left: `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`,
                     }}
@@ -3906,7 +3932,7 @@ export default function VideoPlayer({
                   : 'PLAYHEAD POSITION'
                 const anchorSeconds = previewKind === 'rangeStart' ? commentRangeStart
                   : previewKind === 'rangeEnd'
-                    ? (dragKind === 'rangeEnd' || commentRangeHasExplicitSelectionRef.current ? commentRangeEnd : commentRangeStart)
+                    ? (dragKind === 'rangeEnd' || (commentRangeEnd - commentRangeStart) >= 0.5 ? commentRangeEnd : commentRangeStart)
                   : previewKind === 'clear' ? commentRangeEnd
                   : currentTimeSeconds
                 return (
@@ -3968,7 +3994,7 @@ export default function VideoPlayer({
                 </Button>
 
                                 <div
-                  className="relative flex-shrink-0"
+                  className="relative shrink-0"
                   data-volume-control="true"
                   onMouseEnter={openVolumeSlider}
                   onMouseLeave={scheduleCloseVolumeSlider}
@@ -4125,7 +4151,7 @@ export default function VideoPlayer({
               {/* Right: Quality, Comments (fullscreen), Fullscreen, Download */}
               <div className="flex items-center gap-[6px] justify-end">
                 {showQualitySelector && (
-                  <div ref={desktopQualityControlsRef} className="relative flex-shrink-0">
+                  <div ref={desktopQualityControlsRef} className="relative shrink-0">
                     <Button
                       type="button"
                       variant="outline"
@@ -4234,7 +4260,7 @@ export default function VideoPlayer({
                     {formatTimestampDisplay(effectiveDurationSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)}
                   </span>
                   {showTimeDisplayToggle && (
-                  <div className="relative time-display-toggle flex-shrink-0">
+                  <div className="relative time-display-toggle shrink-0">
                     <button
                       type="button"
                       className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0 bg-transparent border-0 cursor-pointer"
@@ -4275,8 +4301,8 @@ export default function VideoPlayer({
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-1 flex-shrink-0 flex-wrap max-w-full">
-                <div className="relative flex-shrink-0" data-volume-control="true">
+              <div className="flex items-center justify-end gap-1 shrink-0 flex-wrap max-w-full">
+                <div className="relative shrink-0" data-volume-control="true">
                   <Button
                     type="button"
                     variant="outline"
@@ -4326,7 +4352,7 @@ export default function VideoPlayer({
 
                 {/* Mobile quality selector (cog icon, or "Original" label when no previews) */}
                 {showQualitySelector && (
-                  <div ref={mobileQualityControlsRef} className="relative flex-shrink-0">
+                  <div ref={mobileQualityControlsRef} className="relative shrink-0">
                     {hasOriginalOnly ? (
                       <Button
                         type="button"
@@ -4417,7 +4443,7 @@ export default function VideoPlayer({
       {/* Keyboard Shortcuts Dialog (triggered by CommentInput shortcut button) */}
       <Dialog open={showShortcutsDialog} onOpenChange={setShowShortcutsDialog}>
         <DialogContent
-          portalContainer={playerContainerRef.current}
+          portalContainer={playerContainerEl}
           className="bg-card border-border text-card-foreground max-w-[95vw] sm:max-w-md"
         >
           <DialogHeader>

@@ -128,7 +128,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
             : 'Fetching video…'
 
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center p-6">
+      <div className="min-h-dvh flex items-center justify-center p-6">
         <div className="max-w-lg w-full rounded-lg border border-border bg-card p-6">
           <div className="text-lg font-semibold text-card-foreground">{title}</div>
           <div className="mt-2 text-sm text-muted-foreground">{subtitle}</div>
@@ -155,8 +155,8 @@ export function GuestVideoViewer({ token }: { token: string }) {
   }
 
   return (
-    <div className="h-[100dvh] flex flex-col overflow-y-auto lg:overflow-hidden">
-      <div className="border-b border-border bg-background flex-shrink-0">
+    <div className="h-dvh flex flex-col overflow-y-auto lg:overflow-hidden">
+      <div className="border-b border-border bg-background shrink-0">
         <div className={cn('mx-auto w-full max-w-6xl px-4 py-3 flex items-center gap-4')}>
           <div className="flex-1 min-w-0 flex flex-col gap-1">
             <div className="text-sm font-medium text-foreground truncate">
@@ -172,7 +172,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
           </div>
 
           {hasLogo && (
-            <div className="flex-shrink-0">
+            <div className="shrink-0">
               {mainCompanyDomain ? (
                 <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer">
                   {/* eslint-disable-next-line @next/next/no-img-element */}

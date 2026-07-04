@@ -5,7 +5,7 @@ import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getStoredFilePath } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 import { Readable } from 'stream'
 import { z } from 'zod'
 export const runtime = 'nodejs'
@@ -37,7 +37,7 @@ export async function POST(
     const body = await request.json()
     const parsed = downloadZipSchema.safeParse(body)
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
+      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
     }
     const { assetIds } = parsed.data
 
@@ -85,7 +85,7 @@ export async function POST(
     }
 
     // Create zip archive
-    const archive = archiver('zip', {
+    const archive = new ZipArchive({
       zlib: { level: 6 }, // Compression level
     })
 

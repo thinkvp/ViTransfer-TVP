@@ -151,7 +151,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
               {f.uploadedByName ? ` • Uploaded by ${f.uploadedByName}` : ''}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {canDelete && !!f.deleteUrl && (
               <Button
                 type="button"

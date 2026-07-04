@@ -2147,16 +2147,16 @@ export default function AdminSharePage() {
   return (
     <div className="flex-1 min-h-0 bg-background flex flex-col overflow-y-auto lg:overflow-hidden">
       {/* Compact breadcrumb header */}
-      <div className="flex-shrink-0 h-12 my-[2px] border border-border bg-card rounded-lg flex items-center pl-4 pr-3 lg:pr-0 gap-1.5 text-sm overflow-x-auto z-40">
+      <div className="shrink-0 h-12 my-[2px] border border-border bg-card rounded-lg flex items-center pl-4 pr-3 lg:pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
         {/* Back to Project */}
-        <Link href={projectUrl} className="flex-shrink-0">
+        <Link href={projectUrl} className="shrink-0">
           <Button variant="ghost" size="sm" className="h-7 px-2 gap-1">
             <ArrowLeft className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Back</span>
           </Button>
         </Link>
-        <span className="text-muted-foreground flex-shrink-0">/</span>
+        <span className="text-muted-foreground shrink-0">/</span>
 
         {/* Project selector */}
         {canSwitchProjects ? (
@@ -2179,14 +2179,14 @@ export default function AdminSharePage() {
             }}
           />
         ) : (
-          <span className="text-foreground font-medium whitespace-nowrap flex-shrink-0 max-w-[25%] truncate" title={project.title}>{project.title}</span>
+          <span className="text-foreground font-medium whitespace-nowrap shrink-0 max-w-[25%] truncate" title={project.title}>{project.title}</span>
         )}
 
         {isUploadsFilesBrowse ? (
           <>
-            <span className="text-muted-foreground flex-shrink-0">/</span>
+            <span className="text-muted-foreground shrink-0">/</span>
             <span
-              className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[40%] truncate"
+              className="text-foreground whitespace-nowrap shrink-0 max-w-[40%] truncate"
               title={uploadsHeaderPath}
             >
               {uploadsHeaderPath}
@@ -2197,7 +2197,7 @@ export default function AdminSharePage() {
         {/* Video / Album section */}
         {(activeVideoName || activeAlbumId) && !isUploadsFilesBrowse && !(desktopContentTab === 'files' && !requestedFilesFolderName) && (
           <>
-            <span className="text-muted-foreground flex-shrink-0">/</span>
+            <span className="text-muted-foreground shrink-0">/</span>
             {mediaOptions.length > 1 ? (
               <Select
                 value={selectedMediaValue}
@@ -2211,7 +2211,7 @@ export default function AdminSharePage() {
                   }
                 }}
               >
-                <SelectTrigger className="h-7 text-sm w-auto flex-shrink-0 gap-2">
+                <SelectTrigger className="h-7 text-sm w-auto shrink-0 gap-2">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2221,9 +2221,9 @@ export default function AdminSharePage() {
                 </SelectContent>
               </Select>
             ) : !activeAlbumId ? (
-              <span className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[30%] truncate" title={activeVideoName}>{activeVideoName}</span>
+              <span className="text-foreground whitespace-nowrap shrink-0 max-w-[30%] truncate" title={activeVideoName}>{activeVideoName}</span>
             ) : (
-              <span className="text-foreground whitespace-nowrap flex-shrink-0 max-w-[30%] truncate" title={activeAlbum?.name}>{activeAlbum?.name}</span>
+              <span className="text-foreground whitespace-nowrap shrink-0 max-w-[30%] truncate" title={activeAlbum?.name}>{activeAlbum?.name}</span>
             )}
           </>
         )}
@@ -2231,7 +2231,7 @@ export default function AdminSharePage() {
         {/* Version section — hidden in files mode */}
         {!activeAlbumId && readyVideos.length > 0 && desktopContentTab !== 'files' && (
           <>
-            <span className="text-muted-foreground flex-shrink-0">/</span>
+            <span className="text-muted-foreground shrink-0">/</span>
             {readyVideos.length > 1 ? (
               <Select
                 value={headerVersionId || readyVideos[0].id}
@@ -2242,7 +2242,7 @@ export default function AdminSharePage() {
                   window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId, videoVersion: null } }))
                 }}
               >
-                <SelectTrigger className="h-7 text-sm w-auto flex-shrink-0 gap-2">
+                <SelectTrigger className="h-7 text-sm w-auto shrink-0 gap-2">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -2252,15 +2252,15 @@ export default function AdminSharePage() {
                 </SelectContent>
               </Select>
             ) : (
-              <span className="text-foreground whitespace-nowrap flex-shrink-0">{headerVersion?.versionLabel || '\u2014'}</span>
+              <span className="text-foreground whitespace-nowrap shrink-0">{headerVersion?.versionLabel || '\u2014'}</span>
             )}
             {isOlderVersionSelected && (
-              <span className="text-warning text-xs whitespace-nowrap flex-shrink-0">(Newer version available)</span>
+              <span className="text-warning text-xs whitespace-nowrap shrink-0">(Newer version available)</span>
             )}
           </>
         )}
 
-        <span className="w-2 flex-shrink-0 lg:hidden" aria-hidden="true" />
+        <span className="w-2 shrink-0 lg:hidden" aria-hidden="true" />
       </div>
 
       {/* Content */}
@@ -2283,7 +2283,7 @@ export default function AdminSharePage() {
           onAlbumSelect={handleAlbumSelect}
           showVideos={project.enableVideos !== false}
           showAlbums={project.enablePhotos !== false}
-          className="flex-shrink-0 h-[calc(100dvh-var(--admin-header-height))]"
+          className="shrink-0 h-[calc(100dvh-var(--admin-header-height))]"
           downloadableFiles={downloadableFilesWithOptimisticUploads}
           onDownloadFile={handleDownloadFile}
           onDownloadFiles={handleDownloadFiles}
@@ -2766,7 +2766,7 @@ function AdminShareFeedbackGrid({
 
         <div
           className={cn(
-            'relative lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height,0px))] lg:min-h-0 lg:overflow-hidden lg:flex-shrink-0',
+            'relative lg:sticky lg:top-0 lg:self-stretch lg:h-[calc(100dvh-var(--admin-header-height,0px))] lg:min-h-0 lg:overflow-hidden lg:shrink-0',
             'lg:flex lg:flex-col'
           )}
           style={
@@ -2818,7 +2818,7 @@ function AdminShareFeedbackGrid({
           </div>
 
           {!commentsDisabled ? (
-            <div className="hidden lg:block flex-shrink-0">
+            <div className="hidden lg:block shrink-0">
               <CommentInput
                 newComment={management.newComment}
                 onCommentChange={management.handleCommentChange}

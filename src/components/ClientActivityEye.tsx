@@ -178,7 +178,7 @@ export default function ClientActivityEye() {
         side="bottom"
         sideOffset={8}
         onCloseAutoFocus={(e) => e.preventDefault()}
-        className="!p-0 w-[92vw] sm:w-[400px] max-w-[92vw] max-h-[70dvh] overflow-hidden data-[state=open]:!animate-none data-[state=closed]:!animate-none"
+        className="p-0! w-[92vw] sm:w-[400px] max-w-[92vw] max-h-[70dvh] overflow-hidden data-[state=open]:animate-none! data-[state=closed]:animate-none!"
       >
         <div className="flex flex-col max-h-[70dvh]">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">

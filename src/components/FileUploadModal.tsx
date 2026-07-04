@@ -105,7 +105,7 @@ export function FileUploadModal({
         <div className="space-y-4">
           {displayError && (
             <div className="flex gap-3 p-3 bg-destructive-visible border border-destructive-visible rounded-lg">
-              <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+              <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
               <p className="text-sm text-destructive">{displayError}</p>
             </div>
           )}

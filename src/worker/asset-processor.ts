@@ -66,10 +66,7 @@ export async function processAsset(job: Job<AssetProcessingJob>) {
       console.log('[WORKER DEBUG] Validating asset magic bytes...')
     }
 
-    // Note: `file-type` exports a Node-only `fileTypeFromFile` under the `node` condition.
-    // During Next.js build/typecheck this can resolve to the default (core) export instead.
-    // Using the core API keeps it compatible across bundler conditions.
-    const { fileTypeFromBuffer } = await import('file-type/core')
+    const { fileTypeFromBuffer } = await import('file-type')
 
     const sampleSize = 4100
     const sampleBuffer = Buffer.alloc(Math.min(sampleSize, stats.size))

@@ -443,7 +443,7 @@ export function ProjectEmailUpload({
 
         {error && (
           <div className="flex gap-3 p-3 bg-destructive-visible border border-destructive-visible rounded-lg">
-            <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+            <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
             <pre className="text-sm text-destructive whitespace-pre-wrap">{error}</pre>
           </div>
         )}
@@ -480,7 +480,7 @@ export function ProjectEmailUpload({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     {u.status === 'uploading' && (
                       <Button type="button" variant="outline" size="sm" onClick={() => pauseUpload(u.id)}>
                         <Pause className="w-4 h-4" />
@@ -536,7 +536,7 @@ export function ProjectEmailUpload({
                     )}
                     {u.status === 'error' && <span className="text-destructive">{u.error || 'Upload failed'}</span>}
                   </div>
-                  <div className="flex-shrink-0">
+                  <div className="shrink-0">
                     {u.status === 'error' && (
                       <Button type="button" variant="ghost" size="sm" onClick={() => removeUpload(u.id)}>
                         <Trash2 className="w-4 h-4 text-destructive" />
@@ -558,7 +558,7 @@ export function ProjectEmailUpload({
 
       {error && (
         <div className="flex gap-3 p-3 bg-destructive-visible border border-destructive-visible rounded-lg">
-          <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+          <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
           <pre className="text-sm text-destructive whitespace-pre-wrap">{error}</pre>
         </div>
       )}
@@ -644,7 +644,7 @@ export function ProjectEmailUpload({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 flex-shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                   {u.status === 'uploading' && (
                     <Button type="button" variant="outline" size="sm" onClick={() => pauseUpload(u.id)}>
                       <Pause className="w-4 h-4" />
@@ -700,7 +700,7 @@ export function ProjectEmailUpload({
                   )}
                   {u.status === 'error' && <span className="text-destructive">{u.error || 'Upload failed'}</span>}
                 </div>
-                <div className="flex-shrink-0">
+                <div className="shrink-0">
                   {u.status === 'error' && (
                     <Button type="button" variant="ghost" size="sm" onClick={() => removeUpload(u.id)}>
                       <Trash2 className="w-4 h-4 text-destructive" />

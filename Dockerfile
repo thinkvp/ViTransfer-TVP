@@ -56,6 +56,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
 COPY patches ./patches
 
 RUN if [ -f package-lock.json ]; then \
@@ -107,6 +108,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY scripts/ensure-prisma-client.mjs ./scripts/ensure-prisma-client.mjs
 COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
 COPY patches ./patches
 
 ENV NODE_ENV=production
@@ -140,8 +142,9 @@ COPY --chown=app:app --from=builder /app/package.json ./package.json
 COPY --chown=app:app --from=builder /app/public ./public
 COPY --chown=app:app --from=builder /app/.next ./.next
 
-# Prisma migrations need schema + migrations directory
+# Prisma migrations need schema + migrations directory + CLI config (Prisma 7)
 COPY --chown=app:app --from=builder /app/prisma ./prisma
+COPY --chown=app:app --from=builder /app/prisma.config.ts ./prisma.config.ts
 
 # Standalone server expects `public/` and `.next/static` relative to `.next/standalone`
 # Next will try to write runtime cache (notably image optimizer) under `.next/cache`.

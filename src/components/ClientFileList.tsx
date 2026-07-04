@@ -131,7 +131,7 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
               {formatFileSize(Number(f.fileSize))}{f.uploadedByName ? ` • Uploaded by ${f.uploadedByName}` : ''}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <Button type="button" variant="outline" size="sm" onClick={() => void handleDownload(f.id, f.fileName)}>
               <Download className="w-4 h-4" />
             </Button>

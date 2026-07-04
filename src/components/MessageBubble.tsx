@@ -255,14 +255,14 @@ export default function MessageBubble({
           })()}
 
           {/* Timecode prefixed inline so text can use full width when wrapping */}
-          <div className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${textColor}`}>
+          <div className={`text-sm whitespace-pre-wrap wrap-break-word leading-relaxed ${textColor}`}>
             {!isReply && comment.timecode ? (
               <button
                 onClick={handleTimestampClick}
                 className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap mr-2 align-baseline bg-amber-500/20 text-amber-400 border border-amber-400/50 hover:bg-amber-500/25 transition-colors"
                 title="Seek to this timecode"
               >
-                <Clock className="w-3 h-3 flex-shrink-0" />
+                <Clock className="w-3 h-3 shrink-0" />
                 <span className="tabular-nums">
                   {formatTimecodeDisplay(comment.timecode, {
                     showFrames,
@@ -279,7 +279,7 @@ export default function MessageBubble({
             ) : null}
 
             <span
-              className="whitespace-pre-wrap break-words"
+              className="whitespace-pre-wrap wrap-break-word"
               dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(comment.content) }}
             />
           </div>
@@ -352,7 +352,7 @@ export default function MessageBubble({
                       <div key={reply.id} className="pl-3">
                         <div className="flex items-start justify-between gap-3 mb-1">
                           <div className="flex items-center gap-2 min-w-0">
-                            <CornerDownRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                            <CornerDownRight className="w-3 h-3 text-muted-foreground shrink-0" />
                             {showAuthorAvatar ? (
                               <InitialsAvatar
                                 name={replyAvatarName}
@@ -366,7 +366,7 @@ export default function MessageBubble({
                               {replyEffectiveName || 'Anonymous'}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
+                          <div className="flex items-center gap-2 shrink-0">
                             <span className="text-xs text-muted-foreground whitespace-nowrap">
                               {formatMessageTime(reply.createdAt)}
                             </span>
@@ -383,7 +383,7 @@ export default function MessageBubble({
                         </div>
 
                         <div
-                          className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground"
+                          className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground"
                           dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(reply.content) }}
                         />
 

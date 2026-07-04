@@ -454,7 +454,7 @@ export default function SalesInvoicesPage() {
             aria-label="Search invoices"
           />
         </div>
-        <div className="flex flex-nowrap items-center justify-end gap-2 flex-shrink-0">
+        <div className="flex flex-nowrap items-center justify-end gap-2 shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

@@ -166,7 +166,7 @@ export function SalesViewsAndTrackingSection({ shareToken, refreshKey }: { share
                       <tr key={v.id} className="border-b last:border-0">
                         <td className="py-2 pr-3 whitespace-nowrap">{formatDateTime(v.createdAt)}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{v.ipAddress || '—'}</td>
-                        <td className="py-2 truncate max-w-[22rem]" title={v.userAgent || ''}>
+                        <td className="py-2 truncate max-w-88" title={v.userAgent || ''}>
                           {v.userAgent || '—'}
                         </td>
                       </tr>

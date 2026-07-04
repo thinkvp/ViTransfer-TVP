@@ -91,9 +91,9 @@ export function VideoProcessingSettingsSection({
             </CardDescription>
           </div>
           {!hideCollapse && (show ? (
-            <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
           ))}
         </div>
       </CardHeader>

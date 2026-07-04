@@ -156,7 +156,7 @@ export default function NewUserPage() {
   }
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-hidden">
+    <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-hidden">
       <div className="mb-6">
         <h1 className="text-2xl sm:text-3xl font-bold">Add New User</h1>
         <p className="text-muted-foreground mt-1 text-sm sm:text-base">Create a new internal user account</p>

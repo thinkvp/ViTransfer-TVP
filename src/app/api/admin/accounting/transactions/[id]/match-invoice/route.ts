@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const body = await request.json().catch(() => null)
   const parsed = bodySchema.safeParse(body)
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0]?.message || 'invoiceIds is required' }, { status: 400 })
+  if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message || 'invoiceIds is required' }, { status: 400 })
 
   const { invoiceIds, reconcile } = parsed.data
   const isMultiInvoice = invoiceIds.length > 1

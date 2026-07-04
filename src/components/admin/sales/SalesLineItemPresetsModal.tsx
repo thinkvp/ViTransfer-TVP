@@ -123,6 +123,8 @@ export function SalesLineItemPresetsModal({
   const dragIndexRef = useRef<number | null>(null)
   const dragOverIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  // State mirror of dragIndexRef for render-time use (row highlight)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
 
   // Save preset
   const [showSaveName, setShowSaveName] = useState(false)
@@ -619,12 +621,14 @@ export function SalesLineItemPresetsModal({
                             return
                           }
                           dragIndexRef.current = index
+                          setDragIndex(index)
                           e.dataTransfer.effectAllowed = 'move'
                         }}
                         onDragEnd={() => {
                           dragEnabledRef.current = false
                           dragIndexRef.current = null
                           dragOverIndexRef.current = null
+                          setDragIndex(null)
                           setDragOverIndex(null)
                         }}
                         onDragOver={(e) => {
@@ -644,6 +648,7 @@ export function SalesLineItemPresetsModal({
                           dragEnabledRef.current = false
                           dragIndexRef.current = null
                           dragOverIndexRef.current = null
+                          setDragIndex(null)
                           setDragOverIndex(null)
                           if (from === null || to === null || from === to) return
                           const previousItems = [...items]
@@ -656,7 +661,7 @@ export function SalesLineItemPresetsModal({
                         className={[
                           'transition-colors group',
                           it.details ? '' : 'border-b border-border',
-                          dragOverIndex === index && dragIndexRef.current !== index ? 'bg-primary/10' : '',
+                          dragOverIndex === index && dragIndex !== index ? 'bg-primary/10' : '',
                           isChecked ? 'bg-primary/5' : 'hover:bg-muted/30',
                         ].filter(Boolean).join(' ')}
                       >
@@ -683,7 +688,7 @@ export function SalesLineItemPresetsModal({
                         <td className="px-3 py-2.5 align-middle font-medium max-w-[220px]">
                           <span className="flex items-center gap-1.5 truncate">
                             {it.labelColor && (
-                              <span className="inline-block w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: it.labelColor }} />
+                              <span className="inline-block w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: it.labelColor }} />
                             )}
                             <span className="truncate">{it.description}</span>
                           </span>

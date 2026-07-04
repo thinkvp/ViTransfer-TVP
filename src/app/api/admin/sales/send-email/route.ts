@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
+    return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, { status: 400 })
   }
 
   const { shareToken, toEmails, notes } = parsed.data
@@ -318,7 +318,7 @@ export async function POST(request: NextRequest) {
       </div>
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        If the button doesn’t work, copy and paste this link into your browser:<br />
+        If the button doesnâ€™t work, copy and paste this link into your browser:<br />
         <a href="${escapeHtml(shareUrl)}" style="color: ${emailSettings.accentColor || EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
       </p>
     `,

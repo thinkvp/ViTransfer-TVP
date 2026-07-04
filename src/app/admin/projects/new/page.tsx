@@ -325,7 +325,7 @@ export default function NewProjectPage() {
   if (isForbidden) {
     return (
       <div className="flex-1 min-h-0 bg-background">
-        <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+        <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
           <Card>
             <CardHeader>
               <CardTitle>New Project</CardTitle>
@@ -345,7 +345,7 @@ export default function NewProjectPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="max-w-2xl mx-auto">
         <Card>
           <CardHeader>
@@ -498,7 +498,7 @@ export default function NewProjectPage() {
                       setCreateClientError('')
                       setCreateClientOpen(true)
                     }}
-                    className="flex-shrink-0"
+                    className="shrink-0"
                   >
                     <Plus className="w-4 h-4 sm:mr-2" />
                     <span className="hidden sm:inline">Create Client</span>

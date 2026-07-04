@@ -584,7 +584,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                   return (
                     <div
                       className={cn(
-                        'relative flex-shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden bg-muted ring-1',
+                        'relative shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden bg-muted ring-1',
                         ringColor
                       )}
                     >
@@ -641,7 +641,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                       />
                     ) : (
                       <div className="min-w-0">
-                        <CardTitle className="text-lg leading-snug break-words">
+                        <CardTitle className="text-lg leading-snug wrap-break-word">
                           <span>{album.name}</span>
                           {projectStatus !== 'APPROVED' && (
                             <Button
@@ -664,7 +664,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {album.status === 'ERROR' && (
                   <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 bg-destructive-visible text-destructive border-2 border-destructive-visible">
                     FAILED
@@ -678,9 +678,9 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                 )}
 
                 {isExpanded ? (
-                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                 )}
               </div>
             </CardHeader>
@@ -690,7 +690,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                 {album.notes && (
                   <div className="text-sm">
                     <p className="text-muted-foreground">Album Notes</p>
-                    <div className="mt-1 whitespace-pre-wrap break-words">{album.notes}</div>
+                    <div className="mt-1 whitespace-pre-wrap wrap-break-word">{album.notes}</div>
                   </div>
                 )}
 
@@ -902,7 +902,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                             {/* eslint-enable @next/next/no-img-element */}
 
                             {/* Filename / size overlay (bottom), revealed on hover */}
-                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent px-1.5 pb-1 pt-4 opacity-0 transition-opacity group-hover/photo:opacity-100">
+                            <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-black/75 to-transparent px-1.5 pb-1 pt-4 opacity-0 transition-opacity group-hover/photo:opacity-100">
                               <p className="truncate text-[11px] font-medium text-white" title={p.fileName}>
                                 {p.fileName}
                               </p>

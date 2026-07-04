@@ -37,6 +37,34 @@ type QueuedProjectFileUpload = {
   completedAt: number | null
 }
 
+const generateUploadId = (): string => {
+  const cryptoObj: Crypto | undefined = (globalThis as any).crypto
+  if (cryptoObj?.randomUUID) return `project-upload-${Date.now()}-${cryptoObj.randomUUID()}`
+  if (cryptoObj?.getRandomValues) {
+    const bytes = new Uint8Array(16)
+    cryptoObj.getRandomValues(bytes)
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+    return `project-upload-${Date.now()}-${hex}`
+  }
+  return `project-upload-${Date.now()}-${crypto.randomUUID()}`
+}
+
+const buildQueuedUpload = (file: File): QueuedProjectFileUpload => ({
+  id: generateUploadId(),
+  file,
+  projectFileId: null,
+  status: 'queued',
+  progress: 0,
+  uploadSpeed: 0,
+  error: null,
+  tusUpload: null,
+  createdAt: Date.now(),
+  startedAt: null,
+  completedAt: null,
+})
+
 export function ProjectFileUpload({
   projectId,
   onUploadComplete,
@@ -88,19 +116,7 @@ export function ProjectFileUpload({
         continue
       }
 
-      nextItems.push({
-        id: generateUploadId(),
-        file: f,
-        projectFileId: null,
-        status: 'queued',
-        progress: 0,
-        uploadSpeed: 0,
-        error: null,
-        tusUpload: null,
-        createdAt: Date.now(),
-        startedAt: null,
-        completedAt: null,
-      })
+      nextItems.push(buildQueuedUpload(f))
     }
 
     if (errors.length > 0) {
@@ -112,20 +128,6 @@ export function ProjectFileUpload({
     setSelectedFiles([])
     setError(null)
     if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  const generateUploadId = (): string => {
-    const cryptoObj: Crypto | undefined = (globalThis as any).crypto
-    if (cryptoObj?.randomUUID) return `project-upload-${Date.now()}-${cryptoObj.randomUUID()}`
-    if (cryptoObj?.getRandomValues) {
-      const bytes = new Uint8Array(16)
-      cryptoObj.getRandomValues(bytes)
-      const hex = Array.from(bytes)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')
-      return `project-upload-${Date.now()}-${hex}`
-    }
-    return `project-upload-${Date.now()}-${crypto.randomUUID()}`
   }
 
   const activeCounts = useMemo(() => {
@@ -696,7 +698,7 @@ export function ProjectFileUpload({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
                       {isWorking && (
                         <Button type="button" variant="outline" size="sm" onClick={() => pauseUpload(u.id)} title="Pause">
                           <Pause className="w-4 h-4" />

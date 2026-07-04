@@ -44,15 +44,15 @@ export function VideoAssetUploadItem({
     const category = upload.category?.toLowerCase() || ''
 
     if (category === 'thumbnail' || fileType.startsWith('image/')) {
-      return <FileImage className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileImage className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (category === 'video' || fileType.startsWith('video/')) {
-      return <FileVideo className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileVideo className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (category === 'audio' || fileType.startsWith('audio/')) {
-      return <FileMusic className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileMusic className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (
@@ -60,7 +60,7 @@ export function VideoAssetUploadItem({
       fileType === 'application/x-zip-compressed' ||
       fileName.endsWith('.zip')
     ) {
-      return <FileArchive className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileArchive className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
     if (
@@ -70,10 +70,10 @@ export function VideoAssetUploadItem({
       fileName.endsWith('.txt') ||
       fileName.endsWith('.md')
     ) {
-      return <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+      return <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
     }
 
-    return <File className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+    return <File className="h-5 w-5 text-muted-foreground shrink-0" />
   }
 
   const getCategoryLabel = (category: string) => {
@@ -204,7 +204,7 @@ export function VideoAssetUploadItem({
       </div>
 
       {/* Action buttons */}
-      <div className="flex items-center gap-1 flex-shrink-0">
+      <div className="flex items-center gap-1 shrink-0">
         {upload.status === 'uploading' && (
           <Button
             type="button"

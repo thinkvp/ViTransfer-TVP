@@ -282,7 +282,7 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
                   >
                     <button
                       type="button"
-                      className="flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded hover:bg-muted"
+                      className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded hover:bg-muted"
                       aria-label={expanded ? 'Collapse row' : 'Expand row'}
                       title={expanded ? 'Collapse' : 'Expand'}
                       onClick={(e) => {
@@ -296,9 +296,9 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
 
                     <div className="min-w-0 flex-1 flex items-start gap-2 rounded px-2 py-1">
                       {row.hasAttachments ? (
-                        <Paperclip className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+                        <Paperclip className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                       ) : (
-                        <span className="w-4 h-4 flex-shrink-0" />
+                        <span className="w-4 h-4 shrink-0" />
                       )}
 
                       <div className="min-w-0 flex-1">
@@ -445,8 +445,8 @@ export function ProjectEmailTable({ projectId, refreshTrigger, canDelete = true,
           {!detailLoading && detail && (
             <div className="space-y-4 max-h-[78vh] overflow-auto pr-1">
               <div className="space-y-1">
-                <div className="text-base font-semibold break-words">{detail.subject?.trim() ? detail.subject : '(no subject)'}</div>
-                <div className="text-sm text-muted-foreground break-words">From: {displayFrom(detail)}</div>
+                <div className="text-base font-semibold wrap-break-word">{detail.subject?.trim() ? detail.subject : '(no subject)'}</div>
+                <div className="text-sm text-muted-foreground wrap-break-word">From: {displayFrom(detail)}</div>
                 <div className="text-sm text-muted-foreground">Date: {formatDateTime(detail.sentAt || detail.createdAt)}</div>
               </div>
 

@@ -49,7 +49,9 @@ export function useContentImageRefresh({
   refreshIntervalMs = 10 * 60 * 1000,
 }: UseContentImageRefreshOptions) {
   const onRefreshRef = useRef(onRefresh)
-  onRefreshRef.current = onRefresh
+  useEffect(() => {
+    onRefreshRef.current = onRefresh
+  }, [onRefresh])
 
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastHiddenAtRef = useRef<number>(0)

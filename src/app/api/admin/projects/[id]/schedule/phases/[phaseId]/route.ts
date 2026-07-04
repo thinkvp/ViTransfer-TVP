@@ -48,7 +48,7 @@ export async function PATCH(
 
   const parsed = patchPhaseSchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
+    return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, { status: 400 })
   }
 
   const phase = await findPhaseInProject(projectId, phaseId)

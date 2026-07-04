@@ -64,7 +64,7 @@ export async function PATCH(
 
   const parsed = patchTaskSchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
+    return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, { status: 400 })
   }
 
   const task = await findTaskInProject(projectId, taskId)

@@ -895,7 +895,7 @@ export default function ProjectsDashboardKeyDates({
       >
         <ChevronLeft className="w-4 h-4" />
       </Button>
-      <div className="text-sm font-medium tabular-nums w-[9rem] text-center">{monthLabel}</div>
+      <div className="text-sm font-medium tabular-nums w-36 text-center">{monthLabel}</div>
       <Button
         variant="ghost"
         size="icon"
@@ -919,7 +919,7 @@ export default function ProjectsDashboardKeyDates({
           </div>
 
           {upcomingTotalPages > 1 ? (
-            <div className="flex items-center gap-1 flex-shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
               <Button
                 variant="ghost"
                 size="icon"
@@ -930,7 +930,7 @@ export default function ProjectsDashboardKeyDates({
               >
                 <ChevronLeft className="w-4 h-4" />
               </Button>
-              <div className="text-xs text-muted-foreground tabular-nums text-center w-[6.5rem]">
+              <div className="text-xs text-muted-foreground tabular-nums text-center w-26">
                 Page {(upcomingPage + 1).toLocaleString()} of {upcomingTotalPages.toLocaleString()}
               </div>
               <Button
@@ -1009,7 +1009,7 @@ export default function ProjectsDashboardKeyDates({
                       )}
                     </div>
 
-                    <div className="flex-shrink-0 flex items-center gap-2">
+                    <div className="shrink-0 flex items-center gap-2">
                       {k.kind === 'project' ? (
                         <Button
                           type="button"

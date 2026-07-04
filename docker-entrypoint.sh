@@ -27,10 +27,11 @@ wait_for_postgres() {
 
     while [ $attempt -lt $max_attempts ]; do
         if node -e "
-            const { PrismaClient } = require('@prisma/client');
-            const prisma = new PrismaClient();
-            prisma.\$connect()
-                .then(() => { console.log('Connected'); process.exit(0); })
+            const { Client } = require('pg');
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            client.connect()
+                .then(() => client.query('SELECT 1'))
+                .then(() => { console.log('Connected'); client.end(); process.exit(0); })
                 .catch(() => { process.exit(1); });
         " 2>/dev/null; then
             echo "[OK] PostgreSQL is ready!"

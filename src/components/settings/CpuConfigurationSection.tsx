@@ -73,9 +73,9 @@ export function CpuConfigurationSection({
             </CardDescription>
           </div>
           {!hideCollapse && (show ? (
-            <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
           ))}
         </div>
       </CardHeader>
@@ -117,7 +117,7 @@ export function CpuConfigurationSection({
                 )}
                 {workerInfo.stale && (
                   <div className="flex items-start gap-2 mt-1.5 text-warning font-medium">
-                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>This report is stale — the worker may be offline. Values shown are its last known state.</span>
                   </div>
                 )}
@@ -125,7 +125,7 @@ export function CpuConfigurationSection({
             ) : (
               <div className="mt-2 pt-2 border-t">
                 <div className="flex items-start gap-2 text-xs text-warning font-medium">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>
                     No CPU report from the worker yet — values shown are this app host&apos;s CPUs, which may differ
                     from the machine that processes videos. They will correct automatically once the worker starts
@@ -187,7 +187,7 @@ export function CpuConfigurationSection({
               </div>
               {exceedsSystemCapacity && (
                 <div className="flex items-start gap-2 mt-2 text-xs text-destructive font-medium">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>
                     This configuration exceeds system capacity and cannot be saved. Reduce threads per job or concurrent jobs.
                   </span>
@@ -195,7 +195,7 @@ export function CpuConfigurationSection({
               )}
               {fullUtilization && (
                 <div className="flex items-start gap-2 mt-2 text-xs text-warning font-medium">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>
                     This configuration uses all available system threads, leaving no headroom for the OS, database, or web server. Consider reducing threads per job or concurrent jobs.
                   </span>
@@ -203,7 +203,7 @@ export function CpuConfigurationSection({
               )}
               {!exceedsSystemCapacity && !fullUtilization && highAllocation && (
                 <div className="flex items-start gap-2 mt-2 text-xs text-warning font-medium">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>
                     Peak usage may cause contention with system resources. Ensure enough headroom is left for your OS and any other running apps.
                   </span>
@@ -233,7 +233,7 @@ export function CpuConfigurationSection({
 
           {/* Info */}
           <div className="flex items-start gap-2 text-xs text-muted-foreground p-3 bg-muted/30 rounded-lg border">
-            <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+            <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             <span>
               Thread allocation changes take effect on the next job. Concurrency changes require a container restart.
               Environment variables (<code className="bg-background px-1 py-0.5 rounded text-[11px]">CPU_THREADS</code>,{' '}

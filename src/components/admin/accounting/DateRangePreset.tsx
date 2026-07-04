@@ -91,7 +91,7 @@ export function DateRangePreset({ from, to, onFromChange, onToChange }: DateRang
           type="date"
           value={from}
           onChange={e => handleFromChange(e.target.value)}
-          className="h-9 w-[7.5rem] sm:w-36"
+          className="h-9 w-30 sm:w-36"
           title="Start date"
         />
         <span className="text-muted-foreground text-sm leading-none select-none">→</span>
@@ -99,7 +99,7 @@ export function DateRangePreset({ from, to, onFromChange, onToChange }: DateRang
           type="date"
           value={to}
           onChange={e => handleToChange(e.target.value)}
-          className="h-9 w-[7.5rem] sm:w-36"
+          className="h-9 w-30 sm:w-36"
           title="End date"
         />
       </div>

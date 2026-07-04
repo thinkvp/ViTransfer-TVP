@@ -194,7 +194,7 @@ function CompactJobRow({
       onClick={() => { if (job.projectId) onNavigate(job.projectId) }}
     >
       <div className="flex items-center gap-1.5">
-        <span className="flex-shrink-0">
+        <span className="shrink-0">
           {isDone ? (
             <CheckCircle2 className="w-3.5 h-3.5 text-success" />
           ) : isFailed ? (
@@ -216,12 +216,12 @@ function CompactJobRow({
           {job.label}
         </span>
         {job.sublabel ? (
-          <span className="flex-shrink-0 max-w-[35%] truncate text-[11px] text-muted-foreground/70">
+          <span className="shrink-0 max-w-[35%] truncate text-[11px] text-muted-foreground/70">
             {job.sublabel}
           </span>
         ) : null}
         {(isActive || isQueued) ? (
-          <span className="flex-shrink-0 text-[9px] px-1 py-px rounded bg-muted text-muted-foreground font-medium uppercase tracking-wide">
+          <span className="shrink-0 text-[9px] px-1 py-px rounded bg-muted text-muted-foreground font-medium uppercase tracking-wide">
             {KIND_LABEL[job.kind]}
           </span>
         ) : null}
@@ -229,14 +229,14 @@ function CompactJobRow({
         {rightText ? (
           <span
             className={cn(
-              'flex-shrink-0 text-[11px] tabular-nums',
+              'shrink-0 text-[11px] tabular-nums',
               isQueued ? 'text-muted-foreground/60' : 'text-muted-foreground',
             )}
           >
             {rightText}
           </span>
         ) : null}
-        <div className="flex-shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 flex items-center" onClick={(e) => e.stopPropagation()}>
           {job.canClear && (
             <button
               type="button"
@@ -317,7 +317,7 @@ function JobRow({
       {/* Top row: icon + label + actions */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2.5 min-w-0 flex-1">
-          <span className="mt-0.5 flex-shrink-0">
+          <span className="mt-0.5 shrink-0">
             {isDone ? (
               <CheckCircle2 className="w-4 h-4 text-success" />
             ) : isFailed ? (
@@ -341,7 +341,7 @@ function JobRow({
                 </div>
               ) : null}
               {job.kind !== 'upload' && (isActive || isQueued) ? (
-                <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
                   {KIND_LABEL[job.kind]}
                 </span>
               ) : null}
@@ -351,7 +351,7 @@ function JobRow({
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           {job.canPause && (
             <button
               type="button" onClick={job.onPause}
@@ -393,14 +393,14 @@ function JobRow({
                 style={{ width: barWidth }}
               />
               {job.indeterminate ? (
-                <div className="absolute inset-0 rounded-full bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_1.5s_ease-in-out_infinite]" />
+                <div className="absolute inset-0 rounded-full bg-linear-to-r from-transparent via-white/10 to-transparent animate-[shimmer_1.5s_ease-in-out_infinite]" />
               ) : null}
             </div>
           ) : null}
           <div className="flex justify-between text-[11px] text-muted-foreground">
             <span className="truncate">{job.statusLine}</span>
             {job.statusLineRight ? (
-              <span className="flex-shrink-0 ml-2">{job.statusLineRight}</span>
+              <span className="shrink-0 ml-2">{job.statusLineRight}</span>
             ) : null}
           </div>
         </div>
@@ -425,7 +425,7 @@ function JobRow({
             <div key={item.key} className="flex items-center gap-2 pl-1 text-[11px] text-muted-foreground">
               <span
                 className={cn(
-                  'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                  'w-1.5 h-1.5 rounded-full shrink-0',
                   item.status === 'done' ? 'bg-success'
                   : item.status === 'active' ? 'bg-primary'
                   : 'bg-warning',
@@ -992,8 +992,8 @@ function ProjectGroupCard({
     <div>
       <div className="px-4 py-3 cursor-pointer hover:bg-accent/40 transition-colors" onClick={onToggle}>
         <div className="flex items-center gap-2.5">
-          <Chevron className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
-          <FolderIcon className={cn('w-4 h-4 flex-shrink-0', group.hasActive ? 'text-primary' : 'text-muted-foreground')} />
+          <Chevron className="w-4 h-4 shrink-0 text-muted-foreground" />
+          <FolderIcon className={cn('w-4 h-4 shrink-0', group.hasActive ? 'text-primary' : 'text-muted-foreground')} />
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-foreground">{group.name}</div>
             <div className="text-[11px] text-muted-foreground truncate">
@@ -1006,12 +1006,12 @@ function ProjectGroupCard({
             </div>
           </div>
           {group.failedCount > 0 ? (
-            <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
+            <span className="shrink-0 inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-destructive/10 text-destructive font-medium">
               <AlertTriangle className="w-3 h-3" />
               {group.failedCount}
             </span>
           ) : null}
-          <span className="flex-shrink-0 text-xs font-medium text-muted-foreground">
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
             {group.showBar ? `${group.progress}%` : 'Queued'}
           </span>
         </div>
@@ -1089,11 +1089,11 @@ function ConsolidatedFinishedRow({
     <div>
       <div className="px-4 py-3 cursor-pointer hover:bg-accent/40 transition-colors" onClick={onToggle}>
         <div className="flex items-center gap-2.5">
-          <Chevron className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
+          <Chevron className="w-4 h-4 shrink-0 text-muted-foreground" />
           {allFailed ? (
-            <XCircle className="w-4 h-4 flex-shrink-0 text-destructive" />
+            <XCircle className="w-4 h-4 shrink-0 text-destructive" />
           ) : (
-            <CheckCircle2 className="w-4 h-4 flex-shrink-0 text-success" />
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-success" />
           )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-foreground">{group.name}</div>
@@ -1109,7 +1109,7 @@ function ConsolidatedFinishedRow({
           <button
             type="button"
             onClick={dismissAll}
-            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+            className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0"
             title="Dismiss all"
           >
             <X className="w-3.5 h-3.5" />
@@ -1329,7 +1329,7 @@ export default function RunningJobsBell() {
         side="bottom"
         sideOffset={8}
         onCloseAutoFocus={(e) => e.preventDefault()}
-        className="!p-0 w-[92vw] sm:w-[400px] max-w-[92vw] max-h-[70dvh] overflow-hidden data-[state=open]:!animate-none data-[state=closed]:!animate-none"
+        className="p-0! w-[92vw] sm:w-[400px] max-w-[92vw] max-h-[70dvh] overflow-hidden data-[state=open]:animate-none! data-[state=closed]:animate-none!"
       >
         <div className="flex flex-col max-h-[70dvh]">
           {/* Header */}

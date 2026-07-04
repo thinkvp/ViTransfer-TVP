@@ -99,9 +99,9 @@ export function AvatarUploadCrop({
   const PREVIEW_SIZE = 256 // display canvas size (px)
   const OUTPUT_SIZE = 300  // server output size (px)
 
-  // Build current avatar URL (avatarPath column has been dropped, always use API)
-  const avatarUrl = `/api/users/${userId}/avatar?t=${Date.now()}`
-  const [displayAvatarUrl, setDisplayAvatarUrl] = useState(avatarUrl)
+  // Current avatar URL (avatarPath column has been dropped, always use API).
+  // Upload/remove flows set a cache-busted URL explicitly.
+  const [displayAvatarUrl, setDisplayAvatarUrl] = useState(`/api/users/${userId}/avatar`)
   useEffect(() => {
     setDisplayAvatarUrl(`/api/users/${userId}/avatar`)
   }, [userId])
@@ -287,7 +287,7 @@ export function AvatarUploadCrop({
   return (
     <div className="flex items-center gap-4">
       {/* Current avatar */}
-      <div className="relative flex-shrink-0">
+      <div className="relative shrink-0">
         <AvatarPreview
           src={displayAvatarUrl}
           name={displayName}
@@ -386,7 +386,7 @@ export function AvatarUploadCrop({
 
                 {/* Zoom slider */}
                 <div className="flex items-center gap-2">
-                  <ZoomOut className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  <ZoomOut className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                   <input
                     type="range"
                     min={50}
@@ -397,7 +397,7 @@ export function AvatarUploadCrop({
                     className="flex-1 accent-primary"
                     aria-label="Zoom"
                   />
-                  <ZoomIn className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                  <ZoomIn className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                 </div>
               </div>
             ) : (

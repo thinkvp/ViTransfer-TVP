@@ -99,7 +99,7 @@ function InternalCommentBubble(props: {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <div className="text-xs text-muted-foreground whitespace-nowrap">
               {formatMessageTime(comment.createdAt)}
             </div>
@@ -126,7 +126,7 @@ function InternalCommentBubble(props: {
         ) : null}
 
         <div
-          className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground"
+          className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground"
           dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(comment.content) }}
         />
 
@@ -167,7 +167,7 @@ function InternalCommentBubble(props: {
                     <div key={reply.id} className="pl-3">
                       <div className="flex items-start justify-between gap-3 mb-1">
                         <div className="flex items-center gap-2 min-w-0">
-                          <CornerDownRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                          <CornerDownRight className="w-3 h-3 text-muted-foreground shrink-0" />
                           <InitialsAvatar
                             name={reply.authorName || 'Unknown'}
                             displayColor={reply.displayColor}
@@ -179,7 +179,7 @@ function InternalCommentBubble(props: {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex items-center gap-2 shrink-0">
                           <span className="text-xs text-muted-foreground whitespace-nowrap">
                             {formatMessageTime(reply.createdAt)}
                           </span>
@@ -197,7 +197,7 @@ function InternalCommentBubble(props: {
                       </div>
 
                       <div
-                        className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground"
+                        className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground"
                         dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(reply.content) }}
                       />
                     </div>
@@ -351,7 +351,7 @@ export function ProjectInternalComments(props: {
     } finally {
       setLoading(false)
     }
-  }, [pendingDeleteComment, fetchComments, projectId, replyingTo?.id])
+  }, [pendingDeleteComment, fetchComments, projectId, replyingTo])
 
   const deleteAll = useCallback(() => {
     setPendingDeleteAll(true)
@@ -402,7 +402,7 @@ export function ProjectInternalComments(props: {
         </div>
       </CardHeader>
 
-      <CardContent className="!p-0">
+      <CardContent className="p-0!">
         <div className="flex flex-col max-h-[50vh]">
           <div
             ref={messagesContainerRef}

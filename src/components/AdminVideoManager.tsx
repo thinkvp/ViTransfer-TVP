@@ -96,7 +96,8 @@ export default function AdminVideoManager({
   // Poster thumbnails for the latest version of each group. Tokens are minted in one
   // batch request and served via /api/content/<token>; we cache per-video so list
   // refreshes don't re-request, and re-request on image error (token expiry).
-  const sessionIdRef = useRef<string>(`admin:${Date.now()}`)
+  // Lazily initialised on first token mint (render must stay pure).
+  const sessionIdRef = useRef<string | null>(null)
   const [thumbUrlByVideoId, setThumbUrlByVideoId] = useState<Record<string, string>>({})
   const thumbRequestedRef = useRef<Set<string>>(new Set())
 
@@ -116,12 +117,15 @@ export default function AdminVideoManager({
     const items = latestPerGroup.map((v) => ({ videoId: v.id, quality: 'thumbnail' }))
     items.forEach((it) => thumbRequestedRef.current.add(it.videoId))
 
+    if (sessionIdRef.current == null) sessionIdRef.current = `admin:${Date.now()}`
+    const sessionId = sessionIdRef.current
+
     let cancelled = false
     ;(async () => {
       try {
         const res = await apiPost<{ results?: Record<string, string>; directUrls?: Record<string, string> }>('/api/admin/video-token/batch', {
           projectId,
-          sessionId: sessionIdRef.current,
+          sessionId,
           items,
         })
         if (cancelled) return
@@ -299,7 +303,7 @@ export default function AdminVideoManager({
                   return (
                     <div
                       className={cn(
-                        'group/thumb relative flex-shrink-0 w-20 h-12 sm:w-24 sm:h-14 rounded-md overflow-hidden bg-muted ring-1',
+                        'group/thumb relative shrink-0 w-20 h-12 sm:w-24 sm:h-14 rounded-md overflow-hidden bg-muted ring-1',
                         ringColor
                       )}
                     >
@@ -357,7 +361,7 @@ export default function AdminVideoManager({
                       />
                     ) : (
                       <div className="min-w-0">
-                        <CardTitle className="text-lg leading-snug break-words">
+                        <CardTitle className="text-lg leading-snug wrap-break-word">
                           <span>{groupName}</span>
                           {projectStatus !== 'APPROVED' && (
                             <Button
@@ -388,7 +392,7 @@ export default function AdminVideoManager({
                   )}
                 </div>
                 {editingGroupName !== groupName && (
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     {hasUploading && (
                       <span className="px-2 py-1 rounded text-xs font-medium flex items-center gap-1 border border-border bg-secondary text-foreground">
                         <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-foreground/80" />
@@ -412,9 +416,9 @@ export default function AdminVideoManager({
                       </span>
                     )}
                     {isExpanded ? (
-                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                      <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                      <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                     )}
                   </div>
                 )}

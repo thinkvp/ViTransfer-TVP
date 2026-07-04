@@ -190,7 +190,7 @@ function ChartTooltip({ active, payload, label, formatValue }: CustomTooltipProp
       {payload.map((entry) => (
         <div key={entry.name} className="flex items-center gap-2">
           <span
-            className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+            className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
             style={{ backgroundColor: entry.color }}
           />
           <span className="text-muted-foreground">{entry.name}:</span>
@@ -803,7 +803,7 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
                 <div key={row.clientId} className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/50">
                   {/* Rank badge */}
                   <div
-                    className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white bg-gradient-to-br ${isTopThree ? rankColor : 'from-muted-foreground/40 to-muted-foreground/20'}`}
+                    className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white bg-linear-to-br ${isTopThree ? rankColor : 'from-muted-foreground/40 to-muted-foreground/20'}`}
                   >
                     {idx + 1}
                   </div>
@@ -817,7 +817,7 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
                       >
                         {row.clientName}
                       </a>
-                      <span className="flex-shrink-0 text-sm font-semibold tabular-nums">
+                      <span className="shrink-0 text-sm font-semibold tabular-nums">
                         {sym}{total.toLocaleString('en-AU')}
                       </span>
                     </div>
@@ -825,7 +825,7 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
                     {/* Relative progress bar */}
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-1.5">
                       <div
-                        className={`h-full rounded-full bg-gradient-to-r ${isTopThree ? rankColor : 'from-indigo-500 to-indigo-400'} transition-all duration-500`}
+                        className={`h-full rounded-full bg-linear-to-r ${isTopThree ? rankColor : 'from-indigo-500 to-indigo-400'} transition-all duration-500`}
                         style={{ width: `${pct}%` }}
                       />
                     </div>

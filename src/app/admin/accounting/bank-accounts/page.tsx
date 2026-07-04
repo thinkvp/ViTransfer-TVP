@@ -635,16 +635,6 @@ export default function BankAccountsPage() {
     setSelectedImportIndices(new Set())
   }
 
-  function openMatchInvoiceDialog(txn: BankTransaction) {
-    setMatchInvoiceTarget(txn)
-    setSelectedInvoiceIds(new Set())
-    setSelectedInvoiceId(null)
-    setSelectedInvoiceIsReconcile(false)
-    setInvoiceSearch('')
-    setOpenInvoices([])
-    void loadOpenInvoices('')
-  }
-
   const loadOpenInvoices = useCallback(async (q: string) => {
     setLoadingInvoices(true)
     try {
@@ -654,6 +644,16 @@ export default function BankAccountsPage() {
       if (res.ok) { const d = await res.json(); setOpenInvoices(d.invoices ?? []) }
     } finally { setLoadingInvoices(false) }
   }, [])
+
+  function openMatchInvoiceDialog(txn: BankTransaction) {
+    setMatchInvoiceTarget(txn)
+    setSelectedInvoiceIds(new Set())
+    setSelectedInvoiceId(null)
+    setSelectedInvoiceIsReconcile(false)
+    setInvoiceSearch('')
+    setOpenInvoices([])
+    void loadOpenInvoices('')
+  }
 
   async function handleMatchInvoice() {
     if (!matchInvoiceTarget) return
@@ -677,14 +677,6 @@ export default function BankAccountsPage() {
     } finally { setMatchingInvoice(false) }
   }
 
-  function openMatchExpenseDialog(txn: BankTransaction) {
-    setMatchExpenseTarget(txn)
-    setSelectedExpenseId(null)
-    setExpenseSearch('')
-    setUnmatchedExpenses([])
-    void loadUnmatchedExpenses('')
-  }
-
   const loadUnmatchedExpenses = useCallback(async (q: string) => {
     setLoadingExpenses(true)
     try {
@@ -694,6 +686,14 @@ export default function BankAccountsPage() {
       if (res.ok) { const d = await res.json(); setUnmatchedExpenses(d.expenses ?? []) }
     } finally { setLoadingExpenses(false) }
   }, [])
+
+  function openMatchExpenseDialog(txn: BankTransaction) {
+    setMatchExpenseTarget(txn)
+    setSelectedExpenseId(null)
+    setExpenseSearch('')
+    setUnmatchedExpenses([])
+    void loadUnmatchedExpenses('')
+  }
 
   async function handleMatchExpense() {
     if (!matchExpenseTarget || !selectedExpenseId) return
@@ -1027,7 +1027,7 @@ export default function BankAccountsPage() {
                             <div className="px-4 pt-3 pb-4 bg-muted/10 border-t border-border">
                               <div className="sm:hidden space-y-1 pb-3">
                                 <p className="text-xs text-muted-foreground">Description</p>
-                                <p className="text-sm leading-5 whitespace-normal break-words">{t.description}</p>
+                                <p className="text-sm leading-5 whitespace-normal wrap-break-word">{t.description}</p>
                               </div>
                               {activeTab === 'UNMATCHED' ? (
                                 <div className="space-y-3">
@@ -1262,7 +1262,7 @@ export default function BankAccountsPage() {
                               ) : (
                                 <div className="space-y-3 max-w-xl">
                                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
-                                    <div className="col-span-2 sm:hidden"><p className="text-xs text-muted-foreground">Description</p><p className="whitespace-normal break-words">{t.description}</p></div>
+                                    <div className="col-span-2 sm:hidden"><p className="text-xs text-muted-foreground">Description</p><p className="whitespace-normal wrap-break-word">{t.description}</p></div>
                                     {(t.transactionType || t.matchType === 'INVOICE_PAYMENT' || t.matchType === 'BAS_PAYMENT') && <div><p className="text-xs text-muted-foreground">Type</p><p>{t.matchType === 'SPLIT' ? 'Split' : t.matchType === 'BAS_PAYMENT' ? 'BAS Payment' : t.matchType === 'INVOICE_PAYMENT' ? 'Receive Payment' : TYPE_LABELS[t.transactionType!] ?? t.transactionType}</p></div>}
                                     {t.matchType !== 'SPLIT' && t.matchType !== 'BAS_PAYMENT' && (() => { const acctId = t.accountId ?? t.expense?.accountId; const name = t.accountName ?? t.expense?.accountName; const code = acctId ? coaAccounts.find(a => a.id === acctId)?.code : undefined; if (t.matchType === 'INVOICE_PAYMENT') return <div><p className="text-xs text-muted-foreground">Posting</p><p>Invoice payment only</p></div>; if (acctId) return <div><p className="text-xs text-muted-foreground">Account</p>{code ? <Link href={`/admin/accounting/chart-of-accounts/${code}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link> : <Link href={`/admin/accounting/chart-of-accounts/${acctId}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link>}</div>; return null })()}
                                     {t.matchType === 'BAS_PAYMENT' && t.basPeriod && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">BAS Period</p><p>{t.basPeriod.label || `Q${t.basPeriod.quarter} ${t.basPeriod.financialYear}`}</p></div>}

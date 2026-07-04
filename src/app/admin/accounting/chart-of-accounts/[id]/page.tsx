@@ -306,7 +306,7 @@ export default function AccountLedgerPage() {
 
   return (
     <>
-      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-4 max-w-screen-2xl mx-auto">
+      <div className="px-3 sm:px-4 lg:px-6 py-3 sm:py-6 space-y-4 max-w-(--breakpoint-2xl) mx-auto">
       <div className="flex items-center gap-3">
         <Link href="/admin/accounting/chart-of-accounts">
           <Button variant="ghost" size="sm" className="gap-1.5">
@@ -664,7 +664,7 @@ export default function AccountLedgerPage() {
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium whitespace-normal break-words">{transaction.description}</p>
+                      <p className="text-sm font-medium whitespace-normal wrap-break-word">{transaction.description}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">{formatDate(transaction.date)}</p>
                     </div>
                     <p className="text-sm font-medium tabular-nums whitespace-nowrap">{fmtAud(transaction.amountCents)}</p>

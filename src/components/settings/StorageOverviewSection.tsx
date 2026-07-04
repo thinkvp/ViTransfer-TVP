@@ -307,9 +307,9 @@ export function StorageOverviewSection({
             </CardDescription>
           </div>
           {!hideCollapse && (show ? (
-            <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
           ))}
         </div>
       </CardHeader>
@@ -336,7 +336,7 @@ export function StorageOverviewSection({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 text-muted-foreground hover:text-foreground flex-shrink-0"
+                        className="h-6 w-6 text-muted-foreground hover:text-foreground shrink-0"
                         disabled={recalculateProjectDataTotalsLoading || loading}
                         title={(recalculateProjectDataTotalsLoading || loading) ? 'Refreshing…' : 'Recalculate & refresh'}
                         onClick={() => void (async () => {
@@ -477,7 +477,7 @@ export function StorageOverviewSection({
                   {/* Live progress — shown while backup is running */}
                   {backupRunning && backupRunResult && (
                     <div className="flex items-start gap-2 text-xs text-muted-foreground">
-                      <RefreshCw className="w-3 h-3 mt-0.5 flex-shrink-0 animate-spin" />
+                      <RefreshCw className="w-3 h-3 mt-0.5 shrink-0 animate-spin" />
                       <span>{backupRunResult}</span>
                     </div>
                   )}
@@ -603,7 +603,7 @@ export function StorageOverviewSection({
                             <div className="text-[11px] font-medium text-muted-foreground">
                               Affected projects (first 10)
                             </div>
-                            <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                            <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                               {closedPreviewsResult.sample.projects
                                 .map(
                                   (p) =>
@@ -618,7 +618,7 @@ export function StorageOverviewSection({
                               <div className="text-[11px] font-medium text-muted-foreground">
                                 Errors (first 20)
                               </div>
-                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                              <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                                 {closedPreviewsResult.errors
                                   .slice(0, 20)
                                   .map((e) => `${e.projectId}: ${e.path}: ${e.error}`)
@@ -633,7 +633,7 @@ export function StorageOverviewSection({
                 ) : null}
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                 <Button
                   type="button"
                   variant="outline"

@@ -290,13 +290,13 @@ export function ProjectTasks({
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-medium">{task.title}</p>
                       <span
-                        className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-white flex-shrink-0"
+                        className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-white shrink-0"
                         style={{ backgroundColor: task.column.color || 'hsl(var(--muted-foreground))' }}
                       >
                         {task.column.name}
                       </span>
                       {isArchived && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-muted text-muted-foreground flex-shrink-0">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-muted text-muted-foreground shrink-0">
                           Archived
                         </span>
                       )}
@@ -350,7 +350,7 @@ export function ProjectTasks({
                       />
                     ))}
                     {task.members.length > MAX_AVATARS && (
-                      <div className="h-5 w-5 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[8px] font-semibold text-muted-foreground flex-shrink-0">
+                      <div className="h-5 w-5 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[8px] font-semibold text-muted-foreground shrink-0">
                         +{task.members.length - MAX_AVATARS}
                       </div>
                     )}
@@ -372,7 +372,7 @@ export function ProjectTasks({
                           />
                         ))}
                         {task.members.length > MAX_AVATARS && (
-                          <div className="h-5 w-5 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[8px] font-semibold text-muted-foreground flex-shrink-0">
+                          <div className="h-5 w-5 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[8px] font-semibold text-muted-foreground shrink-0">
                             +{task.members.length - MAX_AVATARS}
                           </div>
                         )}

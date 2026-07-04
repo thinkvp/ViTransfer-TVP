@@ -71,7 +71,7 @@ export function SearchableLabelSelect({
           {selected ? (
             <span className="inline-flex items-center gap-1.5">
               <span
-                className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
                 style={{ backgroundColor: selected.color ?? '#6366F1' }}
               />
               {selected.name}
@@ -80,13 +80,13 @@ export function SearchableLabelSelect({
             <span className="text-muted-foreground">{placeholder}</span>
           )}
         </span>
-        <ChevronDown className="h-3.5 w-3.5 opacity-50 flex-shrink-0 ml-1" />
+        <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0 ml-1" />
       </button>
 
       {open && (
         <div className="absolute z-50 mt-1 w-full min-w-[160px] rounded-xl border border-border/60 bg-popover text-popover-foreground shadow-elevation-lg overflow-hidden">
           <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border/40">
-            <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+            <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
             <input
               ref={inputRef}
               type="text"
@@ -131,7 +131,7 @@ export function SearchableLabelSelect({
                 }}
               >
                 <span
-                  className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                  className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
                   style={{ backgroundColor: l.color ?? '#6366F1' }}
                 />
                 {l.name}

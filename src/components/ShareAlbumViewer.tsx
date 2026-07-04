@@ -277,7 +277,7 @@ export function ShareAlbumViewer({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-xl font-semibold truncate">{album?.name || 'Album'}</h2>
-          {album?.notes && <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{album.notes}</p>}
+          {album?.notes && <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap wrap-break-word">{album.notes}</p>}
         </div>
       </div>
 
@@ -301,7 +301,7 @@ export function ShareAlbumViewer({
             <div className="text-base font-semibold">
               {photos.length} photo{photos.length === 1 ? '' : 's'}
             </div>
-            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            <div className="ml-auto flex items-center gap-2 shrink-0">
               <Button
                 type="button"
                 variant="default"

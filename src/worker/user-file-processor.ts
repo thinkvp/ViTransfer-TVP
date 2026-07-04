@@ -28,7 +28,7 @@ export async function processUserFile(job: Job<UserFileProcessingJob>) {
   }
 
   try {
-    const { fileTypeFromBuffer } = await import('file-type/core')
+    const { fileTypeFromBuffer } = await import('file-type')
 
     let sampleBuffer: Buffer
 

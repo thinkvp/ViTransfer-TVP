@@ -111,6 +111,7 @@ export default async function SalesDocPublicViewPage(
       where: {
         shareToken: token,
         ipAddress,
+        // eslint-disable-next-line react-hooks/purity -- server component: renders once per request, current time is intentional
         createdAt: { gt: new Date(Date.now() - DEDUPE_WINDOW_MS) },
       },
       select: { id: true },
@@ -215,6 +216,7 @@ export default async function SalesDocPublicViewPage(
     ? await aggregateInvoicePaidCents(String(share.docId || '').trim())
     : 0
 
+  // eslint-disable-next-line react-hooks/purity -- server component: renders once per request, current time is intentional
   const nowMs = Date.now()
 
   const effectiveStatus = (type === 'QUOTE'
@@ -337,7 +339,7 @@ export default async function SalesDocPublicViewPage(
                     />
                   </div>
                 )}
-                <div className="text-lg font-semibold break-words">{businessName}</div>
+                <div className="text-lg font-semibold wrap-break-word">{businessName}</div>
                 {abn && <div className="text-xs opacity-80 mt-0.5">{businessRegistrationLabel}: {abn}</div>}
                 {address && (
                   <div className="text-xs opacity-80 mt-2 whitespace-pre-wrap">{address}</div>
@@ -349,7 +351,7 @@ export default async function SalesDocPublicViewPage(
                 </div>
               </div>
 
-              <div className="text-right flex-shrink-0">
+              <div className="text-right shrink-0">
                 <div className="text-2xl font-bold tracking-wide">{title}</div>
                 <div className="text-sm opacity-90 mt-1">{numberLabel} {number}</div>
                 {status && (
@@ -379,12 +381,12 @@ export default async function SalesDocPublicViewPage(
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <div className="text-xs text-muted-foreground">Bill To</div>
-                <div className="text-sm font-medium mt-1 break-words">{clientName}</div>
+                <div className="text-sm font-medium mt-1 wrap-break-word">{clientName}</div>
                 {clientAddress && (
-                  <div className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap break-words">{clientAddress}</div>
+                  <div className="text-xs text-muted-foreground mt-1 whitespace-pre-wrap wrap-break-word">{clientAddress}</div>
                 )}
                 {projectTitle && (
-                  <div className="text-sm font-medium mt-3 break-words">Project: {projectTitle}</div>
+                  <div className="text-sm font-medium mt-3 wrap-break-word">Project: {projectTitle}</div>
                 )}
               </div>
               <div className="text-sm text-muted-foreground sm:text-right">
@@ -444,9 +446,9 @@ export default async function SalesDocPublicViewPage(
                       return (
                         <tr key={key} className="border-t">
                           <td className="px-3 py-2 align-top min-w-[280px]">
-                            <div className="font-medium whitespace-normal break-words">{safeString(it?.description) || '—'}</div>
+                            <div className="font-medium whitespace-normal wrap-break-word">{safeString(it?.description) || '—'}</div>
                             {safeString(it?.details).trim() && (
-                              <div className="text-xs text-muted-foreground whitespace-pre-wrap break-words mt-1">
+                              <div className="text-xs text-muted-foreground whitespace-pre-wrap wrap-break-word mt-1">
                                 {safeString(it?.details)}
                               </div>
                             )}
@@ -506,13 +508,13 @@ export default async function SalesDocPublicViewPage(
                     {safeString(doc?.notes).trim() && (
                       <>
                         <div className="text-xs text-muted-foreground">Notes</div>
-                        <div className="text-sm whitespace-pre-wrap break-words mt-1">{safeString(doc?.notes)}</div>
+                        <div className="text-sm whitespace-pre-wrap wrap-break-word mt-1">{safeString(doc?.notes)}</div>
                       </>
                     )}
                     {safeString(doc?.terms).trim() && (
                       <>
                         <div className={safeString(doc?.notes).trim() ? 'text-xs text-muted-foreground mt-4' : 'text-xs text-muted-foreground'}>Terms</div>
-                        <div className="text-sm whitespace-pre-wrap break-words mt-1">{safeString(doc?.terms)}</div>
+                        <div className="text-sm whitespace-pre-wrap wrap-break-word mt-1">{safeString(doc?.terms)}</div>
                       </>
                     )}
                   </div>
@@ -523,7 +525,7 @@ export default async function SalesDocPublicViewPage(
                 {type === 'INVOICE' && paymentDetails.trim() && (
                   <div className="sm:text-right">
                     <div className="text-xs text-muted-foreground">Payment details</div>
-                    <div className="text-sm whitespace-pre-wrap break-words mt-1">{paymentDetails}</div>
+                    <div className="text-sm whitespace-pre-wrap wrap-break-word mt-1">{paymentDetails}</div>
                   </div>
                 )}
               </div>

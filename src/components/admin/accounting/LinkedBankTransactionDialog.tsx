@@ -154,7 +154,7 @@ export function LinkedBankTransactionDialog({ open, transactionId, onOpenChange,
 
             <div>
               <p className="text-xs text-muted-foreground">Description</p>
-              <p className="whitespace-normal break-words">{transaction.description}</p>
+              <p className="whitespace-normal wrap-break-word">{transaction.description}</p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -171,7 +171,7 @@ export function LinkedBankTransactionDialog({ open, transactionId, onOpenChange,
             {transaction.memo && (
               <div>
                 <p className="text-xs text-muted-foreground">Memo</p>
-                <p className="whitespace-normal break-words">{transaction.memo}</p>
+                <p className="whitespace-normal wrap-break-word">{transaction.memo}</p>
               </div>
             )}
 

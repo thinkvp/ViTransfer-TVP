@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
 import { getClientIpAddress } from '@/lib/utils'
 import { logSecurityEvent } from '@/lib/video-access'
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 import { PassThrough, Readable } from 'stream'
 import { failTrackedDownloadNow, registerTrackedDownload, recordTrackedDownloadProgress } from '@/lib/download-tracking'
 // Token-based auth; asset paths resolved via download token verification, not projectId.
@@ -99,7 +99,7 @@ export async function GET(
     }
 
     // Create ZIP archive with streaming (no memory buffer)
-    const archive = archiver('zip', {
+    const archive = new ZipArchive({
       zlib: { level: 6 }, // Compression level (0-9)
     })
 

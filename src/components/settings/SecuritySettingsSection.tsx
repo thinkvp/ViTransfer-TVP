@@ -122,9 +122,9 @@ export function SecuritySettingsSection({
             </CardDescription>
           </div>
           {!hideCollapse && (showSecuritySettings ? (
-            <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
           ))}
         </div>
       </CardHeader>
@@ -143,7 +143,7 @@ export function SecuritySettingsSection({
           {/* Safeguard Limits */}
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-primary flex-shrink-0" />
+              <AlertTriangle className="w-5 h-5 text-primary shrink-0" />
               <div className="text-base font-semibold">Safeguard Limits</div>
             </div>
 
@@ -202,7 +202,7 @@ export function SecuritySettingsSection({
           <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-2 flex-1">
-                <Lock className="w-5 h-5 text-primary flex-shrink-0" />
+                <Lock className="w-5 h-5 text-primary shrink-0" />
                 <Label className="text-base font-semibold">
                   HTTPS Mode
                 </Label>
@@ -278,7 +278,7 @@ export function SecuritySettingsSection({
                         <div key={ip.id} className="border rounded-lg p-3 flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="font-mono text-sm break-all">{ip.ipAddress}</div>
-                            {ip.reason && <div className="text-xs text-muted-foreground mt-1 break-words">{ip.reason}</div>}
+                            {ip.reason && <div className="text-xs text-muted-foreground mt-1 wrap-break-word">{ip.reason}</div>}
                             <div className="text-[11px] text-muted-foreground mt-1">
                               Added {new Date(ip.createdAt).toLocaleString()}
                             </div>
@@ -331,7 +331,7 @@ export function SecuritySettingsSection({
                         <div key={domain.id} className="border rounded-lg p-3 flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="font-mono text-sm break-all">{domain.domain}</div>
-                            {domain.reason && <div className="text-xs text-muted-foreground mt-1 break-words">{domain.reason}</div>}
+                            {domain.reason && <div className="text-xs text-muted-foreground mt-1 wrap-break-word">{domain.reason}</div>}
                             <div className="text-[11px] text-muted-foreground mt-1">
                               Added {new Date(domain.createdAt).toLocaleString()}
                             </div>
@@ -480,20 +480,20 @@ export function SecuritySettingsSection({
                   const val = parseInt(sessionTimeoutValue, 10) || 15
                   const unit = sessionTimeoutUnit
                   if (unit === 'MINUTES') {
-                    if (val < 5) return <><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0 text-warning" /> Very short - users may be logged out while actively viewing</>
-                    if (val <= 30) return <><CheckCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-success" /> Good for security - sessions expire quickly</>
-                    return <><Clock className="w-3 h-3 mt-0.5 flex-shrink-0" /> Longer timeout - convenient but less secure</>
+                    if (val < 5) return <><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-warning" /> Very short - users may be logged out while actively viewing</>
+                    if (val <= 30) return <><CheckCircle className="w-3 h-3 mt-0.5 shrink-0 text-success" /> Good for security - sessions expire quickly</>
+                    return <><Clock className="w-3 h-3 mt-0.5 shrink-0" /> Longer timeout - convenient but less secure</>
                   }
                   if (unit === 'HOURS') {
-                    if (val <= 2) return <><CheckCircle className="w-3 h-3 mt-0.5 flex-shrink-0 text-success" /> Balanced - good for longer review sessions</>
-                    if (val <= 8) return <><Clock className="w-3 h-3 mt-0.5 flex-shrink-0" /> Long timeout - convenient for all-day access</>
-                    return <><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0 text-warning" /> Very long - consider security implications</>
+                    if (val <= 2) return <><CheckCircle className="w-3 h-3 mt-0.5 shrink-0 text-success" /> Balanced - good for longer review sessions</>
+                    if (val <= 8) return <><Clock className="w-3 h-3 mt-0.5 shrink-0" /> Long timeout - convenient for all-day access</>
+                    return <><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-warning" /> Very long - consider security implications</>
                   }
                   if (unit === 'DAYS') {
-                    return <><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0 text-warning" /> Extended timeout - only use for trusted environments</>
+                    return <><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-warning" /> Extended timeout - only use for trusted environments</>
                   }
                   if (unit === 'WEEKS') {
-                    return <><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0 text-warning" /> Maximum timeout - use with caution</>
+                    return <><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0 text-warning" /> Maximum timeout - use with caution</>
                   }
                   return ''
                 })()}

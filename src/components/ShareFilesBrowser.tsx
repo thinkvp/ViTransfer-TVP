@@ -2239,9 +2239,9 @@ export function ShareFilesBrowser({
           }
         }}
       >
-        <div className={cn('relative bg-gradient-to-b from-muted/70 to-muted/35', compact ? 'p-2 pb-1.5' : 'p-2.5 pb-2')}>
+        <div className={cn('relative bg-linear-to-b from-muted/70 to-muted/35', compact ? 'p-2 pb-1.5' : 'p-2.5 pb-2')}>
           <div className={cn('relative rounded-lg border border-border/80 bg-card shadow-inner shadow-black/10', compact ? 'p-1' : 'p-1.5')}>
-            <div className={cn('relative rounded-md overflow-hidden bg-black/85', compact ? 'aspect-[4/3]' : 'aspect-[16/10]')}>
+            <div className={cn('relative rounded-md overflow-hidden bg-black/85', compact ? 'aspect-4/3' : 'aspect-16/10')}>
               {showTimelineHover ? (
                 <VideoHoverPreview
                   thumbnailUrl={videoThumbnailSrc || ''}
@@ -2442,7 +2442,7 @@ export function ShareFilesBrowser({
           setContextMenu({ x: event.clientX, y: event.clientY, group })
         }}
       >
-        <div className="relative p-2.5 pb-2 bg-gradient-to-b from-muted/80 via-muted/45 to-background">
+        <div className="relative p-2.5 pb-2 bg-linear-to-b from-muted/80 via-muted/45 to-background">
           <FolderPreviewMosaic
             label={group.name}
             tiles={folderPreviewTiles}
@@ -3405,7 +3405,7 @@ export function ShareFilesBrowser({
         ? createPortal(
             <div
               ref={contextMenuRef}
-              className="fixed z-[9999] min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-elevation-lg text-popover-foreground"
+              className="fixed z-9999 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-elevation-lg text-popover-foreground"
               style={{
                 left: Math.min(contextMenu.x, window.innerWidth - 220),
                 top: Math.min(contextMenu.y, Math.max(4, window.innerHeight - 260)),

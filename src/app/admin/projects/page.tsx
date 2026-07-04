@@ -97,7 +97,7 @@ export default function AdminPage() {
     }
   }, [searchParams])
 
-  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20'
+  const metricIconWrapperClassName = 'rounded-lg p-2.5 shrink-0 bg-primary/20 ring-1 ring-primary/20'
   const metricIconClassName = 'w-5 h-5 text-primary'
 
   const overview = useMemo<OverviewStats>(() => {
@@ -204,7 +204,7 @@ export default function AdminPage() {
   if (!projects || projects.length === 0) {
     return (
       <div className="flex-1 min-h-0 bg-background">
-        <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+        <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
           <div className="flex justify-between items-center gap-4 mb-4 sm:mb-6">
             <div>
               <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
@@ -303,7 +303,7 @@ export default function AdminPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="flex justify-between items-center gap-4 mb-4 sm:mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">

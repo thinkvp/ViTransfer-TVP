@@ -1,40 +1,15 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  darkMode: ["class"],
+  darkMode: "class",
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/lib/**/*.{js,ts,jsx,tsx,mdx}",
   ],
-  safelist: [
-    // Dynamic user color borders for message bubbles
-    // Sender colors (earth tones - beige, brown, army green)
-    'border-amber-700',
-    'border-orange-800',
-    'border-stone-600',
-    'border-yellow-700',
-    'border-lime-700',
-    'border-green-700',
-    'border-emerald-800',
-    'border-teal-800',
-    'border-slate-600',
-    'border-zinc-600',
-    // Receiver colors (vibrant, high-contrast)
-    'border-red-500',
-    'border-orange-500',
-    'border-amber-500',
-    'border-yellow-400',
-    'border-lime-500',
-    'border-green-500',
-    'border-emerald-500',
-    'border-pink-500',
-    'border-rose-500',
-    'border-fuchsia-500',
-    // Default
-    'border-gray-500',
-  ],
+  // v3 `safelist` was removed in Tailwind 4 — the dynamic border colours now live
+  // in globals.css as `@source inline(...)` directives.
   theme: {
     extend: {
       colors: {

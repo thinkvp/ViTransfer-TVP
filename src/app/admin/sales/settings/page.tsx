@@ -570,7 +570,7 @@ export default function SalesSettingsPage() {
       )}
 
       <div className="lg:flex gap-6">
-        <div className="hidden lg:block w-52 xl:w-60 flex-shrink-0">
+        <div className="hidden lg:block w-52 xl:w-60 shrink-0">
           <nav className="space-y-0.5 sticky top-6">
             {SALES_SECTIONS.map((section) => {
               const SectionIcon = section.icon
@@ -585,7 +585,7 @@ export default function SalesSettingsPage() {
                       : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                   )}
                 >
-                  <SectionIcon className="w-4 h-4 flex-shrink-0" />
+                  <SectionIcon className="w-4 h-4 shrink-0" />
                   {section.label}
                 </button>
               )
@@ -934,7 +934,7 @@ export default function SalesSettingsPage() {
                     <tr key={lbl.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                       <td className="px-3 py-2">
                         <span
-                          className="inline-block w-4 h-4 rounded-sm flex-shrink-0"
+                          className="inline-block w-4 h-4 rounded-sm shrink-0"
                           style={{ backgroundColor: lbl.color ?? '#6366F1' }}
                         />
                       </td>

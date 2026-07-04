@@ -432,7 +432,7 @@ export default function NotificationsBell() {
         side="bottom"
         sideOffset={8}
         onCloseAutoFocus={(e) => e.preventDefault()}
-        className="!p-0 w-[92vw] sm:w-[420px] max-w-[92vw] h-[80dvh] max-h-[80dvh] overflow-hidden data-[state=open]:!animate-none data-[state=closed]:!animate-none"
+        className="p-0! w-[92vw] sm:w-[420px] max-w-[92vw] h-[80dvh] max-h-[80dvh] overflow-hidden data-[state=open]:animate-none! data-[state=closed]:animate-none!"
       >
         <div className="flex h-full flex-col">
           <div className="px-4 sm:px-5 py-3 sm:py-4 border-b border-border flex items-center justify-between">
@@ -485,7 +485,7 @@ export default function NotificationsBell() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <div className="text-sm font-medium text-foreground break-words">{title}</div>
+                            <div className="text-sm font-medium text-foreground wrap-break-word">{title}</div>
                           </div>
                           {projectName ? <div className="text-xs text-muted-foreground truncate">{projectName}</div> : null}
                         </div>
@@ -512,14 +512,14 @@ export default function NotificationsBell() {
                       {clearable ? (
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div className="flex items-center gap-1.5 text-xs font-medium text-warning">
-                            <Pin className="w-3 h-3 flex-shrink-0" />
+                            <Pin className="w-3 h-3 shrink-0" />
                             <span>System Notification</span>
                           </div>
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground flex-shrink-0"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground shrink-0"
                             disabled={clearingId === n.id}
                             onClick={() => clearNotification(n.id)}
                             title="Dismiss"

@@ -354,7 +354,7 @@ export default function EditUserPage() {
 
   return (
     <>
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-x-hidden">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-x-hidden">
         <div className="max-w-4xl mx-auto space-y-6 min-w-0">
           <div className="mb-6">
             <h1 className="text-2xl sm:text-3xl font-bold">Edit User</h1>
@@ -559,7 +559,7 @@ export default function EditUserPage() {
                       variant="outline"
                       size="icon"
                       onClick={generateRandomPassword}
-                      className="flex-shrink-0"
+                      className="shrink-0"
                       title="Generate new password"
                     >
                       <RefreshCw className="w-4 h-4" />
@@ -569,7 +569,7 @@ export default function EditUserPage() {
                       variant="outline"
                       size="icon"
                       onClick={copyPassword}
-                      className="flex-shrink-0"
+                      className="shrink-0"
                       title="Copy password"
                     >
                       {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
@@ -639,7 +639,7 @@ export default function EditUserPage() {
 
               {!passkeyAvailable ? (
                 <div className="bg-muted border border-border rounded p-3 flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0 text-muted-foreground" />
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
                   <div className="text-sm">
                     <p className="font-medium">Not Available</p>
                     <p className="text-xs text-muted-foreground mt-1">{passkeyReason}</p>
@@ -666,7 +666,7 @@ export default function EditUserPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="w-full sm:w-auto flex-shrink-0"
+                      className="w-full sm:w-auto shrink-0"
                       onClick={handleRegisterPasskey}
                       disabled={passkeyLoading}
                     >

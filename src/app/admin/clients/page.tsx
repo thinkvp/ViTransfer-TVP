@@ -206,7 +206,7 @@ export default function ClientsPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="w-full max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="w-full max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="flex justify-between items-center gap-4 mb-4 sm:mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
@@ -239,7 +239,7 @@ export default function ClientsPage() {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 flex-shrink-0">
+            <div className="flex items-center justify-end gap-2 shrink-0">
               <Button
                 type="button"
                 variant="ghost"

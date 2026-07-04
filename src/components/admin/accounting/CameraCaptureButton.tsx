@@ -55,6 +55,8 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
   const [capturedFile, setCapturedFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [cameraCount, setCameraCount] = useState(0)
+  // Mirrors streamRef so render logic (Capture button disabled state) stays reactive
+  const [hasStream, setHasStream] = useState(false)
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -62,6 +64,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
       streamRef.current = null
     }
     if (videoRef.current) videoRef.current.srcObject = null
+    setHasStream(false)
   }, [])
 
   const clearCaptured = useCallback(() => {
@@ -74,6 +77,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
 
   const openStream = useCallback(async (stream: MediaStream) => {
     streamRef.current = stream
+    setHasStream(true)
     if (videoRef.current) {
       videoRef.current.srcObject = stream
       await videoRef.current.play().catch(() => undefined)
@@ -264,7 +268,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
               <img src={previewUrl} alt="Captured receipt preview" className="w-full rounded-md border border-border object-contain" />
             ) : (
               <div className="relative overflow-hidden rounded-md border border-border bg-black/90">
-                <video ref={videoRef} autoPlay muted playsInline className="aspect-[3/4] w-full object-cover" />
+                <video ref={videoRef} autoPlay muted playsInline className="aspect-3/4 w-full object-cover" />
                 {cameraCount > 1 && (
                   <Button
                     type="button"
@@ -317,7 +321,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
                     </Button>
                   </>
                 ) : (
-                  <Button type="button" onClick={() => void handleCapture()} disabled={starting || capturing || !!error && !streamRef.current}>
+                  <Button type="button" onClick={() => void handleCapture()} disabled={starting || capturing || !!error && !hasStream}>
                     {starting || capturing ? <><Loader2 className="w-4 h-4 animate-spin" />Starting…</> : 'Capture'}
                   </Button>
                 )}

@@ -339,7 +339,7 @@ export default function VideoList({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
+                      className="h-6 w-6 shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
                       onClick={() => handleStartEdit(video.id, video.versionLabel)}
                       title="Edit version label"
                     >
@@ -351,7 +351,7 @@ export default function VideoList({
             </div>
             {/* Action icons - right side on all screen sizes */}
             {editingId !== video.id && (
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {/* Show status badge for non-ready states */}
                 {(video.status === 'UPLOADING' || video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'ERROR') && (
                   <span
@@ -453,7 +453,7 @@ export default function VideoList({
                 </p>
               )}
 
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 {video.status === 'READY' && (
                   <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
                     <span className="inline-flex items-center gap-1">
@@ -603,7 +603,7 @@ export default function VideoList({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 flex-shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
+                      className="h-6 w-6 shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
                       onClick={() => handleStartEditNotes(video.id, (video.videoNotes as string) || '')}
                       title="Edit version notes"
                     >

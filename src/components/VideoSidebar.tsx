@@ -899,7 +899,7 @@ export default function VideoSidebar({
     if (!hasTransferItems || isTransfersHidden) return null
 
     return (
-      <div className={cn('border-t border-border bg-card/95 backdrop-blur-sm', isMobile ? 'mt-2' : 'flex-shrink-0')}>
+      <div className={cn('border-t border-border bg-card/95 backdrop-blur-sm', isMobile ? 'mt-2' : 'shrink-0')}>
         {!isMobile && (
           <div
             className="flex h-[5px] cursor-row-resize items-center justify-center bg-border transition-colors hover:bg-primary/20"
@@ -1026,7 +1026,7 @@ export default function VideoSidebar({
 
     const thumbnailEl = (
       <div
-        className="flex-shrink-0 rounded overflow-hidden bg-black flex items-center justify-center relative"
+        className="shrink-0 rounded overflow-hidden bg-black flex items-center justify-center relative"
         style={{ width: videoThumbnailWidth, height: videoThumbnailHeight }}
       >
         {thumbnailUrl ? (
@@ -1046,7 +1046,7 @@ export default function VideoSidebar({
 
     const titleEl = (
       <div className="flex-1 min-w-0">
-        <p className="text-sm leading-snug line-clamp-2 break-words">{group.name}</p>
+        <p className="text-sm leading-snug line-clamp-2 wrap-break-word">{group.name}</p>
         {!showDownloadFiles && (
           <p className="text-xs text-muted-foreground">
             {hideApprovalGrouping && latestVideo?.versionLabel
@@ -1134,7 +1134,7 @@ export default function VideoSidebar({
 
     const thumbnailEl = (
       <div
-        className="flex-shrink-0 rounded overflow-hidden relative bg-gradient-to-br from-muted to-muted-foreground/50 flex items-center justify-center"
+        className="shrink-0 rounded overflow-hidden relative bg-linear-to-br from-muted to-muted-foreground/50 flex items-center justify-center"
         style={{ width: videoThumbnailWidth, height: videoThumbnailHeight }}
       >
         {previewUrl && (
@@ -1155,7 +1155,7 @@ export default function VideoSidebar({
 
     const titleEl = (
       <div className="flex-1 min-w-0">
-        <p className="text-sm leading-snug line-clamp-2 break-words">{a.name}</p>
+        <p className="text-sm leading-snug line-clamp-2 wrap-break-word">{a.name}</p>
         {!showDownloadFiles && (
           <p className="text-xs text-muted-foreground">
             {a.photoCount ?? 0} photo{(a.photoCount ?? 0) === 1 ? '' : 's'}
@@ -1246,7 +1246,7 @@ export default function VideoSidebar({
             isActive ? 'bg-primary/10 text-primary font-medium border border-primary/20' : 'text-foreground'
           )}
         >
-          <div className="flex-shrink-0" style={{ width: uploadsThumbnailWidth }}>
+          <div className="shrink-0" style={{ width: uploadsThumbnailWidth }}>
             <FolderPreviewMosaic
               label="UPLOADS"
               tiles={uploadsPreviewTiles}
@@ -1875,7 +1875,7 @@ export default function VideoSidebar({
       </div>
 
       {downloadableFiles && downloadableFiles.length > 0 && (onDownloadFile || onDownloadFiles) && (
-        <div className={cn('flex-shrink-0 border-t border-border bg-card p-2 space-y-1.5', isMobile && 'sticky bottom-0')}>
+        <div className={cn('shrink-0 border-t border-border bg-card p-2 space-y-1.5', isMobile && 'sticky bottom-0')}>
           {/* Progress bar above buttons */}
           {showDownloadProgress && (
             <div className="w-full mb-2">
@@ -1951,7 +1951,7 @@ export default function VideoSidebar({
         )}
       >
         {hasLogo && (
-          <div className="p-4 border-b border-border flex-shrink-0">
+          <div className="p-4 border-b border-border shrink-0">
             {mainCompanyDomain ? (
               <a href={mainCompanyDomain} target="_blank" rel="noopener noreferrer">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1972,7 +1972,7 @@ export default function VideoSidebar({
           </div>
         )}
         {heading && (
-          <div className="p-4 border-b border-border space-y-3 flex-shrink-0">
+          <div className="p-4 border-b border-border space-y-3 shrink-0">
             {showProjectHeadingLabel && (
               <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Project:
@@ -2033,7 +2033,7 @@ export default function VideoSidebar({
               {showBottomSection && (
                 <>
                   <div
-                    className="flex-shrink-0 h-[5px] bg-border hover:bg-primary/20 cursor-row-resize flex items-center justify-center group transition-colors"
+                    className="shrink-0 h-[5px] bg-border hover:bg-primary/20 cursor-row-resize flex items-center justify-center group transition-colors"
                     onMouseDown={(e) => { e.preventDefault(); setIsDraggingDivider(true) }}
                   >
                     <div className="w-8 h-0.5 rounded-full bg-muted-foreground/30 group-hover:bg-primary/50 transition-colors" />
@@ -2042,7 +2042,7 @@ export default function VideoSidebar({
                     className="flex flex-col"
                     style={{ height: `${filesRatio * 100}%` }}
                   >
-                    <div className="flex-shrink-0 bg-card px-3 py-2 flex items-center justify-between border-b border-border">
+                    <div className="shrink-0 bg-card px-3 py-2 flex items-center justify-between border-b border-border">
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Files</span>
                       {downloadableFiles && downloadableFiles.length > 0 && (onDownloadFile || onDownloadFiles) && (
                         <button
@@ -2103,7 +2103,7 @@ export default function VideoSidebar({
             <>
               {/* Optional tab bar — can be moved to page header via controlled props */}
               {showDesktopTabBar && (
-                <div className="flex flex-shrink-0">
+                <div className="flex shrink-0">
                   <button
                     type="button"
                     onClick={() => setDesktopActiveTabValue('for-review')}
@@ -2193,7 +2193,7 @@ export default function VideoSidebar({
                 ? createPortal(
                     <div
                       ref={contextMenuRef}
-                      className="fixed z-[9999] min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-elevation-lg text-popover-foreground"
+                      className="fixed z-9999 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-elevation-lg text-popover-foreground"
                       style={{
                         left: Math.min(contextMenu.x, window.innerWidth - 220),
                         top: Math.min(contextMenu.y, Math.max(4, window.innerHeight - 260)),
@@ -2530,7 +2530,7 @@ export default function VideoSidebar({
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Project:
                 </div>
-                <h2 className="text-base font-semibold text-foreground break-words">
+                <h2 className="text-base font-semibold text-foreground wrap-break-word">
                   {heading}
                 </h2>
                 {canOpenProjectSwitcher && (
@@ -2573,7 +2573,7 @@ export default function VideoSidebar({
                     key={group.name}
                     onClick={() => onVideoSelect(group.name)}
                     className={cn(
-                      'flex flex-col gap-2 flex-shrink-0 transition-all duration-200',
+                      'flex flex-col gap-2 shrink-0 transition-all duration-200',
                       'rounded-lg p-2',
                       isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
                     )}
@@ -2614,7 +2614,7 @@ export default function VideoSidebar({
 
                     {/* Title and version count */}
                     <div className="flex flex-col gap-1 items-center">
-                      <p className="text-xs font-medium text-foreground line-clamp-2 break-words max-w-[90px] text-center leading-snug">
+                      <p className="text-xs font-medium text-foreground line-clamp-2 wrap-break-word max-w-[90px] text-center leading-snug">
                         {group.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
@@ -2639,7 +2639,7 @@ export default function VideoSidebar({
                     key={a.id}
                     onClick={() => onAlbumSelect?.(a.id)}
                     className={cn(
-                      'flex flex-col gap-2 flex-shrink-0 transition-all duration-200',
+                      'flex flex-col gap-2 shrink-0 transition-all duration-200',
                       'rounded-lg p-2',
                       isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
                     )}
@@ -2659,7 +2659,7 @@ export default function VideoSidebar({
                       </div>
                     ) : (
                       <div
-                        className="bg-gradient-to-br from-muted to-muted-foreground rounded flex items-center justify-center"
+                        className="bg-linear-to-br from-muted to-muted-foreground rounded flex items-center justify-center"
                         style={{ width: mobileThumbSize, height: mobileThumbHeight }}
                       >
                         <Images className="w-6 h-6 text-muted-foreground" />
@@ -2668,7 +2668,7 @@ export default function VideoSidebar({
 
                     {/* Title and Count */}
                     <div className="flex flex-col items-center">
-                      <p className="text-xs font-medium text-foreground line-clamp-2 break-words max-w-[90px] text-center leading-snug">
+                      <p className="text-xs font-medium text-foreground line-clamp-2 wrap-break-word max-w-[90px] text-center leading-snug">
                         {a.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
@@ -2687,7 +2687,7 @@ export default function VideoSidebar({
                     type="button"
                     onClick={() => onUploadsSelect?.()}
                     className={cn(
-                      'flex flex-col gap-2 flex-shrink-0 transition-all duration-200 w-[140px]',
+                      'flex flex-col gap-2 shrink-0 transition-all duration-200 w-[140px]',
                       'rounded-lg p-2',
                       isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
                     )}

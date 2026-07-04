@@ -10,13 +10,20 @@
  *   3. Lists, creates and replies to comments as the client
  *   4. Uploads a comment attachment (tiny PNG via multipart form)
  *   5. Verifies the zero-PII policy on the client view
- *   6. Verifies unauthenticated requests are rejected
- *   7. Deletes a comment as the client
- *   8. Approves the video and verifies project/video state in the DB
- *   9. Optionally logs in as admin (SMOKE_ADMIN_EMAIL / SMOKE_ADMIN_PASSWORD)
+ *   6. Verifies internal (admin-only) comments are not exposed to clients
+ *   7. Tests the password-protected share flow (verify endpoint → share token)
+ *      and cross-project share-token isolation — needs ENCRYPTION_KEY, skipped
+ *      otherwise; set SMOKE_NOISY=1 to also test wrong-password rejection
+ *      (off by default: it logs security events and can push-notify admins)
+ *   8. Verifies unauthenticated requests are rejected
+ *   9. Deletes a comment as the client
+ *  10. Verifies per-project toggles are enforced (client delete/upload opt-ins,
+ *      hideFeedback, CLOSED status blocking share access)
+ *  11. Approves the video and verifies project/video state in the DB
+ *  12. Optionally logs in as admin (SMOKE_ADMIN_EMAIL / SMOKE_ADMIN_PASSWORD)
  *      and verifies the admin view + admin comment deletion
- *  10. Cleans up everything it created (comments via API so storage files are
- *      removed, then the project via Prisma cascade)
+ *  13. Cleans up everything it created (comments via API so storage files are
+ *      removed, then the projects via Prisma cascade)
  *
  * Requirements:
  *   - Server running and reachable (SMOKE_BASE_URL, default tries :3000 then :4321)
@@ -28,9 +35,28 @@
  * client-facing mail can go anywhere.
  */
 import assert from 'assert'
+import fs from 'fs'
+import path from 'path'
 import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+import { encrypt } from '@/lib/encryption'
 
-const prisma = new PrismaClient()
+// loadEnvVar is hoisted (function declaration), so the .env fallback works here too.
+const prisma = new PrismaClient({ adapter: new PrismaPg(loadEnvVar('DATABASE_URL') || '') })
+
+/** Resolve an env var, falling back to a simple .env read (tsx does not auto-load it). */
+function loadEnvVar(name: string): string | undefined {
+  if (process.env[name]) return process.env[name]
+  try {
+    const envFile = fs.readFileSync(path.join(process.cwd(), '.env'), 'utf8')
+    const match = envFile.match(new RegExp(`^${name}=(?:"([^"]*)"|'([^']*)'|([^\\r\\n]*))`, 'm'))
+    const value = match ? (match[1] ?? match[2] ?? match[3])?.trim() : undefined
+    if (value) process.env[name] = value
+    return value
+  } catch {
+    return undefined
+  }
+}
 
 let passed = 0
 let failed = 0
@@ -164,6 +190,29 @@ async function main() {
   })
   console.log(`Seeded project ${project.id} (share slug: ${runId})`)
 
+  // Second, password-protected project — used for the password verify flow and
+  // cross-project token isolation. Needs ENCRYPTION_KEY (same key the server uses)
+  // to seed an encrypted share password; skipped if unavailable.
+  const passwordPlain = `Smoke-${runId}-pw`
+  let passwordProject: { id: string; slug: string } | null = null
+  if (loadEnvVar('ENCRYPTION_KEY')) {
+    try {
+      const created = await prisma.project.create({
+        data: {
+          title: `Smoke E2E PW ${runId}`,
+          slug: `${runId}-pw`,
+          createdById: anyUser.id,
+          authMode: 'PASSWORD',
+          sharePassword: encrypt(passwordPlain),
+          status: 'IN_REVIEW',
+        },
+      })
+      passwordProject = { id: created.id, slug: created.slug }
+    } catch (error) {
+      console.log(`  (password project skipped — could not encrypt share password: ${error instanceof Error ? error.message : error})`)
+    }
+  }
+
   let shareToken = ''
   let commentId = ''
   let replyId = ''
@@ -226,6 +275,31 @@ async function main() {
       assert.equal(comment.userId, undefined, 'userId leaked to client view')
     })
 
+    await check('internal admin comments are NOT returned to clients', async () => {
+      // The share UI hides isInternal comments, but the API must not send them
+      // at all — otherwise clients can read internal notes via the network tab.
+      const internal = await prisma.comment.create({
+        data: {
+          projectId: project.id,
+          videoId: video.id,
+          videoVersion: 1,
+          timecode: '00:00:02:00',
+          content: `INTERNAL-ONLY ${runId}`,
+          isInternal: true,
+          userId: anyUser.id,
+        },
+      })
+      try {
+        const { body } = await api('GET', `/api/share/${runId}/comments`, { token: shareToken })
+        assert(
+          !JSON.stringify(body).includes(`INTERNAL-ONLY ${runId}`),
+          'internal comment content leaked to the client share view'
+        )
+      } finally {
+        await prisma.comment.delete({ where: { id: internal.id } }).catch(() => {})
+      }
+    })
+
     await check('client can reply to a comment', async () => {
       const { status, body } = await api('POST', '/api/comments', {
         token: shareToken,
@@ -272,6 +346,57 @@ async function main() {
       assert(file.fileSize > 0, 'attachment fileSize not resolved from StoredFile')
       assert.equal(file.storagePath, undefined, 'storagePath leaked to client view')
     })
+
+    // ── Password-protected share flow ────────────────────────────────────────
+    section('Password-protected share')
+
+    if (!passwordProject) {
+      console.log('  – skipped (ENCRYPTION_KEY not available to seed an encrypted share password)')
+    } else {
+      const pwSlug = passwordProject.slug
+      let passwordShareToken = ''
+
+      await check('password-protected share page demands authentication', async () => {
+        const { status, body } = await api('GET', `/api/share/${pwSlug}`)
+        assert.equal(status, 401, `expected 401, got ${status}: ${JSON.stringify(body)}`)
+        assert.equal(body?.requiresPassword, true, 'response should signal requiresPassword')
+      })
+
+      if (process.env.SMOKE_NOISY === '1') {
+        // Off by default: each wrong attempt logs a security event and can push-notify admins.
+        await check('wrong share password is rejected', async () => {
+          const { status } = await api('POST', `/api/share/${pwSlug}/verify`, {
+            json: { password: 'definitely-wrong' },
+          })
+          assert.equal(status, 403, `expected 403, got ${status}`)
+        })
+      } else {
+        console.log('  – wrong-password check skipped (set SMOKE_NOISY=1; it logs security events / pushes)')
+      }
+
+      await check('correct share password issues a share token', async () => {
+        const { status, body } = await api('POST', `/api/share/${pwSlug}/verify`, {
+          json: { password: passwordPlain },
+        })
+        assert.equal(status, 200, `expected 200, got ${status}: ${JSON.stringify(body)}`)
+        assert(typeof body?.shareToken === 'string' && body.shareToken.length > 20, 'no shareToken issued')
+        passwordShareToken = body.shareToken
+      })
+
+      await check('password share token grants access to that project', async () => {
+        const { status, body } = await api('GET', `/api/share/${pwSlug}/comments`, { token: passwordShareToken })
+        assert.equal(status, 200, `expected 200, got ${status}: ${JSON.stringify(body)}`)
+        assert(Array.isArray(body))
+      })
+
+      await check('share tokens are project-scoped (cross-project access denied)', async () => {
+        // Project B's token must not open project A, and vice versa.
+        const a = await api('GET', `/api/share/${runId}/comments`, { token: passwordShareToken })
+        assert([401, 403].includes(a.status), `B-token on project A: expected 401/403, got ${a.status}`)
+        const b = await api('GET', `/api/share/${pwSlug}/comments`, { token: shareToken })
+        assert([401, 403].includes(b.status), `A-token on project B: expected 401/403, got ${b.status}`)
+      })
+    }
 
     // ── Unauthenticated rejection ────────────────────────────────────────────
     section('Unauthenticated requests')
@@ -340,6 +465,56 @@ async function main() {
       )
     })
 
+    // ── Project setting enforcement ──────────────────────────────────────────
+    section('Project setting enforcement')
+
+    await check('client delete is denied when the project opt-in is off', async () => {
+      await prisma.project.update({ where: { id: project.id }, data: { allowClientDeleteComments: false } })
+      try {
+        const { status } = await api('DELETE', `/api/comments/${commentId}`, { token: shareToken })
+        assert.equal(status, 403, `expected 403, got ${status}`)
+      } finally {
+        await prisma.project.update({ where: { id: project.id }, data: { allowClientDeleteComments: true } })
+      }
+    })
+
+    await check('client uploads are denied when the project opt-in is off', async () => {
+      await prisma.project.update({ where: { id: project.id }, data: { allowClientUploadFiles: false } })
+      try {
+        const form = new FormData()
+        form.append('file', new Blob([TINY_PNG], { type: 'image/png' }), 'should-fail.png')
+        const { status } = await api('POST', `/api/comments/${commentId}/files`, { token: shareToken, form })
+        assert.equal(status, 403, `expected 403, got ${status}`)
+      } finally {
+        await prisma.project.update({ where: { id: project.id }, data: { allowClientUploadFiles: true } })
+      }
+    })
+
+    await check('hideFeedback returns an empty comment list to clients', async () => {
+      await prisma.project.update({ where: { id: project.id }, data: { hideFeedback: true } })
+      try {
+        const { status, body } = await api('GET', `/api/share/${runId}/comments`, { token: shareToken })
+        assert.equal(status, 200)
+        assert(Array.isArray(body) && body.length === 0, `expected [], got ${JSON.stringify(body)}`)
+      } finally {
+        await prisma.project.update({ where: { id: project.id }, data: { hideFeedback: false } })
+      }
+    })
+
+    await check('CLOSED projects block share access entirely', async () => {
+      const { status: statusBefore } = await prisma.project.findUniqueOrThrow({
+        where: { id: project.id },
+        select: { status: true },
+      })
+      await prisma.project.update({ where: { id: project.id }, data: { status: 'CLOSED' } })
+      try {
+        const { status } = await api('GET', `/api/share/${runId}`, { token: shareToken })
+        assert([401, 403].includes(status), `expected 401/403, got ${status}`)
+      } finally {
+        await prisma.project.update({ where: { id: project.id }, data: { status: statusBefore } })
+      }
+    })
+
     // ── Admin path (optional) ────────────────────────────────────────────────
     section('Admin access')
 
@@ -390,12 +565,17 @@ async function main() {
       }
     }
 
-    try {
-      await prisma.project.delete({ where: { id: project.id } })
-      console.log(`  ✓ removed seeded project ${project.id}`)
-    } catch (error) {
-      console.error(`  ✗ failed to remove seeded project ${project.id} — delete it manually (slug: ${runId})`)
-      console.error(`      ${error instanceof Error ? error.message : error}`)
+    for (const target of [
+      { id: project.id, slug: runId },
+      ...(passwordProject ? [passwordProject] : []),
+    ]) {
+      try {
+        await prisma.project.delete({ where: { id: target.id } })
+        console.log(`  ✓ removed seeded project ${target.id}`)
+      } catch (error) {
+        console.error(`  ✗ failed to remove seeded project ${target.id} — delete it manually (slug: ${target.slug})`)
+        console.error(`      ${error instanceof Error ? error.message : error}`)
+      }
     }
 
     await prisma.$disconnect()

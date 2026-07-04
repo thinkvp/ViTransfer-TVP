@@ -112,7 +112,7 @@ export function InitialsAvatar(props: {
         height={28}
         unoptimized
         className={cn(
-          'h-7 w-7 rounded-full ring-2 ring-card shadow-sm object-cover flex-shrink-0',
+          'h-7 w-7 rounded-full ring-2 ring-card shadow-sm object-cover shrink-0',
           className,
         )}
         onError={() => setImgError(true)}
@@ -123,7 +123,7 @@ export function InitialsAvatar(props: {
   return (
     <div
       className={cn(
-        'h-7 w-7 rounded-full ring-2 ring-card shadow-sm flex items-center justify-center text-[11px] font-semibold uppercase select-none flex-shrink-0',
+        'h-7 w-7 rounded-full ring-2 ring-card shadow-sm flex items-center justify-center text-[11px] font-semibold uppercase select-none shrink-0',
         className
       )}
       style={{ backgroundColor: bg, color: '#fff' }}

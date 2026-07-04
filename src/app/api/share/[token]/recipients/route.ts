@@ -63,7 +63,7 @@ export async function POST(
     const validated = createCustomRecipientSchema.safeParse(body)
     if (!validated.success) {
       return NextResponse.json(
-        { error: validated.error.errors[0]?.message || 'Invalid request' },
+        { error: validated.error.issues[0]?.message || 'Invalid request' },
         { status: 400 }
       )
     }
@@ -145,7 +145,7 @@ export async function DELETE(
     const validated = deleteCustomRecipientSchema.safeParse(body)
     if (!validated.success) {
       return NextResponse.json(
-        { error: validated.error.errors[0]?.message || 'Invalid request' },
+        { error: validated.error.issues[0]?.message || 'Invalid request' },
         { status: 400 }
       )
     }

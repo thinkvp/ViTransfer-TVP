@@ -69,7 +69,7 @@ export default function NewClientPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
           <Link href="/admin/clients">
             <Button variant="ghost" size="default" className="justify-start px-3">

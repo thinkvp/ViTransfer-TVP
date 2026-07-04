@@ -302,7 +302,7 @@ function StatusPill({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        'px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0',
+        'px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0',
         projectStatusBadgeClass(status)
       )}
     >
@@ -462,7 +462,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
   }
 
   const { project, stats, videoStats, albumStats } = data
-  const metricIconWrapperClassName = 'rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20'
+  const metricIconWrapperClassName = 'rounded-lg p-2.5 shrink-0 bg-primary/20 ring-1 ring-primary/20'
   const metricIconClassName = 'w-5 h-5 text-primary'
 
   const hasVideos = videoStats.length > 0
@@ -475,7 +475,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
 
   return (
     <div className="flex-1 sm:min-h-[calc(100dvh-var(--admin-header-height,0px))] bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 h-auto sm:h-[calc(100dvh-var(--admin-header-height,0px))] flex flex-col">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 h-auto sm:h-[calc(100dvh-var(--admin-header-height,0px))] flex flex-col">
         <div className="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <Link href={`/admin/projects/${project.id}`}>
@@ -551,7 +551,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                     <div key={video.videoName} className="border border-border rounded-lg bg-muted/40 p-3 sm:p-4">
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-semibold text-sm sm:text-base break-words">{video.videoName}</h4>
+                          <h4 className="font-semibold text-sm sm:text-base wrap-break-word">{video.videoName}</h4>
                           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
                             {video.versions.length} version{video.versions.length !== 1 ? 's' : ''}
                           </p>
@@ -567,7 +567,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                   className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5"
                                 >
                                   <span className="text-muted-foreground truncate">{version.versionLabel}</span>
-                                  <span className="font-medium whitespace-nowrap flex-shrink-0 inline-flex items-center gap-2">
+                                  <span className="font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-2">
                                     <span className="inline-flex items-center gap-1">
                                       <Eye className="w-3 h-3 text-muted-foreground" />
                                       {version.views}
@@ -611,8 +611,8 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                     <div key={album.albumName} className="border border-border rounded-lg bg-muted/40 p-3 sm:p-4">
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-semibold text-sm sm:text-base break-words inline-flex items-center gap-2">
-                            <Images className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                          <h4 className="font-semibold text-sm sm:text-base wrap-break-word inline-flex items-center gap-2">
+                            <Images className="w-4 h-4 text-muted-foreground shrink-0" />
                             {album.albumName}
                           </h4>
                           <p className="text-xs sm:text-sm text-muted-foreground mt-1">
@@ -624,14 +624,14 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5">
                             <span className="text-muted-foreground truncate">Full Resolution ZIP</span>
-                            <span className="font-medium whitespace-nowrap flex-shrink-0 inline-flex items-center gap-1">
+                            <span className="font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-1">
                               <Download className="w-3 h-3 text-muted-foreground" />
                               {album.fullResDownloads}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5">
                             <span className="text-muted-foreground truncate">Social Media Sized ZIP</span>
-                            <span className="font-medium whitespace-nowrap flex-shrink-0 inline-flex items-center gap-1">
+                            <span className="font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-1">
                               <Download className="w-3 h-3 text-muted-foreground" />
                               {album.socialDownloads}
                             </span>
@@ -873,7 +873,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                 </div>
                                 <TruncatedText
                                   text={mainText}
-                                  className="hidden sm:inline text-muted-foreground text-sm whitespace-normal break-words"
+                                  className="hidden sm:inline text-muted-foreground text-sm whitespace-normal wrap-break-word"
                                 />
                               </td>
                               <td className="py-2 px-3 align-middle text-xs text-muted-foreground whitespace-nowrap tabular-nums hidden sm:table-cell">
@@ -899,7 +899,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                         <span className="text-xs font-semibold text-foreground">Description</span>
                                         <TruncatedText
                                           text={mainText}
-                                          className="text-sm text-muted-foreground break-words"
+                                          className="text-sm text-muted-foreground wrap-break-word"
                                         />
                                       </div>
                                       {showMeta && (
@@ -922,7 +922,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                       <span className="text-xs font-semibold text-foreground">Description</span>
                                       <TruncatedText
                                         text={mainText}
-                                        className="text-sm text-muted-foreground break-words"
+                                        className="text-sm text-muted-foreground wrap-break-word"
                                       />
                                     </div>
                                     {showMeta && (

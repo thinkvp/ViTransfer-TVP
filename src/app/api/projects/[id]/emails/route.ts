@@ -112,7 +112,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     sortDir: url.searchParams.get('sortDir') ?? undefined,
   })
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
+    return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, { status: 400 })
   }
 
   const { page, perPage, sortKey, sortDir } = parsed.data
@@ -190,7 +190,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const body = await request.json()
   const parsed = createSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
+    return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, { status: 400 })
   }
 
   const { fileName, fileSize, mimeType } = parsed.data

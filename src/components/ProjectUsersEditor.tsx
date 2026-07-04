@@ -235,13 +235,13 @@ export function ProjectUsersEditor({
                     <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} avatarUrl={`/api/users/${u.id}/avatar`} />
                     <span className="text-sm font-medium truncate">{u.name || u.email}</span>
                     {u.appRole?.isSystemAdmin === true && (
-                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border shrink-0">
                         <Shield className="w-3 h-3" />
                         Admin
                       </span>
                     )}
                     {u.appRole?.isSystemAdmin !== true && u.appRole?.name && (
-                      <span className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                      <span className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border shrink-0">
                         {u.appRole.name}
                       </span>
                     )}
@@ -249,7 +249,7 @@ export function ProjectUsersEditor({
                   <div className="text-xs text-muted-foreground truncate">{u.email}</div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2 flex-shrink-0">
+                <div className="flex items-center justify-end gap-2 shrink-0">
                   <Button
                     type="button"
                     variant="outline"
@@ -324,13 +324,13 @@ export function ProjectUsersEditor({
                             <InitialsAvatar name={u.name} email={u.email} displayColor={u.displayColor} avatarUrl={`/api/users/${u.id}/avatar`} />
                             <div className="font-medium truncate">{u.name || u.email}</div>
                             {u.appRole?.isSystemAdmin === true && (
-                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border shrink-0">
                                 <Shield className="w-3 h-3" />
                                 Admin
                               </span>
                             )}
                             {u.appRole?.isSystemAdmin !== true && u.appRole?.name && (
-                              <span className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border flex-shrink-0">
+                              <span className="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full bg-muted text-foreground border border-border shrink-0">
                                 {u.appRole.name}
                               </span>
                             )}

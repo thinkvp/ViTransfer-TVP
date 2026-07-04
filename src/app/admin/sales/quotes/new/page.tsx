@@ -113,6 +113,8 @@ export default function NewQuotePage() {
   const dragIndexRef = useRef<number | null>(null)
   const dragOverIndexRef = useRef<number | null>(null)
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  // State mirror of dragIndexRef for render-time use (row highlight)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
   const [unitPriceInputs, setUnitPriceInputs] = useState<Record<string, string>>({})
 
@@ -327,12 +329,14 @@ export default function NewQuotePage() {
               onDragStart={(e) => {
                 if (!dragEnabledRef.current) { e.preventDefault(); return }
                 dragIndexRef.current = idx
+                setDragIndex(idx)
                 e.dataTransfer.effectAllowed = 'move'
               }}
               onDragEnd={() => {
                 dragEnabledRef.current = false
                 dragIndexRef.current = null
                 dragOverIndexRef.current = null
+                setDragIndex(null)
                 setDragOverIndex(null)
               }}
               onDragOver={(e) => {
@@ -357,9 +361,10 @@ export default function NewQuotePage() {
                 }
                 dragIndexRef.current = null
                 dragOverIndexRef.current = null
+                setDragIndex(null)
                 setDragOverIndex(null)
               }}
-              className={`grid grid-cols-1 md:grid-cols-[auto_minmax(0,5fr)_minmax(0,3fr)_minmax(0,4fr)] gap-2 items-start rounded-md border border-border p-3${dragOverIndex === idx && dragIndexRef.current !== idx ? ' ring-2 ring-primary/50' : ''}`}
+              className={`grid grid-cols-1 md:grid-cols-[auto_minmax(0,5fr)_minmax(0,3fr)_minmax(0,4fr)] gap-2 items-start rounded-md border border-border p-3${dragOverIndex === idx && dragIndex !== idx ? ' ring-2 ring-primary/50' : ''}`}
             >
               <div
                 className="hidden md:flex items-center self-stretch cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground"

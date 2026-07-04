@@ -136,7 +136,7 @@ export function ShareProjectSwitcher({
   }, [open])
 
   return (
-    <div ref={containerRef} className="relative flex-shrink-0">
+    <div ref={containerRef} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -154,7 +154,7 @@ export function ShareProjectSwitcher({
       {open && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[120] rounded-xl border border-border/70 bg-popover text-popover-foreground shadow-elevation-lg overflow-hidden"
+          className="fixed z-120 rounded-xl border border-border/70 bg-popover text-popover-foreground shadow-elevation-lg overflow-hidden"
           style={{
             left: `${Math.max(8, menuPosition.left)}px`,
             top: `${Math.max(8, menuPosition.top)}px`,

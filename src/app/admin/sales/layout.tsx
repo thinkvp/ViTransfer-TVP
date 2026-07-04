@@ -36,7 +36,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="w-full max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="w-full max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
@@ -57,7 +57,7 @@ export default function SalesLayout({ children }: { children: React.ReactNode })
                   href={item.href}
                   data-active={isActive ? 'true' : undefined}
                   className={
-                    `flex-shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ` +
+                    `shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ` +
                     (isActive
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-muted/40 text-muted-foreground hover:bg-accent hover:text-accent-foreground')

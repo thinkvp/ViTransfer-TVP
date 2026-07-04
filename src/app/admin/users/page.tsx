@@ -300,14 +300,14 @@ export default function UsersPage() {
 
   if (loading) {
     return (
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <p className="text-muted-foreground">Loading users...</p>
       </div>
     )
   }
 
   return (
-    <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-hidden">
+    <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6 w-full min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
@@ -382,7 +382,7 @@ export default function UsersPage() {
                                 ? 'bg-info-visible text-info border-2 border-info-visible'
                                 : 'bg-muted text-muted-foreground border border-border'
                             )}>
-                              {user.appRole?.isSystemAdmin ? <Shield className="h-3 w-3 flex-shrink-0" /> : <ShieldOff className="h-3 w-3 flex-shrink-0" />}
+                              {user.appRole?.isSystemAdmin ? <Shield className="h-3 w-3 shrink-0" /> : <ShieldOff className="h-3 w-3 shrink-0" />}
                               <span className="truncate max-w-[80px] sm:max-w-[120px] md:max-w-[180px]">{user.appRole?.name || '—'}</span>
                             </span>
                           </td>

@@ -980,7 +980,7 @@ export function CommentSectionView({
   const fullscreenChatOverlay =
     isVideoFullscreen && isFullscreenChatOpen && fullscreenChatPortalTarget
       ? createPortal(
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-[60] w-[min(720px,calc(100vw-2rem))]">
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-24 z-60 w-[min(720px,calc(100vw-2rem))]">
             <div className="relative rounded-lg border border-border bg-card shadow-elevation-sm opacity-50 hover:opacity-100 focus-within:opacity-100 transition-opacity">
               <div className="absolute -top-4 right-3 z-10">
                 <div className="rounded-full border border-border bg-card shadow-elevation-sm">
@@ -1056,16 +1056,16 @@ export function CommentSectionView({
       {fullscreenChatOverlay}
       <Card className={cn("bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden", cardClassName)} data-comment-section>
         {(!hideVideoTitle || showVideoActions) ? (
-        <CardHeader className={cn("border-b border-border flex-shrink-0 space-y-1", hideVideoTitle && !showVideoActions && "hidden")}>
+        <CardHeader className={cn("border-b border-border shrink-0 space-y-1", hideVideoTitle && !showVideoActions && "hidden")}>
         <div className="flex items-start gap-4">
           {!hideVideoTitle && (
           <div className="min-w-0 flex-1">
-            <CardTitle className="text-lg font-semibold text-foreground whitespace-normal break-words leading-snug">
+            <CardTitle className="text-lg font-semibold text-foreground whitespace-normal wrap-break-word leading-snug">
               {headerVideoName}
             </CardTitle>
 
             <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="flex-shrink-0">Version:</span>
+              <span className="shrink-0">Version:</span>
               <span className="text-foreground font-medium">
                 {headerVideo?.versionLabel || '—'}
               </span>
@@ -1074,7 +1074,7 @@ export function CommentSectionView({
                   type="button"
                   variant="outline"
                   size="icon"
-                  className="h-7 w-7 flex-shrink-0"
+                  className="h-7 w-7 shrink-0"
                   onClick={() => setShowVideoInfo(true)}
                   title="Video Information"
                   aria-label="Video Information"
@@ -1088,7 +1088,7 @@ export function CommentSectionView({
                     type="button"
                     variant="default"
                     size="icon"
-                    className="h-7 w-7 flex-shrink-0 sm:hidden"
+                    className="h-7 w-7 shrink-0 sm:hidden"
                     onClick={openGuestLinkDialog}
                     title="Share"
                     aria-label="Share"
@@ -1099,7 +1099,7 @@ export function CommentSectionView({
                     type="button"
                     variant="default"
                     size="sm"
-                    className="h-7 flex-shrink-0 hidden sm:inline-flex"
+                    className="h-7 shrink-0 hidden sm:inline-flex"
                     onClick={openGuestLinkDialog}
                     title="Share"
                     aria-label="Share"
@@ -1113,7 +1113,7 @@ export function CommentSectionView({
           </div>
           )}
           {showVideoActions ? (
-            <div className={cn("flex items-center gap-2 flex-shrink-0", hideVideoTitle && "ml-auto")}>
+            <div className={cn("flex items-center gap-2 shrink-0", hideVideoTitle && "ml-auto")}>
               <Dialog open={guestLinkDialogOpen} onOpenChange={setGuestLinkDialogOpen}>
                 <DialogContent className="max-h-[85dvh] overflow-y-auto">
                   <DialogHeader>
@@ -1235,7 +1235,7 @@ export function CommentSectionView({
         </CardHeader>
         ) : null}
 
-      <CardContent className="flex-1 flex flex-col !p-0 overflow-hidden min-h-0">
+      <CardContent className="flex-1 flex flex-col p-0! overflow-hidden min-h-0">
         <Dialog open={showApproveConfirm} onOpenChange={setShowApproveConfirm}>
           <DialogContent className="max-w-md">
             <DialogHeader>
@@ -1269,7 +1269,7 @@ export function CommentSectionView({
 
                 {/* Approval Status Banner */}
         {commentsDisabled && isProjectApprovedOnly && (
-                    <div className="bg-primary p-4 flex-shrink-0">
+                    <div className="bg-primary p-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="min-w-0">
@@ -1285,10 +1285,10 @@ export function CommentSectionView({
           </div>
         )}
         {commentsDisabled && !isProjectApprovedOnly && (
-          <div className="bg-success-visible border-b-2 border-success-visible p-4 flex-shrink-0">
+          <div className="bg-success-visible border-b-2 border-success-visible p-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
-                <CheckCircle2 className="w-8 h-8 text-success flex-shrink-0" />
+                <CheckCircle2 className="w-8 h-8 text-success shrink-0" />
                 <div className="min-w-0">
                   <h3 className="text-foreground font-medium">
                     Video Approved
@@ -1302,7 +1302,7 @@ export function CommentSectionView({
               </div>
 
               {showVideoActions && headerVideo && (headerVideo?.approved || isHeaderVideoLocallyApproved) ? (
-                <div className="flex-shrink-0">
+                <div className="shrink-0">
                   <Button
                     variant="default"
                     size="sm"
@@ -1357,14 +1357,14 @@ export function CommentSectionView({
         )}
 
         {showVideoNotes && headerVideoNotes ? (
-          <div className="px-4 sm:px-6 py-3 border-b border-border bg-muted/20 flex-shrink-0">
+          <div className="px-4 sm:px-6 py-3 border-b border-border bg-muted/20 shrink-0">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Version Notes</p>
-            <p className="mt-1 text-sm text-foreground whitespace-pre-wrap break-words">{headerVideoNotes}</p>
+            <p className="mt-1 text-sm text-foreground whitespace-pre-wrap wrap-break-word">{headerVideoNotes}</p>
           </div>
         ) : null}
 
         {/* List Controls (directly above the message list) */}
-        <div className="px-4 sm:px-6 py-2 border-b border-border bg-card flex-shrink-0">
+        <div className="px-4 sm:px-6 py-2 border-b border-border bg-card shrink-0">
           <div className="flex flex-wrap items-center gap-2 justify-between">
             <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
               {isAdminView && (
@@ -1390,7 +1390,7 @@ export function CommentSectionView({
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
-              <div className="flex-shrink-0">
+              <div className="shrink-0">
                 <Select
                   value={commentSortMode}
                   onValueChange={(v) => setCommentSortMode(v as 'timecode' | 'date')}
@@ -1432,7 +1432,7 @@ export function CommentSectionView({
               {commentsDisabled && (
                 <div className="py-1 text-muted-foreground">
                   <div className="flex items-start justify-center gap-1.5 px-4 text-xs text-center">
-                    <Lock className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                    <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                     <span>
                       {isProjectApprovedOnly
                         ? 'This project has been approved. Comments are now closed.'

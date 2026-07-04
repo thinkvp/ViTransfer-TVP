@@ -137,17 +137,10 @@ export default function VoiceNotePlayer({ src, className }: VoiceNotePlayerProps
     }
   }, [src])
 
-  const effectiveDuration = useMemo(() => {
-    if (duration > 0) return duration
-    const audio = audioRef.current
-    if (!audio) return 0
-    return getDurationFromAudio(audio)
-  }, [duration])
-
   const progressPercent = useMemo(() => {
-    if (!effectiveDuration || effectiveDuration <= 0) return 0
-    return Math.max(0, Math.min(100, (currentTime / effectiveDuration) * 100))
-  }, [currentTime, effectiveDuration])
+    if (!duration || duration <= 0) return 0
+    return Math.max(0, Math.min(100, (currentTime / duration) * 100))
+  }, [currentTime, duration])
 
   const togglePlayback = async () => {
     const audio = audioRef.current
@@ -171,7 +164,7 @@ export default function VoiceNotePlayer({ src, className }: VoiceNotePlayerProps
     const audio = audioRef.current
     if (!audio) return
 
-    const seekDuration = effectiveDuration > 0 ? effectiveDuration : getDurationFromAudio(audio)
+    const seekDuration = duration > 0 ? duration : getDurationFromAudio(audio)
     if (!seekDuration || seekDuration <= 0) return
 
     const safeRatio = Math.max(0, Math.min(1, ratio))
@@ -303,7 +296,7 @@ export default function VoiceNotePlayer({ src, className }: VoiceNotePlayerProps
 
           <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground tabular-nums">
             <span>{formatAudioTime(currentTime)}</span>
-            <span>{formatAudioTime(effectiveDuration)}</span>
+            <span>{formatAudioTime(duration)}</span>
           </div>
         </div>
       </div>

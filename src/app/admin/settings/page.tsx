@@ -982,7 +982,7 @@ export default function GlobalSettingsPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-4 sm:mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -1321,7 +1321,7 @@ export default function GlobalSettingsPage() {
         {/* Desktop: sidebar nav + content panel (hidden on mobile) */}
         <div className="hidden lg:flex gap-6 mt-4">
           {/* Left sidebar */}
-          <div className="w-52 xl:w-60 flex-shrink-0">
+          <div className="w-52 xl:w-60 shrink-0">
             <nav className="space-y-0.5 sticky top-6">
               {SETTING_SECTIONS.map((section) => (
                 <button
@@ -1334,7 +1334,7 @@ export default function GlobalSettingsPage() {
                       : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                   )}
                 >
-                  <section.icon className="w-4 h-4 flex-shrink-0" />
+                  <section.icon className="w-4 h-4 shrink-0" />
                   {section.label}
                 </button>
               ))}

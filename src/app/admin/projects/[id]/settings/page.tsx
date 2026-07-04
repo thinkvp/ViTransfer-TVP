@@ -570,7 +570,7 @@ export default function ProjectSettingsPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-4 sm:mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -622,9 +622,9 @@ export default function ProjectSettingsPage() {
                   </CardDescription>
                 </div>
                 {showProjectDetails ? (
-                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                 )}
               </div>
             </CardHeader>
@@ -799,7 +799,7 @@ export default function ProjectSettingsPage() {
                           size="sm"
                           onClick={() => setCustomSlugValue(generateRandomSlug())}
                           title="Generate random URL"
-                          className="h-10 w-10 p-0 flex-shrink-0"
+                          className="h-10 w-10 p-0 shrink-0"
                         >
                           <RefreshCw className="w-4 h-4" />
                         </Button>
@@ -844,9 +844,9 @@ export default function ProjectSettingsPage() {
                   </CardDescription>
                 </div>
                 {showClientInfo ? (
-                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                 )}
               </div>
             </CardHeader>
@@ -885,9 +885,9 @@ export default function ProjectSettingsPage() {
                       </CardDescription>
                     </div>
                     {showVideoProcessing ? (
-                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                      <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                      <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                     )}
                   </div>
                 </CardHeader>
@@ -947,9 +947,9 @@ export default function ProjectSettingsPage() {
                       </CardDescription>
                     </div>
                     {showFeedback ? (
-                      <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                      <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                      <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                     )}
                   </div>
                 </CardHeader>
@@ -1092,9 +1092,9 @@ export default function ProjectSettingsPage() {
                   </CardDescription>
                 </div>
                 {showSecurity ? (
-                  <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                  <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                 )}
               </div>
             </CardHeader>
@@ -1187,7 +1187,7 @@ export default function ProjectSettingsPage() {
                       size="sm"
                       onClick={() => setSharePassword(generateSecurePassword())}
                       title="Generate random password"
-                      className="h-10 w-10 p-0 flex-shrink-0"
+                      className="h-10 w-10 p-0 shrink-0"
                     >
                       <RefreshCw className="w-4 h-4" />
                     </Button>
@@ -1198,7 +1198,7 @@ export default function ProjectSettingsPage() {
                         size="sm"
                         onClick={copyPassword}
                         title={copiedPassword ? 'Copied!' : 'Copy password'}
-                        className="h-10 w-10 p-0 flex-shrink-0"
+                        className="h-10 w-10 p-0 shrink-0"
                       >
                         {copiedPassword ? (
                           <Check className="w-4 h-4 text-success" />
@@ -1226,7 +1226,7 @@ export default function ProjectSettingsPage() {
         {/* Desktop: sidebar nav + content panel (hidden on mobile) */}
         <div className="hidden lg:flex gap-6 mt-4">
           {/* Left sidebar */}
-          <div className="w-52 xl:w-60 flex-shrink-0">
+          <div className="w-52 xl:w-60 shrink-0">
             <nav className="space-y-0.5 sticky top-6">
               {projectSections.map((section) => (
                 <button
@@ -1239,7 +1239,7 @@ export default function ProjectSettingsPage() {
                       : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                   )}
                 >
-                  <section.icon className="w-4 h-4 flex-shrink-0" />
+                  <section.icon className="w-4 h-4 shrink-0" />
                   {section.label}
                 </button>
               ))}
@@ -1328,7 +1328,7 @@ export default function ProjectSettingsPage() {
                         {useCustomSlug ? (
                           <>
                             <Input id="slug-d" type="text" value={customSlugValue} onChange={(e) => setCustomSlugValue(e.target.value)} placeholder="e.g., custom-link-name" className="flex-1" />
-                            <Button type="button" variant="outline" size="sm" onClick={() => setCustomSlugValue(generateRandomSlug())} title="Generate random URL" className="h-10 w-10 p-0 flex-shrink-0">
+                            <Button type="button" variant="outline" size="sm" onClick={() => setCustomSlugValue(generateRandomSlug())} title="Generate random URL" className="h-10 w-10 p-0 shrink-0">
                               <RefreshCw className="w-4 h-4" />
                             </Button>
                           </>
@@ -1529,11 +1529,11 @@ export default function ProjectSettingsPage() {
                         <Label htmlFor="password-d">Share Page Password</Label>
                         <div className="flex gap-2 w-full">
                           <PasswordInput id="password-d" value={sharePassword} onChange={(e) => setSharePassword(e.target.value)} placeholder="Enter password for share page" className="flex-1" />
-                          <Button type="button" variant="outline" size="sm" onClick={() => setSharePassword(generateSecurePassword())} title="Generate random password" className="h-10 w-10 p-0 flex-shrink-0">
+                          <Button type="button" variant="outline" size="sm" onClick={() => setSharePassword(generateSecurePassword())} title="Generate random password" className="h-10 w-10 p-0 shrink-0">
                             <RefreshCw className="w-4 h-4" />
                           </Button>
                           {sharePassword && (
-                            <Button type="button" variant="outline" size="sm" onClick={copyPassword} title={copiedPassword ? 'Copied!' : 'Copy password'} className="h-10 w-10 p-0 flex-shrink-0">
+                            <Button type="button" variant="outline" size="sm" onClick={copyPassword} title={copiedPassword ? 'Copied!' : 'Copy password'} className="h-10 w-10 p-0 shrink-0">
                               {copiedPassword ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
                             </Button>
                           )}
@@ -1576,7 +1576,7 @@ export default function ProjectSettingsPage() {
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
             <div className="bg-card border border-border rounded-lg max-w-lg w-full p-6 space-y-4">
               <div className="flex items-start gap-3">
-                <FolderSync className="w-6 h-6 text-warning flex-shrink-0 mt-0.5" />
+                <FolderSync className="w-6 h-6 text-warning shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <h2 className="text-xl font-bold">Rename Requires Background Copy</h2>
                   <p className="text-sm text-muted-foreground mt-2">

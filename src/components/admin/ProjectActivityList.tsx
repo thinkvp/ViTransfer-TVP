@@ -14,7 +14,7 @@ function StatusPill({ status }: { status: string }) {
   return (
     <span
       className={cn(
-        'px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0',
+        'px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0',
         projectStatusBadgeClass(status)
       )}
     >
@@ -95,7 +95,7 @@ export default function ProjectActivityList({
                     ) : (
                       <span
                         className={
-                          `px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0 ` +
+                          `px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap shrink-0 ` +
                           (eventType === 'AUTH'
                             ? getAccessMethodColor(accessMethod)
                             : eventType === 'EMAIL' || eventType === 'EMAIL_OPEN'
@@ -154,14 +154,14 @@ export default function ProjectActivityList({
                       </span>
                     </div>
 
-                    <div className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                    <div className="text-xs text-muted-foreground whitespace-nowrap shrink-0">
                       {formatDateTime(event.createdAt)}
                     </div>
 
                     {isExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
                     ) : (
-                      <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                      <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                     )}
                   </div>
 

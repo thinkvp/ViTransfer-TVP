@@ -698,7 +698,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                             <span className="block text-xs text-muted-foreground truncate">{r.email}</span>
                           </span>
                           {!r.receiveNotifications && (
-                            <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border flex-shrink-0">
+                            <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border shrink-0">
                               notifications off
                             </span>
                           )}

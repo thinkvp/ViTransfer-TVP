@@ -152,8 +152,23 @@ export default function CommentInput({
   const [customRecipients, setCustomRecipients] = useState<
     Array<{ id: string; name: string; createdAtMs: number }>
   >([])
+  // Timestamp used as "now" for the 60s custom-recipient delete window; ticks via
+  // the interval below so the Delete button appears/expires without user interaction.
   const [deleteTick, setDeleteTick] = useState(0)
   const [voiceNoteError, setVoiceNoteError] = useState('')
+
+  useEffect(() => {
+    const hasActiveWindow = () =>
+      customRecipients.some((r) => Date.now() - r.createdAtMs < 60 * 1000)
+    if (!hasActiveWindow()) return
+    setDeleteTick(Date.now())
+    const id = window.setInterval(() => {
+      setDeleteTick(Date.now())
+      if (!hasActiveWindow()) window.clearInterval(id)
+    }, 5_000)
+    return () => window.clearInterval(id)
+  }, [customRecipients])
+
   const [isRecordingVoiceNote, setIsRecordingVoiceNote] = useState(false)
   const [voiceNoteElapsedSeconds, setVoiceNoteElapsedSeconds] = useState(0)
   const [voiceNotePreviewUrl, setVoiceNotePreviewUrl] = useState<string | null>(null)
@@ -808,7 +823,7 @@ export default function CommentInput({
     <div
       style={containerStyle}
       className={cn(
-        'p-4 bg-card flex-shrink-0 min-w-0',
+        'p-4 bg-card shrink-0 min-w-0',
         showTopBorder ? 'border-t border-border' : null,
         containerClassName
       )}
@@ -838,7 +853,7 @@ export default function CommentInput({
           </div>
           <button
             onClick={onCancelReply}
-            className="text-xs text-gray-500 hover:text-gray-300 font-medium flex-shrink-0 px-2 py-1 rounded hover:bg-gray-700 transition-colors"
+            className="text-xs text-gray-500 hover:text-gray-300 font-medium shrink-0 px-2 py-1 rounded hover:bg-gray-700 transition-colors"
           >
             Cancel
           </button>
@@ -871,7 +886,7 @@ export default function CommentInput({
                   >
                     {authorName.trim() ? authorName.trim() : 'Select your name'}
                   </span>
-                  <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
                 <DialogContent
                   portalContainer={dialogPortalContainer}
@@ -897,10 +912,9 @@ export default function CommentInput({
                             opt.isCustom &&
                               opt.id &&
                               customMeta &&
-                              Date.now() - customMeta.createdAtMs < 60 * 1000
+                              deleteTick > 0 &&
+                              deleteTick - customMeta.createdAtMs < 60 * 1000
                           )
-                          // Force a re-render while the 60s window is active
-                          void deleteTick
                           return (
                             <Button
                               key={opt.id ? `${opt.id}:${name}` : name}
@@ -935,7 +949,7 @@ export default function CommentInput({
                                     <Trash2 className="h-4 w-4" />
                                   </button>
                                 ) : null}
-                                {isSelected ? <Check className="h-4 w-4 flex-shrink-0" /> : null}
+                                {isSelected ? <Check className="h-4 w-4 shrink-0" /> : null}
                               </span>
                             </Button>
                           )
@@ -1035,7 +1049,7 @@ export default function CommentInput({
                     aria-haspopup="dialog"
                     aria-expanded={timePopoverOpen}
                   >
-                    <Clock className="w-3 h-3 flex-shrink-0" />
+                    <Clock className="w-3 h-3 shrink-0" />
                     <span className="truncate">{displayRangeTime}</span>
                   </button>
 
@@ -1047,7 +1061,7 @@ export default function CommentInput({
                     >
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-sm font-medium text-foreground">Comment time</span>
-                        <div className="inline-flex flex-shrink-0 rounded-md border border-border bg-muted/40 p-0.5 text-xs">
+                        <div className="inline-flex shrink-0 rounded-md border border-border bg-muted/40 p-0.5 text-xs">
                           <button
                             type="button"
                             onClick={() => handleToggleMode('duration')}
@@ -1153,7 +1167,7 @@ export default function CommentInput({
                           type="button"
                           variant="default"
                           size="sm"
-                          className="flex-shrink-0"
+                          className="shrink-0"
                           onClick={() => setTimePopoverOpen(false)}
                         >
                           Done

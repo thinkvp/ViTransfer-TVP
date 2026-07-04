@@ -50,9 +50,9 @@ export function SharePasswordRequirements({ password, className = '' }: SharePas
             }`}
           >
             {result.passed ? (
-              <Check className="w-4 h-4 flex-shrink-0" />
+              <Check className="w-4 h-4 shrink-0" />
             ) : (
-              <X className="w-4 h-4 flex-shrink-0 opacity-30" />
+              <X className="w-4 h-4 shrink-0 opacity-30" />
             )}
             <span className={result.passed ? 'font-medium' : ''}>{result.label}</span>
           </li>

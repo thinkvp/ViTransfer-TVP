@@ -128,6 +128,8 @@ export default function SecurityEventsClient() {
   const [filterSeverity, setFilterSeverity] = useState<string>('')
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
   const [rateLimits, setRateLimits] = useState<RateLimitEntry[]>([])
+  // "Now" anchored to the last rate-limit fetch, so lockout expiry checks are render-pure
+  const [rateLimitsFetchedAt, setRateLimitsFetchedAt] = useState(0)
   const [showRateLimits, setShowRateLimits] = useState(false)
   const [cleanupDays, setCleanupDays] = useState<0 | 7 | 30 | 90>(90)
 
@@ -179,6 +181,7 @@ export default function SecurityEventsClient() {
 
       const data = await response.json()
       setRateLimits(data.entries || [])
+      setRateLimitsFetchedAt(Date.now())
     } catch (error) {
       console.error('Error loading rate limits:', error)
     }
@@ -299,7 +302,7 @@ export default function SecurityEventsClient() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-4">
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2">
             <Shield className="w-8 h-8" />
@@ -315,7 +318,7 @@ export default function SecurityEventsClient() {
           <CardContent className="p-3 sm:p-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <Shield className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
@@ -325,7 +328,7 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <Tag className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
@@ -335,7 +338,7 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <XCircle className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
@@ -345,7 +348,7 @@ export default function SecurityEventsClient() {
               </div>
 
               <div className="flex items-center gap-2 min-w-0">
-                <div className="rounded-lg p-2.5 flex-shrink-0 bg-primary/20 ring-1 ring-primary/20">
+                <div className="rounded-lg p-2.5 shrink-0 bg-primary/20 ring-1 ring-primary/20">
                   <Unlock className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
@@ -463,11 +466,11 @@ export default function SecurityEventsClient() {
                           <div className="text-sm text-muted-foreground">
                             Failed attempts: {entry.count}
                           </div>
-                          <div className="text-sm text-muted-foreground break-words">
+                          <div className="text-sm text-muted-foreground wrap-break-word">
                             Locked until: {formatDateTime(new Date(entry.lockoutUntil).toISOString())}
                           </div>
                         </div>
-                        {entry.lockoutUntil > Date.now() ? (
+                        {entry.lockoutUntil > rateLimitsFetchedAt ? (
                           <Button
                             onClick={() => handleUnblockRateLimit(entry.key)}
                             variant="outline"
@@ -651,12 +654,12 @@ export default function SecurityEventsClient() {
                               <td className="px-3 py-2 align-top">
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
-                                    <div className="font-medium text-foreground break-words">
+                                    <div className="font-medium text-foreground wrap-break-word">
                                       {eventLabel}
                                     </div>
                                   </div>
                                   {event.wasBlocked && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-destructive-visible text-destructive border border-destructive-visible flex-shrink-0">
+                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-destructive-visible text-destructive border border-destructive-visible shrink-0">
                                       BLOCKED
                                     </span>
                                   )}
@@ -716,7 +719,7 @@ export default function SecurityEventsClient() {
                                           </div>
                                         )}
                                         {event.project && (
-                                          <div className="break-words">
+                                          <div className="wrap-break-word">
                                             <span className="text-xs font-medium text-muted-foreground">Project</span>
                                             <div className="text-foreground">{event.project.title}</div>
                                           </div>

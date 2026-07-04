@@ -653,7 +653,7 @@ export function ClientFileUpload({ clientId, onUploadComplete, maxConcurrent = 3
                   )}
                 </div>
 
-                <div className="flex items-center gap-1 flex-shrink-0">
+                <div className="flex items-center gap-1 shrink-0">
                   {u.status === 'uploading' && (
                     <Button type="button" variant="ghost" size="icon" onClick={() => pauseUpload(u.id)} title="Pause upload" className="h-8 w-8">
                       <Pause className="h-4 w-4" />

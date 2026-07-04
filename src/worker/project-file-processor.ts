@@ -28,7 +28,7 @@ export async function processProjectFile(job: Job<ProjectFileProcessingJob>) {
   }
 
   try {
-    const { fileTypeFromBuffer } = await import('file-type/core')
+    const { fileTypeFromBuffer } = await import('file-type')
 
     let sampleBuffer: Buffer
 

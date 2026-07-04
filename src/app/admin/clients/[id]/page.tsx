@@ -577,7 +577,7 @@ export default function ClientDetailPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
           <Link href="/admin/clients">
             <Button variant="ghost" size="default" className="justify-start px-3">
@@ -1064,7 +1064,7 @@ export default function ClientDetailPage() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-card border border-border rounded-lg max-w-lg w-full p-6 space-y-4">
             <div className="flex items-start gap-3">
-              <FolderSync className="w-6 h-6 text-warning flex-shrink-0 mt-0.5" />
+              <FolderSync className="w-6 h-6 text-warning shrink-0 mt-0.5" />
               <div className="flex-1">
                 <h2 className="text-xl font-bold">Rename Requires Background Copy</h2>
                 <p className="text-sm text-muted-foreground mt-2">

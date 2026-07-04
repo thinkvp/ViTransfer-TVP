@@ -6,7 +6,7 @@ import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize } from '@/lib/s3-storage'
@@ -36,7 +36,7 @@ async function writeZipFile(params: {
   await fs.promises.unlink(tmpPath).catch(() => {})
 
   const outStream = fs.createWriteStream(tmpPath)
-  const archive = archiver('zip', { zlib: { level: 6 } })
+  const archive = new ZipArchive({ zlib: { level: 6 } })
 
   const done = new Promise<void>((resolve, reject) => {
     outStream.on('close', () => resolve())

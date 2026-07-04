@@ -49,7 +49,7 @@ export async function processClientFile(job: Job<ClientFileProcessingJob>) {
   }
 
   try {
-    const { fileTypeFromBuffer } = await import('file-type/core')
+    const { fileTypeFromBuffer } = await import('file-type')
 
     let sampleBuffer: Buffer
     // resolved is only set in non-S3 mode and may be used by the SVG branch below

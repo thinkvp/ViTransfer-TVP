@@ -120,7 +120,7 @@ export default function SessionMonitor() {
     <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-5">
       <div className="bg-warning-visible border-2 border-warning-visible rounded-lg shadow-lg p-4 max-w-sm">
         <div className="flex items-start gap-3">
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             <svg
               className="w-6 h-6 text-warning"
               fill="none"

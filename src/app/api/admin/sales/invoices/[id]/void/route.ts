@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null))
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 })
+    return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, { status: 400 })
   }
 
   const { version, action } = parsed.data

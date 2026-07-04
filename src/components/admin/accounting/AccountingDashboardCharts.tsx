@@ -208,7 +208,7 @@ function ChartTooltip({
       {payload.map((entry) => (
         <div key={entry.name} className="flex items-center gap-2">
           <span
-            className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
+            className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
             style={{ backgroundColor: entry.color }}
           />
           <span className="text-muted-foreground">{entry.name}:</span>
@@ -530,7 +530,7 @@ function Leaderboard({
                   {showSectionBadge && (
                     <span
                       className={cn(
-                        'flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded',
+                        'shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded',
                         SECTION_BADGE[row.section].className,
                       )}
                     >
@@ -550,14 +550,14 @@ function Leaderboard({
                     </span>
                   )}
                 </div>
-                <span className="flex-shrink-0 text-sm font-semibold tabular-nums">
+                <span className="shrink-0 text-sm font-semibold tabular-nums">
                   {fmtAudFull(row.amountCents, sym)}
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                 <div
                   className={cn(
-                    'h-full rounded-full bg-gradient-to-r transition-all duration-500',
+                    'h-full rounded-full bg-linear-to-r transition-all duration-500',
                     SECTION_GRADIENT[row.section],
                   )}
                   style={{ width: `${pct}%` }}

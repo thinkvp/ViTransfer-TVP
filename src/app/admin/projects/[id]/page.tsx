@@ -466,7 +466,7 @@ export default function ProjectPage() {
   }
 
   const hasTrackedProjectData = Math.max(Number(project?.totalBytes || 0), Number(project?.diskBytes || 0), 0) > 0
-  const iconBadgeClassName = 'rounded-md p-1.5 flex-shrink-0 bg-foreground/10'
+  const iconBadgeClassName = 'rounded-md p-1.5 shrink-0 bg-foreground/10'
   const iconBadgeIconClassName = 'w-4 h-4 text-primary'
 
   const formatProjectDate = (date: string | Date) => {
@@ -520,7 +520,7 @@ export default function ProjectPage() {
 
   return (
     <div className="flex-1 min-h-0 bg-background">
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
+      <div className="max-w-(--breakpoint-2xl) mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-6">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
           <Link href="/admin/projects">
             <Button variant="ghost" size="default" className="justify-start px-3">
@@ -554,11 +554,11 @@ export default function ProjectPage() {
               <CardHeader>
                 <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
                   <div className="min-w-0 flex-1">
-	                    <CardTitle className="flex items-center gap-2 break-words">
+	                    <CardTitle className="flex items-center gap-2 wrap-break-word">
 	                      <span className={iconBadgeClassName}>
 	                        <FolderKanban className={iconBadgeIconClassName} />
 	                      </span>
-	                      <span className="min-w-0 break-words">{project.title}</span>
+	                      <span className="min-w-0 wrap-break-word">{project.title}</span>
 	                    </CardTitle>
                   </div>
                   <ProjectStatusPicker
@@ -575,7 +575,7 @@ export default function ProjectPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="text-sm min-w-0">
                       <p className="text-muted-foreground">Client</p>
-                      <p className="font-medium break-words">
+                      <p className="font-medium wrap-break-word">
                         {(() => {
                           const primaryRecipient = project.recipients?.find((r: any) => r.isPrimary) || project.recipients?.[0]
                           const label = project.companyName || primaryRecipient?.name || primaryRecipient?.email || 'Client'
@@ -591,7 +591,7 @@ export default function ProjectPage() {
                       )}
                     </div>
 
-                    <div className="text-sm flex-shrink-0 text-right">
+                    <div className="text-sm shrink-0 text-right">
                       <p className="text-muted-foreground">Start Date</p>
                       {isEditingStartDate && canFullProjectControl ? (
                         <div className="mt-1 flex items-center justify-end gap-2">
@@ -647,7 +647,7 @@ export default function ProjectPage() {
                   {String(project.description || '').trim().length > 0 && (
                     <div className="text-sm">
                       <p className="text-muted-foreground">Project Description</p>
-                      <div className="mt-1 text-sm text-foreground whitespace-pre-wrap break-words">{project.description}</div>
+                      <div className="mt-1 text-sm text-foreground whitespace-pre-wrap wrap-break-word">{project.description}</div>
                     </div>
                   )}
 
@@ -855,7 +855,7 @@ export default function ProjectPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
-                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 flex-shrink-0"
+                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 shrink-0"
                       title={sortMode === 'status' ? 'Sort alphabetically' : 'Sort by status'}
                     >
                       <span>{sortMode === 'status' ? 'Status' : 'Alphabetical'}</span>

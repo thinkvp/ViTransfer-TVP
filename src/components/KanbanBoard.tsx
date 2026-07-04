@@ -678,7 +678,7 @@ function KanbanColumnView({
       onDrop={canDragColumn ? onColumnDrop : undefined}
       onDragEnd={canDragColumn ? onColumnDragEnd : undefined}
       className={`
-        ${stretch ? 'flex-shrink-0 w-[280px] md:w-auto md:flex-1 md:min-w-[200px]' : 'flex-shrink-0 w-[280px]'} bg-muted/30 rounded-lg border transition-all
+        ${stretch ? 'shrink-0 w-[280px] md:w-auto md:flex-1 md:min-w-[200px]' : 'shrink-0 w-[280px]'} bg-muted/30 rounded-lg border transition-all
         ${isColumnDragging ? 'opacity-40 ring-2 ring-primary' : ''}
         ${isColumnDropTarget ? 'ring-2 ring-primary/50' : ''}
       `}
@@ -689,13 +689,13 @@ function KanbanColumnView({
         style={columnHeaderColor ? { borderTopColor: columnHeaderColor, borderTopWidth: 3 } : undefined}
       >
         <div className="flex items-center gap-2 min-w-0">
-          {canDragColumn && <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 flex-shrink-0" />}
+          {canDragColumn && <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" />}
           <h3 className="text-sm font-semibold truncate">{column.name}</h3>
           <span className="text-xs text-muted-foreground tabular-nums">
             {column.cards.length}
           </span>
         </div>
-        <div className="flex items-center gap-0.5 flex-shrink-0">
+        <div className="flex items-center gap-0.5 shrink-0">
           <Button variant="ghost" size="icon" className="w-7 h-7" onClick={onAddCard}>
             <Plus className="w-3.5 h-3.5" />
           </Button>
@@ -827,9 +827,9 @@ function KanbanCardView({
       `}
     >
       <div className="flex items-start gap-1.5">
-        <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 mt-0.5 flex-shrink-0 cursor-grab active:cursor-grabbing" />
+        <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50 mt-0.5 shrink-0 cursor-grab active:cursor-grabbing" />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium leading-tight break-words">{card.title}</p>
+          <p className="text-sm font-medium leading-tight wrap-break-word">{card.title}</p>
 
           {card.description && (
             <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{card.description}</p>
@@ -879,7 +879,7 @@ function KanbanCardView({
                 ))}
                 {card.members.length > MAX_AVATARS && (
                   <div
-                    className="h-6 w-6 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[9px] font-semibold text-muted-foreground flex-shrink-0"
+                    className="h-6 w-6 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[9px] font-semibold text-muted-foreground shrink-0"
                     title={`${card.members.length - MAX_AVATARS} more`}
                   >
                     +{card.members.length - MAX_AVATARS}
@@ -908,7 +908,7 @@ function KanbanCardView({
               data-card-menu
               variant="ghost"
               size="icon"
-              className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+              className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
               onClick={(e) => e.stopPropagation()}
             >
               <MoreHorizontal className="w-3 h-3" />
@@ -1250,7 +1250,7 @@ export function CardDialog({
                       } : undefined}
                     >
                       <span className="truncate">{currentColumn?.name || 'Select status'}</span>
-                      <MoreHorizontal className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
+                      <MoreHorizontal className="w-3.5 h-3.5 shrink-0 opacity-50" />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="min-w-[200px]">
@@ -1260,7 +1260,7 @@ export function CardDialog({
                         onClick={() => setSelectedColumnId(col.id)}
                       >
                         <span
-                          className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+                          className="w-3 h-3 rounded-full mr-2 shrink-0"
                           style={{ backgroundColor: col.color || 'hsl(var(--muted-foreground))' }}
                         />
                         {col.name}
@@ -1451,7 +1451,7 @@ export function CardDialog({
                             className="h-5 w-5 text-[8px]"
                           />
                           <span className="truncate">{u.name || u.email}</span>
-                          <Plus className="w-3 h-3 text-muted-foreground ml-auto flex-shrink-0" />
+                          <Plus className="w-3 h-3 text-muted-foreground ml-auto shrink-0" />
                         </button>
                       ))}
                   </div>
@@ -1625,7 +1625,7 @@ function TaskHistory({ cardId }: { cardId: string }) {
               email={null}
               displayColor={actor?.displayColor ?? null}
               avatarUrl={actor ? `/api/users/${actor.id}/avatar` : null}
-              className="h-6 w-6 text-[9px] flex-shrink-0 mt-0.5"
+              className="h-6 w-6 text-[9px] shrink-0 mt-0.5"
             />
             <div className="min-w-0 flex-1">
               <span className="text-sm">
@@ -1825,7 +1825,7 @@ function TaskComments({
           />
           <Button
             size="icon"
-            className="w-8 h-8 flex-shrink-0"
+            className="w-8 h-8 shrink-0"
             disabled={!newComment.trim() || loading}
             onClick={() => void submit()}
           >
@@ -1885,7 +1885,7 @@ function TaskCommentBubble({
               {comment.authorName || 'Unknown'}
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <div className="text-xs text-muted-foreground whitespace-nowrap">
               {formatDateTime(comment.createdAt)}
             </div>
@@ -1904,7 +1904,7 @@ function TaskCommentBubble({
           </div>
         </div>
 
-        <div className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground">
+        <div className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground">
           {comment.content}
         </div>
 
@@ -1942,7 +1942,7 @@ function TaskCommentBubble({
                     <div key={reply.id} className="pl-3">
                       <div className="flex items-start justify-between gap-3 mb-1">
                         <div className="flex items-center gap-2 min-w-0">
-                          <CornerDownRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                          <CornerDownRight className="w-3 h-3 text-muted-foreground shrink-0" />
                           <InitialsAvatar
                             name={reply.authorName || 'Unknown'}
                             displayColor={reply.displayColor}
@@ -1953,7 +1953,7 @@ function TaskCommentBubble({
                             {reply.authorName || 'Unknown'}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex items-center gap-2 shrink-0">
                           <span className="text-xs text-muted-foreground whitespace-nowrap">
                             {formatDateTime(reply.createdAt)}
                           </span>
@@ -1969,7 +1969,7 @@ function TaskCommentBubble({
                           )}
                         </div>
                       </div>
-                      <div className="text-sm whitespace-pre-wrap break-words leading-relaxed text-foreground">
+                      <div className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground">
                         {reply.content}
                       </div>
                     </div>
@@ -2095,7 +2095,7 @@ function ArchivedView({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium truncate">{card.title}</span>
                 <span
-                  className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-white flex-shrink-0"
+                  className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-white shrink-0"
                   style={{ backgroundColor: card.column.color || 'hsl(var(--muted-foreground))' }}
                 >
                   {card.column.name}
@@ -2155,7 +2155,7 @@ function ArchivedView({
                 />
               ))}
               {card.members.length > MAX_AVATARS && (
-                <div className="h-6 w-6 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[9px] font-semibold text-muted-foreground flex-shrink-0">
+                <div className="h-6 w-6 rounded-full ring-2 ring-card bg-muted flex items-center justify-center text-[9px] font-semibold text-muted-foreground shrink-0">
                   +{card.members.length - MAX_AVATARS}
                 </div>
               )}

@@ -111,7 +111,7 @@ function MarkDoneButton({ title, disabled, onClick }: { title: string; disabled:
       disabled={disabled}
       onClick={onClick}
       title={title}
-      className="flex-shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-success-solid focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-50"
+      className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-success-solid focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-50"
     >
       <CheckCheck className="h-4 w-4" />
     </button>
@@ -125,7 +125,7 @@ function OpenBadge({ count }: { count: number }) {
   return (
     <span
       title={`${count} open`}
-      className="inline-flex min-w-[1.25rem] flex-shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground"
+      className="inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground"
     >
       {count}
     </span>
@@ -134,7 +134,7 @@ function OpenBadge({ count }: { count: number }) {
 
 function DoneBadge() {
   return (
-    <span title="All done" className="flex-shrink-0 text-success-solid">
+    <span title="All done" className="shrink-0 text-success-solid">
       <CheckCircle2 className="h-4 w-4" />
     </span>
   )
@@ -326,13 +326,13 @@ export default function ProjectFeedbackList() {
                   className="flex flex-1 items-center gap-2.5 text-left min-w-0"
                 >
                   {projCollapsed ? (
-                    <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   ) : (
-                    <ChevronDown className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
                   )}
                   <span
                     className={cn(
-                      'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md',
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
                       projDone ? 'bg-success-solid/15 text-success' : 'bg-primary/10 text-primary'
                     )}
                   >
@@ -347,7 +347,7 @@ export default function ProjectFeedbackList() {
                       >
                         {proj.title}
                       </Link>
-                      <span className={cn('flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium', projectStatusBadgeClass(proj.status))}>
+                      <span className={cn('shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium', projectStatusBadgeClass(proj.status))}>
                         {projectStatusLabel(proj.status)}
                       </span>
                     </span>
@@ -385,11 +385,11 @@ export default function ProjectFeedbackList() {
                             className="flex flex-1 items-center gap-2 text-left min-w-0"
                           >
                             {vidCollapsed ? (
-                              <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             ) : (
-                              <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             )}
-                            <VideoIcon className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                            <VideoIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             <span className={cn('truncate text-sm font-medium', vidDone && 'text-muted-foreground')}>{vid.name}</span>
                             {vid.unresolvedCount > 0 ? <OpenBadge count={vid.unresolvedCount} /> : <DoneBadge />}
                           </button>
@@ -419,11 +419,11 @@ export default function ProjectFeedbackList() {
                                       className="flex flex-1 items-center gap-2 text-left min-w-0"
                                     >
                                       {verCollapsed ? (
-                                        <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                                        <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
                                       ) : (
-                                        <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
+                                        <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
                                       )}
-                                      <span className="flex-shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
+                                      <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-secondary-foreground">
                                         {ver.versionLabel || `v${ver.version}`}
                                       </span>
                                       {/* Per-version count only when a video has multiple versions —
@@ -441,7 +441,7 @@ export default function ProjectFeedbackList() {
                                         onClick={() => toggle(showDoneVersions, setShowDoneVersions, ver.videoId)}
                                         title={showDone ? 'Hide done comments' : `Show ${ver.resolvedCount} done`}
                                         className={cn(
-                                          'flex flex-shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums transition-colors',
+                                          'flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium tabular-nums transition-colors',
                                           showDone ? 'text-success' : 'text-muted-foreground hover:text-foreground'
                                         )}
                                       >
@@ -452,7 +452,7 @@ export default function ProjectFeedbackList() {
                                     <Link
                                       href={`/admin/projects/${proj.id}/share?video=${encodeURIComponent(vid.name)}&version=${ver.version}`}
                                       title="Open this version on the share page"
-                                      className="flex-shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
                                     >
                                       <Play className="h-3.5 w-3.5" />
                                     </Link>
@@ -460,7 +460,7 @@ export default function ProjectFeedbackList() {
                                       type="button"
                                       onClick={() => exportComments(proj.id, ver.videoId)}
                                       title="Export this version's comments (SRT)"
-                                      className="flex-shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
                                     >
                                       <Download className="h-3.5 w-3.5" />
                                     </button>
@@ -535,7 +535,7 @@ function FeedbackRow({
           onClick={() => onToggle(!isResolved)}
           title={isResolved ? 'Marked done — click to reopen' : 'Mark as done'}
           className={cn(
-            'mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50',
+            'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-50',
             isResolved
               ? 'border-success-solid bg-success-solid text-success-foreground'
               : 'border-muted-foreground/40 text-transparent hover:border-success-solid hover:text-success-solid/60'
@@ -544,7 +544,7 @@ function FeedbackRow({
           {busy ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Check className="h-2.5 w-2.5" />}
         </button>
       ) : (
-        isResolved && <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-success-solid" />
+        isResolved && <Check className="mt-0.5 h-4 w-4 shrink-0 text-success-solid" />
       )}
       <div className={cn('min-w-0 flex-1 text-sm', isResolved && 'text-muted-foreground line-through')}>
         <span className="mr-1.5 inline-flex items-center gap-1.5 align-baseline text-xs text-muted-foreground">
@@ -552,7 +552,7 @@ function FeedbackRow({
           <span className="font-medium text-foreground/80">{comment.authorName}</span>
           {/* Timecode pill — same styling as the share-page comment timecode */}
           <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-400/50 bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium text-amber-400">
-            <Clock className="h-3 w-3 flex-shrink-0" />
+            <Clock className="h-3 w-3 shrink-0" />
             <span className="tabular-nums">
               {formatTimecodeDisplay(comment.timecode, { showFrames: false })}
               {comment.timecodeEnd
@@ -561,7 +561,7 @@ function FeedbackRow({
             </span>
           </span>
         </span>
-        <span className="break-words">{comment.content}</span>
+        <span className="wrap-break-word">{comment.content}</span>
       </div>
     </div>
   )

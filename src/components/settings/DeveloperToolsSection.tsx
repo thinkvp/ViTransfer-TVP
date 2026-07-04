@@ -434,9 +434,9 @@ export function DeveloperToolsSection({
             </CardDescription>
           </div>
           {!hideCollapse && (show ? (
-            <ChevronUp className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
           ))}
         </div>
       </CardHeader>
@@ -611,7 +611,7 @@ export function DeveloperToolsSection({
                         ? <>Show new files to copy (first {s3DryRunResult.sampleKeys.length})</>
                         : <>Show sample files to copy (first {s3DryRunResult.sampleKeys.length})</>}
                     </summary>
-                    <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                    <pre className="mt-2 text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                       {s3DryRunResult.sampleKeys.join('\n')}
                     </pre>
                   </details>
@@ -621,7 +621,7 @@ export function DeveloperToolsSection({
                     <summary className="cursor-pointer text-xs text-destructive hover:text-destructive/80">
                       Show missing local files ({s3DryRunResult.missingKeys.length}) — DB-referenced paths not found on disk
                     </summary>
-                    <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive">
+                    <pre className="mt-2 text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-destructive/30 bg-destructive/5 p-2 text-destructive">
                       {s3DryRunResult.missingKeys.join('\n')}
                     </pre>
                   </details>
@@ -653,7 +653,7 @@ export function DeveloperToolsSection({
                     <summary className="cursor-pointer text-xs text-muted-foreground hover:text-foreground">
                       Show errors ({s3Status.run.errors.length})
                     </summary>
-                    <pre className="mt-2 text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                    <pre className="mt-2 text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                       {s3Status.run.errors.map((error) => `${error.key}: ${error.error}`).join('\n')}
                     </pre>
                   </details>
@@ -782,13 +782,13 @@ export function DeveloperToolsSection({
                             <>
                               <div>
                                 <div className="text-[11px] font-medium text-muted-foreground">Orphan paths (first 20)</div>
-                                <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                                <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                                   {orphanProjectFilesResult.sample.orphanPaths.join('\n') || 'None'}
                                 </pre>
                               </div>
                               <div>
                                 <div className="text-[11px] font-medium text-muted-foreground">Related project IDs</div>
-                                <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                                <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                                   {orphanProjectFilesResult.sample.projectIds.join('\n') || 'None'}
                                 </pre>
                               </div>
@@ -798,7 +798,7 @@ export function DeveloperToolsSection({
                           {orphanProjectFilesResult?.missingFileSample?.paths.length ? (
                             <div>
                               <div className="text-[11px] font-medium text-muted-foreground">Missing file paths (first 20)</div>
-                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                              <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                                 {orphanProjectFilesResult.missingFileSample.paths.join('\n')}
                               </pre>
                             </div>
@@ -807,7 +807,7 @@ export function DeveloperToolsSection({
                           {orphanProjectFilesResult?.errors?.length ? (
                             <div>
                               <div className="text-[11px] font-medium text-muted-foreground">Errors (first 20)</div>
-                              <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                              <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                                 {orphanProjectFilesResult.errors
                                   .slice(0, 20)
                                   .map((e) => `${e.path}: ${e.error}`)
@@ -822,7 +822,7 @@ export function DeveloperToolsSection({
                 ) : null}
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                 <Button
                   type="button"
                   variant="outline"
@@ -882,7 +882,7 @@ export function DeveloperToolsSection({
                           Show stale notifications{backlogResult.staleSampleTruncated ? ' (first 50)' : ''}
                         </summary>
                         <div className="mt-2">
-                          <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                          <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                             {backlogResult.staleSample.map((entry) => formatBacklogEntry(entry)).join('\n')}
                           </pre>
                         </div>
@@ -892,7 +892,7 @@ export function DeveloperToolsSection({
                 ) : null}
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                 <Button
                   type="button"
                   variant="outline"
@@ -947,7 +947,7 @@ export function DeveloperToolsSection({
                           Show per-queue breakdown
                         </summary>
                         <div className="mt-2">
-                          <pre className="text-[11px] whitespace-pre-wrap break-words rounded-md border border-border bg-background/50 p-2">
+                          <pre className="text-[11px] whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-background/50 p-2">
                             {Object.entries(bullmqPurgeResult.queues)
                               .map(([name, counts]) => `${name}: ${counts.completed} completed, ${counts.failed} failed`)
                               .join('\n')}
@@ -959,7 +959,7 @@ export function DeveloperToolsSection({
                 ) : null}
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                 <Button
                   type="button"
                   variant="outline"

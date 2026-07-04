@@ -47,7 +47,7 @@ export default async function UnsubscribePage({
 
   if (!isValid) {
     return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center p-4">
+      <div className="min-h-dvh bg-background flex items-center justify-center p-4">
         <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <h1 className="text-xl font-semibold text-foreground">Invalid link</h1>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -65,7 +65,7 @@ export default async function UnsubscribePage({
 
   if (!project) {
     return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center p-4">
+      <div className="min-h-dvh bg-background flex items-center justify-center p-4">
         <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <h1 className="text-xl font-semibold text-foreground">Project not found</h1>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -83,7 +83,7 @@ export default async function UnsubscribePage({
 
   if (!recipient) {
     return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center p-4">
+      <div className="min-h-dvh bg-background flex items-center justify-center p-4">
         <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <h1 className="text-xl font-semibold text-foreground">Recipient not found</h1>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -119,7 +119,7 @@ export default async function UnsubscribePage({
   const isSubscribed = recipient.receiveNotifications === true
 
   return (
-    <div className="min-h-[100dvh] bg-background flex items-center justify-center p-4">
+    <div className="min-h-dvh bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
         {isSubscribed ? (
           <>

@@ -17,6 +17,8 @@ npm run start:standalone     # Run the standalone production server (.next/stand
 npm run lint                 # eslint .
 npm run check:rbac           # Static RBAC gate check — REQUIRED to pass (see RBAC below)
 npm run test:share-uploads   # API + UI smoke checks for the share-upload feature (tsx scripts)
+npm run test:smoke           # General smoke test: check:rbac + pure-logic/security/static checks (no DB needed); also hits a running server if one responds
+npm run test:e2e             # Live end-to-end share-page workflow test — needs a running server (:3000/:4321) + DATABASE_URL; seeds and removes its own data. Dev/test instances only (can enqueue admin notifications)
 npm run preview:emails       # Render email templates to HTML previews for inspection
 ```
 
