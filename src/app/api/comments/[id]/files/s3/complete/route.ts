@@ -130,23 +130,27 @@ export async function POST(
     : 'application/octet-stream'
 
   try {
-    const commentFile = await prisma.commentFile.create({
-      data: {
-        commentId,
-        projectId: comment.projectId,
+    // Entity row + StoredFile registration commit atomically so a partial failure
+    // can't leave a CommentFile without its registration.
+    const commentFile = await prisma.$transaction(async (tx) => {
+      const created = await tx.commentFile.create({
+        data: {
+          commentId,
+          projectId: comment.projectId,
+          fileName,
+          fileType: resolvedFileType,
+        },
+      })
+      await registerStoredFile({
+        entityType: 'COMMENT_FILE',
+        entityId: created.id,
+        fileRole: 'ORIGINAL',
+        storagePath: key,
         fileName,
-        fileType: resolvedFileType,
-      },
-    })
-
-    // Register in StoredFile
-    await registerStoredFile({
-      entityType: 'COMMENT_FILE',
-      entityId: commentFile.id,
-      fileRole: 'ORIGINAL',
-      storagePath: key,
-      fileName,
-      fileSize: BigInt(fileSize),
+        fileSize: BigInt(fileSize),
+        projectId: comment.projectId,
+      }, tx)
+      return created
     })
 
     await recalculateAndStoreProjectTotalBytes(comment.projectId)

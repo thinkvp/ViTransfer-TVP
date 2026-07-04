@@ -5,10 +5,19 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp, AlertTriangle, Info } from 'lucide-react'
 
+export interface CpuWorkerReport {
+  hostname: string
+  updatedAt: string
+  stale: boolean
+  runningVideoConcurrency?: number
+}
+
 interface CpuConfigurationSectionProps {
   show: boolean
   setShow: (value: boolean) => void
   hideCollapse?: boolean
+  /** Worker-published CPU snapshot; null when the worker hasn't reported (values shown are then the app host's). */
+  workerInfo?: CpuWorkerReport | null
   detectedThreads: number
   budgetThreads: number
   reservedSystemThreads: number
@@ -26,6 +35,7 @@ interface CpuConfigurationSectionProps {
 export function CpuConfigurationSection({
   show,
   setShow,
+  workerInfo,
   detectedThreads,
   budgetThreads,
   reservedSystemThreads,
@@ -98,6 +108,32 @@ export function CpuConfigurationSection({
                 <span className="font-medium">{allocatedFfmpegThreads}</span>
               </div>
             </div>
+            {workerInfo ? (
+              <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
+                Reported by worker <span className="font-medium text-foreground">{workerInfo.hostname}</span>
+                {' · '}last update {new Date(workerInfo.updatedAt).toLocaleString()}
+                {typeof workerInfo.runningVideoConcurrency === 'number' && (
+                  <> · currently running {workerInfo.runningVideoConcurrency} concurrent job{workerInfo.runningVideoConcurrency === 1 ? '' : 's'}</>
+                )}
+                {workerInfo.stale && (
+                  <div className="flex items-start gap-2 mt-1.5 text-warning font-medium">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                    <span>This report is stale — the worker may be offline. Values shown are its last known state.</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-2 pt-2 border-t">
+                <div className="flex items-start gap-2 text-xs text-warning font-medium">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                  <span>
+                    No CPU report from the worker yet — values shown are this app host&apos;s CPUs, which may differ
+                    from the machine that processes videos. They will correct automatically once the worker starts
+                    (requires a worker running this version or newer).
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Thread Allocation */}

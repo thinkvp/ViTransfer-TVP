@@ -22,7 +22,16 @@ import { cn, formatDate } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
-interface TaxRateOption { id: string; name: string; code: string; rate: number; isDefault: boolean }
+const TAX_CODE_OPTIONS: { code: string; name: string }[] = [
+  { code: 'GST', name: 'GST (10%)' },
+  { code: 'GST_FREE', name: 'GST Free' },
+  { code: 'BAS_EXCLUDED', name: 'BAS Excluded' },
+  { code: 'INPUT_TAXED', name: 'Input Taxed' },
+]
+
+function taxCodeName(code: string): string {
+  return TAX_CODE_OPTIONS.find(o => o.code === code)?.name ?? code
+}
 
 interface OpenInvoice {
   id: string
@@ -66,15 +75,14 @@ function txnTypeOptions(amountCents: number): string[] {
   return amountCents >= 0 ? ['Deposit', 'ReceivePayment', 'Transfer'] : ['Expense', 'Transfer']
 }
 
-function defaultPostForm(txn: BankTransaction, taxRates: TaxRateOption[]): PostFormState {
+function defaultPostForm(txn: BankTransaction): PostFormState {
   const isDebit = txn.amountCents < 0
-  const defaultTax = taxRates.find(r => r.isDefault) ?? taxRates.find(r => r.code === 'GST') ?? null
   return {
     transactionType: isDebit ? 'Expense' : 'Deposit',
     accountId: '',
     accountSearch: '',
     accountOpen: false,
-    taxCode: defaultTax?.code ?? 'GST',
+    taxCode: 'GST',
     memo: '',
     supplierName: '',
     files: [],
@@ -121,7 +129,6 @@ export default function BankAccountsPage() {
   const [txnSearch, setTxnSearch] = useState('')
 
   const [coaAccounts, setCoaAccounts] = useState<AccountOption[]>([])
-  const [taxRates, setTaxRates] = useState<TaxRateOption[]>([])
 
   const [postForms, setPostForms] = useState<Record<string, PostFormState>>({})
   const [posting, setPosting] = useState<string | null>(null)
@@ -267,12 +274,8 @@ export default function BankAccountsPage() {
   }
 
   const loadRefData = useCallback(async () => {
-    const [coaRes, trRes] = await Promise.all([
-      apiFetch('/api/admin/accounting/accounts?activeOnly=true'),
-      apiFetch('/api/admin/accounting/tax-rates'),
-    ])
+    const coaRes = await apiFetch('/api/admin/accounting/accounts?activeOnly=true')
     if (coaRes.ok) { const d = await coaRes.json(); setCoaAccounts(buildAccountOptions(d.accounts ?? [])) }
-    if (trRes.ok) { const d = await trRes.json(); setTaxRates(d.taxRates ?? []) }
   }, [])
 
   useEffect(() => { void loadAccounts() }, [loadAccounts])
@@ -363,7 +366,7 @@ export default function BankAccountsPage() {
   function handleTabChange(tab: TabKey) { setActiveTab(tab); setTxnPage(1); setTxnSearch('') }
 
   function getPostForm(txn: BankTransaction): PostFormState {
-    return postForms[txn.id] ?? defaultPostForm(txn, taxRates)
+    return postForms[txn.id] ?? defaultPostForm(txn)
   }
 
   function setPostFormField(txnId: string, updates: Partial<PostFormState>) {
@@ -374,7 +377,7 @@ export default function BankAccountsPage() {
     const next = expandedId === txn.id ? null : txn.id
     setExpandedId(next)
     if (next && !postForms[txn.id]) {
-      const initial = defaultPostForm(txn, taxRates)
+      const initial = defaultPostForm(txn)
       setPostForms(prev => ({ ...prev, [txn.id]: initial }))
       // Fetch account suggestion for this description
       if (selectedAccountId && txn.status === 'UNMATCHED') {
@@ -975,7 +978,7 @@ export default function BankAccountsPage() {
                             {activeTab === 'MATCHED' && (
                               <div className="w-24 shrink-0 hidden sm:block">
                                 <span className="text-xs text-muted-foreground">
-                                  {t.matchType === 'SPLIT' ? '—' : t.taxCode ? (taxRates.find(r => r.code === t.taxCode)?.name ?? t.taxCode) : '—'}
+                                  {t.matchType === 'SPLIT' ? '—' : t.taxCode ? taxCodeName(t.taxCode) : '—'}
                                 </span>
                               </div>
                             )}
@@ -1085,14 +1088,7 @@ export default function BankAccountsPage() {
                                       <Select value={form.taxCode} onValueChange={v => setPostFormField(t.id, { taxCode: v })}>
                                         <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                                         <SelectContent>
-                                          {taxRates.length > 0
-                                            ? taxRates.map(r => <SelectItem key={r.id} value={r.code}>{r.name}</SelectItem>)
-                                            : <>
-                                                <SelectItem value="GST">GST (10%)</SelectItem>
-                                                <SelectItem value="GST_FREE">GST Free</SelectItem>
-                                                <SelectItem value="BAS_EXCLUDED">BAS Excluded</SelectItem>
-                                                <SelectItem value="INPUT_TAXED">Input Taxed</SelectItem>
-                                              </>}
+                                          {TAX_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.name}</SelectItem>)}
                                         </SelectContent>
                                       </Select>
                                     </div>
@@ -1227,14 +1223,7 @@ export default function BankAccountsPage() {
                                                 <Select value={line.taxCode} onValueChange={v => updateSplitLine(idx, { taxCode: v })}>
                                                   <SelectTrigger className="h-8 min-w-0 flex-1 text-sm"><SelectValue /></SelectTrigger>
                                                   <SelectContent>
-                                                    {taxRates.length > 0
-                                                      ? taxRates.map(r => <SelectItem key={r.id} value={r.code}>{r.name}</SelectItem>)
-                                                      : <>
-                                                          <SelectItem value="GST">GST (10%)</SelectItem>
-                                                          <SelectItem value="GST_FREE">GST Free</SelectItem>
-                                                          <SelectItem value="BAS_EXCLUDED">BAS Excluded</SelectItem>
-                                                          <SelectItem value="INPUT_TAXED">Input Taxed</SelectItem>
-                                                        </>}
+                                                    {TAX_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.name}</SelectItem>)}
                                                   </SelectContent>
                                                 </Select>
                                                 {splitLines.length > 2 && (
@@ -1277,7 +1266,7 @@ export default function BankAccountsPage() {
                                     {(t.transactionType || t.matchType === 'INVOICE_PAYMENT' || t.matchType === 'BAS_PAYMENT') && <div><p className="text-xs text-muted-foreground">Type</p><p>{t.matchType === 'SPLIT' ? 'Split' : t.matchType === 'BAS_PAYMENT' ? 'BAS Payment' : t.matchType === 'INVOICE_PAYMENT' ? 'Receive Payment' : TYPE_LABELS[t.transactionType!] ?? t.transactionType}</p></div>}
                                     {t.matchType !== 'SPLIT' && t.matchType !== 'BAS_PAYMENT' && (() => { const acctId = t.accountId ?? t.expense?.accountId; const name = t.accountName ?? t.expense?.accountName; const code = acctId ? coaAccounts.find(a => a.id === acctId)?.code : undefined; if (t.matchType === 'INVOICE_PAYMENT') return <div><p className="text-xs text-muted-foreground">Posting</p><p>Invoice payment only</p></div>; if (acctId) return <div><p className="text-xs text-muted-foreground">Account</p>{code ? <Link href={`/admin/accounting/chart-of-accounts/${code}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link> : <Link href={`/admin/accounting/chart-of-accounts/${acctId}`} className="text-sm text-primary hover:underline underline-offset-2">{name}</Link>}</div>; return null })()}
                                     {t.matchType === 'BAS_PAYMENT' && t.basPeriod && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">BAS Period</p><p>{t.basPeriod.label || `Q${t.basPeriod.quarter} ${t.basPeriod.financialYear}`}</p></div>}
-                                    {t.taxCode && <div><p className="text-xs text-muted-foreground">GST</p><p>{taxRates.find(r => r.code === t.taxCode)?.name ?? t.taxCode}</p></div>}
+                                    {t.taxCode && <div><p className="text-xs text-muted-foreground">GST</p><p>{taxCodeName(t.taxCode)}</p></div>}
                                     {t.invoicePayment?.invoiceId && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Invoice</p><Link href={`/admin/sales/invoices/${t.invoicePayment.invoiceId}`} className="text-sm text-primary hover:underline underline-offset-2">{t.invoicePayment.invoiceNumber ?? t.invoicePayment.invoiceId}{t.invoicePayment.clientName ? ` — ${t.invoicePayment.clientName}` : ''}</Link></div>}
                                     {!t.invoicePayment && t.invoicePayments && t.invoicePayments.length > 0 && (
                                       <div className="col-span-2 sm:col-span-3">

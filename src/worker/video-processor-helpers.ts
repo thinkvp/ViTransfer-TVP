@@ -260,6 +260,39 @@ async function moveTempFileToLogicalStorage(srcPath: string, destLogicalPath: st
   await moveUploadedFile(srcPath, destLogicalPath, stats.size)
 }
 
+// HLS bundles and sprite sets are 30-300 small files; serial PUTs to S3 make upload
+// latency (not bandwidth) dominate wall-clock. Kept modest so parallel video jobs
+// don't saturate the uplink. Local mode is unaffected in practice (renames are cheap).
+export const STORAGE_UPLOAD_CONCURRENCY = 8
+
+/**
+ * Run tasks with bounded concurrency, preserving result order. Stops pulling new
+ * tasks after the first failure (in-flight tasks finish) and rejects with that error.
+ */
+export async function runWithConcurrency<T>(
+  tasks: Array<() => Promise<T>>,
+  concurrency: number,
+): Promise<T[]> {
+  const results: T[] = new Array(tasks.length)
+  let nextIndex = 0
+  let failed = false
+
+  async function worker() {
+    while (!failed && nextIndex < tasks.length) {
+      const i = nextIndex++
+      try {
+        results[i] = await tasks[i]()
+      } catch (err) {
+        failed = true
+        throw err
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker))
+  return results
+}
+
 /**
  * Resolve original video path in storage and validate content.
  * Reads directly from STORAGE_ROOT — no temp copy needed.
@@ -528,10 +561,13 @@ export async function processTimelinePreviews(
 
   const localFiles = await fs.promises.readdir(tempDir)
   const spriteFiles = localFiles.filter((f) => f.startsWith('sprite-') && f.endsWith('.jpg'))
-  for (const spriteFile of spriteFiles) {
-    const localSpritePath = path.join(tempDir, spriteFile)
-    await moveTempFileToLogicalStorage(localSpritePath, `${spritesPath}/${spriteFile}`)
-  }
+  await runWithConcurrency(
+    spriteFiles.map((spriteFile) => async () => {
+      const localSpritePath = path.join(tempDir, spriteFile)
+      await moveTempFileToLogicalStorage(localSpritePath, `${spritesPath}/${spriteFile}`)
+    }),
+    STORAGE_UPLOAD_CONCURRENCY,
+  )
 
   // Register timeline files in StoredFile registry
   await registerTimelineStoredFiles(videoId, vttPath, spritesPath)
@@ -611,16 +647,20 @@ async function encodeHlsRenditionFromOriginal(params: {
   })
 
   // Upload every produced file (index.m3u8, init.mp4, seg-*.m4s) and tally bytes for bandwidth.
+  // Bounded-concurrency: a partial bundle from a mid-batch failure is caught by the
+  // completeness gate (verifyStoredHlsBundle) exactly like a mid-loop serial failure was.
   const generated = await fs.promises.readdir(renditionDir)
-  const uploadedPaths: string[] = []
   let totalBytes = 0
-  for (const file of generated) {
-    const abs = path.join(renditionDir, file)
-    totalBytes += await fs.promises.stat(abs).then((s) => s.size).catch(() => 0)
-    const dest = `${hlsRoot}/${label}/${file}`
-    await moveTempFileToLogicalStorage(abs, dest)
-    uploadedPaths.push(dest)
-  }
+  const uploadedPaths = await runWithConcurrency(
+    generated.map((file) => async () => {
+      const abs = path.join(renditionDir, file)
+      totalBytes += await fs.promises.stat(abs).then((s) => s.size).catch(() => 0)
+      const dest = `${hlsRoot}/${label}/${file}`
+      await moveTempFileToLogicalStorage(abs, dest)
+      return dest
+    }),
+    STORAGE_UPLOAD_CONCURRENCY,
+  )
 
   const bandwidth = durationSeconds > 0 ? Math.round((totalBytes * 8) / durationSeconds) : 0
   return {

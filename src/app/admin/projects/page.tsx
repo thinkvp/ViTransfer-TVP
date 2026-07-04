@@ -132,13 +132,9 @@ export default function AdminPage() {
   }, [analyticsByProjectId, filteredProjects, projects])
 
   const loadProjects = useCallback(async () => {
-    try {
-      const res = await apiFetch('/api/projects')
-      if (!res.ok) throw new Error('Failed to load projects')
-      const data = await res.json()
-      const loadedProjects = (data.projects || data || []) as Project[]
-      setProjects(loadedProjects)
-
+    // Analytics totals are optional; fetched in parallel with the projects list
+    // rather than after it (they don't depend on each other).
+    const analyticsPromise = (async () => {
       try {
         const analyticsRes = await apiFetch('/api/analytics')
         if (analyticsRes.ok) {
@@ -165,11 +161,21 @@ export default function AdminPage() {
       } catch {
         // Analytics totals are optional; fall back to 0s
       }
+    })()
+
+    try {
+      const res = await apiFetch('/api/projects')
+      if (!res.ok) throw new Error('Failed to load projects')
+      const data = await res.json()
+      const loadedProjects = (data.projects || data || []) as Project[]
+      setProjects(loadedProjects)
     } catch (error) {
       setProjects([])
     } finally {
       setLoading(false)
     }
+
+    await analyticsPromise
   }, [])
 
   useEffect(() => {

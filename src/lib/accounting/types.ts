@@ -202,6 +202,10 @@ export interface BasSalesRecord {
   gstCents: number
   totalIncGstCents: number
   taxEnabled: boolean
+  /** Set for non-invoice income postings (Chart of Accounts ledger entries) */
+  kind?: 'bankTransaction' | 'journal' | 'splitLine'
+  /** For bankTransaction and splitLine rows: the underlying bank transaction ID */
+  bankTransactionId?: string
 }
 
 export interface BasExpenseRecord {

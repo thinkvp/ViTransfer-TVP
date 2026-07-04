@@ -76,20 +76,28 @@ export function getCachedCpuConfigOverrides(): CpuConfigOverrides {
 // Dynamic thread scaling — when fewer jobs are active than max concurrency,
 // each running FFmpeg process is allowed more threads so idle CPU budget
 // isn't wasted.  The counter is process-global (worker is single-process).
+//
+// The counter tracks every job doing *sustained* FFmpeg work, not just the
+// video-processing queue: timeline-sprite generation for share uploads and
+// video assets runs on separate queues with their own concurrency, and if it
+// isn't counted here those jobs each get a full pool's worth of threads on
+// top of the video jobs' allocation (oversubscribing the host during bulk
+// reprocesses). One-shot frame grabs (thumbnails) are deliberately not
+// counted — they finish in well under a second.
 // ---------------------------------------------------------------------------
 let _activeVideoJobs = 0
 
-/** Call when a video processing job starts (before FFmpeg). */
+/** Call when a sustained FFmpeg job starts (video processing, timeline sprites). */
 export function incrementActiveVideoJobs(): void {
   _activeVideoJobs++
 }
 
-/** Call when a video processing job finishes or fails (in `finally`). */
+/** Call when a sustained FFmpeg job finishes or fails (in `finally`). */
 export function decrementActiveVideoJobs(): void {
   _activeVideoJobs = Math.max(0, _activeVideoJobs - 1)
 }
 
-/** Current number of active video processing jobs. */
+/** Current number of active FFmpeg-heavy jobs. */
 export function getActiveVideoJobs(): number {
   return _activeVideoJobs
 }
@@ -253,5 +261,77 @@ export function logCpuAllocation(allocation: CpuAllocation): void {
       `[CPU CONFIG] WARNING: configured max FFmpeg threads (${allocation.maxThreadsUsedEstimate}) exceeds budget (${allocation.budgetThreads}). ` +
         `Consider lowering VIDEO_WORKER_CONCURRENCY or FFMPEG_THREADS_PER_JOB.`
     )
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Worker CPU info publishing — in split deployments the web app and worker
+// run on different hosts, so the app cannot detect the worker's CPU itself
+// (the settings page would show the app host's cores and the save validation
+// would reject configs that exceed *its* capacity, not the worker's). The
+// worker publishes its detected hardware + current allocation to Redis on
+// startup and on every override refresh; the settings API prefers this
+// snapshot over local detection.
+// ---------------------------------------------------------------------------
+export const WORKER_CPU_INFO_REDIS_KEY = 'cpu:workerInfo'
+
+/** A snapshot older than this is flagged stale (worker publishes every ~5 min). */
+export const WORKER_CPU_INFO_STALE_MS = 15 * 60 * 1000
+
+export interface WorkerCpuInfo {
+  hostname: string
+  detectedThreads: number
+  effectiveThreads: number
+  reservedSystemThreads: number
+  budgetThreads: number
+  ffmpegThreadsPerJob: number
+  videoWorkerConcurrency: number
+  /** Concurrency the BullMQ workers were actually started with (changes need a worker restart). */
+  runningVideoConcurrency: number
+  dynamicThreadAllocation: boolean
+  maxThreadsUsedEstimate: number
+  updatedAt: string
+}
+
+/** Publish this worker's CPU detection + allocation to Redis. Never throws. */
+export async function publishWorkerCpuInfo(
+  redis: { set: (key: string, value: string) => Promise<unknown> },
+  runningVideoConcurrency: number
+): Promise<void> {
+  try {
+    const alloc = getCpuAllocation()
+    const info: WorkerCpuInfo = {
+      hostname: os.hostname(),
+      detectedThreads: os.cpus().length,
+      effectiveThreads: alloc.effectiveThreads,
+      reservedSystemThreads: alloc.reservedSystemThreads,
+      budgetThreads: alloc.budgetThreads,
+      ffmpegThreadsPerJob: alloc.ffmpegThreadsPerJob,
+      videoWorkerConcurrency: alloc.videoWorkerConcurrency,
+      runningVideoConcurrency,
+      dynamicThreadAllocation: alloc.dynamicThreadAllocation,
+      maxThreadsUsedEstimate: alloc.maxThreadsUsedEstimate,
+      updatedAt: new Date().toISOString(),
+    }
+    await redis.set(WORKER_CPU_INFO_REDIS_KEY, JSON.stringify(info))
+  } catch (error) {
+    console.error('[CPU CONFIG] Failed to publish worker CPU info:', error)
+  }
+}
+
+/** Read the worker-published CPU snapshot. Returns null when absent or unparsable. */
+export async function readWorkerCpuInfo(
+  redis: { get: (key: string) => Promise<string | null> }
+): Promise<{ info: WorkerCpuInfo; stale: boolean } | null> {
+  try {
+    const raw = await redis.get(WORKER_CPU_INFO_REDIS_KEY)
+    if (!raw) return null
+    const info = JSON.parse(raw) as WorkerCpuInfo
+    if (!info || typeof info.effectiveThreads !== 'number' || info.effectiveThreads <= 0) return null
+    const updatedMs = Date.parse(info.updatedAt)
+    const stale = !Number.isFinite(updatedMs) || Date.now() - updatedMs > WORKER_CPU_INFO_STALE_MS
+    return { info, stale }
+  } catch {
+    return null
   }
 }

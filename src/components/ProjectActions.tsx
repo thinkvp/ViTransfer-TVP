@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
-import { Trash2, ExternalLink, RotateCcw, Send, Loader2 } from 'lucide-react'
+import { Trash2, ExternalLink, RotateCcw, Send, Loader2, CalendarRange } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import {
@@ -438,6 +438,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     router.push(`/admin/projects/${project.id}/analytics`)
   }
 
+  const handleViewGantt = () => {
+    router.push(`/admin/projects/${project.id}/gantt`)
+  }
+
   const handleReprocessPreviews = () => {
     if (!canReprocessPreviews || isReprocessingPreviews) return
     setShowReprocessConfirm(true)
@@ -556,6 +560,16 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               )}
             </Button>
           )}
+
+          <Button
+            variant="outline"
+            size="default"
+            className="w-full"
+            onClick={handleViewGantt}
+          >
+            <CalendarRange className="w-4 h-4 mr-2" />
+            View Gantt
+          </Button>
 
           {canViewAnalytics && (
             <Button

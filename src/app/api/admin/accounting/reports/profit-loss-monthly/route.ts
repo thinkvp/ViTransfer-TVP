@@ -220,7 +220,9 @@ export async function GET(request: NextRequest) {
     addTo(ym(t.date), 'incomeCents', amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent))
   }
   for (const j of incomeJournals) {
-    addTo(ym(j.date), 'incomeCents', amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent))
+    // Negate: INCOME is credit-normal, so a credit (negative in journal convention)
+    // increases income — matches the range P&L in reports.ts
+    addTo(ym(j.date), 'incomeCents', -amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent))
   }
   for (const s of incomeSplits) {
     addTo(ym(s.bankTransaction.date), 'incomeCents', amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent))

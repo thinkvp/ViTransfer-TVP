@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { isSmtpConfigured, getRateLimitSettings, getShareTokenTtlSeconds } from '@/lib/settings'
 import { getCurrentUserFromRequest, getShareContext, signShareToken, parseBearerToken } from '@/lib/auth'
 import { getPrimaryRecipient, getProjectRecipients } from '@/lib/recipients'
-import { verifyProjectAccess, fetchProjectWithVideos } from '@/lib/project-access'
+import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { trackSharePageAccess } from '@/lib/share-access-tracking'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
@@ -36,16 +36,20 @@ export async function GET(
     }, `share-access:${token}`)
     if (rateLimitResult) return rateLimitResult
 
-    const projectMeta = await prisma.project.findUnique({
+    // Single fetch serves both the auth gate (sharePassword/authMode) and the response
+    // payload (videos) — this endpoint is hit on every share-page load, video switch and
+    // keepalive, and previously queried the project twice per call.
+    const project = await prisma.project.findUnique({
       where: { slug: token },
-      select: {
-        id: true,
-        sharePassword: true,
-        authMode: true,
+      include: {
+        videos: {
+          where: { status: 'READY' as const },
+          orderBy: { version: 'desc' },
+        },
       },
     })
 
-    if (!projectMeta) {
+    if (!project) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
@@ -56,7 +60,7 @@ export async function GET(
     // - NONE auth: Ignore invalid token, proceed as if no token sent
     // - PASSWORD/OTP/BOTH: Return 401 to force re-authentication
     const bearerToken = parseBearerToken(request)
-    if (bearerToken && !shareContext && projectMeta.authMode !== 'NONE') {
+    if (bearerToken && !shareContext && project.authMode !== 'NONE') {
       const currentUser = await getCurrentUserFromRequest(request)
       const isInternalUser = !!currentUser
 
@@ -65,25 +69,16 @@ export async function GET(
         return NextResponse.json({
           error: 'Session expired or invalid. Please authenticate again.',
           requiresPassword: true,
-          authMode: projectMeta.authMode || 'PASSWORD'
+          authMode: project.authMode || 'PASSWORD'
         }, { status: 401 })
       }
     }
 
-    const project = await fetchProjectWithVideos(
-      token,
-      projectMeta.id
-    )
-
-    if (!project) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
-    }
-
     const accessCheck = await verifyProjectAccess(
       request,
-      projectMeta.id,
-      projectMeta.sharePassword,
-      projectMeta.authMode,
+      project.id,
+      project.sharePassword,
+      project.authMode,
       { allowAnonymousNone: true }
     )
 
@@ -99,7 +94,7 @@ export async function GET(
         {
           error: 'Authentication required',
           requiresPassword: true,
-          authMode: projectMeta.authMode || 'PASSWORD',
+          authMode: project.authMode || 'PASSWORD',
         },
         {
           status: 401,
@@ -115,27 +110,27 @@ export async function GET(
 
     if (!isAdmin && shareContext?.accessMethod) {
       await touchProjectLastAccessForRequest({
-        projectId: projectMeta.id,
+        projectId: project.id,
         request,
         sessionId: shareContext.sessionId,
       }).catch(() => {})
     }
 
     // Track share page access for projects with no authentication (authMode = NONE)
-    if (projectMeta.authMode === 'NONE' && !isAdmin) {
+    if (project.authMode === 'NONE' && !isAdmin) {
       // Use Redis for 30-minute deduplication
       const redis = getRedis()
       const ipAddress = getClientIpAddress(request)
-      const dedupeKey = `share_access:${projectMeta.id}:${ipAddress}`
+      const dedupeKey = `share_access:${project.id}:${ipAddress}`
       const alreadyTracked = await redis.get(dedupeKey)
 
       if (!alreadyTracked) {
         // CRITICAL: Use deterministic sessionId for NONE authMode
         // This must match the sessionId used in JWT token for session invalidation to work
-        const sessionId = `none:${projectMeta.id}:${ipAddress}`
+        const sessionId = `none:${project.id}:${ipAddress}`
 
         await trackSharePageAccess({
-          projectId: projectMeta.id,
+          projectId: project.id,
           accessMethod: 'NONE',
           sessionId,
           request,
@@ -172,7 +167,7 @@ export async function GET(
     // Tokens are session-bound and cached per session (see generateVideoAccessToken),
     // so re-loading the payload within a session reuses the same token — no proliferation.
     // Skipped entirely when videos are disabled for the project.
-    const thumbnailSessionId = shareContext?.sessionId || `share:${projectMeta.id}:${token}`
+    const thumbnailSessionId = shareContext?.sessionId || `share:${project.id}:${token}`
     const thumbnailUrlByVideoId = new Map<string, string>()
     if (project.enableVideos !== false) {
       const videosWithThumb = project.videos.filter((v: any) => previewMap.get(v.id)?.has('THUMBNAIL'))
@@ -194,7 +189,7 @@ export async function GET(
             }
           }
           try {
-            const thumbToken = await generateVideoAccessToken(v.id, projectMeta.id, 'thumbnail', request, thumbnailSessionId)
+            const thumbToken = await generateVideoAccessToken(v.id, project.id, 'thumbnail', request, thumbnailSessionId)
             if (thumbToken) thumbnailUrlByVideoId.set(v.id, `/api/content/${thumbToken}`)
           } catch (error) {
             console.error('[SHARE] Failed to mint thumbnail token', { videoId: v.id, error })
@@ -250,7 +245,7 @@ export async function GET(
     })
 
     // Parallelize independent queries for better performance
-    const [smtpConfigured, globalSettings, primaryRecipient] = await Promise.all([
+    const [smtpConfigured, globalSettings, primaryRecipient, recipients] = await Promise.all([
       isSmtpConfigured(),
       prisma.settings.findUnique({
         where: { id: 'default' },
@@ -262,21 +257,18 @@ export async function GET(
           mainCompanyDomain: true,
         },
       }),
-      getPrimaryRecipient(project.id)
+      getPrimaryRecipient(project.id),
+      getProjectRecipients(project.id),
     ])
 
-    let allRecipients: Array<{ id: string; name: string | null; email: string | null; displayColor?: string | null }> = []
-    {
-      const recipients = await getProjectRecipients(project.id)
-      allRecipients = recipients
-        .filter(r => r.id)
-        .map(r => ({
-          id: r.id!,
-          name: r.name,
-          email: r.email || null,
-          displayColor: (r as any).displayColor ?? null,
-        }))
-    }
+    const allRecipients = recipients
+      .filter(r => r.id)
+      .map(r => ({
+        id: r.id!,
+        name: r.name,
+        email: r.email || null,
+        displayColor: (r as any).displayColor ?? null,
+      }))
 
     const effectiveVideos = project.enableVideos === false ? [] : videosSanitizedBase
     const effectiveVideosByName = project.enableVideos === false ? {} : sortedVideosByName
@@ -336,11 +328,11 @@ export async function GET(
       let sessionId: string
       if (shareContext?.sessionId) {
         sessionId = shareContext.sessionId
-      } else if (projectMeta.authMode === 'NONE') {
+      } else if (project.authMode === 'NONE') {
         // CRITICAL: For NONE authMode, use deterministic sessionId based on IP
         // This must match the sessionId used in SharePageAccess tracking
         const ipAddress = getClientIpAddress(request)
-        sessionId = `none:${projectMeta.id}:${ipAddress}`
+        sessionId = `none:${project.id}:${ipAddress}`
       } else {
         sessionId = accessCheck.shareTokenSessionId || `share:${project.id}:${token}`
       }
@@ -351,8 +343,8 @@ export async function GET(
         permissions: ['view', 'comment', 'download'],
         guest: false,
         sessionId,
-        authMode: shareContext?.authMode ?? projectMeta.authMode,
-        accessMethod: shareContext?.accessMethod ?? (projectMeta.authMode === 'NONE' ? 'NONE' : undefined),
+        authMode: shareContext?.authMode ?? project.authMode,
+        accessMethod: shareContext?.accessMethod ?? (project.authMode === 'NONE' ? 'NONE' : undefined),
         ttlSeconds: shareTtlSeconds,
       })
       responseBody.shareToken = shareToken

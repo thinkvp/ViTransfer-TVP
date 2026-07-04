@@ -59,29 +59,18 @@ async function computeInvoicePaidAtYmdForExpiry(tx: Prisma.TransactionClient, in
   const id = String(invoiceId || '').trim()
   if (!id) return null
 
+  // Stripe money is read from its SalesPayment mirror rows (source=STRIPE),
+  // consistent with recomputeInvoiceStoredStatus / aggregateInvoicePaidCents.
   const paymentsAgg = await tx.salesPayment.aggregate({
-    where: { invoiceId: id, excludeFromInvoiceBalance: false },
+    where: {
+      invoiceId: id,
+      OR: [{ excludeFromInvoiceBalance: false }, { source: 'STRIPE' as any }],
+    },
     _max: { paymentDate: true },
   }).catch(() => null)
 
-  const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
-    where: { invoiceDocId: id },
-    _max: { createdAt: true },
-  }).catch(() => null)
-
-  const latestLocalYmd = typeof paymentsAgg?._max?.paymentDate === 'string' ? paymentsAgg._max.paymentDate : null
-
-  const stripeCreatedAt = stripeAgg?._max?.createdAt
-  const stripeIso = typeof stripeCreatedAt === 'string'
-    ? stripeCreatedAt
-    : (stripeCreatedAt && typeof (stripeCreatedAt as any).toISOString === 'function' ? (stripeCreatedAt as any).toISOString() : null)
-  const latestStripeYmd = typeof stripeIso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(stripeIso) ? stripeIso.slice(0, 10) : null
-
-  return [latestLocalYmd, latestStripeYmd]
-    .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
-    .sort()
-    .at(-1)
-    ?? null
+  const latestYmd = typeof paymentsAgg?._max?.paymentDate === 'string' ? paymentsAgg._max.paymentDate : null
+  return latestYmd && /^\d{4}-\d{2}-\d{2}$/.test(latestYmd) ? latestYmd : null
 }
 
 export async function POST(request: NextRequest) {

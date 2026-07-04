@@ -633,11 +633,11 @@ async function walkDirBytes(dir: string): Promise<number> {
 }
 
 /** List all accounting file S3 keys (for orphan scan). */
-export async function listAccountingS3Keys(): Promise<Array<{ key: string; bytes: number }>> {
+export async function listAccountingS3Keys(): Promise<Array<{ key: string; bytes: number; lastModified?: Date }>> {
   const client = getS3Client()
   const bucket = getS3Bucket()
   const prefix = `${ACCOUNTING_S3_PREFIX}/`
-  const results: Array<{ key: string; bytes: number }> = []
+  const results: Array<{ key: string; bytes: number; lastModified?: Date }> = []
   let continuationToken: string | undefined
 
   do {
@@ -648,7 +648,7 @@ export async function listAccountingS3Keys(): Promise<Array<{ key: string; bytes
       MaxKeys: 1000,
     }))
     for (const obj of resp.Contents ?? []) {
-      if (obj.Key) results.push({ key: obj.Key, bytes: obj.Size ?? 0 })
+      if (obj.Key) results.push({ key: obj.Key, bytes: obj.Size ?? 0, lastModified: obj.LastModified })
     }
     continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined
   } while (continuationToken)
@@ -657,8 +657,8 @@ export async function listAccountingS3Keys(): Promise<Array<{ key: string; bytes
 }
 
 /** Walk the local accounting directory and return all file paths relative to ACCOUNTING_STORAGE_ROOT. */
-export async function listAccountingLocalFiles(): Promise<Array<{ relPath: string; bytes: number }>> {
-  const results: Array<{ relPath: string; bytes: number }> = []
+export async function listAccountingLocalFiles(): Promise<Array<{ relPath: string; bytes: number; lastModified?: Date }>> {
+  const results: Array<{ relPath: string; bytes: number; lastModified?: Date }> = []
   await walkAccountingDir(ACCOUNTING_STORAGE_ROOT, ACCOUNTING_STORAGE_ROOT, results)
   return results
 }
@@ -666,7 +666,7 @@ export async function listAccountingLocalFiles(): Promise<Array<{ relPath: strin
 async function walkAccountingDir(
   dir: string,
   root: string,
-  out: Array<{ relPath: string; bytes: number }>,
+  out: Array<{ relPath: string; bytes: number; lastModified?: Date }>,
 ): Promise<void> {
   let entries: fs.Dirent[]
   try {
@@ -684,6 +684,7 @@ async function walkAccountingDir(
         out.push({
           relPath: path.relative(root, entryPath).replace(/\\/g, '/'),
           bytes: stat.size,
+          lastModified: stat.mtime,
         })
       }
     }

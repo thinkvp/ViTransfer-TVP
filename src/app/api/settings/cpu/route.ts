@@ -4,7 +4,7 @@ import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getRedis } from '@/lib/redis'
-import { getCpuAllocation, CPU_CONFIG_REDIS_KEY, loadCpuConfigOverrides, CpuConfigOverrides } from '@/lib/cpu-config'
+import { getCpuAllocation, CPU_CONFIG_REDIS_KEY, loadCpuConfigOverrides, CpuConfigOverrides, readWorkerCpuInfo } from '@/lib/cpu-config'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -31,16 +31,48 @@ export async function GET(request: NextRequest) {
   )
   if (rateLimitResult) return rateLimitResult
 
-  const detectedThreads = os.cpus().length
   const redis = getRedis()
   await loadCpuConfigOverrides(redis)
-  const allocation = getCpuAllocation()
   const raw = await redis.hgetall(CPU_CONFIG_REDIS_KEY)
   const overrides: Record<string, number | boolean | null> = {
     ffmpegThreadsPerJob: raw.ffmpegThreadsPerJob ? parseInt(raw.ffmpegThreadsPerJob, 10) : null,
     videoWorkerConcurrency: raw.videoWorkerConcurrency ? parseInt(raw.videoWorkerConcurrency, 10) : null,
     dynamicThreadAllocation: raw.dynamicThreadAllocation !== undefined ? raw.dynamicThreadAllocation !== 'false' : null,
   }
+
+  // Prefer the worker-published CPU snapshot: in split deployments (app and
+  // worker on different hosts) the app's own os.cpus() describes the wrong
+  // machine — the worker is where FFmpeg actually runs.
+  const workerReport = await readWorkerCpuInfo(redis)
+
+  if (workerReport) {
+    const { info, stale } = workerReport
+    return NextResponse.json({
+      system: {
+        detectedThreads: info.effectiveThreads,
+        reservedSystemThreads: info.reservedSystemThreads,
+        budgetThreads: info.budgetThreads,
+        maxFfmpegThreadsPerJob: MAX_FFMPEG_THREADS,
+      },
+      current: {
+        ffmpegThreadsPerJob: info.ffmpegThreadsPerJob,
+        videoWorkerConcurrency: info.videoWorkerConcurrency,
+        dynamicThreadAllocation: info.dynamicThreadAllocation,
+      },
+      overrides,
+      worker: {
+        hostname: info.hostname,
+        updatedAt: info.updatedAt,
+        stale,
+        runningVideoConcurrency: info.runningVideoConcurrency,
+      },
+    })
+  }
+
+  // No worker snapshot (worker not yet updated/started) — fall back to
+  // detecting this host, as before.
+  const detectedThreads = os.cpus().length
+  const allocation = getCpuAllocation()
 
   return NextResponse.json({
     system: {
@@ -55,6 +87,7 @@ export async function GET(request: NextRequest) {
       dynamicThreadAllocation: allocation.dynamicThreadAllocation,
     },
     overrides,
+    worker: null,
   })
 }
 
@@ -123,13 +156,34 @@ export async function PATCH(request: NextRequest) {
     proposedOverrides.dynamicThreadAllocation = !!dynamicThreadAllocation
   }
 
-  const nextAllocation = getCpuAllocation(proposedOverrides)
-  const estimatedMaxThreads = nextAllocation.videoWorkerConcurrency * nextAllocation.ffmpegThreadsPerJob
+  // Validate against the worker's CPU when a worker snapshot exists: in split
+  // deployments the app host's core count is irrelevant (and typically much
+  // smaller), so validating locally would wrongly reject valid configs.
+  // A cleared override falls back to the worker's currently-computed value —
+  // clearing always reverts toward a computed default within budget, so this
+  // is safe even if the snapshot is a few minutes old.
+  const workerReport = await readWorkerCpuInfo(redis)
 
-  if (estimatedMaxThreads > nextAllocation.effectiveThreads) {
+  let estimatedMaxThreads: number
+  let systemLimitThreads: number
+  let budgetThreads: number
+  if (workerReport) {
+    const proposedThreadsPerJob = proposedOverrides.ffmpegThreadsPerJob ?? workerReport.info.ffmpegThreadsPerJob
+    const proposedConcurrency = proposedOverrides.videoWorkerConcurrency ?? workerReport.info.videoWorkerConcurrency
+    estimatedMaxThreads = proposedThreadsPerJob * proposedConcurrency
+    systemLimitThreads = workerReport.info.effectiveThreads
+    budgetThreads = workerReport.info.budgetThreads
+  } else {
+    const nextAllocation = getCpuAllocation(proposedOverrides)
+    estimatedMaxThreads = nextAllocation.videoWorkerConcurrency * nextAllocation.ffmpegThreadsPerJob
+    systemLimitThreads = nextAllocation.effectiveThreads
+    budgetThreads = nextAllocation.budgetThreads
+  }
+
+  if (estimatedMaxThreads > systemLimitThreads) {
     return NextResponse.json(
       {
-        error: `The configured allocation would use ${estimatedMaxThreads} threads, which exceeds the system limit of ${nextAllocation.effectiveThreads}. Reduce FFmpeg threads per job or concurrent jobs.`
+        error: `The configured allocation would use ${estimatedMaxThreads} threads, which exceeds the ${workerReport ? "worker's" : 'system'} limit of ${systemLimitThreads}. Reduce FFmpeg threads per job or concurrent jobs.`
       },
       { status: 400 }
     )
@@ -166,14 +220,14 @@ export async function PATCH(request: NextRequest) {
   }
 
   const warnings: string[] = []
-  if (estimatedMaxThreads === nextAllocation.effectiveThreads) {
+  if (estimatedMaxThreads === systemLimitThreads) {
     warnings.push(
-      `The configured allocation uses ${estimatedMaxThreads} of ${nextAllocation.effectiveThreads} available threads, ` +
+      `The configured allocation uses ${estimatedMaxThreads} of ${systemLimitThreads} available threads, ` +
         'leaving no headroom for the OS and app. Consider reducing threads or concurrency.'
     )
-  } else if (estimatedMaxThreads > nextAllocation.budgetThreads) {
+  } else if (estimatedMaxThreads > budgetThreads) {
     warnings.push(
-      `The configured allocation uses ${estimatedMaxThreads} threads, which exceeds the recommended FFmpeg budget of ${nextAllocation.budgetThreads}. This may cause contention under load.`
+      `The configured allocation uses ${estimatedMaxThreads} threads, which exceeds the recommended FFmpeg budget of ${budgetThreads}. This may cause contention under load.`
     )
   }
 

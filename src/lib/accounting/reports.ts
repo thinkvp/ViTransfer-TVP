@@ -630,13 +630,15 @@ export async function buildBalanceSheetReport(
     ])
   )
 
-  // Accounts Receivable: unpaid / partially-paid invoices (accrue based on issue date)
+  // Accounts Receivable: invoices issued on or before asOf that were still unpaid
+  // AT that date. Include PAID invoices and date-filter payments so a backdated
+  // balance sheet reflects the position as it stood on asOf, not today's statuses.
   const outstandingInvoices = await prisma.salesInvoice.findMany({
     where: {
       issueDate: { lte: asOf },
-      status: { in: ['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID'] },
+      status: { not: 'VOID' },
     },
-    select: { id: true, itemsJson: true, taxEnabled: true, payments: { where: { excludeFromInvoiceBalance: false }, select: { amountCents: true } } },
+    select: { id: true, itemsJson: true, taxEnabled: true, payments: { where: { excludeFromInvoiceBalance: false, paymentDate: { lte: asOf } }, select: { amountCents: true } } },
   })
   const stripePayments = await prisma.salesInvoiceStripePayment.findMany({
     where: { createdAt: { lte: new Date(`${asOf}T23:59:59.999Z`) } },
@@ -670,11 +672,16 @@ export async function buildBalanceSheetReport(
 
   const totalAssetsCents = assetLines.reduce((s, l) => s + l.amountCents, 0)
 
-  // Liabilities: Accounts Payable = unpaid approved expenses to date
+  // Liabilities: Accounts Payable = expenses that were approved-but-unpaid AT asOf.
+  // Includes expenses since reconciled whose paying bank transaction is dated after
+  // asOf, so a backdated balance sheet shows the liability as it stood then.
   const unpaidExpenses = await prisma.expense.findMany({
     where: {
       date: { lte: asOf },
-      status: 'APPROVED',
+      OR: [
+        { status: 'APPROVED' },
+        { status: 'RECONCILED', bankTransaction: { date: { gt: asOf } } },
+      ],
     },
     select: { amountIncGst: true },
   })
@@ -859,14 +866,16 @@ export async function buildAgedReceivablesReport(asOf: string): Promise<AgedRece
   const settings = await prisma.salesSettings.findUnique({ where: { id: 'default' } })
   const taxRatePercent = settings?.taxRatePercent ?? 10
 
+  // Include PAID invoices and date-filter payments so a backdated report reflects
+  // what was outstanding AT asOf (fully-paid-as-of rows drop out via outstanding <= 0).
   const invoices = await prisma.salesInvoice.findMany({
     where: {
       issueDate: { lte: asOf },
-      status: { in: ['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID'] },
+      status: { not: 'VOID' },
     },
     include: {
       client: { select: { id: true, name: true } },
-      payments: { where: { excludeFromInvoiceBalance: false }, select: { amountCents: true } },
+      payments: { where: { excludeFromInvoiceBalance: false, paymentDate: { lte: asOf } }, select: { amountCents: true } },
     },
     orderBy: { issueDate: 'asc' },
   })

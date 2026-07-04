@@ -221,7 +221,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         break
       }
       case 'amount': {
-        const getAmt = (row: typeof a): number => { const e = row.entry as any; if (row.kind === 'expense') return e.amountExGst ?? 0; if (row.kind === 'bankTransaction') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } if (row.kind === 'journal') return amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); if (row.kind === 'split') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } return e.amountCents ?? 0 }
+        const getAmt = (row: typeof a): number => { const e = row.entry as any; if (row.kind === 'expense') return e.amountExGst ?? 0; if (row.kind === 'bankTransaction') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } if (row.kind === 'journal') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? ex : -ex } if (row.kind === 'split') { const ex = amountExcludingGst(e.amountCents, e.taxCode, taxRatePercent); return isDebitNormal ? -ex : ex } return e.amountCents ?? 0 }
         r = getAmt(a) - getAmt(b)
         break
       }
@@ -240,8 +240,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return sum + (isDebitNormal ? -exGst : exGst)
     }
     if (row.kind === 'journal') {
+      // Journals store accounting convention (positive = debit). For credit-normal
+      // accounts (INCOME/LIABILITY/EQUITY) a credit increases the balance, so negate.
       const j = row.entry as ReturnType<typeof journalEntryFromDb>
-      return sum + amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
+      const exGst = amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
+      return sum + (isDebitNormal ? exGst : -exGst)
     }
     if (row.kind === 'split') {
       const s = row.entry as { amountCents: number; taxCode: 'GST' | 'GST_FREE' | 'BAS_EXCLUDED' | 'INPUT_TAXED' }

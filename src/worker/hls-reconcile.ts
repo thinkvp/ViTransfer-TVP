@@ -17,6 +17,7 @@
  * the candidate sets shrink to empty on subsequent runs.
  */
 import { prisma } from '@/lib/db'
+import { getRedis } from '@/lib/redis'
 import { getVideoQueue, getShareUploadPreviewQueue } from '@/lib/queue'
 import { verifyStoredHlsBundle } from './video-processor-helpers'
 import { buildVideoHlsStorageRoot, buildVideoAssetHlsStorageRoot } from '@/lib/project-storage-paths'
@@ -42,6 +43,11 @@ const ASSET_PREVIEW_ROLES: FileRole[] = ['PREVIEW_MP4']
 // Per-run caps so a large backlog drains over several ticks instead of hammering storage.
 const RETRY_BATCH = 100
 const RECLAIM_BATCH = 200
+
+// A bundle that failed verification won't heal between sweeps on its own (the retry leg
+// only re-packages hlsReady=false entities), so don't re-walk it against storage every
+// 15 minutes. A false skip only delays reclaim — deletion always requires a fresh verify.
+const VERIFY_FAIL_TTL_SECONDS = 4 * 3600
 
 export async function processHlsReconcile(): Promise<{
   requeued: number
@@ -145,32 +151,74 @@ async function retryMissingAssetHls(): Promise<number> {
   return requeued
 }
 
-/** Delete MP4 previews for videos whose stored HLS bundle verifies complete. */
-async function reclaimVideoPreviews(affectedProjects: Set<string>): Promise<number> {
-  // Candidates: distinct videos that still have at least one MP4 preview row. Self-limiting —
-  // once reclaimed they drop out of this set.
+/**
+ * Fetch the next window of reclaim candidates (distinct entities that still have at least
+ * one MP4 preview row — self-limiting: once reclaimed they drop out of the set). A Redis
+ * cursor rotates the scan window across sweeps so candidates that keep failing the checks
+ * (not READY yet, bundle failing verification) can't pin the batch and starve the rest.
+ */
+async function nextReclaimCandidates(
+  entityType: 'VIDEO' | 'VIDEO_ASSET',
+  fileRoles: FileRole[],
+): Promise<Array<{ entityId: string; projectId: string | null }>> {
+  const redis = getRedis()
+  const cursorKey = `hls_reclaim_cursor:${entityType}`
+  const cursor = await redis.get(cursorKey).catch(() => null)
+
   const rows = await prisma.storedFile.findMany({
-    where: { entityType: 'VIDEO', fileRole: { in: VIDEO_PREVIEW_ROLES } },
+    where: {
+      entityType,
+      fileRole: { in: fileRoles },
+      ...(cursor ? { entityId: { gt: cursor } } : {}),
+    },
     select: { entityId: true, projectId: true },
     distinct: ['entityId'],
+    orderBy: { entityId: 'asc' },
     take: RECLAIM_BATCH,
   })
+
+  // A short page means the scan reached the end of the set — wrap to the start next sweep.
+  if (rows.length < RECLAIM_BATCH) {
+    await redis.del(cursorKey).catch(() => {})
+  } else {
+    await redis.set(cursorKey, rows[rows.length - 1].entityId).catch(() => {})
+  }
+  return rows
+}
+
+/** True when this bundle failed verification recently — skip re-walking it against storage. */
+async function verifyFailedRecently(entityType: 'VIDEO' | 'VIDEO_ASSET', entityId: string): Promise<boolean> {
+  return Boolean(await getRedis().get(`hls_verify_failed:${entityType}:${entityId}`).catch(() => null))
+}
+
+async function markVerifyFailed(entityType: 'VIDEO' | 'VIDEO_ASSET', entityId: string): Promise<void> {
+  await getRedis().set(`hls_verify_failed:${entityType}:${entityId}`, '1', 'EX', VERIFY_FAIL_TTL_SECONDS).catch(() => {})
+}
+
+/** Delete MP4 previews for videos whose stored HLS bundle verifies complete. */
+async function reclaimVideoPreviews(affectedProjects: Set<string>): Promise<number> {
+  const rows = await nextReclaimCandidates('VIDEO', VIDEO_PREVIEW_ROLES)
   if (rows.length === 0) return 0
 
-  let reclaimed = 0
-  for (const row of rows) {
-    const video = await prisma.video.findUnique({
-      where: { id: row.entityId },
-      select: { id: true, projectId: true, hlsReady: true, status: true },
-    })
-    if (!video || video.status !== 'READY' || !video.hlsReady) continue
+  const videos = await prisma.video.findMany({
+    where: { id: { in: rows.map((r) => r.entityId) }, status: 'READY', hlsReady: true },
+    select: { id: true, projectId: true },
+  })
+  const fallbackProjectId = new Map(rows.map((r) => [r.entityId, r.projectId]))
 
-    const projectId = video.projectId || row.projectId
+  let reclaimed = 0
+  for (const video of videos) {
+    const projectId = video.projectId || fallbackProjectId.get(video.id)
     if (!projectId) continue
+
+    if (await verifyFailedRecently('VIDEO', video.id)) continue
 
     const hlsRoot = buildVideoHlsStorageRoot(projectId, video.id)
     const verified = await verifyStoredHlsBundle(hlsRoot)
-    if (!verified) continue
+    if (!verified) {
+      await markVerifyFailed('VIDEO', video.id)
+      continue
+    }
 
     const deleted = await deletePreviewSet('VIDEO', video.id, VIDEO_PREVIEW_ROLES)
     if (deleted) {
@@ -183,27 +231,29 @@ async function reclaimVideoPreviews(affectedProjects: Set<string>): Promise<numb
 
 /** Delete the redundant MP4 playback preview for assets whose stored HLS bundle verifies complete. */
 async function reclaimAssetPreviews(affectedProjects: Set<string>): Promise<number> {
-  const rows = await prisma.storedFile.findMany({
-    where: { entityType: 'VIDEO_ASSET', fileRole: { in: ASSET_PREVIEW_ROLES } },
-    select: { entityId: true, projectId: true },
-    distinct: ['entityId'],
-    take: RECLAIM_BATCH,
-  })
+  const rows = await nextReclaimCandidates('VIDEO_ASSET', ASSET_PREVIEW_ROLES)
   if (rows.length === 0) return 0
 
+  const assets = await prisma.videoAsset.findMany({
+    where: { id: { in: rows.map((r) => r.entityId) } },
+    select: { id: true, videoId: true, video: { select: { projectId: true } } },
+  })
+  const fallbackProjectId = new Map(rows.map((r) => [r.entityId, r.projectId]))
+
   let reclaimed = 0
-  for (const row of rows) {
-    const asset = await prisma.videoAsset.findUnique({
-      where: { id: row.entityId },
-      select: { id: true, videoId: true, video: { select: { projectId: true } } },
-    })
-    const projectId = asset?.video?.projectId || row.projectId
-    if (!asset || !asset.videoId || !projectId) continue
+  for (const asset of assets) {
+    const projectId = asset.video?.projectId || fallbackProjectId.get(asset.id)
+    if (!asset.videoId || !projectId) continue
+
+    if (await verifyFailedRecently('VIDEO_ASSET', asset.id)) continue
 
     // Verify the bundle on storage rather than trusting the `hlsReady` flag — reclaim
     // deletes the MP4, so we must be certain the HLS copy is actually complete first.
     const hlsRoot = buildVideoAssetHlsStorageRoot(projectId, asset.videoId, asset.id)
-    if (!(await verifyStoredHlsBundle(hlsRoot))) continue
+    if (!(await verifyStoredHlsBundle(hlsRoot))) {
+      await markVerifyFailed('VIDEO_ASSET', asset.id)
+      continue
+    }
 
     const deleted = await deletePreviewSet('VIDEO_ASSET', asset.id, ASSET_PREVIEW_ROLES)
     if (deleted) {

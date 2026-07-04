@@ -30,6 +30,7 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { Readable } from 'stream'
+import * as fs from 'fs'
 
 // ---------------------------------------------------------------------------
 // Client singleton
@@ -97,7 +98,13 @@ export const S3_PRESIGNED_PART_EXPIRES_SECONDS = 3600
 // Basic file operations
 // ---------------------------------------------------------------------------
 
-/** Upload a file to S3. Uses multipart for files over MULTIPART_THRESHOLD_BYTES. */
+/**
+ * Upload a file to S3 as a single PutObject.
+ *
+ * NOTE: R2 caps a single PUT at ~5 GiB, and a consumed stream body can't be retried.
+ * For anything large or coming from a local file, prefer s3UploadLocalFile (multipart
+ * with per-part retry) or s3UploadFileWithRetry (body factory, replayable per attempt).
+ */
 export async function s3UploadFile(
   key: string,
   body: Readable | Buffer,
@@ -176,6 +183,80 @@ export async function s3UploadFileWithRetry(
     attempts: opts.attempts,
     label: `upload ${key}`,
   })
+}
+
+/**
+ * Files at or above this size are uploaded via server-side multipart instead of a
+ * single PUT. Well below R2's ~5 GiB single-PUT cap, and small enough that a transient
+ * failure over a slow link (worker NAS → R2) only re-sends one part, not the whole file.
+ */
+const S3_MULTIPART_UPLOAD_THRESHOLD_BYTES = 256 * 1024 * 1024
+
+/**
+ * Upload a LOCAL file to S3, choosing the safest transfer strategy by size:
+ * - below the multipart threshold: single PUT with a fresh read stream per retry
+ * - above it: server-side multipart, each part read from disk on demand and retried
+ *   independently (this is also the only way past R2's ~5 GiB single-PUT cap)
+ *
+ * The source file is left in place — callers own its lifecycle.
+ */
+export async function s3UploadLocalFile(
+  key: string,
+  localPath: string,
+  contentType: string,
+  size: number,
+  opts: { attempts?: number } = {},
+): Promise<void> {
+  if (size < S3_MULTIPART_UPLOAD_THRESHOLD_BYTES) {
+    await s3UploadFileWithRetry(key, () => fs.createReadStream(localPath), contentType, size, opts)
+    return
+  }
+
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const uploadId = await withS3Retry(
+    () => s3InitiateMultipartUpload(key, contentType),
+    { attempts: opts.attempts, label: `initiate multipart upload ${key}` },
+  )
+
+  const partSize = computeMultipartCopyPartSize(size)
+  const partCount = Math.ceil(size / partSize)
+  const parts: CompletedPart[] = []
+
+  try {
+    for (let partNumber = 1; partNumber <= partCount; partNumber += 1) {
+      const start = (partNumber - 1) * partSize
+      const end = Math.min(size - 1, start + partSize - 1)
+
+      // The stream is created inside the retry callback so every attempt reads
+      // the byte range fresh from disk (a consumed stream can't be replayed).
+      const partResponse = await withS3Retry(
+        () => client.send(new UploadPartCommand({
+          Bucket: bucket,
+          Key: key,
+          UploadId: uploadId,
+          PartNumber: partNumber,
+          Body: fs.createReadStream(localPath, { start, end }),
+          ContentLength: end - start + 1,
+        })),
+        { attempts: opts.attempts, label: `upload part ${partNumber}/${partCount} of ${key}` },
+      )
+
+      if (!partResponse.ETag) {
+        throw new Error(`Missing ETag for multipart upload part ${partNumber} (${key})`)
+      }
+      parts.push({ ETag: partResponse.ETag, PartNumber: partNumber })
+    }
+
+    await withS3Retry(
+      () => s3CompleteMultipartUpload(key, uploadId, parts),
+      { attempts: opts.attempts, label: `complete multipart upload ${key}` },
+    )
+  } catch (error) {
+    await s3AbortMultipartUpload(key, uploadId).catch(() => {})
+    throw error
+  }
 }
 
 /** Download a file from S3. Returns the stream and the object's byte length (0 if unknown). */

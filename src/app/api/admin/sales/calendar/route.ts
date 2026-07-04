@@ -113,29 +113,18 @@ export async function GET(request: NextRequest) {
         status: true,
         dueDate: true,
         itemsJson: true,
-        payments: { where: { excludeFromInvoiceBalance: false }, select: { amountCents: true } },
+        // Manual payments counted toward the balance plus Stripe mirror rows
+        // (source=STRIPE) — consistent with recomputeInvoiceStoredStatus.
+        payments: {
+          where: { OR: [{ excludeFromInvoiceBalance: false }, { source: 'STRIPE' as any }] },
+          select: { amountCents: true },
+        },
         client: { select: { name: true } },
         project: { select: { id: true, title: true } },
       },
       orderBy: [{ dueDate: 'asc' }, { invoiceNumber: 'asc' }],
     }),
   ])
-
-  const invoiceIds = invoices.map((inv) => inv.id)
-  const stripePayments = invoiceIds.length
-    ? await prisma.salesInvoiceStripePayment.findMany({
-        where: { invoiceDocId: { in: invoiceIds } },
-        select: { invoiceDocId: true, invoiceAmountCents: true },
-      })
-    : []
-
-  const stripePaidByInvoiceId = stripePayments.reduce<Record<string, number>>((acc, p) => {
-    const id = typeof p.invoiceDocId === 'string' ? p.invoiceDocId : ''
-    const cents = Number(p.invoiceAmountCents)
-    if (!id || !Number.isFinite(cents) || cents <= 0) return acc
-    acc[id] = (acc[id] ?? 0) + cents
-    return acc
-  }, {})
 
   const visibleInvoices = invoices.filter((inv) => {
     if (inv.status === 'PAID' || inv.status === 'VOID') return false
@@ -144,15 +133,12 @@ export async function GET(request: NextRequest) {
     const totalCents = sumLineItemsTotal(items, taxRatePercent)
     if (!(Number.isFinite(totalCents) && totalCents > 0)) return true
 
-    const manualPaidCents = Array.isArray((inv as any).payments)
+    const paidCents = Array.isArray((inv as any).payments)
       ? (inv as any).payments.reduce((acc: number, p: any) => {
           const cents = Number(p?.amountCents)
           return Number.isFinite(cents) ? acc + cents : acc
         }, 0)
       : 0
-
-    const stripePaidCents = stripePaidByInvoiceId[inv.id] ?? 0
-    const paidCents = manualPaidCents + stripePaidCents
 
     return paidCents < totalCents
   })

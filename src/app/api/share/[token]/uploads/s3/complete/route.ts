@@ -93,36 +93,47 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to complete upload' }, { status: 500 })
   }
 
-  const createdFile = await prisma.shareUploadFile.create({
-    data: {
-      projectId: access.project.id,
-      folderRelativePath: folderPath,
-      fileName: storedFileName || fileName,
-      fileType,
-      mediaDurationSeconds: mediaMetadata?.durationSeconds ?? null,
-      mediaWidth: mediaMetadata?.width ?? null,
-      mediaHeight: mediaMetadata?.height ?? null,
-      mediaCodec: mediaMetadata?.codec ?? null,
-      uploadedByName: access.isAdmin ? 'Admin' : 'Client',
-    },
-    select: {
-      id: true,
-      folderRelativePath: true,
-      fileName: true,
-      fileType: true,
-      createdAt: true,
-    },
-  })
-
-  // Register in StoredFile
-  await registerStoredFile({
-    entityType: 'SHARE_UPLOAD_FILE',
-    entityId: createdFile.id,
-    fileRole: 'ORIGINAL',
-    storagePath: key,
-    fileName: storedFileName || fileName,
-    fileSize: BigInt(fileSize),
-  })
+  // Entity row + StoredFile registration commit atomically: a partial failure must not
+  // leave a ShareUploadFile without its registration (invisible to reconciliation).
+  let createdFile
+  try {
+    createdFile = await prisma.$transaction(async (tx) => {
+      const created = await tx.shareUploadFile.create({
+        data: {
+          projectId: access.project.id,
+          folderRelativePath: folderPath,
+          fileName: storedFileName || fileName,
+          fileType,
+          mediaDurationSeconds: mediaMetadata?.durationSeconds ?? null,
+          mediaWidth: mediaMetadata?.width ?? null,
+          mediaHeight: mediaMetadata?.height ?? null,
+          mediaCodec: mediaMetadata?.codec ?? null,
+          uploadedByName: access.isAdmin ? 'Admin' : 'Client',
+        },
+        select: {
+          id: true,
+          folderRelativePath: true,
+          fileName: true,
+          fileType: true,
+          createdAt: true,
+        },
+      })
+      await registerStoredFile({
+        entityType: 'SHARE_UPLOAD_FILE',
+        entityId: created.id,
+        fileRole: 'ORIGINAL',
+        storagePath: key,
+        fileName: storedFileName || fileName,
+        fileSize: BigInt(fileSize),
+        projectId: access.project.id,
+      }, tx)
+      return created
+    })
+  } catch (error) {
+    // The object is already in R2 — log the key so the orphan is traceable.
+    console.error(`[SHARE UPLOADS S3 COMPLETE] Upload completed but DB registration failed — unregistered object at ${key}:`, error)
+    return NextResponse.json({ error: 'Failed to record upload' }, { status: 500 })
+  }
 
   if (folderPath) {
     const folderStoragePath = await resolveUploadFolderStoragePath({

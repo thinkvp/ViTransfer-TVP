@@ -1,6 +1,6 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { downloadFile, getFilePath, uploadFile, deleteFile } from '../lib/storage'
+import { downloadFile, getFilePath, uploadFileFromPath, deleteFile } from '../lib/storage'
 import type { AlbumPhotoZipJob } from '../lib/queue'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip'
 import fs from 'fs'
@@ -88,10 +88,11 @@ async function writeZipFile(params: {
   await fs.promises.rename(tmpPath, outputPath)
 
   // In S3 mode, upload the locally-generated ZIP to R2 then remove the temp file.
+  // uploadFileFromPath gives retries + multipart for large ZIPs (single PUTs can't
+  // be retried after a transient R2 error and are capped at ~5 GiB).
   if (isS3Mode()) {
     const stats = await fs.promises.stat(outputPath)
-    const readStream = fs.createReadStream(outputPath)
-    await uploadFile(outputStoragePath, readStream, stats.size, 'application/zip')
+    await uploadFileFromPath(outputStoragePath, outputPath, stats.size, 'application/zip')
     await fs.promises.unlink(outputPath).catch(() => {})
   }
 }

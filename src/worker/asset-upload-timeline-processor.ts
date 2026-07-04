@@ -3,7 +3,9 @@ import os from 'os'
 import fs from 'fs/promises'
 import { prisma } from '@/lib/db'
 import { generateTimelineSprite, getVideoMetadata } from '@/lib/ffmpeg'
+import { incrementActiveVideoJobs, decrementActiveVideoJobs } from '@/lib/cpu-config'
 import { moveUploadedFile } from '@/lib/storage'
+import { runWithConcurrency, STORAGE_UPLOAD_CONCURRENCY } from './video-processor-helpers'
 import { materializeStoragePathToLocalFile } from '@/lib/storage-provider'
 import { buildAssetTimelineStorageRoot, buildUploadTimelineStorageRoot } from '@/lib/project-storage-paths'
 import { getStoredFilePath, registerStoredFile } from '@/lib/stored-file'
@@ -61,38 +63,47 @@ async function generateTimelinePreviews(params: {
   const spriteCount = Math.ceil(durationSeconds / segmentDurationSeconds)
   const vttLines: string[] = ['WEBVTT', '']
 
-  for (let spriteIndex = 0; spriteIndex < spriteCount; spriteIndex++) {
-    const segmentStart = spriteIndex * segmentDurationSeconds
-    const remaining = Math.max(0, durationSeconds - segmentStart)
-    if (remaining <= 0) break
+  // Sprite generation decodes the whole video — sustained FFmpeg work. Count it
+  // in the shared active-jobs counter so dynamic thread allocation splits the
+  // CPU budget between concurrent video transcodes and timeline jobs instead of
+  // giving each a full pool's worth of threads.
+  incrementActiveVideoJobs()
+  try {
+    for (let spriteIndex = 0; spriteIndex < spriteCount; spriteIndex++) {
+      const segmentStart = spriteIndex * segmentDurationSeconds
+      const remaining = Math.max(0, durationSeconds - segmentStart)
+      if (remaining <= 0) break
 
-    const segmentDuration = Math.min(segmentDurationSeconds, remaining)
-    const spriteFileName = `sprite-${String(spriteIndex).padStart(3, '0')}.jpg`
-    const tempSpritePath = path.join(tempDir, spriteFileName)
+      const segmentDuration = Math.min(segmentDurationSeconds, remaining)
+      const spriteFileName = `sprite-${String(spriteIndex).padStart(3, '0')}.jpg`
+      const tempSpritePath = path.join(tempDir, spriteFileName)
 
-    await generateTimelineSprite({
-      inputPath,
-      outputPath: tempSpritePath,
-      startTimeSeconds: segmentStart,
-      durationSeconds: segmentDuration,
-      intervalSeconds,
-      tileColumns,
-      tileRows,
-      frameWidth,
-    })
+      await generateTimelineSprite({
+        inputPath,
+        outputPath: tempSpritePath,
+        startTimeSeconds: segmentStart,
+        durationSeconds: segmentDuration,
+        intervalSeconds,
+        tileColumns,
+        tileRows,
+        frameWidth,
+      })
 
-    if (DEBUG) console.log(`[WORKER] Timeline sprite ${spriteIndex + 1}/${spriteCount} generated`)
+      if (DEBUG) console.log(`[WORKER] Timeline sprite ${spriteIndex + 1}/${spriteCount} generated`)
 
-    for (let frameIndex = 0; frameIndex < framesPerSprite; frameIndex++) {
-      const cueStart = segmentStart + frameIndex * intervalSeconds
-      if (cueStart >= durationSeconds) break
-      const cueEnd = Math.min(durationSeconds, cueStart + intervalSeconds)
-      const col = frameIndex % tileColumns
-      const row = Math.floor(frameIndex / tileColumns)
-      vttLines.push(`${formatVttTimestamp(cueStart)} --> ${formatVttTimestamp(cueEnd)}`)
-      vttLines.push(`${spriteFileName}#xywh=${col * frameWidth},${row * frameHeight},${frameWidth},${frameHeight}`)
-      vttLines.push('')
+      for (let frameIndex = 0; frameIndex < framesPerSprite; frameIndex++) {
+        const cueStart = segmentStart + frameIndex * intervalSeconds
+        if (cueStart >= durationSeconds) break
+        const cueEnd = Math.min(durationSeconds, cueStart + intervalSeconds)
+        const col = frameIndex % tileColumns
+        const row = Math.floor(frameIndex / tileColumns)
+        vttLines.push(`${formatVttTimestamp(cueStart)} --> ${formatVttTimestamp(cueEnd)}`)
+        vttLines.push(`${spriteFileName}#xywh=${col * frameWidth},${row * frameHeight},${frameWidth},${frameHeight}`)
+        vttLines.push('')
+      }
     }
+  } finally {
+    decrementActiveVideoJobs()
   }
 
   const tempVttPath = path.join(tempDir, 'index.vtt')
@@ -103,11 +114,14 @@ async function generateTimelinePreviews(params: {
 
   const localFiles = await fs.readdir(tempDir)
   const spriteFiles = localFiles.filter((f) => f.startsWith('sprite-') && f.endsWith('.jpg'))
-  for (const spriteFile of spriteFiles) {
-    const spriteFullPath = path.join(tempDir, spriteFile)
-    const spriteStats = await fs.stat(spriteFullPath)
-    await moveUploadedFile(spriteFullPath, `${outputSpritesPath}/${spriteFile}`, spriteStats.size)
-  }
+  await runWithConcurrency(
+    spriteFiles.map((spriteFile) => async () => {
+      const spriteFullPath = path.join(tempDir, spriteFile)
+      const spriteStats = await fs.stat(spriteFullPath)
+      await moveUploadedFile(spriteFullPath, `${outputSpritesPath}/${spriteFile}`, spriteStats.size)
+    }),
+    STORAGE_UPLOAD_CONCURRENCY,
+  )
 
   await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
   return { vttPath, spritesPath: outputSpritesPath, ready: true }

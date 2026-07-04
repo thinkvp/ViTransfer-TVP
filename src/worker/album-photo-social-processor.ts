@@ -1,6 +1,6 @@
 import { Job } from 'bullmq'
 import { prisma } from '../lib/db'
-import { getFilePath, downloadFile, uploadFile, deleteFile } from '../lib/storage'
+import { getFilePath, downloadFile, uploadFileFromPath, deleteFile } from '../lib/storage'
 import type { AlbumPhotoSocialJob } from '../lib/queue'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { getAlbumZipJobId, getAlbumZipStoragePath } from '../lib/album-photo-zip'
@@ -123,8 +123,7 @@ export async function processAlbumPhotoSocial(job: Job<AlbumPhotoSocialJob>) {
       const outStats = await fs.promises.stat(tmpOutputPath)
       newSocialFileSize = BigInt(outStats.size)
 
-      const uploadStream = fs.createReadStream(tmpOutputPath)
-      await uploadFile(socialStoragePath, uploadStream, outStats.size, 'image/jpeg')
+      await uploadFileFromPath(socialStoragePath, tmpOutputPath, outStats.size, 'image/jpeg')
     } else {
       const inputPath = getFilePath(origPath)
       const outputPath = getFilePath(socialStoragePath)

@@ -132,7 +132,7 @@ export type AlbumSocialJob = {
 /** A server-side job that has recently completed (kept for 30 min). */
 export type CompletedServerJob = {
   id: string
-  type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename' | 'videoAssetPreview' | 'albumSocial'
+  type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename' | 'videoAssetPreview' | 'albumSocial' | 'system'
   label: string
   sublabel: string
   /** Clean project name for grouping display (distinct from the job-specific `sublabel`). */
@@ -730,11 +730,18 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   // stacking concurrent requests and pushing us toward rate limits.
   const pollInFlightRef = useRef(false)
 
+  // After a 401/403 there is no point re-polling every 10s with a dead session;
+  // pause until the tab regains visibility (user interaction may have refreshed
+  // the session in another tab).
+  const pollAuthFailedRef = useRef(false)
+
   useEffect(() => {
     let active = true
 
     async function poll() {
       if (pollInFlightRef.current) return // skip when a request is already in-flight
+      if (typeof document !== 'undefined' && document.hidden) return // hidden tabs resume via visibilitychange
+      if (pollAuthFailedRef.current) return
       pollInFlightRef.current = true
 
       try {
@@ -968,6 +975,16 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             latestAlbumSocialJobsRef.current = incoming
           }
 
+          // --- System queue failures (admin-only, failure-only channel) ---
+          if (Array.isArray(data.systemFailedJobs)) {
+            for (const j of data.systemFailedJobs as CompletedServerJob[]) {
+              const key = getCompletedServerJobKeyByParts('system', j.id)
+              if (!dismissedServerJobIdsRef.current.has(key)) {
+                newCompleted.push({ ...j, type: 'system' })
+              }
+            }
+          }
+
           // Auto-clear dismissed keys for any job that is currently active again.
           // This prevents old dismissals from blocking completions when the same
           // album/video/project gets new work (e.g. adding photos to an existing
@@ -1047,6 +1064,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           // API returned a non-OK status — surface as error
           if (res.status === 401 || res.status === 403) {
             setPollError('Session expired — please refresh the page.')
+            pollAuthFailedRef.current = true // stop polling until the tab regains focus
           } else {
             setPollError(`Server error (${res.status})`)
           }
@@ -1062,9 +1080,22 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
     poll()
     const interval = setInterval(poll, dropdownOpen ? 5_000 : 10_000)
+
+    // Hidden tabs skip polling entirely; catch up as soon as the tab is visible
+    // again. Regaining visibility also retries after an auth failure — the user
+    // may have refreshed their session in another tab.
+    const onVisibilityChange = () => {
+      if (!document.hidden) {
+        pollAuthFailedRef.current = false
+        poll()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     return () => {
       active = false
       clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [dropdownOpen])
 

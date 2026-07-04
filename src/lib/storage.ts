@@ -3,7 +3,7 @@ import * as path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
-import { isS3Mode, s3UploadFile, s3UploadFileWithRetry, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile, s3GetFileSize, s3ListPrefixSizes } from '@/lib/s3-storage'
+import { isS3Mode, s3UploadFile, s3UploadLocalFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile, s3GetFileSize, s3ListPrefixSizes } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -129,6 +129,26 @@ export async function uploadFile(
 }
 
 /**
+ * Upload a LOCAL file to a logical storage path. The source file is left in place.
+ *
+ * Prefer this over uploadFile(stream) whenever the data already exists on disk:
+ * in S3 mode it gets retries (a raw stream body can't be replayed after a transient
+ * R2 error) and multipart transfer for large files (R2 caps single PUTs at ~5 GiB).
+ */
+export async function uploadFileFromPath(
+  filePath: string,
+  srcAbsPath: string,
+  size: number,
+  contentType: string = 'application/octet-stream',
+): Promise<void> {
+  if (isS3Mode()) {
+    await s3UploadLocalFile(filePath, srcAbsPath, contentType, size)
+    return
+  }
+  await uploadFile(filePath, fs.createReadStream(srcAbsPath), size, contentType)
+}
+
+/**
  * Move a file from an absolute source path (e.g. a TUS temp file) to a logical
  * storage path (relative to STORAGE_ROOT), using an atomic fs.rename when the
  * source and destination are on the same filesystem, or falling back to a
@@ -150,11 +170,11 @@ export async function moveUploadedFile(
         `File size mismatch before S3 upload: expected ${expectedSize} bytes, got ${stat.size} bytes.`
       )
     }
-    // Re-open the stream per attempt: a consumed Readable can't be replayed, so a
-    // transient R2 500 mid-upload would otherwise be a "non-retryable streaming request".
-    await s3UploadFileWithRetry(
+    // Multipart above the size threshold (R2 caps single PUTs at ~5 GiB), single PUT
+    // with a fresh stream per retry attempt below it.
+    await s3UploadLocalFile(
       destLogicalPath,
-      () => fs.createReadStream(srcAbsPath),
+      srcAbsPath,
       'application/octet-stream',
       expectedSize,
     )

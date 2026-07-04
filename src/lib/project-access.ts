@@ -194,18 +194,3 @@ export async function verifyProjectAccess(
     shareTokenSessionId: shareContext.sessionId,
   }
 }
-
-export async function fetchProjectWithVideos(
-  token: string,
-  projectId: string
-) {
-  return prisma.project.findUnique({
-    where: { slug: token },
-    include: {
-      videos: {
-        where: { status: 'READY' as const },
-        orderBy: { version: 'desc' },
-      },
-    },
-  })
-}

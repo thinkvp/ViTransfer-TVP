@@ -7,7 +7,7 @@ import { generateThumbnail } from '@/lib/ffmpeg'
 import { buildUploadPreviewStoragePath, buildVideoAssetPreviewStoragePath } from '@/lib/project-storage-paths'
 import { recalculateAndStoreProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
-import { getFilePath, uploadFile } from '@/lib/storage'
+import { getFilePath, uploadFileFromPath } from '@/lib/storage'
 import { getStoredFilePath } from '@/lib/stored-file'
 import { registerStoredFile } from '@/lib/stored-file'
 import type { ShareUploadPreviewJob } from '@/lib/queue'
@@ -392,7 +392,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
         throw new Error('Preview output file is empty')
       }
 
-      await uploadFile(previewStoragePath, fs.createReadStream(tempThumbnailPath) as any, stat.size, 'image/jpeg')
+      await uploadFileFromPath(previewStoragePath, tempThumbnailPath, stat.size, 'image/jpeg')
       const previewFileSize = BigInt(stat.size)
       await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
     } else {
@@ -406,7 +406,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
           throw new Error('Thumbnail preview output file is empty')
         }
 
-        await uploadFile(previewStoragePath, fs.createReadStream(tempThumbnailPath) as any, thumbnailStat.size, 'image/jpeg')
+        await uploadFileFromPath(previewStoragePath, tempThumbnailPath, thumbnailStat.size, 'image/jpeg')
         const previewFileSize = BigInt(thumbnailStat.size)
         await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
 
@@ -423,7 +423,7 @@ export async function processShareUploadPreview(job: Job<ShareUploadPreviewJob>)
           throw new Error('Preview output file is empty')
         }
 
-        await uploadFile(previewStoragePath, fs.createReadStream(tempThumbnailPath) as any, stat.size, 'image/jpeg')
+        await uploadFileFromPath(previewStoragePath, tempThumbnailPath, stat.size, 'image/jpeg')
         const previewFileSize = BigInt(stat.size)
         await updateRecordSuccess(type, recordId, previewStoragePath, previewFileSize)
       }

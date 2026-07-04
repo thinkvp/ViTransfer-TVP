@@ -21,6 +21,21 @@ import {
 const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/
 const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
 
+/**
+ * Files younger than this are never treated as orphans (neither reported nor deleted).
+ *
+ * The scan snapshots DB references BEFORE listing storage, so anything uploaded after
+ * the snapshot (a presigned browser upload completing, the worker pushing transcode
+ * output) looks "unreferenced" even though its StoredFile row lands moments later.
+ * Uploads register within seconds of completing; one hour covers that window plus any
+ * cross-network (worker NAS → VPS Postgres) delay with a wide margin.
+ */
+const ORPHAN_GRACE_MS = 60 * 60 * 1000
+
+function isWithinOrphanGrace(lastModified: Date | undefined, now: number): boolean {
+  return !!lastModified && now - lastModified.getTime() < ORPHAN_GRACE_MS
+}
+
 type ShareUploadFilePathRow = { storagePath: string | null }
 type ShareUploadFolderPathRow = { storagePath: string | null }
 type ShareUploadPreviewPathRow = { storagePath: string | null; previewPath: string | null; timelinePreviewVttPath: string | null; timelinePreviewSpritesPath: string | null }
@@ -48,6 +63,8 @@ export type ProjectStorageOrphanCleanupResult = {
   scannedFiles: number
   orphanFiles: number
   orphanFileBytes: number
+  /** Unreferenced files skipped because they are younger than the orphan grace window */
+  recentFilesSkipped: number
   /** DB records whose file is absent from storage (file on storage ≠ file in DB) */
   missingFiles: number
   missingFileSample?: {
@@ -292,8 +309,9 @@ async function walkProjectFiles(
   out: OrphanFileEntry[],
   refs: ProjectStorageReferences,
   errors: Array<{ path: string; error: string }>,
-  stats: { scannedFiles: number }
+  stats: { scannedFiles: number; recentFilesSkipped: number }
 ): Promise<void> {
+  const now = Date.now()
   const entries = await fs.promises.readdir(dirAbs, { withFileTypes: true }).catch((error: any) => {
     errors.push({ path: dirRel, error: String(error?.message || error) })
     return [] as fs.Dirent[]
@@ -316,6 +334,10 @@ async function walkProjectFiles(
 
       stats.scannedFiles++
       if (!isReferencedPath(entryRel, refs)) {
+        if (isWithinOrphanGrace(fileStat.mtime, now)) {
+          stats.recentFilesSkipped++
+          continue
+        }
         out.push({
           absPath: entryAbs,
           relPath: normalizeRelativeStoragePath(entryRel),
@@ -367,6 +389,7 @@ async function pruneEmptyDirectories(dirRels: string[], dryRun: boolean): Promis
 type S3ObjectEntry = {
   key: string
   bytes: number
+  lastModified?: Date
 }
 
 /**
@@ -398,6 +421,7 @@ async function listS3Objects(): Promise<S3ObjectEntry[]> {
         objects.push({
           key: obj.Key,
           bytes: obj.Size ?? 0,
+          lastModified: obj.LastModified,
         })
       }
     }
@@ -416,9 +440,10 @@ async function scanS3ForOrphans(
   s3Objects: S3ObjectEntry[],
   refs: ProjectStorageReferences,
   errors: Array<{ path: string; error: string }>,
-  stats: { scannedFiles: number }
+  stats: { scannedFiles: number; recentFilesSkipped: number }
 ): Promise<OrphanFileEntry[]> {
   const orphanFiles: OrphanFileEntry[] = []
+  const now = Date.now()
 
   for (const s3Object of s3Objects) {
     stats.scannedFiles++
@@ -428,6 +453,13 @@ async function scanS3ForOrphans(
 
     // Check if this S3 key is referenced in the database
     if (!isReferencedPath(s3Object.key, refs)) {
+      // Grace window: an object uploaded after the DB snapshot was taken looks
+      // unreferenced even though its StoredFile row is about to land. Never
+      // treat young files as orphans.
+      if (isWithinOrphanGrace(s3Object.lastModified, now)) {
+        stats.recentFilesSkipped++
+        continue
+      }
       orphanFiles.push({
         absPath: `s3://${getS3Bucket()}/${s3Object.key}`, // Mark as S3 path for reporting
         relPath: normalizeRelativeStoragePath(s3Object.key),
@@ -582,14 +614,15 @@ async function buildReferencedAccountingPaths(
  */
 async function scanAccountingOrphans(
   accountingRefPaths: Set<string>,
-  stats: { scannedFiles: number },
+  stats: { scannedFiles: number; recentFilesSkipped: number },
   errors: Array<{ path: string; error: string }>,
-  prefetchedS3Files?: Array<{ key: string; bytes: number }>,
+  prefetchedS3Files?: Array<{ key: string; bytes: number; lastModified?: Date }>,
 ): Promise<OrphanFileEntry[]> {
   const orphanFiles: OrphanFileEntry[] = []
+  const now = Date.now()
 
   if (isS3Mode()) {
-    let s3Files: Array<{ key: string; bytes: number }>
+    let s3Files: Array<{ key: string; bytes: number; lastModified?: Date }>
     if (prefetchedS3Files) {
       s3Files = prefetchedS3Files
     } else {
@@ -609,6 +642,10 @@ async function scanAccountingOrphans(
         : obj.key
 
       if (!accountingRefPaths.has(relPath)) {
+        if (isWithinOrphanGrace(obj.lastModified, now)) {
+          stats.recentFilesSkipped++
+          continue
+        }
         orphanFiles.push({
           absPath: `s3://${getS3Bucket()}/${obj.key}`,
           relPath: obj.key,
@@ -617,7 +654,7 @@ async function scanAccountingOrphans(
       }
     }
   } else {
-    let localFiles: Array<{ relPath: string; bytes: number }>
+    let localFiles: Array<{ relPath: string; bytes: number; lastModified?: Date }>
     try {
       localFiles = await listAccountingLocalFiles()
     } catch (e: any) {
@@ -628,6 +665,10 @@ async function scanAccountingOrphans(
     for (const file of localFiles) {
       stats.scannedFiles++
       if (!accountingRefPaths.has(file.relPath)) {
+        if (isWithinOrphanGrace(file.lastModified, now)) {
+          stats.recentFilesSkipped++
+          continue
+        }
         orphanFiles.push({
           absPath: path.join(ACCOUNTING_STORAGE_ROOT, file.relPath),
           relPath: `accounting/${file.relPath}`,
@@ -677,7 +718,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
   ])
   const errors: Array<{ path: string; error: string }> = []
   const orphanFiles: OrphanFileEntry[] = []
-  const stats = { scannedFiles: 0 }
+  const stats = { scannedFiles: 0, recentFilesSkipped: 0 }
   let scannedStorageRoots = 0
 
   let roots: Array<{ absPath: string; relPath: string }> = []
@@ -784,6 +825,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
       scannedFiles: stats.scannedFiles,
       orphanFiles: orphanFiles.length,
       orphanFileBytes,
+      recentFilesSkipped: stats.recentFilesSkipped,
       missingFiles: missingResult.count,
       missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
       danglingRows: danglingRows.length,
@@ -821,6 +863,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
       scannedFiles: stats.scannedFiles,
       orphanFiles: orphanFiles.length,
       orphanFileBytes,
+      recentFilesSkipped: stats.recentFilesSkipped,
       missingFiles: missingResult.count,
       missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
       danglingRows: danglingRows.length,
@@ -865,6 +908,7 @@ export async function cleanupProjectStorageOrphans(dryRun: boolean): Promise<Pro
     scannedFiles: stats.scannedFiles,
     orphanFiles: orphanFiles.length,
     orphanFileBytes,
+    recentFilesSkipped: stats.recentFilesSkipped,
     missingFiles: missingResult.count,
     missingFileSample: missingResult.count > 0 ? { paths: missingResult.sample } : undefined,
     danglingRows: danglingRows.length,

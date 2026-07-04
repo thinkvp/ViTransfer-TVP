@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "2.1.5",
+  "version": "2.1.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,6 +9,8 @@
     "start": "next start",
     "start:standalone": "node .next/standalone/server.js",
     "check:rbac": "node scripts/check-rbac-gates.mjs",
+    "test:smoke": "npm run check:rbac && tsx scripts/smoke-test.ts",
+    "test:e2e": "tsx scripts/smoke-e2e.ts",
     "lint": "eslint .",
     "test:share-uploads:api": "tsx scripts/check-share-uploads-api.ts",
     "test:share-uploads:ui": "tsx scripts/check-share-uploads-ui.ts",

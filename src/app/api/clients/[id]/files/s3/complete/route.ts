@@ -98,23 +98,33 @@ export async function POST(
   const resolvedCategory =
     typeof category === 'string' && category.trim() ? category.trim() : 'other'
 
-  const record = await prisma.clientFile.create({
-    data: {
-      clientId,
-      fileName,
-      fileType: resolvedFileType,
-      category: resolvedCategory,
-      uploadedBy: currentUser.id,
-      uploadedByName: currentUser.name || currentUser.email,
-    },
-    select: { id: true },
-  })
-
-  // Register in StoredFile
-  await registerStoredFile({
-    entityType: 'CLIENT_FILE', entityId: record.id, fileRole: 'ORIGINAL',
-    storagePath: key, fileName, fileSize: BigInt(fileSize),
-  })
+  // Entity row + StoredFile registration commit atomically so a partial failure
+  // can't leave a ClientFile without its registration.
+  let record
+  try {
+    record = await prisma.$transaction(async (tx) => {
+      const created = await tx.clientFile.create({
+        data: {
+          clientId,
+          fileName,
+          fileType: resolvedFileType,
+          category: resolvedCategory,
+          uploadedBy: currentUser.id,
+          uploadedByName: currentUser.name || currentUser.email,
+        },
+        select: { id: true },
+      })
+      await registerStoredFile({
+        entityType: 'CLIENT_FILE', entityId: created.id, fileRole: 'ORIGINAL',
+        storagePath: key, fileName, fileSize: BigInt(fileSize),
+      }, tx)
+      return created
+    })
+  } catch (err) {
+    // The object is already in R2 — log the key so the orphan is traceable.
+    console.error(`[CLIENT FILES S3 COMPLETE] Upload completed but DB registration failed — unregistered object at ${key}:`, err)
+    return NextResponse.json({ error: 'Failed to record upload' }, { status: 500 })
+  }
 
   const { getClientFileQueue } = await import('@/lib/queue')
   const q = getClientFileQueue()

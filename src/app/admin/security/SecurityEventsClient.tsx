@@ -10,6 +10,7 @@ import { formatDateTime } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 import {
+  SECURITY_EVENT_METADATA,
   formatSecurityEventType,
   formatSecurityEventTypeWithDetails,
   getSecurityEventDescription,
@@ -47,6 +48,7 @@ interface SecurityEventsResponse {
     pages: number
   }
   blockedTotal: number
+  statsWindowDays?: number
   stats: Array<{
     type: string
     count: number
@@ -117,6 +119,7 @@ export default function SecurityEventsClient() {
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, pages: 0 })
   const [blockedTotal, setBlockedTotal] = useState(0)
   const [stats, setStats] = useState<Array<{ type: string; count: number }>>([])
+  const [statsWindowDays, setStatsWindowDays] = useState(30)
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(false)
   const [pendingUnblockKey, setPendingUnblockKey] = useState<string | null>(null)
@@ -130,6 +133,17 @@ export default function SecurityEventsClient() {
 
   const [eventsSortKey, setEventsSortKey] = useState<EventsTableSortKey>('createdAt')
   const [eventsSortDirection, setEventsSortDirection] = useState<'asc' | 'desc'>('desc')
+
+  // Type filter options: the full static catalog (so types with no recent events stay
+  // filterable — the server stats only cover the last statsWindowDays) plus any DB types
+  // not in the catalog, with recent counts appended where known.
+  const typeOptions = useMemo(() => {
+    const counts = new Map(stats.map(s => [s.type, s.count]))
+    const all = new Set<string>([...Object.keys(SECURITY_EVENT_METADATA), ...counts.keys()])
+    return Array.from(all)
+      .sort((a, b) => formatSecurityEventType(a).localeCompare(formatSecurityEventType(b)))
+      .map(type => ({ type, count: counts.get(type) }))
+  }, [stats])
 
   const loadEvents = useCallback(async () => {
     setLoading(true)
@@ -150,6 +164,7 @@ export default function SecurityEventsClient() {
       setPagination(data.pagination)
       setBlockedTotal(data.blockedTotal ?? 0)
       setStats(data.stats)
+      if (data.statsWindowDays) setStatsWindowDays(data.statsWindowDays)
     } catch (error) {
       console.error('Error loading security events:', error)
     } finally {
@@ -314,7 +329,7 @@ export default function SecurityEventsClient() {
                   <Tag className="w-5 h-5 text-primary" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Types</p>
+                  <p className="text-xs text-muted-foreground">Types ({statsWindowDays}d)</p>
                   <p className="text-base font-semibold tabular-nums truncate">{stats.length}</p>
                 </div>
               </div>
@@ -354,9 +369,9 @@ export default function SecurityEventsClient() {
                   className="w-full mt-1 h-9 px-3 bg-background text-foreground border border-border rounded-md"
                 >
                   <option value="">All Types</option>
-                  {stats.map(stat => (
-                    <option key={stat.type} value={stat.type}>
-                      {formatSecurityEventType(stat.type)} ({stat.count})
+                  {typeOptions.map(({ type, count }) => (
+                    <option key={type} value={type}>
+                      {formatSecurityEventType(type)}{count != null ? ` (${count})` : ''}
                     </option>
                   ))}
                 </select>

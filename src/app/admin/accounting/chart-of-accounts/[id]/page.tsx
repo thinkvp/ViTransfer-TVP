@@ -68,8 +68,11 @@ function getEntryAmountExGst(row: Entry, accountType: Account['type'] | undefine
     return isDebitNormalAccountType(accountType) ? -exGst : exGst
   }
   if (row.kind === 'journal') {
+    // Journals store accounting convention (positive = debit). For credit-normal
+    // accounts (INCOME/LIABILITY/EQUITY) a credit increases the balance, so negate.
     const j = row.entry as JournalEntry
-    return amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
+    const exGst = amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
+    return isDebitNormalAccountType(accountType) ? exGst : -exGst
   }
   if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).amountCents
   if (row.kind === 'bankAccountTxn') return (row.entry as BankAccountTxnEntry).amountCents

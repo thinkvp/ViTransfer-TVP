@@ -5,11 +5,38 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
 import { getCpuAllocation, loadCpuConfigOverrides } from '@/lib/cpu-config'
 import { getRedis } from '@/lib/redis'
-import { getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoThumbnailQueue, getFolderRenameQueue, getShareUploadPreviewQueue, getAssetTimelineQueue, getUploadTimelineQueue } from '@/lib/queue'
+import {
+  getVideoQueue,
+  getAlbumPhotoZipQueue,
+  getAlbumPhotoThumbnailQueue,
+  getFolderRenameQueue,
+  getShareUploadPreviewQueue,
+  getAssetTimelineQueue,
+  getUploadTimelineQueue,
+  getAssetQueue,
+  getClientFileQueue,
+  getUserFileQueue,
+  getProjectFileQueue,
+  getProjectEmailQueue,
+  getPasswordEmailQueue,
+} from '@/lib/queue'
 import { getAlbumZipJobId, type AlbumZipVariant } from '@/lib/album-photo-zip'
 import { getAlbumThumbnailQueueJobId } from '@/lib/album-photo-thumbnail'
 
 export const runtime = 'nodejs'
+
+// Upper bound on jobs fetched per getJobs() call. Without a range BullMQ
+// deserializes every job in the set — the share-upload-preview completed set
+// (retained 1h) can hold hundreds of payloads after a big wave, re-read every
+// poll. Sets are returned newest-first, so capping keeps the recent jobs the
+// 30-min window cares about.
+const QUEUE_SCAN_CAP = 999
+
+// Short shared cache of the assembled response, keyed per user (visibility is
+// per-user). Concurrent tabs / near-simultaneous polls reuse one build instead
+// of re-reading every queue and table.
+const RESPONSE_CACHE_TTL_SECONDS = 4
+const responseCacheKey = (userId: string) => `running-jobs:resp:v1:${userId}`
 
 /**
  * GET /api/running-jobs
@@ -29,6 +56,20 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   try {
+    // Serve the per-user cached response when a recent poll already built it
+    // (multiple tabs poll independently). Best-effort — a Redis hiccup just
+    // means a fresh build.
+    try {
+      const cached = await getRedis().get(responseCacheKey(authResult.id))
+      if (cached) {
+        return new NextResponse(cached, {
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+    } catch {
+      // fall through to a fresh build
+    }
+
     const isSystemAdmin = authResult.appRoleIsSystemAdmin === true
     const permissions = getUserPermissions(authResult)
     const allowedStatuses = permissions.projectVisibility?.statuses ?? []
@@ -94,15 +135,15 @@ export async function GET(request: NextRequest) {
       atActiveJobs, atWaitingJobs,
       utActiveJobs, utWaitingJobs,
     ] = await Promise.all([
-      videoQueue.getJobs(['active']),
-      videoQueue.getJobs(['waiting', 'prioritized', 'delayed']),
-      previewQueue.getJobs(['active']),
-      previewQueue.getJobs(['waiting', 'prioritized', 'delayed']),
-      previewQueue.getJobs(['completed']),
-      assetTimelineQueue.getJobs(['active']),
-      assetTimelineQueue.getJobs(['waiting', 'prioritized', 'delayed']),
-      uploadTimelineQueue.getJobs(['active']),
-      uploadTimelineQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      videoQueue.getJobs(['active'], 0, QUEUE_SCAN_CAP),
+      videoQueue.getJobs(['waiting', 'prioritized', 'delayed'], 0, QUEUE_SCAN_CAP),
+      previewQueue.getJobs(['active'], 0, QUEUE_SCAN_CAP),
+      previewQueue.getJobs(['waiting', 'prioritized', 'delayed'], 0, QUEUE_SCAN_CAP),
+      previewQueue.getJobs(['completed'], 0, QUEUE_SCAN_CAP),
+      assetTimelineQueue.getJobs(['active'], 0, QUEUE_SCAN_CAP),
+      assetTimelineQueue.getJobs(['waiting', 'prioritized', 'delayed'], 0, QUEUE_SCAN_CAP),
+      uploadTimelineQueue.getJobs(['active'], 0, QUEUE_SCAN_CAP),
+      uploadTimelineQueue.getJobs(['waiting', 'prioritized', 'delayed'], 0, QUEUE_SCAN_CAP),
     ])
 
     // Transcode leg state per video (PROCESSING wins over QUEUED).
@@ -423,8 +464,8 @@ export async function GET(request: NextRequest) {
     try {
       const videoQueue = getVideoQueue()
       const [completedVideoJobs, failedVideoJobs] = await Promise.all([
-        videoQueue.getJobs(['completed']),
-        videoQueue.getJobs(['failed']),
+        videoQueue.getJobs(['completed'], 0, QUEUE_SCAN_CAP),
+        videoQueue.getJobs(['failed'], 0, QUEUE_SCAN_CAP),
       ])
       for (const job of completedVideoJobs) recordLatest(recentlyCompletedVideoFinishedAt, job.data?.videoId, job.finishedOn)
       for (const job of failedVideoJobs) recordLatest(recentlyFailedVideoFinishedAt, job.data?.videoId, job.finishedOn)
@@ -447,6 +488,7 @@ export async function GET(request: NextRequest) {
       albumThumbnailJobs,
       folderRenameJobs,
       albumSocialJobs,
+      systemFailedJobs,
     ] = await Promise.all([
       prisma.video.findMany({
         where: {
@@ -475,9 +517,10 @@ export async function GET(request: NextRequest) {
         select: { id: true, name: true, version: true, versionLabel: true, projectId: true, updatedAt: true, project: { select: { title: true } } },
       }).catch((err) => { console.error('[running-jobs] errored-processing query failed:', err); return [] }),
       buildAlbumZipJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-zip builder failed:', err); return { active: [], completed: [] } }),
-      buildAlbumThumbnailJobs().catch((err) => { console.error('[running-jobs] album-thumbnail builder failed:', err); return { active: [], completed: [] } }),
-      buildFolderRenameJobs().catch((err) => { console.error('[running-jobs] folder-rename builder failed:', err); return { active: [], completed: [] } }),
+      buildAlbumThumbnailJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-thumbnail builder failed:', err); return { active: [], completed: [] } }),
+      buildFolderRenameJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] folder-rename builder failed:', err); return { active: [], completed: [] } }),
       buildAlbumSocialJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-social builder failed:', err); return { active: [], completed: [] } }),
+      buildSystemFailedJobs(isSystemAdmin).catch((err) => { console.error('[running-jobs] system-failed builder failed:', err); return [] }),
     ])
 
     const completedProcessingJobs = completedProcessingVideos.map((video) => ({
@@ -499,7 +542,7 @@ export async function GET(request: NextRequest) {
       error: true,
     }))
 
-    return NextResponse.json({
+    const payload = {
       jobs,
       completedProcessingJobs,
       erroredProcessingJobs,
@@ -510,6 +553,18 @@ export async function GET(request: NextRequest) {
       // assets moved into their version's composite in `jobs`).
       videoAssetPreviewJobs: uploadsJobs,
       albumSocialJobs,
+      systemFailedJobs,
+    }
+
+    const body = JSON.stringify(payload)
+    try {
+      await getRedis().set(responseCacheKey(authResult.id), body, 'EX', RESPONSE_CACHE_TTL_SECONDS)
+    } catch {
+      // best-effort cache
+    }
+
+    return new NextResponse(body, {
+      headers: { 'content-type': 'application/json' },
     })
   } catch (err: any) {
     console.error('[running-jobs]', err)
@@ -559,6 +614,10 @@ export async function POST(request: NextRequest) {
   const forbidden = () => NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
+    // Drop this user's cached GET response so the next poll reflects the clear
+    // immediately instead of waiting out the cache TTL.
+    await getRedis().del(responseCacheKey(authResult.id)).catch(() => {})
+
     if (type === 'processing') {
       const video = await prisma.video.findUnique({
         where: { id },
@@ -611,19 +670,39 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // QUEUED → READY (nothing was produced; the original is intact). A stalled
-      // PROCESSING → ERROR: a half-finished transcode leaves incomplete previews,
-      // so mark it failed (eligible for the Reprocess action) rather than READY,
-      // which would present an unplayable video as good.
+      // A stalled PROCESSING → ERROR: a half-finished transcode leaves incomplete
+      // previews, so mark it failed (eligible for the Reprocess action) rather than
+      // READY, which would present an unplayable video as good. A cleared QUEUED
+      // video goes back to READY only when previews from an earlier run exist
+      // (i.e. this was a queued reprocess); a fresh upload cleared before its
+      // first transcode has nothing playable, so it lands ERROR too.
+      let clearedStatus: 'READY' | 'ERROR' = 'ERROR'
+      let clearedError: string | null =
+        'Processing was interrupted (worker stopped) and cleared manually. Reprocess to retry.'
+      if (video.status === 'QUEUED') {
+        const existingPreview = await prisma.storedFile.findFirst({
+          where: {
+            entityType: 'VIDEO',
+            entityId: id,
+            fileRole: { in: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080'] },
+          },
+          select: { id: true },
+        })
+        if (existingPreview) {
+          clearedStatus = 'READY'
+          clearedError = null
+        } else {
+          clearedError = 'Cleared from the queue before processing. Reprocess to generate previews.'
+        }
+      }
+
       await prisma.video.update({
         where: { id },
         data: {
-          status: video.status === 'PROCESSING' ? 'ERROR' : 'READY',
+          status: clearedStatus,
           processingPhase: null,
           processingProgress: 0,
-          processingError: video.status === 'PROCESSING'
-            ? 'Processing was interrupted (worker stopped) and cleared manually. Reprocess to retry.'
-            : null,
+          processingError: clearedError,
         },
       })
 
@@ -742,6 +821,47 @@ export async function POST(request: NextRequest) {
 }
 
 // ---------------------------------------------------------------------------
+// Shared visibility helpers
+// ---------------------------------------------------------------------------
+
+interface VisibilityContext {
+  isSystemAdmin: boolean
+  userId: string
+  allowedStatuses: string[]
+}
+
+// Failed job-table rows (folder renames, album thumbnails) are worth keeping
+// visible longer than the 30-min success window, but not forever — dismissal
+// is per-browser localStorage, so an unbounded FAILED row haunts every other
+// device indefinitely. Details live in the worker logs after this.
+const FAILED_JOB_RETENTION_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Reduce a candidate projectId list to the ids visible to this user, using the
+ * same rules as the main queries (system admins see all, restricted by the
+ * role's allowed project statuses; others additionally need assignment).
+ * Needed for job tables that only carry a denormalized projectId, no relation.
+ */
+async function filterVisibleProjectIds(
+  projectIds: Array<string | null | undefined>,
+  { isSystemAdmin, userId, allowedStatuses }: VisibilityContext,
+): Promise<Set<string>> {
+  const unique = [...new Set(projectIds.filter((id): id is string => !!id))]
+  if (unique.length === 0) return new Set()
+  if (isSystemAdmin && allowedStatuses.length === 0) return new Set(unique)
+
+  const visible = await prisma.project.findMany({
+    where: {
+      id: { in: unique },
+      status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+      ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+    },
+    select: { id: true },
+  })
+  return new Set(visible.map((p) => p.id))
+}
+
+// ---------------------------------------------------------------------------
 // Album ZIP generation jobs helper
 // ---------------------------------------------------------------------------
 
@@ -759,9 +879,9 @@ async function buildAlbumZipJobs({
   try {
     const albumZipQueue = getAlbumPhotoZipQueue()
     const [activeZipQueueJobs, waitingZipQueueJobs, completedZipQueueJobs] = await Promise.all([
-      albumZipQueue.getJobs(['active']),
-      albumZipQueue.getJobs(['waiting', 'prioritized', 'delayed']),
-      albumZipQueue.getJobs(['completed']),
+      albumZipQueue.getJobs(['active'], 0, QUEUE_SCAN_CAP),
+      albumZipQueue.getJobs(['waiting', 'prioritized', 'delayed'], 0, QUEUE_SCAN_CAP),
+      albumZipQueue.getJobs(['completed'], 0, QUEUE_SCAN_CAP),
     ])
 
     // Map albumId:variant → status
@@ -890,11 +1010,12 @@ async function buildAlbumZipJobs({
   }
 }
 
-async function buildAlbumThumbnailJobs() {
+async function buildAlbumThumbnailJobs(visibility: VisibilityContext) {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+  const failedCutoff = new Date(Date.now() - FAILED_JOB_RETENTION_MS)
   const now = Date.now()
 
-  const [activeJobs, completedJobs, failedJobs] = await Promise.all([
+  const [rawActiveJobs, rawCompletedJobs, rawFailedJobs] = await Promise.all([
     prisma.albumThumbnailJob.findMany({
       where: { status: { in: ['PENDING', 'IN_PROGRESS'] } },
       orderBy: { createdAt: 'asc' },
@@ -904,11 +1025,27 @@ async function buildAlbumThumbnailJobs() {
       orderBy: { completedAt: 'desc' },
     }),
     prisma.albumThumbnailJob.findMany({
-      where: { status: 'FAILED' },
+      where: {
+        status: 'FAILED',
+        OR: [
+          { completedAt: { gte: failedCutoff } },
+          { completedAt: null, updatedAt: { gte: failedCutoff } },
+        ],
+      },
       orderBy: { completedAt: 'desc' },
       take: 50,
     }),
   ])
+
+  // The job table only carries a denormalized projectId — apply the same
+  // project visibility the rest of the endpoint enforces.
+  const visibleProjectIds = await filterVisibleProjectIds(
+    [...rawActiveJobs, ...rawCompletedJobs, ...rawFailedJobs].map((j) => j.projectId),
+    visibility,
+  )
+  const activeJobs = rawActiveJobs.filter((j) => visibleProjectIds.has(j.projectId))
+  const completedJobs = rawCompletedJobs.filter((j) => visibleProjectIds.has(j.projectId))
+  const failedJobs = rawFailedJobs.filter((j) => visibleProjectIds.has(j.projectId))
 
   const queueStatusByAlbumId = new Map<string, 'PENDING' | 'IN_PROGRESS'>()
   const queueDbJobIds = new Set<string>()
@@ -917,8 +1054,8 @@ async function buildAlbumThumbnailJobs() {
   try {
     const thumbnailQueue = getAlbumPhotoThumbnailQueue()
     const [activeQueueJobs, waitingQueueJobs] = await Promise.all([
-      thumbnailQueue.getJobs(['active']),
-      thumbnailQueue.getJobs(['waiting', 'prioritized', 'delayed']),
+      thumbnailQueue.getJobs(['active'], 0, QUEUE_SCAN_CAP),
+      thumbnailQueue.getJobs(['waiting', 'prioritized', 'delayed'], 0, QUEUE_SCAN_CAP),
     ])
 
     const queueIdPrefix = 'album-photo-thumbnail-'
@@ -1044,10 +1181,11 @@ async function buildAlbumThumbnailJobs() {
 // Folder rename jobs helper
 // ---------------------------------------------------------------------------
 
-async function buildFolderRenameJobs() {
+async function buildFolderRenameJobs(visibility: VisibilityContext) {
   const cutoff = new Date(Date.now() - 30 * 60 * 1000)
+  const failedCutoff = new Date(Date.now() - FAILED_JOB_RETENTION_MS)
 
-  const [activeJobs, completedJobs, failedJobs] = await Promise.all([
+  const [rawActiveJobs, rawCompletedJobs, rawFailedJobs] = await Promise.all([
     // Active: PENDING or IN_PROGRESS
     prisma.folderRenameJob.findMany({
       where: { status: { in: ['PENDING', 'IN_PROGRESS'] } },
@@ -1058,13 +1196,34 @@ async function buildFolderRenameJobs() {
       where: { status: 'COMPLETED', completedAt: { gte: cutoff } },
       orderBy: { completedAt: 'desc' },
     }),
-    // Failed (no time cutoff — persist until manually dismissed; capped to bound payload)
+    // Failed within the retention window (dismissal is per-browser only, so
+    // time-bound these rather than persisting forever); capped to bound payload
     prisma.folderRenameJob.findMany({
-      where: { status: 'FAILED' },
+      where: {
+        status: 'FAILED',
+        OR: [
+          { completedAt: { gte: failedCutoff } },
+          { completedAt: null, updatedAt: { gte: failedCutoff } },
+        ],
+      },
       orderBy: { completedAt: 'desc' },
       take: 50,
     }),
   ])
+
+  // PROJECT renames are scoped to the projects this user can see; renames of
+  // other entity types (CLIENT, etc.) span projects, so only system admins see
+  // them — mirrors the clear (POST) authorization above.
+  const allJobs = [...rawActiveJobs, ...rawCompletedJobs, ...rawFailedJobs]
+  const visibleProjectIds = await filterVisibleProjectIds(
+    allJobs.filter((j) => j.entityType === 'PROJECT').map((j) => j.entityId),
+    visibility,
+  )
+  const canSee = (j: { entityType: string; entityId: string }) =>
+    j.entityType === 'PROJECT' ? visibleProjectIds.has(j.entityId) : visibility.isSystemAdmin
+  const activeJobs = rawActiveJobs.filter(canSee)
+  const completedJobs = rawCompletedJobs.filter(canSee)
+  const failedJobs = rawFailedJobs.filter(canSee)
 
   const active = activeJobs.map((j) => ({
     id: j.id,
@@ -1107,6 +1266,54 @@ async function buildFolderRenameJobs() {
   ]
 
   return { active, completed }
+}
+
+// ---------------------------------------------------------------------------
+// System queue failures helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Failure-only surfacing for the queues with no dedicated Running Jobs UI
+ * (file validation + email jobs finish in sub-seconds, so active progress is
+ * pointless — but their failures were previously completely silent). Reads
+ * each queue's failed set (retained 24h) and reports entries to system admins
+ * in the Maintenance bucket; the payloads carry no project scoping.
+ */
+async function buildSystemFailedJobs(isSystemAdmin: boolean) {
+  if (!isSystemAdmin) return []
+
+  const cutoff = Date.now() - FAILED_JOB_RETENTION_MS
+  const sources = [
+    { slug: 'asset-processing', label: 'Asset processing', queue: getAssetQueue() },
+    { slug: 'client-file', label: 'Client file processing', queue: getClientFileQueue() },
+    { slug: 'user-file', label: 'User file processing', queue: getUserFileQueue() },
+    { slug: 'project-file', label: 'Project file processing', queue: getProjectFileQueue() },
+    { slug: 'project-email', label: 'Project email ingest', queue: getProjectEmailQueue() },
+    { slug: 'password-email', label: 'Password email delivery', queue: getPasswordEmailQueue() },
+  ] as const
+
+  const results = await Promise.all(
+    sources.map(async (source) => {
+      try {
+        const failed = await source.queue.getJobs(['failed'], 0, QUEUE_SCAN_CAP)
+        return failed
+          .filter((job) => job.finishedOn && job.finishedOn >= cutoff)
+          .map((job) => ({
+            id: `${source.slug}:${job.id}`,
+            type: 'system' as const,
+            label: source.label,
+            sublabel: (job.failedReason || 'Job failed').slice(0, 140),
+            projectId: '',
+            completedAt: job.finishedOn as number,
+            error: true as const,
+          }))
+      } catch {
+        return []
+      }
+    }),
+  )
+
+  return results.flat().sort((a, b) => b.completedAt - a.completedAt)
 }
 
 // -----------------------------------------------------------------------

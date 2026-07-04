@@ -69,64 +69,6 @@ async function lockSalesDocumentNumbering(
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${config.lockKey})`
 }
 
-async function findLowestAvailableNumber(
-  tx: Prisma.TransactionClient,
-  type: SalesDocumentType
-): Promise<number> {
-  const rows = type === 'invoice'
-    ? await tx.$queryRaw<HighestNumberRow[]>`
-        WITH ordered AS (
-          SELECT CAST(regexp_replace("invoiceNumber", '^INV-', '') AS INTEGER) AS value
-          FROM "SalesInvoice"
-          WHERE "invoiceNumber" ~ '^INV-[0-9]+$'
-        ),
-        candidate AS (
-          SELECT 1 AS value
-          WHERE NOT EXISTS (SELECT 1 FROM ordered WHERE value = 1)
-          UNION ALL
-          SELECT value + 1 AS value
-          FROM (
-            SELECT value, LEAD(value) OVER (ORDER BY value) AS nextValue
-            FROM ordered
-          ) gaps
-          WHERE nextValue IS NOT NULL AND nextValue > value + 1
-          ORDER BY value
-          LIMIT 1
-        )
-        SELECT COALESCE(
-          (SELECT value FROM candidate ORDER BY value LIMIT 1),
-          (SELECT COALESCE(MAX(value), 0) + 1 FROM ordered)
-        ) AS value
-      `
-    : await tx.$queryRaw<HighestNumberRow[]>`
-        WITH ordered AS (
-          SELECT CAST(regexp_replace("quoteNumber", '^EST-', '') AS INTEGER) AS value
-          FROM "SalesQuote"
-          WHERE "quoteNumber" ~ '^EST-[0-9]+$'
-        ),
-        candidate AS (
-          SELECT 1 AS value
-          WHERE NOT EXISTS (SELECT 1 FROM ordered WHERE value = 1)
-          UNION ALL
-          SELECT value + 1 AS value
-          FROM (
-            SELECT value, LEAD(value) OVER (ORDER BY value) AS nextValue
-            FROM ordered
-          ) gaps
-          WHERE nextValue IS NOT NULL AND nextValue > value + 1
-          ORDER BY value
-          LIMIT 1
-        )
-        SELECT COALESCE(
-          (SELECT value FROM candidate ORDER BY value LIMIT 1),
-          (SELECT COALESCE(MAX(value), 0) + 1 FROM ordered)
-        ) AS value
-      `
-
-  const row = Array.isArray(rows) ? rows[0] : null
-  return Math.max(1, toSafeInteger(row?.value))
-}
-
 export async function nextSalesDocumentNumber(
   tx: Prisma.TransactionClient,
   type: SalesDocumentType

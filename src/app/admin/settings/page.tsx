@@ -286,6 +286,7 @@ export default function GlobalSettingsPage() {
   const [cpuDynamicThreadAllocation, setCpuDynamicThreadAllocation] = useState(true)
   const [cpuDefaultFfmpegThreadsPerJob, setCpuDefaultFfmpegThreadsPerJob] = useState(2)
   const [cpuDefaultVideoWorkerConcurrency, setCpuDefaultVideoWorkerConcurrency] = useState(1)
+  const [cpuWorkerInfo, setCpuWorkerInfo] = useState<{ hostname: string; updatedAt: string; stale: boolean; runningVideoConcurrency?: number } | null>(null)
 
   const [recalcProjectDataLoading, setRecalcProjectDataLoading] = useState(false)
   const [recalcProjectDataResult, setRecalcProjectDataResult] = useState<string | null>(null)
@@ -474,6 +475,7 @@ export default function GlobalSettingsPage() {
         if (cpuResponse.ok) {
           const cpuData = await cpuResponse.json()
           setCpuDetectedThreads(cpuData.system?.detectedThreads || 0)
+          setCpuWorkerInfo(cpuData.worker ?? null)
           setCpuBudgetThreads(cpuData.system?.budgetThreads || 0)
           setCpuReservedSystemThreads(cpuData.system?.reservedSystemThreads || 0)
           setCpuMaxFfmpegThreadsPerJob(cpuData.system?.maxFfmpegThreadsPerJob || 12)
@@ -1144,6 +1146,7 @@ export default function GlobalSettingsPage() {
           <CpuConfigurationSection
             show={showCpuConfig}
             setShow={setShowCpuConfig}
+            workerInfo={cpuWorkerInfo}
             detectedThreads={cpuDetectedThreads}
             budgetThreads={cpuBudgetThreads}
             reservedSystemThreads={cpuReservedSystemThreads}
@@ -1471,6 +1474,7 @@ export default function GlobalSettingsPage() {
                 show={true}
                 setShow={() => {}}
                 hideCollapse
+                workerInfo={cpuWorkerInfo}
                 detectedThreads={cpuDetectedThreads}
                 budgetThreads={cpuBudgetThreads}
                 reservedSystemThreads={cpuReservedSystemThreads}

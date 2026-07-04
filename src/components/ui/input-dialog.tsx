@@ -24,6 +24,8 @@ interface InputDialogProps {
   onConfirm: (value: string) => void | Promise<void>
   onCancel?: () => void
   loading?: boolean
+  /** Permit confirming with an empty value (e.g. to clear an optional field). */
+  allowEmpty?: boolean
 }
 
 export function InputDialog({
@@ -38,6 +40,7 @@ export function InputDialog({
   onConfirm,
   onCancel,
   loading = false,
+  allowEmpty = false,
 }: InputDialogProps) {
   const [value, setValue] = React.useState(defaultValue)
   const [busy, setBusy] = React.useState(false)
@@ -56,13 +59,14 @@ export function InputDialog({
 
   const handleConfirm = async () => {
     const trimmed = value.trim()
-    if (!trimmed) {
+    if (!trimmed && !allowEmpty) {
       inputRef.current?.focus()
       return
     }
     setBusy(true)
     try {
       await onConfirm(trimmed)
+      onOpenChange?.(false)
     } finally {
       setBusy(false)
     }
@@ -104,7 +108,7 @@ export function InputDialog({
           <Button variant="outline" onClick={handleCancel} disabled={isLoading}>
             {cancelLabel}
           </Button>
-          <Button onClick={handleConfirm} disabled={isLoading || !value.trim()}>
+          <Button onClick={handleConfirm} disabled={isLoading || (!allowEmpty && !value.trim())}>
             {isLoading ? 'Please wait…' : confirmLabel}
           </Button>
         </DialogFooter>

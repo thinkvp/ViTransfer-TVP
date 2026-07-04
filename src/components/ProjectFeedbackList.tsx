@@ -71,6 +71,37 @@ type ResolveScope =
   | { videoIds: string[] }
   | Record<string, never> // whole project
 
+// Persist the expanded/collapsed tree (and the per-version "show done" toggle) across
+// reloads so the list opens the way the user last left it. Bump the version suffix if the
+// stored shape ever changes.
+const COLLAPSE_STORAGE_KEY = 'vt-feedback-collapse-v1'
+
+type PersistedCollapse = {
+  projects: string[]
+  videos: string[]
+  versions: string[]
+  showDone: string[]
+}
+
+function readPersistedCollapse(): PersistedCollapse | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(COLLAPSE_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PersistedCollapse> | null
+    if (!parsed || typeof parsed !== 'object') return null
+    const arr = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+    return {
+      projects: arr(parsed.projects),
+      videos: arr(parsed.videos),
+      versions: arr(parsed.versions),
+      showDone: arr(parsed.showDone),
+    }
+  } catch {
+    return null
+  }
+}
+
 // Hover-revealed "mark everything in this group done" icon button.
 // Kept keyboard-accessible: focus also reveals it.
 function MarkDoneButton({ title, disabled, onClick }: { title: string; disabled: boolean; onClick: () => void }) {
@@ -138,27 +169,36 @@ export default function ProjectFeedbackList() {
       const loaded = (data.projects || []) as ProjectGroup[]
       setProjects(loaded)
 
-      // On first load, collapse anything with nothing open so the list leads with work:
-      // fully-done projects, and individual videos whose feedback is all done.
+      // On first load, restore the last expanded/collapsed state from localStorage. With no
+      // saved state, fall back to collapsing anything with nothing open so the list leads with
+      // work: fully-done projects, and individual videos whose feedback is all done.
       if (!initialisedCollapse.current) {
         initialisedCollapse.current = true
-        setCollapsedProjects(new Set(loaded.filter((p) => p.unresolvedCount === 0).map((p) => p.id)))
-        setCollapsedVideos(
-          new Set(
-            loaded.flatMap((p) =>
-              p.videos.filter((v) => v.unresolvedCount === 0).map((v) => `${p.id}::${v.name}`)
-            )
-          )
-        )
-        setCollapsedVersions(
-          new Set(
-            loaded.flatMap((p) =>
-              p.videos.flatMap((v) =>
-                v.versions.filter((ver) => ver.unresolvedCount === 0).map((ver) => ver.videoId)
+        const persisted = readPersistedCollapse()
+        if (persisted) {
+          setCollapsedProjects(new Set(persisted.projects))
+          setCollapsedVideos(new Set(persisted.videos))
+          setCollapsedVersions(new Set(persisted.versions))
+          setShowDoneVersions(new Set(persisted.showDone))
+        } else {
+          setCollapsedProjects(new Set(loaded.filter((p) => p.unresolvedCount === 0).map((p) => p.id)))
+          setCollapsedVideos(
+            new Set(
+              loaded.flatMap((p) =>
+                p.videos.filter((v) => v.unresolvedCount === 0).map((v) => `${p.id}::${v.name}`)
               )
             )
           )
-        )
+          setCollapsedVersions(
+            new Set(
+              loaded.flatMap((p) =>
+                p.videos.flatMap((v) =>
+                  v.versions.filter((ver) => ver.unresolvedCount === 0).map((ver) => ver.videoId)
+                )
+              )
+            )
+          )
+        }
       }
     } catch {
       setProjects([])
@@ -170,6 +210,25 @@ export default function ProjectFeedbackList() {
   useEffect(() => {
     void load()
   }, [load])
+
+  // Persist collapse/expand + show-done state whenever it changes, but only after the first
+  // load has seeded it — otherwise the initial empty sets would clobber the saved state.
+  useEffect(() => {
+    if (!initialisedCollapse.current || typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(
+        COLLAPSE_STORAGE_KEY,
+        JSON.stringify({
+          projects: [...collapsedProjects],
+          videos: [...collapsedVideos],
+          versions: [...collapsedVersions],
+          showDone: [...showDoneVersions],
+        } satisfies PersistedCollapse)
+      )
+    } catch {
+      // Ignore quota/availability errors — persistence is best-effort.
+    }
+  }, [collapsedProjects, collapsedVideos, collapsedVersions, showDoneVersions])
 
   const resolve = useCallback(
     async (projectId: string, scope: ResolveScope, resolved: boolean) => {

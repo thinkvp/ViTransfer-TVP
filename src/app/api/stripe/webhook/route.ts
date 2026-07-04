@@ -98,6 +98,15 @@ export async function POST(request: NextRequest) {
 
     const recordId = crypto.randomUUID()
 
+    // Critical persistence: if any of this fails, return 500 so Stripe retries.
+    // The insert is idempotent (ON CONFLICT DO NOTHING) and the mirror-payment
+    // creation checks for an existing row, so retries are safe.
+    let didInsert = false
+    const nowMs = Date.now()
+    const paidAtIso = new Date(nowMs).toISOString()
+    const paidAtYmd = paidAtIso.slice(0, 10)
+
+    try {
     const inserted = await prisma.$queryRaw<Array<{ id: string }>>`
       INSERT INTO "SalesInvoiceStripePayment" (
         "id",
@@ -129,27 +138,23 @@ export async function POST(request: NextRequest) {
       RETURNING "id"
     `
 
-    const didInsert = Array.isArray(inserted) && inserted.length > 0
+    didInsert = Array.isArray(inserted) && inserted.length > 0
 
-    const nowMs = Date.now()
+    // Create a SalesPayment mirror record so Stripe income is visible in BAS / cash-basis
+    // reports and drives invoice status/balance (source=STRIPE). excludeFromInvoiceBalance=true
+    // keeps it out of the manual-payments aggregate so it is never double-counted.
+    // Existence check (rather than gating on didInsert) makes webhook retries after a
+    // partial failure recreate the mirror correctly.
+    const mirrorExists = await prisma.salesPayment.findFirst({
+      where: { source: 'STRIPE' as any, reference: sessionId },
+      select: { id: true },
+    })
 
-    if (didInsert) {
-      // Keep stored invoice status and any active public share snapshot in sync.
-      await recomputeInvoiceStoredStatus(prisma, String(docId), { createdByUserId: null, nowMs }).catch(() => null)
-    }
-
-    // Best-effort: mark the public invoice snapshot as paid.
-    const paidAtIso = new Date(nowMs).toISOString()
-    const paidAtYmd = paidAtIso.slice(0, 10)
-
-    // Create a SalesPayment record so Stripe income is visible in BAS / cash-basis reports
-    // via the standard SalesPayment table. excludeFromInvoiceBalance=true prevents double-counting
-    // against the SalesInvoiceStripePayment that drives invoice status.
-    if (didInsert) {
+    if (!mirrorExists) {
       const invoiceRow = await prisma.salesInvoice.findUnique({
         where: { id: String(docId) },
         select: { clientId: true },
-      }).catch(() => null)
+      })
 
       await prisma.salesPayment.create({
         data: {
@@ -162,7 +167,15 @@ export async function POST(request: NextRequest) {
           clientId: invoiceRow?.clientId ?? null,
           invoiceId: String(docId),
         },
-      }).catch(() => null)
+      })
+    }
+
+    // Keep stored invoice status and any active public share snapshot in sync.
+    // Run on replays too, so a retry after a partial failure self-heals the status.
+    await recomputeInvoiceStoredStatus(prisma, String(docId), { createdByUserId: null, nowMs })
+    } catch (error) {
+      console.error('[STRIPE_WEBHOOK] Failed to persist checkout.session payment:', error)
+      return NextResponse.json({ error: 'Failed to record payment' }, { status: 500 })
     }
 
     const expiresAt = addDaysLocal(endOfDayLocal(new Date()), 30)
@@ -305,7 +318,8 @@ export async function POST(request: NextRequest) {
     }
     } catch (error) {
       console.error('[STRIPE_WEBHOOK] Unexpected error handling checkout.session event:', error)
-      // Return 200 below — Stripe must not retry; the INSERT uses ON CONFLICT DO NOTHING for idempotency
+      // Return 200 below — only best-effort work (share snapshot, notifications) can reach here;
+      // persistence failures already returned 500 above so Stripe retries those.
     }
   }
 

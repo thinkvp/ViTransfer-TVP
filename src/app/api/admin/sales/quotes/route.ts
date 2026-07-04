@@ -6,6 +6,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { salesQuoteFromDb } from '@/lib/sales/db-mappers'
 import { nextSalesDocumentNumber } from '@/lib/sales/numbering'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
+import { getDefaultTaxRatePercent, lineItemsSchema, normalizeLineItems } from '@/lib/sales/line-items'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,7 +21,7 @@ const createSchema = z.object({
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   notes: z.string().max(20000).optional().nullable(),
   terms: z.string().max(20000).optional().nullable(),
-  items: z.array(z.any()).default([]),
+  items: lineItemsSchema.default([]),
 })
 
 export async function GET(request: NextRequest) {
@@ -102,6 +103,8 @@ export async function POST(request: NextRequest) {
     })
     const taxEnabled = typeof (settingsRow as any)?.taxEnabled === 'boolean' ? (settingsRow as any).taxEnabled : true
 
+    const items = normalizeLineItems(input.items, await getDefaultTaxRatePercent(tx))
+
     const row = await tx.salesQuote.create({
       data: {
         quoteNumber,
@@ -111,7 +114,7 @@ export async function POST(request: NextRequest) {
         validUntil: input.validUntil || null,
         notes: input.notes || '',
         terms: input.terms || '',
-        itemsJson: input.items,
+        itemsJson: items as any,
         remindersEnabled: true,
         taxEnabled,
       },

@@ -60,9 +60,10 @@ export async function GET(request: NextRequest) {
       where: hasDateFilter ? { date: dateFilter } : {},
     }),
     listSalesInvoiceIncomeEntries({ from, to }),
-    // Only EXPENSE/COGS need the bank-transaction sign flip (withdrawal → increase expense).
+    // EXPENSE/COGS need the bank-transaction sign flip (withdrawal → increase expense);
     // ASSET accounts use raw bank-statement sign (deposit = increase, no flip).
-    prisma.account.findMany({ where: { type: { in: ['EXPENSE', 'COGS'] } }, select: { id: true } }),
+    // ASSET/EXPENSE/COGS are debit-normal for journal sign handling.
+    prisma.account.findMany({ where: { type: { in: ['EXPENSE', 'COGS', 'ASSET'] } }, select: { id: true, type: true } }),
     getSalesTaxRate(),
   ])
 
@@ -78,7 +79,10 @@ export async function GET(request: NextRequest) {
   // Bank transactions follow bank-statement convention (positive = money in).
   // Only EXPENSE/COGS need the sign flip (a withdrawal -$100 = money out = should
   // increase the expense balance).  ASSET, INCOME, LIABILITY, EQUITY use raw sign.
-  const expenseNormalSet = new Set(expenseNormalAccounts.map((a: { id: string }) => a.id))
+  const expenseNormalSet = new Set(
+    expenseNormalAccounts.filter((a: { id: string; type: string }) => a.type !== 'ASSET').map((a: { id: string }) => a.id)
+  )
+  const debitNormalSet = new Set(expenseNormalAccounts.map((a: { id: string }) => a.id))
 
   for (const transaction of bankTransactions) {
     if (!transaction.accountId) continue
@@ -95,10 +99,13 @@ export async function GET(request: NextRequest) {
     balances[splitLine.accountId] = (balances[splitLine.accountId] ?? 0) + contribution
   }
 
-  // Journal entries are already signed from the account's perspective.
+  // Journals store accounting convention (positive = debit). Debit-normal accounts
+  // (ASSET/EXPENSE/COGS) keep the sign; credit-normal accounts (INCOME/LIABILITY/EQUITY)
+  // negate so a credit increases the balance.
   for (const journalEntry of journalEntries) {
     const exGst = amountExcludingGst(journalEntry.amountCents, journalEntry.taxCode, taxRatePercent)
-    balances[journalEntry.accountId] = (balances[journalEntry.accountId] ?? 0) + exGst
+    const contribution = debitNormalSet.has(journalEntry.accountId) ? exGst : -exGst
+    balances[journalEntry.accountId] = (balances[journalEntry.accountId] ?? 0) + contribution
   }
 
   for (const entry of salesIncomeEntries) {

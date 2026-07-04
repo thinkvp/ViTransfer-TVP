@@ -224,41 +224,22 @@ export async function processSalesReminders() {
   } as any).catch(() => null)
 
   const invoiceIds = invoices.map((i) => i.id).filter((id) => typeof id === 'string' && id.trim())
-  const stripePayments = invoiceIds.length
-    ? await prisma.salesInvoiceStripePayment.findMany({
-        where: { invoiceDocId: { in: invoiceIds } },
-        select: { invoiceDocId: true, invoiceAmountCents: true, createdAt: true },
-        take: 2000,
-      }).catch(() => [])
-    : []
 
-  const stripePaidByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
-  for (const p of stripePayments) {
-    const id = p?.invoiceDocId
-    const amount = Number(p?.invoiceAmountCents)
-    if (typeof id !== 'string' || !id.trim() || !Number.isFinite(amount)) continue
-    const paidCents = Math.max(0, Math.trunc(amount))
-    const createdIso = typeof p?.createdAt === 'string' ? p.createdAt : p?.createdAt?.toISOString?.()
-    const ymd = typeof createdIso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(createdIso) ? createdIso.slice(0, 10) : null
-
-    const base = stripePaidByInvoiceId[id] ?? { paidCents: 0, latestYmd: null }
-    const latestYmd = [base.latestYmd, ymd]
-      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-      .sort()
-      .at(-1)
-      ?? null
-    stripePaidByInvoiceId[id] = { paidCents: base.paidCents + paidCents, latestYmd }
-  }
-
+  // Manual/QuickBooks payments counted toward the balance, plus Stripe mirror
+  // rows (source=STRIPE) — consistent with recomputeInvoiceStoredStatus and the
+  // dashboard rollup, so deleted test payments drop out here too.
   const salesPayments = invoiceIds.length
     ? await prisma.salesPayment.findMany({
-        where: { invoiceId: { in: invoiceIds }, excludeFromInvoiceBalance: false },
+        where: {
+          invoiceId: { in: invoiceIds },
+          OR: [{ excludeFromInvoiceBalance: false }, { source: 'STRIPE' as any }],
+        },
         select: { invoiceId: true, amountCents: true, paymentDate: true },
         take: 10000,
       }).catch(() => [])
     : []
 
-  const manualPaidByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
+  const paidByInvoiceId: Record<string, { paidCents: number; latestYmd: string | null }> = {}
   for (const p of salesPayments) {
     const id = p?.invoiceId
     const amount = Number(p?.amountCents)
@@ -268,13 +249,13 @@ export async function processSalesReminders() {
       ? p.paymentDate
       : null
 
-    const base = manualPaidByInvoiceId[id] ?? { paidCents: 0, latestYmd: null }
+    const base = paidByInvoiceId[id] ?? { paidCents: 0, latestYmd: null }
     const latestYmd = [base.latestYmd, ymd]
       .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
       .sort()
       .at(-1)
       ?? null
-    manualPaidByInvoiceId[id] = { paidCents: base.paidCents + paidCents, latestYmd }
+    paidByInvoiceId[id] = { paidCents: base.paidCents + paidCents, latestYmd }
   }
 
   void today
@@ -399,9 +380,7 @@ export async function processSalesReminders() {
       }
 
       const totalCents = invoiceTotalCents(inv as SalesInvoice, settings)
-      const paidStripe = stripePaidByInvoiceId[String(inv.id)]?.paidCents ?? 0
-      const paidManual = manualPaidByInvoiceId[String(inv.id)]?.paidCents ?? 0
-      const paidCents = Math.max(0, Math.trunc(paidStripe + paidManual))
+      const paidCents = Math.max(0, Math.trunc(paidByInvoiceId[String(inv.id)]?.paidCents ?? 0))
       const outstandingCents = Math.max(0, Math.trunc(totalCents - paidCents))
       if (outstandingCents <= 0) {
         debugSkip('INVOICE', inv, 'noOutstandingBalance')
@@ -650,6 +629,10 @@ export async function processSalesReminders() {
       // Only send reminders for active quotes (not accepted/closed).
       const quoteStatus = typeof q?.status === 'string' ? q.status.trim().toUpperCase() : ''
       if (!['OPEN', 'SENT'].includes(quoteStatus)) continue
+
+      // Never email a client about a draft they were never sent. A quote counts
+      // as sent when it was emailed from the app (sentAt) or manually marked SENT.
+      if (quoteStatus !== 'SENT' && !q?.sentAt) continue
 
       const validUntil = typeof q?.validUntil === 'string' ? q.validUntil : null
       if (!validUntil) continue

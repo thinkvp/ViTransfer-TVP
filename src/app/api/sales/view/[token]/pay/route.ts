@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { formatStripeDashboardDescription, getStripeGatewaySettings } from '@/lib/sales/stripe-gateway'
 import { calcStripeGrossUpCents } from '@/lib/sales/stripe-fees'
+import { aggregateInvoicePaidCents } from '@/lib/sales/invoice-paid'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -75,10 +76,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const doc = (share.docJson ?? {}) as any
   const status = typeof doc?.status === 'string' ? doc.status.toUpperCase() : ''
   if (status === 'PAID') return NextResponse.json({ error: 'Invoice is already paid' }, { status: 400 })
+  if (status === 'VOID') return NextResponse.json({ error: 'Invoice is not payable' }, { status: 400 })
 
   const items = Array.isArray(doc?.items) ? doc.items : []
   const liveSalesSettings = await prisma.salesSettings
-    .upsert({ where: { id: 'default' }, create: { id: 'default' }, update: {}, select: { taxRatePercent: true } })
+    .upsert({ where: { id: 'default' }, create: { id: 'default' }, update: {}, select: { taxRatePercent: true, currencyCode: true } })
     .catch(() => null)
   const taxRatePercent = Number(liveSalesSettings?.taxRatePercent)
   const defaultTaxRate = Number.isFinite(taxRatePercent) ? taxRatePercent : 10
@@ -94,11 +96,33 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'Invoice total is not payable' }, { status: 400 })
   }
 
+  // Charge only the outstanding balance — a partially-paid invoice must not be
+  // charged its full total again.
+  const paidCents = await aggregateInvoicePaidCents(String(share.docId || ''))
+  const balanceCents = Math.max(0, invoiceTotalCents - paidCents)
+  if (balanceCents <= 0) {
+    return NextResponse.json({ error: 'Invoice is already paid' }, { status: 400 })
+  }
+
   const feePercent = Number.isFinite(gateway.feePercent) ? gateway.feePercent : 0
   const feeFixedCents = Number.isFinite(gateway.feeFixedCents) ? Math.max(0, Math.trunc(gateway.feeFixedCents)) : 0
-  const { feeCents, chargeCents } = calcStripeGrossUpCents(invoiceTotalCents, feePercent, feeFixedCents)
+  const { feeCents, chargeCents } = calcStripeGrossUpCents(balanceCents, feePercent, feeFixedCents)
 
   const currency = (gateway.currencies[0] || 'AUD').toLowerCase()
+
+  // Invoice amounts are denominated in the Sales settings currency. Refuse to
+  // charge the same number in a different currency if the gateway is misconfigured.
+  const invoiceCurrency = (typeof liveSalesSettings?.currencyCode === 'string' && liveSalesSettings.currencyCode.trim()
+    ? liveSalesSettings.currencyCode.trim()
+    : 'AUD'
+  ).toUpperCase()
+  if (currency.toUpperCase() !== invoiceCurrency) {
+    console.error('[SALES][PAY] Stripe gateway currency does not match Sales currency', {
+      gatewayCurrency: currency.toUpperCase(),
+      invoiceCurrency,
+    })
+    return NextResponse.json({ error: 'Online payment is temporarily unavailable' }, { status: 500 })
+  }
 
   const invoiceNumber = typeof doc?.invoiceNumber === 'string' ? doc.invoiceNumber : String(share.docNumber || '')
   const description = formatStripeDashboardDescription(gateway.dashboardPaymentDescription, invoiceNumber)
@@ -118,9 +142,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         price_data: {
           currency,
           product_data: {
-            name: `Invoice ${invoiceNumber}`,
+            name: paidCents > 0 ? `Invoice ${invoiceNumber} (balance)` : `Invoice ${invoiceNumber}`,
           },
-          unit_amount: invoiceTotalCents,
+          unit_amount: balanceCents,
         },
         quantity: 1,
       },
@@ -148,7 +172,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         docId: String(share.docId || ''),
         invoiceNumber,
         currency: currency.toUpperCase(),
-        invoiceAmountCents: String(invoiceTotalCents),
+        invoiceAmountCents: String(balanceCents),
         feeAmountCents: String(feeCents),
         totalAmountCents: String(chargeCents),
       },
@@ -158,7 +182,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       docId: String(share.docId || ''),
       invoiceNumber,
       currency: currency.toUpperCase(),
-      invoiceAmountCents: String(invoiceTotalCents),
+      invoiceAmountCents: String(balanceCents),
       feeAmountCents: String(feeCents),
       totalAmountCents: String(chargeCents),
     },

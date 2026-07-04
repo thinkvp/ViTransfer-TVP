@@ -36,7 +36,7 @@ export async function generateMetadata(
 type DocType = 'QUOTE' | 'INVOICE'
 
 type QuoteStatus = 'OPEN' | 'SENT' | 'OPENED' | 'CLOSED' | 'ACCEPTED'
-type InvoiceStatus = 'OPEN' | 'SENT' | 'OPENED' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID'
+type InvoiceStatus = 'OPEN' | 'SENT' | 'OPENED' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID' | 'VOID'
 
 function safeString(v: unknown): string {
   return typeof v === 'string' ? v : ''
@@ -103,6 +103,19 @@ export default async function SalesDocPublicViewPage(
   if (security?.trackAnalytics && !skipTracking) {
     const userAgent = h.get('user-agent') || null
 
+    // Dedupe notifications: email-client prefetchers and link scanners hit the
+    // same link several times in quick succession. Still record every view
+    // event, but only notify once per IP per window.
+    const DEDUPE_WINDOW_MS = 15 * 60 * 1000
+    const recentViewFromSameIp = await prisma.salesDocumentViewEvent.findFirst({
+      where: {
+        shareToken: token,
+        ipAddress,
+        createdAt: { gt: new Date(Date.now() - DEDUPE_WINDOW_MS) },
+      },
+      select: { id: true },
+    }).catch(() => null)
+
     await prisma.salesDocumentViewEvent.create({
       data: {
         shareToken: token,
@@ -118,7 +131,7 @@ export default async function SalesDocPublicViewPage(
     const docNumber = String(share.docNumber || '')
     const docId = typeof (share as any)?.docId === 'string' ? String((share as any).docId) : null
 
-    await sendPushNotification({
+    if (!recentViewFromSameIp) await sendPushNotification({
       type: notifType as any,
       title: isQuote ? 'Quote Viewed' : 'Invoice Viewed',
       message: `A client viewed the ${isQuote ? 'quote' : 'invoice'} link`,
@@ -195,7 +208,7 @@ export default async function SalesDocPublicViewPage(
   const rawStatus = safeString(doc?.status).toUpperCase()
   const status = (type === 'QUOTE'
     ? (['OPEN', 'SENT', 'CLOSED', 'ACCEPTED'].includes(rawStatus) ? (rawStatus as QuoteStatus) : null)
-    : (['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID'].includes(rawStatus) ? (rawStatus as InvoiceStatus) : null)
+    : (['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PAID', 'VOID'].includes(rawStatus) ? (rawStatus as InvoiceStatus) : null)
   )
 
   const paidCentsFromDb = type === 'INVOICE'
@@ -217,6 +230,8 @@ export default async function SalesDocPublicViewPage(
     : (status
       ? (() => {
           const invoiceStatus = status as InvoiceStatus
+          // VOID is terminal — never let payment/date logic override it.
+          if (invoiceStatus === 'VOID') return 'VOID' as InvoiceStatus
           const totalCentsForStatus = Number.isFinite(totalCents) ? totalCents : 0
 
           // Use real payment totals when possible, but preserve manual PAID/PARTIALLY_PAID status.
@@ -271,6 +286,8 @@ export default async function SalesDocPublicViewPage(
   const canPayInvoice = type === 'INVOICE'
     && Boolean(stripeGateway?.enabled)
     && effectiveStatus !== 'PAID'
+    && effectiveStatus !== 'VOID'
+    && rawStatus !== 'VOID'
 
   const stripeCurrency = firstCurrencyFromCsv(stripeGateway?.currencies, currencyCode)
   const displayCurrency = currencyCode

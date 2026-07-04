@@ -5,7 +5,7 @@ import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import os from 'os'
-import { getCpuAllocation, logCpuAllocation, loadCpuConfigOverrides } from '../lib/cpu-config'
+import { getCpuAllocation, logCpuAllocation, loadCpuConfigOverrides, publishWorkerCpuInfo } from '../lib/cpu-config'
 import { processVideo } from './video-processor'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
@@ -77,6 +77,11 @@ async function main() {
 
   // Load Redis-backed CPU overrides before computing allocation.
   await loadCpuConfigOverrides(getRedis())
+
+  // Publish this process's storage config and warn if the app disagrees
+  // (split app/worker topology — env drift is otherwise silent).
+  const { publishAndCheckStorageConfig } = await import('@/lib/storage-config-guard')
+  await publishAndCheckStorageConfig('worker')
 
   // Centralized CPU allocation coordinates worker concurrency with FFmpeg thread usage.
   const cpuAllocation = getCpuAllocation()
@@ -748,7 +753,15 @@ async function main() {
           const dangling = await findDanglingStoredFiles()
           if (dangling.length > 0) {
             const pruned = await deleteStoredFilesByIds(dangling.map((r) => r.id))
-            console.log(`[CONSISTENCY] Pruned ${pruned} dangling StoredFile row(s) (entity no longer exists)`)
+            // Row-only prune: the underlying objects stay in storage and surface as
+            // orphan files in the scan below until an admin runs a real cleanup.
+            // Log the stranded bytes so that cost is visible, not silent.
+            const strandedBytes = dangling.reduce((sum, r) => sum + (r.fileSize != null ? Number(r.fileSize) : 0), 0)
+            console.log(
+              `[CONSISTENCY] Pruned ${pruned} dangling StoredFile row(s) (entity no longer exists); ` +
+              `~${(strandedBytes / (1024 * 1024)).toFixed(1)} MiB of storage now unreferenced pending orphan cleanup. ` +
+              `Sample paths: ${dangling.slice(0, 5).map((r) => r.storagePath).join(', ')}`
+            )
           }
 
           console.log('[CONSISTENCY] Running scheduled storage integrity scan (dry run)...')
@@ -1038,6 +1051,9 @@ async function main() {
     await cleanupOldTempFiles()
   }, ONE_HOUR_MS)
 
+  // A download only counts as stale after 5 min without progress (DOWNLOAD_TRACKING_STALE_MS),
+  // so scanning every 10 min is enough — the sweep is a cross-site Redis SCAN that is
+  // almost always a no-op.
   const downloadCleanupInterval = setInterval(async () => {
     const cleaned = await cleanupStaleTrackedDownloads().catch((error) => {
       console.error('Scheduled download tracking cleanup failed:', error)
@@ -1047,14 +1063,22 @@ async function main() {
     if (cleaned > 0) {
       console.log(`[DOWNLOAD] Marked ${cleaned} stale download(s) as failed`)
     }
-  }, 60 * 1000)
+  }, 10 * 60 * 1000)
 
   // Periodically refresh Redis-backed CPU overrides so admin changes take
   // effect without a container restart (threads per job only; concurrency
-  // changes still require restart).
+  // changes still require restart). Admin tweaks are rare — a change taking
+  // up to 5 min to reach the worker is acceptable. Each refresh republishes
+  // the worker's CPU snapshot so the settings page (which may run on a
+  // different host) reports the worker's hardware, not the app's.
   const cpuConfigRefreshInterval = setInterval(async () => {
     await loadCpuConfigOverrides(getRedis()).catch(() => undefined)
-  }, 60 * 1000)
+    await publishWorkerCpuInfo(getRedis(), concurrency)
+  }, 5 * 60 * 1000)
+
+  // Publish immediately so the settings page has worker CPU info right after
+  // worker startup instead of waiting for the first 5-min refresh.
+  await publishWorkerCpuInfo(getRedis(), concurrency)
 
   // Handle shutdown gracefully
   process.on('SIGTERM', async () => {

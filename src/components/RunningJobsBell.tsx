@@ -84,6 +84,7 @@ type JobKind =
   | 'rename'
   | 'asset-preview'
   | 'social'
+  | 'system'
 
 type JobStatus = 'queued' | 'active' | 'done' | 'failed'
 
@@ -133,6 +134,7 @@ const KIND_ICON: Record<JobKind, React.ComponentType<{ className?: string }>> = 
   'rename': FolderSync,
   'asset-preview': Film,
   'social': Share2,
+  'system': Wrench,
 }
 
 const KIND_LABEL: Record<JobKind, string> = {
@@ -145,6 +147,7 @@ const KIND_LABEL: Record<JobKind, string> = {
   'rename': 'Rename',
   'asset-preview': 'Preview',
   'social': 'Social',
+  'system': 'System',
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +757,7 @@ function normalizeCompletedServerJob(
     : job.type === 'albumThumbnail' ? 'Thumbnails complete'
     : job.type === 'videoAssetPreview' ? 'Uploads complete'
     : job.type === 'albumSocial' ? 'Social copies complete'
+    : job.type === 'system' ? 'Background job complete'
     : 'Folder rename complete'
 
   const errorLabel =
@@ -762,6 +766,7 @@ function normalizeCompletedServerJob(
     : job.type === 'albumThumbnail' ? 'Thumbnails failed'
     : job.type === 'videoAssetPreview' ? 'Uploads failed'
     : job.type === 'albumSocial' ? 'Social copies failed'
+    : job.type === 'system' ? 'Background job failed'
     : 'Folder rename failed'
 
   const kind: JobKind =
@@ -770,6 +775,7 @@ function normalizeCompletedServerJob(
     : job.type === 'albumThumbnail' ? 'thumbnail'
     : job.type === 'videoAssetPreview' ? 'upload'
     : job.type === 'albumSocial' ? 'social'
+    : job.type === 'system' ? 'system'
     : 'rename'
 
   // Clean project name for grouping (falls back to the sublabel up to the first ' · ').
@@ -820,6 +826,7 @@ const KIND_NOUN: Record<JobKind, [singular: string, plural: string]> = {
   'rename': ['rename', 'renames'],
   'asset-preview': ['preview', 'previews'],
   'social': ['social copy', 'social copies'],
+  'system': ['system job', 'system jobs'],
 }
 
 function kindChip(kind: JobKind, count: number): string {

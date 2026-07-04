@@ -7,7 +7,7 @@ import { prisma } from '@/lib/db'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildAlbumPhotoThumbnailStoragePath } from '@/lib/project-storage-paths'
-import { deleteFile, downloadFile, getFilePath, uploadFile } from '@/lib/storage'
+import { deleteFile, downloadFile, getFilePath, uploadFileFromPath } from '@/lib/storage'
 import { isS3Mode, s3FileExists } from '@/lib/s3-storage'
 import { registerStoredFile, getStoredFilePath } from '@/lib/stored-file'
 import type { AlbumPhotoThumbnailJob } from '@/lib/queue'
@@ -135,7 +135,7 @@ async function processSinglePhoto(photo: AlbumPhotoCandidate, projectId: string)
 
       const outStats = await fs.promises.stat(tmpOutputPath)
       newThumbnailFileSize = BigInt(outStats.size)
-      await uploadFile(thumbnailStoragePath, fs.createReadStream(tmpOutputPath), outStats.size, 'image/jpeg')
+      await uploadFileFromPath(thumbnailStoragePath, tmpOutputPath, outStats.size, 'image/jpeg')
     } else {
       const inputPath = getFilePath(origPath)
       const outputPath = getFilePath(thumbnailStoragePath)

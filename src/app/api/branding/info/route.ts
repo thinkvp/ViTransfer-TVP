@@ -29,6 +29,8 @@ export async function GET(request: NextRequest) {
         mainCompanyDomain: true,
         companyName: true,
         accentColor: true,
+        emailHeaderColor: true,
+        emailHeaderTextMode: true,
       },
     })
 
@@ -47,10 +49,12 @@ export async function GET(request: NextRequest) {
       mainCompanyDomain: settings?.mainCompanyDomain || null,
       companyName: settings?.companyName || null,
       accentColor: settings?.accentColor || null,
+      emailHeaderColor: settings?.emailHeaderColor || null,
+      emailHeaderTextMode: settings?.emailHeaderTextMode || null,
     })
     response.headers.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=120')
     return response
   } catch {
-    return NextResponse.json({ hasLogo: false, mainCompanyDomain: null, companyName: null, accentColor: null })
+    return NextResponse.json({ hasLogo: false, mainCompanyDomain: null, companyName: null, accentColor: null, emailHeaderColor: null, emailHeaderTextMode: null })
   }
 }

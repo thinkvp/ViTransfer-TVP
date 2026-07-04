@@ -11,6 +11,9 @@ export const runtime = 'nodejs'
 
 export const dynamic = 'force-dynamic'
 
+// Window for the per-type summary counts (the events list itself is unwindowed).
+const STATS_WINDOW_DAYS = 30
+
 /**
  * GET /api/security/events
  *
@@ -67,8 +70,14 @@ export async function GET(request: NextRequest) {
     if (severity) where.severity = severity
     if (projectId) where.projectId = projectId
 
+    // Summary stats are windowed: an unbounded groupBy walks the entire table, which
+    // grows without limit; the [type, createdAt] index keeps this window cheap. The
+    // client merges these with the static event-type catalog, so types with no recent
+    // events remain filterable.
+    const statsSince = new Date(Date.now() - STATS_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+
     // Fetch events with pagination
-    const [events, total, blockedTotal] = await Promise.all([
+    const [events, total, blockedTotal, stats] = await Promise.all([
       prisma.securityEvent.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -85,16 +94,15 @@ export async function GET(request: NextRequest) {
         }
       }),
       prisma.securityEvent.count({ where }),
-      prisma.securityEvent.count({ where: { ...where, wasBlocked: true } })
+      prisma.securityEvent.count({ where: { ...where, wasBlocked: true } }),
+      prisma.securityEvent.groupBy({
+        by: ['type'],
+        where: { createdAt: { gte: statsSince } },
+        _count: {
+          id: true
+        }
+      })
     ])
-
-    // Get summary stats
-    const stats = await prisma.securityEvent.groupBy({
-      by: ['type'],
-      _count: {
-        id: true
-      }
-    })
 
     const response = NextResponse.json({
       events,
@@ -105,6 +113,7 @@ export async function GET(request: NextRequest) {
         pages: Math.ceil(total / limit)
       },
       blockedTotal,
+      statsWindowDays: STATS_WINDOW_DAYS,
       stats: stats.map(s => ({
         type: s.type,
         count: s._count.id

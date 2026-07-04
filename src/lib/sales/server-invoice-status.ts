@@ -24,6 +24,26 @@ async function getSalesTaxRatePercent(tx: Prisma.TransactionClient): Promise<num
   return Number.isFinite(rate) ? rate : 10
 }
 
+// Single source of truth for how much has been paid against an invoice:
+// manual/QuickBooks payments counted toward the balance, plus Stripe mirror
+// rows (source=STRIPE). Reading Stripe money from the mirrors — rather than
+// SalesInvoiceStripePayment — keeps status consistent with the dashboard
+// rollup and accounting cash receipts, and lets deleted test payments drop out.
+async function aggregatePaidCents(
+  tx: Prisma.TransactionClient,
+  invoiceId: string
+): Promise<{ paidCents: number }> {
+  const agg = await tx.salesPayment.aggregate({
+    where: {
+      invoiceId,
+      OR: [{ excludeFromInvoiceBalance: false }, { source: 'STRIPE' as any }],
+    },
+    _sum: { amountCents: true },
+  })
+  const paid = Number(agg?._sum?.amountCents ?? 0)
+  return { paidCents: Number.isFinite(paid) ? Math.max(0, Math.trunc(paid)) : 0 }
+}
+
 export async function recomputeInvoiceStoredStatus(
   tx: Prisma.TransactionClient,
   invoiceId: string,
@@ -42,6 +62,7 @@ export async function recomputeInvoiceStoredStatus(
       sentAt: true,
       dueDate: true,
       itemsJson: true,
+      taxEnabled: true,
       version: true,
     },
   })
@@ -50,21 +71,11 @@ export async function recomputeInvoiceStoredStatus(
   // VOID is terminal: never recompute or write a revision for a voided invoice,
   // otherwise a later payment recompute could silently un-void it.
   if ((inv.status as InvoiceStatus) === 'VOID') {
-    const paymentsAgg = await tx.salesPayment.aggregate({
-      where: { invoiceId: id, excludeFromInvoiceBalance: false },
-      _sum: { amountCents: true },
-    })
-    const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
-      where: { invoiceDocId: id },
-      _sum: { invoiceAmountCents: true },
-    })
-    const paidLocalCents = Number(paymentsAgg?._sum?.amountCents ?? 0)
-    const paidStripeCents = Number(stripeAgg?._sum?.invoiceAmountCents ?? 0)
-    const paidCents = Math.max(0, Math.trunc(paidLocalCents + paidStripeCents))
+    const { paidCents } = await aggregatePaidCents(tx, id)
 
     const taxRatePercent = await getSalesTaxRatePercent(tx)
     const items = Array.isArray(inv.itemsJson) ? inv.itemsJson : []
-    const invTaxEnabled = typeof (inv as any).taxEnabled === 'boolean' ? (inv as any).taxEnabled : true
+    const invTaxEnabled = typeof inv.taxEnabled === 'boolean' ? inv.taxEnabled : true
     const totalCents = sumLineItemsSubtotal(items as any) + (invTaxEnabled ? sumLineItemsTax(items as any, taxRatePercent) : 0)
 
     return { status: 'VOID', paidCents, totalCents }
@@ -72,27 +83,13 @@ export async function recomputeInvoiceStoredStatus(
 
   const taxRatePercent = await getSalesTaxRatePercent(tx)
   const items = Array.isArray(inv.itemsJson) ? inv.itemsJson : []
-  const invTaxEnabled = typeof (inv as any).taxEnabled === 'boolean' ? (inv as any).taxEnabled : true
+  const invTaxEnabled = typeof inv.taxEnabled === 'boolean' ? inv.taxEnabled : true
 
   const subtotalCents = sumLineItemsSubtotal(items as any)
   const taxCents = invTaxEnabled ? sumLineItemsTax(items as any, taxRatePercent) : 0
   const totalCents = subtotalCents + taxCents
 
-  const paymentsAgg = await tx.salesPayment.aggregate({
-    where: { invoiceId: id, excludeFromInvoiceBalance: false },
-    _sum: { amountCents: true },
-    _max: { paymentDate: true },
-  })
-
-  const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
-    where: { invoiceDocId: id },
-    _sum: { invoiceAmountCents: true },
-    _max: { createdAt: true },
-  })
-
-  const paidLocalCents = Number(paymentsAgg?._sum?.amountCents ?? 0)
-  const paidStripeCents = Number(stripeAgg?._sum?.invoiceAmountCents ?? 0)
-  const paidCents = Math.max(0, Math.trunc(paidLocalCents + paidStripeCents))
+  const { paidCents } = await aggregatePaidCents(tx, id)
 
   const nextStatus = computeInvoiceEffectiveStatus(
     {

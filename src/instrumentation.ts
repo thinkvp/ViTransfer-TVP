@@ -24,6 +24,11 @@ export async function register() {
       // Initialize security settings from environment variables
       await initializeSecuritySettings()
 
+      // Publish this process's storage config and warn if the worker disagrees
+      // (split app/worker topology — env drift is otherwise silent).
+      const { publishAndCheckStorageConfig } = await import('./lib/storage-config-guard')
+      await publishAndCheckStorageConfig('app')
+
       console.log('[INIT] Server initialization complete')
     } catch (error) {
       console.error('[INIT] Initialization error:', error)

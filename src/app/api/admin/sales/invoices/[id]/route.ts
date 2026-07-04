@@ -6,6 +6,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
+import { getDefaultTaxRatePercent, lineItemsSchema, normalizeLineItems } from '@/lib/sales/line-items'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,7 +20,7 @@ const patchSchema = z.object({
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   notes: z.string().max(20000).optional(),
   terms: z.string().max(20000).optional(),
-  items: z.array(z.any()).optional(),
+  items: lineItemsSchema.optional(),
   sentAt: z.string().datetime().nullable().optional(),
   remindersEnabled: z.boolean().optional(),
 })
@@ -28,29 +29,18 @@ async function computeInvoicePaidAtYmdForExpiry(tx: Prisma.TransactionClient, in
   const id = String(invoiceId || '').trim()
   if (!id) return null
 
+  // Stripe money is read from its SalesPayment mirror rows (source=STRIPE),
+  // consistent with recomputeInvoiceStoredStatus / aggregateInvoicePaidCents.
   const paymentsAgg = await tx.salesPayment.aggregate({
-    where: { invoiceId: id, excludeFromInvoiceBalance: false },
+    where: {
+      invoiceId: id,
+      OR: [{ excludeFromInvoiceBalance: false }, { source: 'STRIPE' as any }],
+    },
     _max: { paymentDate: true },
   }).catch(() => null)
 
-  const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
-    where: { invoiceDocId: id },
-    _max: { createdAt: true },
-  }).catch(() => null)
-
-  const latestLocalYmd = typeof paymentsAgg?._max?.paymentDate === 'string' ? paymentsAgg._max.paymentDate : null
-
-  const stripeCreatedAt = stripeAgg?._max?.createdAt
-  const stripeIso = typeof stripeCreatedAt === 'string'
-    ? stripeCreatedAt
-    : (stripeCreatedAt && typeof (stripeCreatedAt as any).toISOString === 'function' ? (stripeCreatedAt as any).toISOString() : null)
-  const latestStripeYmd = typeof stripeIso === 'string' && /^\d{4}-\d{2}-\d{2}/.test(stripeIso) ? stripeIso.slice(0, 10) : null
-
-  return [latestLocalYmd, latestStripeYmd]
-    .filter((d): d is string => typeof d === 'string' && d.trim().length > 0)
-    .sort()
-    .at(-1)
-    ?? null
+  const latestYmd = typeof paymentsAgg?._max?.paymentDate === 'string' ? paymentsAgg._max.paymentDate : null
+  return latestYmd && /^\d{4}-\d{2}-\d{2}$/.test(latestYmd) ? latestYmd : null
 }
 
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -108,11 +98,21 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
       const current = await tx.salesInvoice.findUnique({ where: { id } })
       if (!current) return null
 
+      // VOID is terminal: editing would re-activate the revoked public share
+      // (upsert clears revokedAt) and could silently un-void via a status patch.
+      if ((current.status as string) === 'VOID') {
+        return { badRequest: 'Cannot edit a void invoice. Un-void it first.' }
+      }
+
       if (Number(current.version) !== Number(input.version)) {
         return { conflict: true, current }
       }
 
       const nextVersion = Number(current.version) + 1
+
+      const items = input.items
+        ? normalizeLineItems(input.items, await getDefaultTaxRatePercent(tx))
+        : undefined
 
       const next = await tx.salesInvoice.update({
         where: { id },
@@ -124,7 +124,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
           ...(input.dueDate !== undefined ? { dueDate: input.dueDate || null } : {}),
           ...(typeof input.notes === 'string' ? { notes: input.notes } : {}),
           ...(typeof input.terms === 'string' ? { terms: input.terms } : {}),
-          ...(input.items ? { itemsJson: input.items } : {}),
+          ...(items ? { itemsJson: items as any } : {}),
           ...(input.sentAt !== undefined
             ? { sentAt: input.sentAt ? new Date(input.sentAt) : null }
             : {}),
@@ -165,6 +165,10 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
     if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+    if ((updated as any).badRequest) {
+      return NextResponse.json({ error: (updated as any).badRequest }, { status: 409 })
+    }
+
     if ((updated as any).conflict) {
       const current = (updated as any).current
       return NextResponse.json(
@@ -193,6 +197,20 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
   if (rateLimitResult) return rateLimitResult
 
   const { id } = await ctx.params
+
+  // Deleting an invoice with payments would orphan the SalesPayment rows
+  // (invoiceId is SetNull), and orphaned payments report $0 GST on a cash-basis
+  // BAS. Require payments to be removed first, or the invoice voided instead.
+  const [paymentCount, stripePaymentCount] = await Promise.all([
+    prisma.salesPayment.count({ where: { invoiceId: id } }),
+    prisma.salesInvoiceStripePayment.count({ where: { invoiceDocId: id } }),
+  ])
+  if (paymentCount > 0 || stripePaymentCount > 0) {
+    return NextResponse.json(
+      { error: 'Cannot delete an invoice with payments. Delete the payments first, or void the invoice instead.' },
+      { status: 409 }
+    )
+  }
 
   try {
     await prisma.$transaction(async (tx) => {

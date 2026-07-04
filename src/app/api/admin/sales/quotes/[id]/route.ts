@@ -5,6 +5,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesQuoteFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
+import { getDefaultTaxRatePercent, lineItemsSchema, normalizeLineItems } from '@/lib/sales/line-items'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,7 +20,7 @@ const patchSchema = z.object({
   validUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   notes: z.string().max(20000).optional(),
   terms: z.string().max(20000).optional(),
-  items: z.array(z.any()).optional(),
+  items: lineItemsSchema.optional(),
   sentAt: z.string().datetime().nullable().optional(),
   remindersEnabled: z.boolean().optional(),
 })
@@ -85,6 +86,10 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
       const nextVersion = Number(current.version) + 1
 
+      const items = input.items
+        ? normalizeLineItems(input.items, await getDefaultTaxRatePercent(tx))
+        : undefined
+
       const next = await tx.salesQuote.update({
         where: { id },
         data: {
@@ -96,7 +101,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
           ...(input.validUntil !== undefined ? { validUntil: input.validUntil || null } : {}),
           ...(typeof input.notes === 'string' ? { notes: input.notes } : {}),
           ...(typeof input.terms === 'string' ? { terms: input.terms } : {}),
-          ...(input.items ? { itemsJson: input.items } : {}),
+          ...(items ? { itemsJson: items as any } : {}),
           ...(input.sentAt !== undefined
             ? { sentAt: input.sentAt ? new Date(input.sentAt) : null }
             : {}),

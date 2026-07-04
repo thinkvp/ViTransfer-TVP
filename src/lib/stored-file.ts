@@ -17,9 +17,16 @@
  */
 
 import { prisma } from './db'
-import { deleteFile } from './storage'
-import { isS3Mode, s3DeleteFile } from './s3-storage'
-import type { EntityType, FileRole } from '@prisma/client'
+import { deleteFile, deleteDirectory } from './storage'
+import { isS3Mode } from './s3-storage'
+import type { EntityType, FileRole, Prisma } from '@prisma/client'
+
+/**
+ * Either the global Prisma client or an interactive-transaction client. Passing a
+ * transaction client lets entity creation + StoredFile registration commit atomically,
+ * so a failure can't leave an entity row without its file registration.
+ */
+type DbClient = typeof prisma | Prisma.TransactionClient
 
 // Re-export for convenience
 export type { EntityType, FileRole }
@@ -33,6 +40,15 @@ export const RESOLUTION_TO_FILE_ROLE: Record<string, FileRole> = {
   '720p': 'PREVIEW_720',
   '1080p': 'PREVIEW_1080',
 }
+
+/**
+ * Roles whose storagePath is a DIRECTORY (one row, many files inside), not a
+ * single object. Storage deletion for these must remove the whole prefix/tree.
+ */
+export const DIRECTORY_FILE_ROLES: ReadonlySet<FileRole> = new Set<FileRole>([
+  'TIMELINE_SPRITES',
+  'HLS_SEGMENTS',
+])
 
 // ---------------------------------------------------------------------------
 // Register / upsert
@@ -57,11 +73,10 @@ export interface RegisterStoredFileParams {
 }
 
 /**
- * Build the column data shared by the upsert create/update branches.
- * `metadata: undefined` is intentional — on update it means "leave unchanged",
- * on create it means "default to null".
+ * Build the column data for the upsert create branch: omitted optional fields
+ * default to null.
  */
-function buildStoredFileData(params: RegisterStoredFileParams, projectId: string | null) {
+function buildStoredFileCreateData(params: RegisterStoredFileParams, projectId: string | null) {
   return {
     projectId,
     storagePath: params.storagePath,
@@ -73,10 +88,28 @@ function buildStoredFileData(params: RegisterStoredFileParams, projectId: string
   }
 }
 
+/**
+ * Build the column data for the upsert update branch: omitted (undefined)
+ * optional fields leave the existing value UNCHANGED, so a partial re-register
+ * (e.g. a status-only update) can't wipe a known fileSize/fileName. Passing an
+ * explicit null still clears the field.
+ */
+function buildStoredFileUpdateData(params: RegisterStoredFileParams, projectId: string | null) {
+  return {
+    projectId,
+    storagePath: params.storagePath,
+    fileName: params.fileName === undefined ? undefined : params.fileName,
+    fileSize: params.fileSize === undefined ? undefined : params.fileSize != null ? BigInt(params.fileSize) : null,
+    status: params.status === undefined ? undefined : params.status,
+    generatedAt: params.generatedAt === undefined ? undefined : params.generatedAt,
+    metadata: params.metadata ? (params.metadata as any) : undefined,
+  }
+}
+
 /** Resolve projectId for a register call: explicit value wins, otherwise derive from the entity. */
-async function resolveProjectIdForParams(params: RegisterStoredFileParams): Promise<string | null> {
+async function resolveProjectIdForParams(params: RegisterStoredFileParams, db: DbClient): Promise<string | null> {
   if (params.projectId !== undefined) return params.projectId
-  return resolveEntityProjectId(params.entityType, params.entityId)
+  return resolveEntityProjectId(params.entityType, params.entityId, db)
 }
 
 /**
@@ -87,11 +120,10 @@ async function resolveProjectIdForParams(params: RegisterStoredFileParams): Prom
  *
  * Called by workers, upload handlers, and reprocess flows.
  */
-export async function registerStoredFile(params: RegisterStoredFileParams) {
-  const projectId = await resolveProjectIdForParams(params)
-  const data = buildStoredFileData(params, projectId)
+export async function registerStoredFile(params: RegisterStoredFileParams, db: DbClient = prisma) {
+  const projectId = await resolveProjectIdForParams(params, db)
 
-  return prisma.storedFile.upsert({
+  return db.storedFile.upsert({
     where: {
       entityType_entityId_fileRole: {
         entityType: params.entityType,
@@ -103,9 +135,9 @@ export async function registerStoredFile(params: RegisterStoredFileParams) {
       entityType: params.entityType,
       entityId: params.entityId,
       fileRole: params.fileRole,
-      ...data,
+      ...buildStoredFileCreateData(params, projectId),
     },
-    update: data,
+    update: buildStoredFileUpdateData(params, projectId),
   })
 }
 
@@ -140,7 +172,7 @@ export async function registerStoredFiles(
 
   return prisma.$transaction(
     files.map((f) => {
-      const data = buildStoredFileData(f, projectIdFor(f))
+      const projectId = projectIdFor(f)
       return prisma.storedFile.upsert({
         where: {
           entityType_entityId_fileRole: {
@@ -153,9 +185,9 @@ export async function registerStoredFiles(
           entityType: f.entityType,
           entityId: f.entityId,
           fileRole: f.fileRole,
-          ...data,
+          ...buildStoredFileCreateData(f, projectId),
         },
-        update: data,
+        update: buildStoredFileUpdateData(f, projectId),
       })
     }),
   )
@@ -168,6 +200,12 @@ export async function registerStoredFiles(
 /**
  * Remove a file row from the registry and optionally delete from storage.
  * Uses a single DELETE … RETURNING-style operation via Prisma's delete with select.
+ *
+ * Storage deletion is guarded:
+ * - Directory roles (TIMELINE_SPRITES, HLS_SEGMENTS) delete the whole prefix/tree —
+ *   a single-object delete on a directory path would silently strand its contents.
+ * - If another StoredFile row still references the same path (shared paths, e.g.
+ *   custom video thumbnails aliasing an asset's ORIGINAL), the object is kept.
  */
 export async function deleteStoredFile(
   entityType: EntityType,
@@ -192,13 +230,19 @@ export async function deleteStoredFile(
 
   if (options?.deleteFromStorage && storagePath) {
     try {
-      if (isS3Mode()) {
-        await s3DeleteFile(storagePath)
+      // Shared-path guard: our row is already deleted, so any remaining row with
+      // this exact path means another entity still uses the underlying object.
+      const stillReferenced = await countStoredFilesByPath(storagePath)
+      if (stillReferenced > 0) {
+        console.log(`[StoredFile] Skipping storage delete of shared path (${stillReferenced} other reference(s)): ${storagePath}`)
+      } else if (DIRECTORY_FILE_ROLES.has(fileRole)) {
+        await deleteDirectory(storagePath)
       } else {
         await deleteFile(storagePath)
       }
-    } catch {
-      // Best-effort — storage cleanup may fail if file already deleted
+    } catch (err) {
+      // Best-effort, but never silent: a failed delete strands a paid object in R2.
+      console.warn(`[StoredFile] Failed to delete storage object ${storagePath} (${entityType}/${entityId}/${fileRole}):`, err instanceof Error ? err.message : err)
     }
   }
 
@@ -371,29 +415,30 @@ export async function getStoredFilePathForProject(
 export async function resolveEntityProjectId(
   entityType: EntityType,
   entityId: string,
+  db: DbClient = prisma,
 ): Promise<string | null> {
   switch (entityType) {
     case 'VIDEO': {
-      const v = await prisma.video.findUnique({ where: { id: entityId }, select: { projectId: true } })
+      const v = await db.video.findUnique({ where: { id: entityId }, select: { projectId: true } })
       return v?.projectId ?? null
     }
     case 'VIDEO_ASSET': {
-      const va = await prisma.videoAsset.findUnique({
+      const va = await db.videoAsset.findUnique({
         where: { id: entityId },
         select: { video: { select: { projectId: true } } },
       })
       return va?.video?.projectId ?? null
     }
     case 'SHARE_UPLOAD_FILE': {
-      const uf = await prisma.shareUploadFile.findUnique({ where: { id: entityId }, select: { projectId: true } })
+      const uf = await db.shareUploadFile.findUnique({ where: { id: entityId }, select: { projectId: true } })
       return uf?.projectId ?? null
     }
     case 'ALBUM': {
-      const a = await prisma.album.findUnique({ where: { id: entityId }, select: { projectId: true } })
+      const a = await db.album.findUnique({ where: { id: entityId }, select: { projectId: true } })
       return a?.projectId ?? null
     }
     case 'ALBUM_PHOTO': {
-      const ap = await prisma.albumPhoto.findUnique({
+      const ap = await db.albumPhoto.findUnique({
         where: { id: entityId },
         select: { album: { select: { projectId: true } } },
       })
@@ -404,22 +449,22 @@ export async function resolveEntityProjectId(
       return null
     }
     case 'PROJECT_FILE': {
-      const pf = await prisma.projectFile.findUnique({ where: { id: entityId }, select: { projectId: true } })
+      const pf = await db.projectFile.findUnique({ where: { id: entityId }, select: { projectId: true } })
       return pf?.projectId ?? null
     }
     case 'PROJECT_EMAIL': {
-      const pe = await prisma.projectEmail.findUnique({ where: { id: entityId }, select: { projectId: true } })
+      const pe = await db.projectEmail.findUnique({ where: { id: entityId }, select: { projectId: true } })
       return pe?.projectId ?? null
     }
     case 'COMMENT_FILE': {
-      const cmf = await prisma.commentFile.findUnique({
+      const cmf = await db.commentFile.findUnique({
         where: { id: entityId },
         select: { comment: { select: { projectId: true } } },
       })
       return cmf?.comment?.projectId ?? null
     }
     case 'PROJECT_EMAIL_ATTACHMENT': {
-      const pea = await prisma.projectEmailAttachment.findUnique({
+      const pea = await db.projectEmailAttachment.findUnique({
         where: { id: entityId },
         select: { projectEmail: { select: { projectId: true } } },
       })
@@ -431,8 +476,13 @@ export async function resolveEntityProjectId(
     case 'SETTINGS_BRANDING':
     case 'ACCOUNTING_ATTACHMENT':
       return null
-    default:
+    default: {
+      // Exhaustiveness guard: adding a new EntityType without wiring it up here
+      // becomes a compile error instead of silently resolving to "not project-scoped".
+      const _exhaustive: never = entityType
+      void _exhaustive
       return null
+    }
   }
 }
 
@@ -446,6 +496,7 @@ export interface DanglingStoredFile {
   entityId: string
   fileRole: FileRole
   storagePath: string
+  fileSize: bigint | null
 }
 
 /**
@@ -499,7 +550,7 @@ export async function findDanglingStoredFiles(options?: { pageSize?: number }): 
 
   do {
     const rows: DanglingStoredFile[] = await prisma.storedFile.findMany({
-      select: { id: true, entityType: true, entityId: true, fileRole: true, storagePath: true },
+      select: { id: true, entityType: true, entityId: true, fileRole: true, storagePath: true, fileSize: true },
       orderBy: { id: 'asc' },
       take: pageSize + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -656,8 +707,23 @@ export async function batchResolveFileSizes(
           } catch { return { entityId: f.entityId, size: 0 } }
         }),
       )
-      for (const r of s3Sizes) {
-        if (r.size > 0) sizeMap.set(r.entityId, r.size)
+      const resolved = s3Sizes.filter((r) => r.size > 0)
+      for (const r of resolved) {
+        sizeMap.set(r.entityId, r.size)
+      }
+      // Persist the resolved sizes so the row self-heals — otherwise every listing
+      // render pays an S3 HEAD per null-size row, forever. Fire-and-forget.
+      if (resolved.length > 0) {
+        void Promise.all(
+          resolved.map((r) =>
+            prisma.storedFile.updateMany({
+              where: { entityType, entityId: r.entityId, fileRole, fileSize: null },
+              data: { fileSize: BigInt(r.size) },
+            }),
+          ),
+        ).catch((err) => {
+          console.warn('[StoredFile] Failed to backfill resolved file sizes:', err instanceof Error ? err.message : err)
+        })
       }
     }
   }

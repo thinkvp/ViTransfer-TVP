@@ -323,6 +323,9 @@ model Project {
   // Key Dates (internal schedule milestones)
   keyDates ProjectKeyDate[]
 
+  // Production schedule (Gantt chart)
+  schedule ProjectSchedule?
+
   statusChanges ProjectStatusChange[]
 
   salesQuotes   SalesQuote[]
@@ -369,6 +372,71 @@ model ProjectKeyDate {
   @@index([projectId, date])
   @@index([reminderAt])
   @@index([reminderSentAt])
+}
+
+// Production schedule (Gantt chart) — one per project, internal/admin only
+model ProjectSchedule {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title           String? // header override; falls back to project.title
+  includeWeekends Boolean @default(false)
+
+  phases ProjectSchedulePhase[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProjectSchedulePhase {
+  id         String          @id @default(cuid())
+  scheduleId String
+  schedule   ProjectSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  name      String
+  color     String // #RRGGBB
+  sortOrder Int    @default(0)
+
+  tasks ProjectScheduleTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([scheduleId, sortOrder])
+}
+
+enum ScheduleTaskKind {
+  BAR
+  MILESTONE
+}
+
+enum ScheduleTaskOwner {
+  STUDIO
+  CLIENT
+}
+
+model ProjectScheduleTask {
+  id      String               @id @default(cuid())
+  phaseId String
+  phase   ProjectSchedulePhase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  kind        ScheduleTaskKind  @default(BAR)
+  owner       ScheduleTaskOwner @default(STUDIO)
+
+  // ISO date strings (avoid timezone drift)
+  startDate String // YYYY-MM-DD
+  endDate   String // YYYY-MM-DD; == startDate for MILESTONE
+
+  showDeadline Boolean @default(false) // "key date" marker at bar end
+  sortOrder    Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phaseId, sortOrder])
 }
 
 model UserKeyDate {
@@ -1982,7 +2050,7 @@ model StoredFile {
 
   storagePath String
   fileName    String?    // cached display name
-  fileSize    BigInt?    // 0 = unknown
+  fileSize    BigInt?    // null = unknown (batchResolveFileSizes lazily backfills from S3 HEAD)
   status      String?    // PENDING | READY | ERROR (null for simple files)
   generatedAt DateTime?
   metadata    Json?      // { width, height, duration, codec, ... }
