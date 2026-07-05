@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.8] - 2026-07-05
+
+### Fixed
+
+- **CI restored after the 2.1.7 dependency sweep (two independent breakages)** — the `rbac-lint-tsc` job on `main` failed at `npm ci`: npm 10 (bundled with the workflow's Node 22) has a validation bug with nested overrides (`tinyglobby → picomatch@4.0.4`) and rejects the lock file that npm 11 generates and accepts — verified against a freshly regenerated lock, so npm ≥ 11 is a hard requirement, not a stale-lock symptom. CI now runs Node 24 (matching the Dockerfile's `node:24` + `npm@latest` and local dev). The next failure in line was TypeScript 6 promoting the deprecated tsconfig `baseUrl` to a hard error (TS5101) — removed, since `paths` already resolve relative to `tsconfig.json` under `moduleResolution: "bundler"`. Also bumped `actions/checkout` v4 → v5 (clears the Node 20 deprecation annotation).
+
+### Changed
+
+- **`engines` guard (`node >=24`, `npm >=11`)** — anyone installing with older tooling now gets a clear `EBADENGINE` warning naming the requirement instead of a cryptic lock-sync error. The lock file was also resynced, picking up the missed 2.1.6 → 2.1.7 root version bump and npm 11's bundled-dep metadata for `@tailwindcss/oxide-wasm32-wasi`.
+
 ## [2.1.7] - 2026-07-04
 
 ### Changed
