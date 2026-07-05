@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **PostgreSQL 17 → 18 in the Docker Compose stacks** — `docker-compose.yml`, `docker-compose.build.yml`, and `INSTALLATION.md` now use `postgres:18-alpine`. Note the `postgres:18` image's new data layout: the volume mounts at `/var/lib/postgresql` (not `/var/lib/postgresql/data`). **Existing installations cannot switch images in place** — a major Postgres upgrade requires a dump/restore: `pg_dump -Fc` on 17, point the compose at a fresh volume with the new mount path, `pg_restore` into 18. Keep the old volume until verified. The app itself is version-agnostic (vanilla Postgres, no extensions; Prisma 7 supports 18).
+
 ## [2.1.8] - 2026-07-05
 
 ### Fixed

@@ -332,7 +332,7 @@ docker compose down
 docker compose down -v
 
 # Remove images
-docker rmi thinkvp/vitransfer-tvp-app:latest thinkvp/vitransfer-tvp-worker:latest postgres:17-alpine redis:8-alpine
+docker rmi thinkvp/vitransfer-tvp-app:latest thinkvp/vitransfer-tvp-worker:latest postgres:18-alpine redis:8-alpine
 ```
 
 ## Getting Help
