@@ -187,16 +187,11 @@ interface VideoSidebarProps {
   hasApprovableVideos?: boolean
   /** Whether the desktop tab bar should be rendered inside the sidebar. */
   showDesktopTabBar?: boolean
-  /** Render an UPLOADS folder entry inside the VIEW layout (combined files view). */
+  /** Render the UPLOADS section (one card per top-level folder) inside the VIEW layout. */
   showUploadsInView?: boolean
-  /** Called when the UPLOADS entry in the VIEW layout is clicked (toggles the Files browser). */
-  onUploadsSelect?: () => void
-  /** Up to 3 resolved preview thumbnail URLs for the UPLOADS folder mosaic. */
-  uploadsPreviewTiles?: string[]
-  /** Video poster URL for the UPLOADS folder mosaic when no image tiles exist. */
-  uploadsPreviewPoster?: string | null
-  /** Called when an UPLOADS mosaic thumbnail fails to load (token expiry → refresh). */
-  onUploadsPreviewError?: () => void
+  /** Called when an UPLOADS folder card is clicked; opens that folder in the Files browser.
+   *  Pass the folder's top-level relative path (empty/undefined = UPLOADS root). */
+  onUploadsSelect?: (folderPath?: string) => void
   /** Controlled desktop mode; when omitted, sidebar manages it internally. */
   desktopActiveTab?: 'for-review' | 'files'
   /** Controlled desktop mode setter. */
@@ -262,9 +257,6 @@ export default function VideoSidebar({
   showDesktopTabBar = true,
   showUploadsInView = false,
   onUploadsSelect,
-  uploadsPreviewTiles = [],
-  uploadsPreviewPoster = null,
-  onUploadsPreviewError,
   desktopActiveTab,
   onDesktopActiveTabChange,
   selectedFileIds,
@@ -388,6 +380,28 @@ export default function VideoSidebar({
   const shouldShowAlbums = showAlbums && albumsList.length > 0
   const hasVideos = shouldShowVideos && videoGroups.length > 0
   const hasAlbums = shouldShowAlbums && albumsList.length > 0
+
+  // Top-level upload folders (admin-managed). Each becomes its own card in the
+  // UPLOADS section, mirroring how Albums/Videos list their items. Derived from the
+  // downloadable upload groups (which include empty admin folders), bucketed by their
+  // first path segment so nested (client-created) subfolders roll into their parent.
+  const uploadFolderEntries = useMemo(() => {
+    const groups = (downloadableFiles ?? []).filter((group) => group.groupType === 'uploads')
+    const byTop = new Map<string, { relativePath: string; folderName: string; fileCount: number }>()
+    for (const group of groups) {
+      const rel = getUploadsRelativePath(group.name)
+      if (!rel) continue // skip loose root-level files (no admin folder)
+      const top = rel.split('/')[0]
+      if (!top) continue
+      const fileCount = (group.mainFile ? 1 : 0) + group.subFiles.length
+      const existing = byTop.get(top)
+      if (existing) existing.fileCount += fileCount
+      else byTop.set(top, { relativePath: top, folderName: top, fileCount })
+    }
+    return [...byTop.values()].sort((a, b) => a.folderName.localeCompare(b.folderName, undefined, { sensitivity: 'base' }))
+  }, [downloadableFiles])
+
+  const hasUploadFolders = uploadFolderEntries.length > 0
 
   const activeAlbum = useMemo(() => {
     if (!activeAlbumId) return null
@@ -754,11 +768,10 @@ export default function VideoSidebar({
 
   // Desktop sidebar thumbnails scale up as the sidebar is widened; the current
   // sizes are the floor. Base width 256px → 64px video/album thumbnail (w-16).
-  // Video/album thumbnails stay 16:9; the uploads mosaic shares the same width.
+  // Video/album/upload-folder thumbnails stay 16:9.
   const thumbnailScale = Math.max(1, sidebarWidth / 256)
   const videoThumbnailWidth = Math.round(64 * thumbnailScale)
   const videoThumbnailHeight = Math.round((videoThumbnailWidth * 9) / 16)
-  const uploadsThumbnailWidth = videoThumbnailWidth
 
   // Desktop sidebar: computed groups and render helpers (mobile section is unchanged)
   const forReviewGroups = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true)))
@@ -1221,48 +1234,36 @@ export default function VideoSidebar({
     )
   }
 
-  // Combined files view: a single clickable UPLOADS folder rendered inside the VIEW
-  // layout. Clicking it opens UPLOADS in the Files browser (and toggles back to root).
-  const renderUploadsViewButton = () => {
-    const uploadGroups = (downloadableFiles ?? []).filter((group) => group.groupType === 'uploads')
-    const hasUploads = uploadGroups.length > 0
-    if (!hasUploads) return null
-    const isActive = String(activeFilesFolderName || '').trim().startsWith('UPLOADS')
-    const totalFileCount = uploadGroups.reduce((count, group) => {
-      return count + (group.mainFile ? 1 : 0) + group.subFiles.length
-    }, 0)
+  // Combined files view: one card per top-level upload folder, rendered inside the
+  // UPLOADS section. Clicking a card opens that folder in the Files browser (and
+  // toggles back to the project root when it is already active).
+  const renderUploadFolderButton = (folder: typeof uploadFolderEntries[0]) => {
+    const target = `UPLOADS / ${folder.relativePath}`
+    const isActive = String(activeFilesFolderName || '').trim() === target
     return (
-      <div className="mt-4 border-t border-border pt-3">
-        <div className="px-3 py-2 text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
-          <Upload className="w-3 h-3" />
-          Uploads
-        </div>
-        <button
-          type="button"
-          onClick={() => onUploadsSelect?.()}
-          className={cn(
-            'w-full text-left px-2 py-2 rounded-lg transition-all duration-200 flex flex-row items-start gap-2',
-            'hover:bg-accent hover:text-accent-foreground',
-            isActive ? 'bg-primary/10 text-primary font-medium border border-primary/20' : 'text-foreground'
-          )}
+      <button
+        key={folder.relativePath}
+        type="button"
+        onClick={() => onUploadsSelect?.(folder.relativePath)}
+        className={cn(
+          'w-full text-left px-2 py-2 rounded-lg transition-all duration-200 flex flex-row items-start gap-2',
+          'hover:bg-accent hover:text-accent-foreground',
+          isActive ? 'bg-primary/10 text-primary font-medium border border-primary/20' : 'text-foreground'
+        )}
+      >
+        <div
+          className="shrink-0 rounded overflow-hidden relative bg-linear-to-br from-muted to-muted-foreground/50 flex items-center justify-center"
+          style={{ width: videoThumbnailWidth, height: videoThumbnailHeight }}
         >
-          <div className="shrink-0" style={{ width: uploadsThumbnailWidth }}>
-            <FolderPreviewMosaic
-              label="UPLOADS"
-              tiles={uploadsPreviewTiles}
-              videoPoster={uploadsPreviewPoster}
-              isUploads
-              onTileError={onUploadsPreviewError}
-            />
-          </div>
-          <div className="flex-1 min-w-0 pt-2">
-            <p className="text-sm font-semibold leading-snug">UPLOADS</p>
-            <p className="text-xs text-muted-foreground">
-              {totalFileCount} {totalFileCount === 1 ? 'file' : 'files'}
-            </p>
-          </div>
-        </button>
-      </div>
+          <Folder className="w-4 h-4 text-muted-foreground/70 relative z-10" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm leading-snug line-clamp-2 wrap-break-word">{folder.folderName}</p>
+          <p className="text-xs text-muted-foreground">
+            {folder.fileCount} {folder.fileCount === 1 ? 'file' : 'files'}
+          </p>
+        </div>
+      </button>
     )
   }
 
@@ -2133,54 +2134,58 @@ export default function VideoSidebar({
 
               {/* FOR REVIEW tab */}
               {desktopActiveTabValue === 'for-review' && (
-                <div className="overflow-y-auto overflow-x-hidden flex-1 min-h-0 mr-[5px]">
-                  <nav className="p-3">
-                    {/* For Review heading */}
+                <div className="overflow-y-auto overflow-x-hidden flex-1 min-h-0 bg-muted/70">
+                  <nav className="pb-2">
+                    {/* The scroll area is the lighter surface edge-to-edge; only the section
+                        labels get the darker base band (with divider lines), so the items sit
+                        on the lift and empty space below stays lighter too. */}
                     {forReviewGroups.length > 0 && (
-                      <div className="px-3 py-2 text-xs font-semibold text-warning uppercase tracking-wider flex items-center gap-2">
-                        <Play className="w-3 h-3" />
-                        For Review
-                      </div>
-                    )}
-                    {forReviewGroups.length > 0 && (
-                      <div className="space-y-1">
-                        {forReviewGroups.map(g => renderVideoButton(g))}
+                      <div>
+                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-warning uppercase tracking-wider flex items-center gap-2">
+                          <Play className="w-3 h-3" />
+                          For Review
+                        </div>
+                        <div className="space-y-1 px-2 py-2">
+                          {forReviewGroups.map(g => renderVideoButton(g))}
+                        </div>
                       </div>
                     )}
 
-                    {/* APPROVED section */}
                     {approvedGroups.length > 0 && (
-                      <div className={cn(forReviewGroups.length > 0 ? 'mt-4' : '')}>
-                        <div
-                          className={cn(
-                            'px-3 py-2 text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-2',
-                            forReviewGroups.length > 0 ? 'border-t border-border pt-3' : ''
-                          )}
-                        >
+                      <div>
+                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-2">
                           <CheckCircle2 className="w-3 h-3" />
                           Approved
                         </div>
-                        <div className="space-y-1">
+                        <div className="space-y-1 px-2 py-2">
                           {approvedGroups.map(g => renderVideoButton(g))}
                         </div>
                       </div>
                     )}
 
-                    {/* ALBUMS section */}
                     {hasAlbums && (
-                      <div className="mt-4">
-                        <div className="px-3 py-2 text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2 border-t border-border pt-3">
+                      <div>
+                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
                           <Images className="w-3 h-3" />
                           Albums
                         </div>
-                        <div className="space-y-1">
+                        <div className="space-y-1 px-2 py-2">
                           {albumsList.map(a => renderAlbumButton(a))}
                         </div>
                       </div>
                     )}
 
-                    {/* UPLOADS folder (combined files view) */}
-                    {showUploadsInView && renderUploadsViewButton()}
+                    {showUploadsInView && hasUploadFolders && (
+                      <div>
+                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
+                          <Upload className="w-3 h-3" />
+                          Uploads
+                        </div>
+                        <div className="space-y-1 px-2 py-2">
+                          {uploadFolderEntries.map(renderUploadFolderButton)}
+                        </div>
+                      </div>
+                    )}
                   </nav>
                 </div>
               )}
@@ -2679,34 +2684,33 @@ export default function VideoSidebar({
                 )
               })}
 
-              {/* Uploads (combined files view) */}
-              {showUploadsInView && (downloadableFiles ?? []).some((group) => group.groupType === 'uploads') && (() => {
-                const isActive = String(activeFilesFolderName || '').trim().startsWith('UPLOADS')
+              {/* Uploads (combined files view): one card per top-level folder */}
+              {showUploadsInView && uploadFolderEntries.map((folder) => {
+                const target = `UPLOADS / ${folder.relativePath}`
+                const isActive = String(activeFilesFolderName || '').trim() === target
                 return (
                   <button
+                    key={folder.relativePath}
                     type="button"
-                    onClick={() => onUploadsSelect?.()}
+                    onClick={() => onUploadsSelect?.(folder.relativePath)}
                     className={cn(
                       'flex flex-col gap-2 shrink-0 transition-all duration-200 w-[140px]',
                       'rounded-lg p-2',
                       isActive ? 'bg-primary/10 border border-primary/20' : 'hover:bg-accent'
                     )}
                   >
-                    <FolderPreviewMosaic
-                      label="UPLOADS"
-                      tiles={uploadsPreviewTiles}
-                      videoPoster={uploadsPreviewPoster}
-                      isUploads
-                      onTileError={onUploadsPreviewError}
-                    />
+                    <FolderPreviewMosaic label={folder.folderName} tiles={[]} isUploads />
                     <div className="flex flex-col items-center">
-                      <p className="text-xs font-medium text-foreground text-center leading-snug">
-                        UPLOADS
+                      <p className="text-xs font-medium text-foreground text-center leading-snug line-clamp-2 max-w-[90px] wrap-break-word">
+                        {folder.folderName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {folder.fileCount} {folder.fileCount === 1 ? 'file' : 'files'}
                       </p>
                     </div>
                   </button>
                 )
-              })()}
+              })}
                 </div>
               </div>
             )}

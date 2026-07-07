@@ -1208,11 +1208,14 @@ export default function AdminSharePage() {
     }
   }
 
-  // Toggle the UPLOADS folder in the Files browser (UPLOADS ⇄ project root).
-  const handleUploadsSelect = () => {
+  // Open a specific UPLOADS folder in the Files browser (toggles back to the project
+  // root when it is already active). `folderPath` is the folder's top-level relative
+  // path; empty/undefined opens the UPLOADS root.
+  const handleUploadsSelect = (folderPath?: string) => {
     if (!confirmShareDraftNavigation()) return
-    const isAlreadyActive = desktopContentTab === 'files'
-      && String(requestedFilesFolderName || '').trim().startsWith('UPLOADS')
+    const target = folderPath ? `UPLOADS / ${folderPath}` : 'UPLOADS'
+    const current = String(requestedFilesFolderName || '').trim()
+    const isAlreadyActive = desktopContentTab === 'files' && current === target
     if (isAlreadyActive) {
       setRequestedFilesFolderName(null)
       return
@@ -1220,7 +1223,7 @@ export default function AdminSharePage() {
     setActiveVideoName('')
     setActiveVideosRaw([])
     setActiveAlbumId(null)
-    setRequestedFilesFolderName('UPLOADS')
+    setRequestedFilesFolderName(target)
     setDesktopContentTab('files')
   }
 
@@ -2032,41 +2035,6 @@ export default function AdminSharePage() {
     }
   }, [filePreviewByVideoId, project?.slug, requestFilesRefresh, getUploadAccessUrl])
 
-  // Resolve up to 3 preview thumbnails for the sidebar UPLOADS folder mosaic, so the
-  // entry matches the FILES browser root folder card. Mirrors ShareFilesBrowser's
-  // per-folder tile resolution but across all uploads groups.
-  const [uploadsPreviewTiles, setUploadsPreviewTiles] = useState<string[]>([])
-  useEffect(() => {
-    let cancelled = false
-    async function resolveUploadsTiles() {
-      const uploadGroups = (downloadableFilesWithOptimisticUploads || []).filter((group) => group.groupType === 'uploads')
-      if (uploadGroups.length === 0) {
-        setUploadsPreviewTiles([])
-        return
-      }
-      const candidates = uploadGroups
-        .flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
-        .filter((file) => {
-          const kind = getDownloadableFileKind(file)
-          return kind === 'image' || kind === 'video'
-        })
-        .slice(0, 12)
-
-      const urls: string[] = []
-      for (const file of candidates) {
-        const url = await resolveDownloadablePreviewUrl(file).catch(() => null)
-        if (typeof url === 'string' && url.length > 0 && !urls.includes(url)) {
-          urls.push(url)
-          if (urls.length >= 3) break
-        }
-      }
-      if (!cancelled) setUploadsPreviewTiles(urls)
-    }
-    void resolveUploadsTiles()
-    return () => { cancelled = true }
-    // Re-resolves whenever the files list refreshes (focus/visibility/interval), which
-    // also recovers expired preview tokens — so the mosaic needs no error-retry loop.
-  }, [downloadableFilesWithOptimisticUploads, resolveDownloadablePreviewUrl])
 
   const resolveDownloadablePlaybackUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
     if (file.type === 'upload-file' && file.uploadFileId && project?.slug) {
@@ -2340,7 +2308,6 @@ export default function AdminSharePage() {
           desktopActiveTab="for-review"
           showUploadsInView
           onUploadsSelect={handleUploadsSelect}
-          uploadsPreviewTiles={uploadsPreviewTiles}
           selectedFileIds={selectedFileIds}
           onSelectedFileIdsChange={setSelectedFileIds}
           activeFilesFolderName={requestedFilesFolderName}

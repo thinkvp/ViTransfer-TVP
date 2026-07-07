@@ -1031,7 +1031,7 @@ export default function ProjectSettingsPage() {
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowClientUploadFiles">Allow clients to upload files to Projects</Label>
                     <p className="text-xs text-muted-foreground">
-                      Authenticated clients can upload files with comments on the Share page and to the UPLOADS directory (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.
+                      Authenticated clients can upload files with comments on the Share page and to Uploads directories (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.
                     </p>
                   </div>
                   <Switch
@@ -1445,7 +1445,7 @@ export default function ProjectSettingsPage() {
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
                         <Label htmlFor="allowClientUploadFiles-d">Allow clients to upload files to Projects</Label>
-                        <p className="text-xs text-muted-foreground">Authenticated clients can upload files with comments on the Share page and to the UPLOADS directory (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.</p>
+                        <p className="text-xs text-muted-foreground">Authenticated clients can upload files with comments on the Share page and to Uploads directories (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.</p>
                       </div>
                       <Switch id="allowClientUploadFiles-d" checked={allowClientUploadFiles} onCheckedChange={setAllowClientUploadFiles} />
                     </div>

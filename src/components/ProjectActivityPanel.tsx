@@ -296,13 +296,13 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
       )}
       data-project-activity
     >
-      <CardHeader className="border-b border-border shrink-0 space-y-1">
-        <CardTitle className="flex items-center gap-2 text-base">
+      <CardHeader className="px-4 py-3 border-b border-border shrink-0 space-y-0">
+        <CardTitle className="flex items-center gap-2 text-base min-h-9">
           <Activity className="w-4 h-4" />
           Project Activity
         </CardTitle>
       </CardHeader>
-      <CardContent ref={scrollRef} className="flex-1 p-0! overflow-y-auto min-h-0">
+      <CardContent ref={scrollRef} className="flex-1 p-0! overflow-y-auto min-h-0 bg-muted/70">
         {events === null && !error && (
           <div className="p-6 text-sm text-muted-foreground">Loading activity…</div>
         )}
@@ -323,7 +323,7 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
                     <div
                       className={cn(
                         'flex items-start gap-3 px-4 py-3',
-                        openTarget && 'cursor-pointer hover:bg-muted/50 transition-colors',
+                        openTarget && 'cursor-pointer hover:bg-muted transition-colors',
                       )}
                       {...(openTarget
                         ? {

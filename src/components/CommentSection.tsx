@@ -1409,7 +1409,7 @@ export function CommentSectionView({
         </div>
 
         {/* Messages Area - Threaded Conversations */}
-        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3 min-h-0 bg-muted/30">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3 min-h-0 bg-muted/70">
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
               {commentsDisabled ? (

@@ -838,16 +838,31 @@ export function ShareFilesBrowser({
     }
   }, [rootUploadGroups])
 
-  // Render exactly one top-level UPLOADS card whenever any uploads group exists.
-  // The server only emits a literal `UPLOADS` group when files live at the uploads
-  // root (or uploads are empty); when files sit only in subfolders the groups are
-  // named `UPLOADS / <path>` and there is no root group. In that case fall back to
-  // the synthetic `uploadsRootGroup` so the main browser still shows the section —
-  // matching the sidebar, which shows UPLOADS whenever any uploads group exists.
-  const rootUploadsSectionGroups = useMemo(
-    () => (rootUploadGroups.length > 0 ? [uploadsRootGroup] : []),
-    [rootUploadGroups, uploadsRootGroup]
-  )
+  // Render one root card per top-level upload folder (matching the sidebar's UPLOADS
+  // section), instead of a single consolidated "UPLOADS" card. Server groups are named
+  // `UPLOADS / <path>`; we bucket them by their first path segment so nested
+  // (client-created) subfolders roll up into their top-level parent's card for the
+  // count + preview mosaic. Clicking a card navigates to the real `UPLOADS / <top>`
+  // group, which drills in to show that folder's direct files + subfolders. Loose
+  // root-level files (the bare `UPLOADS` group) are intentionally not surfaced as a card.
+  const rootUploadsSectionGroups = useMemo<DownloadableGroup[]>(() => {
+    const byTop = new Map<string, DownloadableGroup>()
+    for (const group of rootUploadGroups) {
+      const normalized = String(group.name || '').trim()
+      const withoutPrefix = normalized.replace(/^UPLOADS\s*\/\s*/i, '')
+      if (!withoutPrefix || withoutPrefix === normalized) continue // skip bare `UPLOADS` root
+      const top = withoutPrefix.split('/').map((s) => s.trim()).filter(Boolean)[0]
+      if (!top) continue
+      const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+      const existing = byTop.get(top)
+      if (existing) {
+        existing.subFiles = [...existing.subFiles, ...groupFiles]
+      } else {
+        byTop.set(top, { name: `UPLOADS / ${top}`, groupType: 'uploads', subFiles: [...groupFiles] })
+      }
+    }
+    return [...byTop.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+  }, [rootUploadGroups])
 
   const splitRootSections = [
     rootVideoGroups.length > 0,
@@ -1020,13 +1035,16 @@ export function ShareFilesBrowser({
       return
     }
 
-    if (resolvedParentName === 'UPLOADS' && rootUploadGroups.length === 0) {
+    // The bare UPLOADS root is no longer a browsable view (each top-level upload
+    // folder is its own card at the project root), so backing out of a top-level
+    // uploads folder returns to the project root rather than the uploads root.
+    if (resolvedParentName === 'UPLOADS') {
       navigateToFolder(null)
       return
     }
 
     navigateToFolder(resolvedParentName)
-  }, [openFolderName, getFolderHierarchySegments, resolveFolderNameFromSegments, rootUploadGroups.length, navigateToFolder])
+  }, [openFolderName, getFolderHierarchySegments, resolveFolderNameFromSegments, navigateToFolder])
 
   useEffect(() => {
     const handleOpenRoot = () => {
@@ -2764,7 +2782,7 @@ export function ShareFilesBrowser({
       </div>
 
       <div
-        className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-4"
+        className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-4 bg-muted/70"
         onDragOverCapture={(event) => {
           if (!isUploadsContext) return
           void allowUploadDrop(event)
@@ -2807,7 +2825,7 @@ export function ShareFilesBrowser({
 
                 {rootUploadsSectionGroups.length > 0 ? (
                   <section className="space-y-2 border-t border-border/70 pt-4">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">UPLOADS</h4>
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
                       {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
                     </div>
@@ -2821,7 +2839,7 @@ export function ShareFilesBrowser({
                 </div>
                 {rootUploadsSectionGroups.length > 0 ? (
                   <section className={cn('space-y-2', projectRootGroups.length > 0 ? 'border-t border-border/70 pt-4' : '')}>
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">UPLOADS</h4>
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
                       {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
                     </div>

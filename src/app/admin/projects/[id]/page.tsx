@@ -8,9 +8,10 @@ import { Input } from '@/components/ui/input'
 import Link from 'next/link'
 import AdminVideoManager from '@/components/AdminVideoManager'
 import AdminAlbumManager from '@/components/AdminAlbumManager'
+import AdminUploadManager from '@/components/AdminUploadManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
-import { ArrowLeft, Settings, ArrowUpDown, Check, FolderKanban, Pencil, Video, Images, X } from 'lucide-react'
+import { ArrowLeft, Settings, ArrowUpDown, Check, FolderKanban, Pencil, Video, Images, Upload, X } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import { toast } from 'sonner'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
@@ -59,6 +60,7 @@ export default function ProjectPage() {
   const [transcriptionEnabled, setTranscriptionEnabled] = useState(false)
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [albumSummary, setAlbumSummary] = useState<{ albumCount: number; photoCount: number }>({ albumCount: 0, photoCount: 0 })
+  const [uploadsSummary, setUploadsSummary] = useState<{ folderCount: number; fileCount: number }>({ folderCount: 0, fileCount: 0 })
   const [adminUser, setAdminUser] = useState<any>(null)
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [assignedUsers, setAssignedUsers] = useState<AssignableUser[]>([])
@@ -906,6 +908,32 @@ export default function ProjectPage() {
                   canDelete={canDeleteInternalFiles}
                   onProjectDataChanged={bumpProjectStorageRefresh}
                   onSummaryChange={setAlbumSummary}
+                />
+              </div>
+            )}
+
+            {canAccessPhotoVideo && project.enableUploads !== false && (
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <h2 className="text-xl font-semibold flex items-center gap-2 min-w-0">
+                    <span className={iconBadgeClassName}>
+                      <Upload className={iconBadgeIconClassName} />
+                    </span>
+                    <span>Uploads</span>
+                    {uploadsSummary.folderCount > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        {uploadsSummary.folderCount} {uploadsSummary.folderCount === 1 ? 'folder' : 'folders'}
+                        {uploadsSummary.fileCount > 0 && ` · ${uploadsSummary.fileCount} ${uploadsSummary.fileCount === 1 ? 'file' : 'files'}`}
+                      </span>
+                    )}
+                  </h2>
+                </div>
+                <AdminUploadManager
+                  projectId={project.id}
+                  projectStatus={project.status}
+                  canDelete={canDeleteInternalFiles}
+                  onProjectDataChanged={bumpProjectStorageRefresh}
+                  onSummaryChange={setUploadsSummary}
                 />
               </div>
             )}

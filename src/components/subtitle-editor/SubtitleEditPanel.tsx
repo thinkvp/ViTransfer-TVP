@@ -132,7 +132,7 @@ export function SubtitleEditPanel({ editor }: { editor: SubtitleEditorApi }) {
         className={cn(
           'border rounded-md p-2 cursor-pointer transition-colors',
           isSelected ? 'border-primary ring-1 ring-primary/40' : 'border-border',
-          isActive ? 'bg-primary/10' : 'bg-muted/20 hover:bg-muted/40',
+          isActive ? 'bg-primary/10' : 'bg-card hover:bg-accent',
         )}
       >
         <div className="flex items-center gap-1 mb-1">
@@ -225,7 +225,7 @@ export function SubtitleEditPanel({ editor }: { editor: SubtitleEditorApi }) {
       <div
         ref={listRef}
         onScroll={() => { lastManualScrollRef.current = Date.now() }}
-        className="flex-1 min-h-0 overflow-y-auto px-3 pb-2 space-y-2"
+        className="flex-1 min-h-0 overflow-y-auto px-3 pt-2 pb-2 space-y-2 bg-muted/70"
       >
         {editor.loading ? (
           <div className="flex items-center justify-center py-10 text-muted-foreground text-sm">

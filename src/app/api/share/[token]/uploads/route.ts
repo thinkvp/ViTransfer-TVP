@@ -1,4 +1,3 @@
-import * as fs from 'fs'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
@@ -6,52 +5,24 @@ import {
   normalizeProjectUploadRelativePath,
   sanitizeStorageName,
 } from '@/lib/project-storage-paths'
-import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
-import { deleteFile, deleteDirectory, getFilePath, uploadFile } from '@/lib/storage'
-import { isS3Mode } from '@/lib/s3-storage'
-import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
+import {
+  resolveUploadFolderStoragePath,
+  ensureUploadFolderExistsInStorage,
+  getUploadFolderParentRelativePath as getParentRelativePath,
+  deleteUploadFile,
+  deleteUploadFolderTree,
+  renameUploadFolder,
+} from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess, resolveShareUploadActor } from '@/lib/share-uploads'
-import { getStoredFileRecords, deleteStoredFilesForEntity, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const UPLOAD_FOLDER_MARKER = '.vitransfer_folder'
 
 interface FolderListItem {
   id: string
   relativePath: string
   folderName: string
   createdAt: Date
-}
-
-interface FileListItem {
-  id: string
-  folderRelativePath: string
-  fileName: string
-  fileSize: string
-  fileType: string
-  createdAt: Date
-  previewStatus: string | null
-}
-
-function getParentRelativePath(relativePath: string): string {
-  const normalized = normalizeProjectUploadRelativePath(relativePath)
-  if (!normalized) return ''
-  const parts = normalized.split('/')
-  if (parts.length <= 1) return ''
-  return parts.slice(0, -1).join('/')
-}
-
-async function ensureFolderExistsInStorage(storagePath: string): Promise<void> {
-  if (isS3Mode()) {
-    const markerPath = `${storagePath}/${UPLOAD_FOLDER_MARKER}`
-    await uploadFile(markerPath, Buffer.alloc(0), 0, 'application/octet-stream')
-    return
-  }
-
-  const absolutePath = getFilePath(storagePath)
-  await fs.promises.mkdir(absolutePath, { recursive: true })
 }
 
 export async function GET(
@@ -169,7 +140,7 @@ export async function POST(
   })
 
   try {
-    await ensureFolderExistsInStorage(storagePath)
+    await ensureUploadFolderExistsInStorage(storagePath)
   } catch (error) {
     console.error('[SHARE UPLOADS] Failed to create storage folder:', error)
     return NextResponse.json({ error: 'Failed to create folder in storage' }, { status: 500 })
@@ -247,135 +218,17 @@ export async function DELETE(
   }
 
   if (fileId) {
-    const file = await prisma.shareUploadFile.findFirst({
-      where: { id: fileId, projectId: access.project.id },
-      select: { id: true, fileType: true },
-    })
-
-    if (!file) {
-      return NextResponse.json({ error: 'File not found' }, { status: 404 })
+    const result = await deleteUploadFile({ projectId: access.project.id, fileId })
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error || 'Failed to delete file' }, { status: result.status || 500 })
     }
-
-    // Pull every registered file for this upload (original + preview/timeline derivatives)
-    // so we delete ALL of them, not just the ORIGINAL — otherwise preview/timeline rows
-    // and files were left behind as dangling rows / orphan files.
-    const storedRecords = await getStoredFileRecords('SHARE_UPLOAD_FILE', [file.id], {
-      select: { fileRole: true, storagePath: true },
-    }) as Array<{ fileRole: string; storagePath: string | null }>
-
-    // Delete every registered file (original + preview/timeline derivatives).
-    const physicalDeletes: Promise<unknown>[] = []
-    for (const rec of storedRecords) {
-      if (!rec.storagePath) continue
-      physicalDeletes.push(
-        (rec.fileRole === 'TIMELINE_SPRITES' ? deleteDirectory(rec.storagePath) : deleteFile(rec.storagePath)).catch(() => undefined),
-      )
-    }
-    await Promise.allSettled(physicalDeletes)
-
-    await prisma.shareUploadFile.delete({ where: { id: file.id } })
-    await deleteStoredFilesForEntity('SHARE_UPLOAD_FILE', file.id).catch(() => {})
-    await recalculateAndStoreProjectTotalBytes(access.project.id)
     return NextResponse.json({ success: true })
   }
 
-  if (!folderPath) {
-    return NextResponse.json({ error: 'Invalid folderPath' }, { status: 400 })
+  const result = await deleteUploadFolderTree({ projectId: access.project.id, folderPath })
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error || 'Failed to delete folder' }, { status: result.status || 500 })
   }
-
-  const foldersToDelete = await prisma.shareUploadFolder.findMany({
-    where: {
-      projectId: access.project.id,
-      OR: [
-        { relativePath: folderPath },
-        { relativePath: { startsWith: `${folderPath}/` } },
-      ],
-    },
-    select: { id: true, storagePath: true },
-  })
-
-  const filesToDelete = await prisma.shareUploadFile.findMany({
-    where: {
-      projectId: access.project.id,
-      OR: [
-        { folderRelativePath: folderPath },
-        { folderRelativePath: { startsWith: `${folderPath}/` } },
-      ],
-    },
-    select: { id: true, fileType: true },
-  })
-
-  // Delete every registered file (original + preview/timeline derivatives) for the
-  // uploads in this folder. Preview paths come from StoredFile (ID-keyed).
-  const fileDeleteTasks: Promise<unknown>[] = []
-  const folderFileIds = filesToDelete.map((f) => f.id)
-  if (folderFileIds.length > 0) {
-    const folderStored = await getStoredFileRecords('SHARE_UPLOAD_FILE', folderFileIds, {
-      select: { fileRole: true, storagePath: true },
-    }) as Array<{ fileRole: string; storagePath: string | null }>
-    for (const rec of folderStored) {
-      if (!rec.storagePath) continue
-      fileDeleteTasks.push(
-        (rec.fileRole === 'TIMELINE_SPRITES' ? deleteDirectory(rec.storagePath) : deleteFile(rec.storagePath)).catch(() => undefined),
-      )
-    }
-  }
-  await Promise.allSettled(fileDeleteTasks)
-
-  const folderIdsToDelete = foldersToDelete.map((folder) => folder.id)
-  const uniqueFolderStoragePaths = [...new Set(foldersToDelete.map((folder) => folder.storagePath).filter(Boolean))]
-
-  if (uniqueFolderStoragePaths.length > 0) {
-    const siblingFolders = await prisma.shareUploadFolder.findMany({
-      where: {
-        projectId: access.project.id,
-        storagePath: { in: uniqueFolderStoragePaths },
-        NOT: { id: { in: folderIdsToDelete } },
-      },
-      select: { storagePath: true },
-    })
-    const sharedStoragePathSet = new Set(siblingFolders.map((folder) => folder.storagePath))
-
-    const markerDeleteTasks = uniqueFolderStoragePaths
-      .filter((storagePath) => !sharedStoragePathSet.has(storagePath))
-      .map((storagePath) => deleteFile(`${storagePath}/${UPLOAD_FOLDER_MARKER}`))
-
-    await Promise.allSettled(markerDeleteTasks)
-  }
-
-  // Collect file IDs for StoredFile cleanup before deletion
-  const fileIdsToDelete = filesToDelete.map(f => f.id)
-
-  await prisma.$transaction([
-    prisma.shareUploadFile.deleteMany({
-      where: {
-        projectId: access.project.id,
-        OR: [
-          { folderRelativePath: folderPath },
-          { folderRelativePath: { startsWith: `${folderPath}/` } },
-        ],
-      },
-    }),
-    prisma.shareUploadFolder.deleteMany({
-      where: {
-        projectId: access.project.id,
-        OR: [
-          { relativePath: folderPath },
-          { relativePath: { startsWith: `${folderPath}/` } },
-        ],
-      },
-    }),
-  ])
-
-  // Clean up StoredFile rows for deleted files
-  if (fileIdsToDelete.length > 0) {
-    await deleteStoredFilesByCriteria({
-      entityType: 'SHARE_UPLOAD_FILE',
-      entityIds: fileIdsToDelete,
-    }).catch(() => {})
-  }
-
-  await recalculateAndStoreProjectTotalBytes(access.project.id)
 
   return NextResponse.json({ success: true })
 }
@@ -408,104 +261,18 @@ export async function PATCH(
   }
 
   const folderPath = normalizeProjectUploadRelativePath(String(body?.folderPath || '').trim())
-  const nextFolderName = sanitizeStorageName(String(body?.folderName || '').trim())
-
-  if (!folderPath) {
-    return NextResponse.json({ error: 'folderPath is required' }, { status: 400 })
-  }
-
-  if (!nextFolderName) {
-    return NextResponse.json({ error: 'folderName is required' }, { status: 400 })
-  }
-
-  const parentPath = getParentRelativePath(folderPath)
-  const nextFolderPath = normalizeProjectUploadRelativePath(
-    parentPath ? `${parentPath}/${nextFolderName}` : nextFolderName,
-  )
-
-  if (!nextFolderPath) {
-    return NextResponse.json({ error: 'Invalid target folder path' }, { status: 400 })
-  }
-
-  if (nextFolderPath === folderPath) {
-    return NextResponse.json({ success: true, folderPath: nextFolderPath })
-  }
-
-  const conflictingFolder = await prisma.shareUploadFolder.findFirst({
-    where: {
-      projectId: access.project.id,
-      relativePath: nextFolderPath,
-    },
-    select: { id: true },
+  const result = await renameUploadFolder({
+    projectId: access.project.id,
+    folderPath,
+    folderName: String(body?.folderName || ''),
   })
 
-  if (conflictingFolder) {
-    return NextResponse.json({ error: 'A folder with that name already exists' }, { status: 409 })
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error || 'Failed to rename folder' }, { status: result.status || 500 })
   }
-
-  const [folderRows, fileExists] = await Promise.all([
-    prisma.shareUploadFolder.findMany({
-      where: {
-        projectId: access.project.id,
-        OR: [
-          { relativePath: folderPath },
-          { relativePath: { startsWith: `${folderPath}/` } },
-        ],
-      },
-      select: { id: true, relativePath: true },
-    }),
-    prisma.shareUploadFile.findFirst({
-      where: {
-        projectId: access.project.id,
-        OR: [
-          { folderRelativePath: folderPath },
-          { folderRelativePath: { startsWith: `${folderPath}/` } },
-        ],
-      },
-      select: { id: true },
-    }),
-  ])
-
-  if (folderRows.length === 0 && !fileExists) {
-    return NextResponse.json({ error: 'Folder not found' }, { status: 404 })
-  }
-
-  const prefixLength = folderPath.length
-
-  await prisma.$transaction(async (tx) => {
-    // Zero-copy rename: remap logical folder paths in DB. Keep physical storage keys unchanged.
-    await tx.$executeRaw`
-      UPDATE "ShareUploadFile"
-      SET "folderRelativePath" = CASE
-        WHEN "folderRelativePath" = ${folderPath} THEN ${nextFolderPath}
-        ELSE ${nextFolderPath} || REPLACE("folderRelativePath", ${folderPath}, '')
-      END
-      WHERE "projectId" = ${access.project.id}
-        AND (
-          "folderRelativePath" = ${folderPath}
-          OR "folderRelativePath" LIKE ${`${folderPath}/%`}
-        )
-    `
-
-    for (const folder of folderRows) {
-      const suffix = folder.relativePath === folderPath
-        ? ''
-        : folder.relativePath.slice(prefixLength)
-      const nextRelativePath = `${nextFolderPath}${suffix}`
-      const nextName = nextRelativePath.split('/').pop() || nextFolderName
-
-      await tx.shareUploadFolder.update({
-        where: { id: folder.id },
-        data: {
-          relativePath: nextRelativePath,
-          folderName: nextName,
-        },
-      })
-    }
-  })
 
   return NextResponse.json({
     success: true,
-    folderPath: nextFolderPath,
+    folderPath: result.nextFolderPath,
   })
 }
