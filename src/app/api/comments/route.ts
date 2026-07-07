@@ -77,8 +77,8 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // SECURITY: If feedback is hidden (or Share Only mode), return empty array (don't expose comments)
-    if (project.hideFeedback || project.status === 'SHARE_ONLY') {
+    // SECURITY: If feedback is hidden, return empty array (don't expose comments)
+    if (project.hideFeedback) {
       return NextResponse.json([], { headers: noStoreHeaders })
     }
 

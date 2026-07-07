@@ -144,7 +144,7 @@ export async function GET(
 
     // Resolve preview availability and original file sizes from StoredFile
     const videoIds = project.videos.map((v: any) => v.id)
-    const storedPreviews = videoIds.length > 0 ? await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'], select: { entityId: true, fileRole: true, fileSize: true, fileName: true, storagePath: true } }) : []
+    const storedPreviews = videoIds.length > 0 ? await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL', 'SUBTITLES_VTT', 'WAVEFORM_PEAKS'], select: { entityId: true, fileRole: true, fileSize: true, fileName: true, storagePath: true } }) : []
 
     const previewMap = new Map<string, Set<string>>()
     const sizeMap = new Map<string, number>()
@@ -219,6 +219,8 @@ export async function GET(
         originalFileName: hasOriginal ? (nameMap.get(video.id) ?? undefined) : undefined,
         timelinePreviewVttPath: undefined,
         timelinePreviewSpritesPath: undefined,
+        hasSubtitles: previews.has('SUBTITLES_VTT'),
+        hasWaveformPeaks: previews.has('WAVEFORM_PEAKS'),
       }
     })
 
@@ -290,7 +292,7 @@ export async function GET(
       recipients: allRecipients,
 
       restrictCommentsToLatestVersion: project.restrictCommentsToLatestVersion,
-      hideFeedback: project.hideFeedback || project.status === 'SHARE_ONLY',
+      hideFeedback: project.hideFeedback,
       useFullTimecode: (project as any).useFullTimecode ?? false,
       allowClientDeleteComments: project.allowClientDeleteComments,
       enableClientUploads: project.enableClientUploads ?? true,

@@ -143,7 +143,7 @@ async function retryMissingAssetHls(): Promise<number> {
     await getShareUploadPreviewQueue().add(
       'generate-preview',
       { type: 'videoAsset', recordId: a.id, storagePath: '', fileType: a.fileType, fileName: a.fileName },
-      { jobId: `share-preview:videoAsset:${a.id}` },
+      { jobId: `share-preview-videoAsset-${a.id}` },
     ).then(() => { requeued++ }).catch((e) => {
       console.warn(`[HLS-RECONCILE] asset HLS re-enqueue failed for ${a.id}:`, e instanceof Error ? e.message : e)
     })

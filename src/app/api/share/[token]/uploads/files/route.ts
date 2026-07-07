@@ -11,7 +11,7 @@ import {
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
-import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
+import { resolveProjectStoragePath, resolveShareUploadAccess, resolveShareUploadActor } from '@/lib/share-uploads'
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
 import { registerStoredFile } from '@/lib/stored-file'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
@@ -114,6 +114,11 @@ export async function POST(
   // eslint-disable-next-line no-restricted-syntax -- appending filename to DB-resolved folder path
   const storagePath = path.posix.join(folderStoragePath, storageFileName)
 
+  const actor = await resolveShareUploadActor(access, {
+    recipientId: formData.get('recipientId'),
+    authorName: formData.get('authorName'),
+  })
+
   const buffer = Buffer.from(await file.arrayBuffer())
   await uploadFile(storagePath, buffer, fileSize, mimeType)
 
@@ -127,7 +132,9 @@ export async function POST(
       mediaWidth: mediaMetadata?.width ?? null,
       mediaHeight: mediaMetadata?.height ?? null,
       mediaCodec: mediaMetadata?.codec ?? null,
-      uploadedByName: access.isAdmin ? 'Admin' : 'Client',
+      uploadedById: actor.userId,
+      uploadedByRecipientId: actor.recipientId,
+      uploadedByName: actor.name,
     },
     select: {
       id: true,
@@ -162,7 +169,9 @@ export async function POST(
         relativePath: normalizedFolderPath,
         folderName: normalizedFolderPath.split('/').pop() || normalizedFolderPath,
         storagePath: folderStoragePath,
-        createdByName: access.isAdmin ? 'Admin' : 'Client',
+        createdById: actor.userId,
+        createdByRecipientId: actor.recipientId,
+        createdByName: actor.name,
       },
     })
   }

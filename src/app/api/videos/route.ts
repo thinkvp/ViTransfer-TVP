@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes, allowApproval } = body
+    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes, allowApproval, autoGenerateSubtitles } = body
 
     // Validate required fields
     if (!name || !name.trim()) {
@@ -64,6 +64,10 @@ export async function POST(request: NextRequest) {
 
     if (allowApproval !== undefined && typeof allowApproval !== 'boolean') {
       return NextResponse.json({ error: 'allowApproval must be a boolean' }, { status: 400 })
+    }
+
+    if (autoGenerateSubtitles !== undefined && typeof autoGenerateSubtitles !== 'boolean') {
+      return NextResponse.json({ error: 'autoGenerateSubtitles must be a boolean' }, { status: 400 })
     }
 
     // Validate uploaded file
@@ -155,10 +159,13 @@ export async function POST(request: NextRequest) {
         versionLabel: effectiveVersionLabel,
         videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
         allowApproval: allowApproval ?? true,
+        autoGenerateSubtitles: autoGenerateSubtitles ?? true,
         status: 'UPLOADING',
         duration: 0,
         width: 0,
         height: 0,
+        uploadedById: admin.id,
+        uploadedByName: admin.name || admin.email,
       },
     })
 

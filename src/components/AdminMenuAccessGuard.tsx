@@ -10,6 +10,7 @@ const PATH_MENU_MAP: Record<string, MenuKey> = {
   clients: 'clients',
   sales: 'sales',
   accounting: 'accounting',
+  assistant: 'assistant',
   settings: 'settings',
   users: 'users',
   security: 'security',

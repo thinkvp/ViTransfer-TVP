@@ -27,6 +27,9 @@ interface VideoUploadProps {
 
   allowApproval?: boolean
   showAllowApprovalField?: boolean
+
+  /** When true, show the per-version "Auto-generate subtitles" tickbox (i.e. Whisper is enabled globally). */
+  transcriptionEnabled?: boolean
 }
 
 export default function VideoUpload({
@@ -37,6 +40,7 @@ export default function VideoUpload({
   showVideoNotesField = true,
   allowApproval: allowApprovalProp,
   showAllowApprovalField = true,
+  transcriptionEnabled = false,
 }: VideoUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addUpload } = useUploadManagerActions()
@@ -46,6 +50,7 @@ export default function VideoUpload({
   const [versionLabel, setVersionLabel] = useState('')
   const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
   const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? true)
+  const [autoGenerateSubtitles, setAutoGenerateSubtitles] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -172,6 +177,7 @@ export default function VideoUpload({
           versionLabel: trimmedVersionLabel,
           videoNotes: trimmedVideoNotes,
           allowApproval: allowApproval === true,
+          autoGenerateSubtitles: transcriptionEnabled ? autoGenerateSubtitles === true : true,
           originalFileName: file.name,
           originalFileSize: file.size,
           name: trimmedVideoName,
@@ -255,8 +261,12 @@ export default function VideoUpload({
         </div>
       )}
 
-      {/* Version Label + Allow Approval */}
-      <div className={showAllowApprovalField ? 'grid gap-4 sm:grid-cols-2' : 'space-y-2'}>
+      {/* Version Label + Allow Approval + Subtitles */}
+      {(() => {
+        const cols = 1 + (showAllowApprovalField ? 1 : 0) + (transcriptionEnabled ? 1 : 0)
+        const gridClass = cols === 3 ? 'grid gap-4 sm:grid-cols-3' : cols === 2 ? 'grid gap-4 sm:grid-cols-2' : 'space-y-2'
+        return (
+      <div className={gridClass}>
         <div className="space-y-2">
           <Label htmlFor="versionLabel">Version Label (Optional)</Label>
           <Input
@@ -284,7 +294,26 @@ export default function VideoUpload({
             </div>
           </div>
         )}
+
+        {transcriptionEnabled && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Subtitles</div>
+            <div className="flex items-center gap-2 h-10">
+              <Checkbox
+                checked={autoGenerateSubtitles}
+                onCheckedChange={(v) => setAutoGenerateSubtitles(Boolean(v))}
+                disabled={submitting}
+                aria-label="Auto-generate subtitles"
+              />
+              <span className={autoGenerateSubtitles ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                {autoGenerateSubtitles ? 'Auto-generate' : 'Off — set manually'}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
+        )
+      })()}
 
       {/* Version Notes */}
       {showVideoNotesField && (

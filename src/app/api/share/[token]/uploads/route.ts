@@ -10,7 +10,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { deleteFile, deleteDirectory, getFilePath, uploadFile } from '@/lib/storage'
 import { isS3Mode } from '@/lib/s3-storage'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
-import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
+import { resolveProjectStoragePath, resolveShareUploadAccess, resolveShareUploadActor } from '@/lib/share-uploads'
 import { getStoredFileRecords, deleteStoredFilesForEntity, deleteStoredFilesByCriteria } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
@@ -175,6 +175,11 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to create folder in storage' }, { status: 500 })
   }
 
+  const actor = await resolveShareUploadActor(access, {
+    recipientId: body?.recipientId,
+    authorName: body?.authorName,
+  })
+
   const folder = await prisma.shareUploadFolder.upsert({
     where: {
       projectId_relativePath: {
@@ -184,14 +189,15 @@ export async function POST(
     },
     update: {
       folderName: safeFolderName,
-      createdByName: access.isAdmin ? 'Admin' : 'Client',
     },
     create: {
       projectId: access.project.id,
       relativePath,
       folderName: safeFolderName,
       storagePath,
-      createdByName: access.isAdmin ? 'Admin' : 'Client',
+      createdById: actor.userId,
+      createdByRecipientId: actor.recipientId,
+      createdByName: actor.name,
     },
     select: {
       id: true,

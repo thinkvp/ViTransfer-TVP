@@ -17,6 +17,8 @@ let shareUploadPreviewQueueInstance: Queue<ShareUploadPreviewJob> | null = null
 let assetTimelineQueueInstance: Queue<AssetTimelineJob> | null = null
 let uploadTimelineQueueInstance: Queue<UploadTimelineJob> | null = null
 let passwordEmailQueueInstance: Queue<PasswordEmailJob> | null = null
+let aiAssistantQueueInstance: Queue<AiAssistantJob> | null = null
+let transcriptionQueueInstance: Queue<TranscriptionJob> | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -95,6 +97,25 @@ export interface FolderRenameJobPayload {
   /** The FolderRenameJob DB record id. All state lives in DB, not BullMQ. */
   folderRenameJobId: string
 }
+
+/** Payload for an AI assistant generation job (proposal extraction or connection test). */
+export interface AiAssistantJob {
+  /** The AiAssistantRequest DB record id. All state lives in DB, not BullMQ. */
+  requestId: string
+}
+
+/**
+ * Payload for a Whisper transcription job. All three kinds run on the shared
+ * 'transcription' queue (concurrency 1 — the Whisper server shares NAS CPU
+ * with Ollama).
+ */
+export type TranscriptionJob =
+  /** Generate SRT subtitles + playback VTT for a video version. */
+  | { kind: 'video-subtitles'; videoId: string; force?: boolean }
+  /** Transcribe a short dictation clip. State lives in the AiAssistantRequest row. */
+  | { kind: 'dictation'; requestId: string }
+  /** Whisper server liveness/model check. State lives in the AiAssistantRequest row. */
+  | { kind: 'whisper-test'; requestId: string }
 
 /** Payload for a share-files preview generation job (image resize or video frame extract). */
 export interface ShareUploadPreviewJob {
@@ -427,6 +448,136 @@ export function getFolderRenameQueue(): Queue<FolderRenameJobPayload> {
   return folderRenameQueueInstance
 }
 
+export function getAiAssistantQueue(): Queue<AiAssistantJob> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!aiAssistantQueueInstance) {
+    aiAssistantQueueInstance = new Queue<AiAssistantJob>('ai-assistant', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        // Do not auto-retry — retries would double LLM token spend. On failure the
+        // DB record is marked FAILED and the admin can retry from the UI.
+        attempts: 1,
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+
+  return aiAssistantQueueInstance
+}
+
+export function getTranscriptionQueue(): Queue<TranscriptionJob> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+
+  if (!transcriptionQueueInstance) {
+    transcriptionQueueInstance = new Queue<TranscriptionJob>('transcription', {
+      connection: getRedisForQueue(),
+      defaultJobOptions: {
+        // Video subtitle jobs tolerate a retry (Whisper server may be busy/rebooting).
+        // Dictation/test jobs override this to attempts: 1 at enqueue time — the
+        // admin is actively polling and the DB row is marked FAILED instead.
+        attempts: 2,
+        backoff: {
+          type: 'exponential',
+          delay: 10000,
+        },
+        removeOnComplete: {
+          age: 3600,
+        },
+        removeOnFail: {
+          age: 86400,
+        },
+      },
+    })
+  }
+
+  return transcriptionQueueInstance
+}
+
+/**
+ * Enqueue subtitle generation for a video version. No-ops unless transcription
+ * is enabled + configured in Settings. Uses a deterministic jobId for
+ * idempotent enqueue.
+ *
+ * Stamps Video.transcriptionStatus=PENDING (queued UI state + drives full
+ * (re)generation) ONLY when a forced regeneration is requested or the video
+ * has no subtitles yet. When subtitles already exist, the job is still
+ * enqueued but runs only to heal a missing waveform — it must never overwrite
+ * hand-edited cues, so the status is left as READY.
+ */
+export async function enqueueVideoSubtitles(
+  videoId: string,
+  options?: { force?: boolean },
+): Promise<boolean> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') return false
+
+  const settings = await prisma.settings.findUnique({
+    where: { id: 'default' },
+    select: {
+      transcriptionEnabled: true,
+      transcriptionProvider: true,
+      transcriptionWhisperUrl: true,
+      transcriptionOpenaiApiKey: true,
+    },
+  })
+  const configured = (settings?.transcriptionProvider ?? 'LOCAL') === 'OPENAI'
+    ? !!settings?.transcriptionOpenaiApiKey
+    : !!settings?.transcriptionWhisperUrl
+  if (!settings?.transcriptionEnabled || !configured) {
+    return false
+  }
+
+  const video = await prisma.video.findUnique({
+    where: { id: videoId },
+    select: { transcriptionStatus: true, autoGenerateSubtitles: true },
+  })
+  // Per-version opt-out: skip the Whisper run (and the PENDING stamp) unless
+  // forced. The job is still enqueued so the waveform can heal; the processor
+  // makes the same decision and generates peaks only.
+  const willRegenerate =
+    options?.force === true ||
+    (video?.autoGenerateSubtitles !== false && video?.transcriptionStatus !== 'READY')
+  if (willRegenerate) {
+    await prisma.video.update({
+      where: { id: videoId },
+      data: { transcriptionStatus: 'PENDING', transcriptionError: null },
+    }).catch(() => {
+      // Video may have been deleted between processing and enqueue — safe to ignore
+    })
+  }
+
+  const queue = getTranscriptionQueue()
+  // NB: BullMQ rejects custom job IDs containing ':' (its Redis key delimiter), so use '-'.
+  const jobId = `subtitles-${videoId}`
+
+  // BullMQ dedupes by jobId across ALL states, so a stale completed/failed
+  // entry would block a legitimate re-enqueue (reprocess, waveform heal).
+  // Always evict those first; active jobs are left alone.
+  try {
+    const existing = await queue.getJob(jobId)
+    if (existing) {
+      const state = await existing.getState()
+      if (state === 'failed' || state === 'completed' || state === 'unknown') {
+        await existing.remove().catch(() => {})
+      }
+    }
+  } catch {
+    // Non-fatal — add() below is a no-op if eviction failed
+  }
+
+  await queue.add('video-subtitles', { kind: 'video-subtitles', videoId, force: options?.force }, { jobId })
+  return true
+}
+
 export function getShareUploadPreviewQueue(): Queue<ShareUploadPreviewJob> {
   if (process.env.NEXT_PHASE === 'phase-production-build') {
     throw new Error('Queue not available during build phase')
@@ -506,7 +657,8 @@ export async function enqueueShareUploadPreview(
 ): Promise<void> {
   if (process.env.NEXT_PHASE === 'phase-production-build') return
 
-  const jobId = `share-preview:${payload.type}:${payload.recordId}`
+  // NB: BullMQ rejects custom job IDs containing ':' (its Redis key delimiter), so use '-'.
+  const jobId = `share-preview-${payload.type}-${payload.recordId}`
 
   // Stamp DB record before enqueuing so the UI can immediately show PENDING state.
   if (payload.type === 'shareUploadFile') {

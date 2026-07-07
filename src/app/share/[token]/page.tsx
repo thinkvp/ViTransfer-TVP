@@ -11,6 +11,8 @@ import VideoSidebar from '@/components/VideoSidebar'
 import { ShareFilesBrowser } from '../../../components/ShareFilesBrowser'
 import { ShareProjectSwitcher, type ShareProjectOption } from '@/components/ShareProjectSwitcher'
 import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
+import { ProjectActivityPanel } from '@/components/ProjectActivityPanel'
+import { useResizableSidePanel } from '@/hooks/useResizableSidePanel'
 import { OTPInput } from '@/components/OTPInput'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -23,6 +25,9 @@ import { apiFetch } from '@/lib/api-client'
 import { isS3Mode } from '@/lib/storage-provider-client'
 import { extractUploadMediaMetadata } from '@/lib/upload-media-metadata-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
+import { useSubtitleEditor } from '@/hooks/useSubtitleEditor'
+import { SubtitleEditPanel } from '@/components/subtitle-editor/SubtitleEditPanel'
+import { SubtitleTimelineStrip } from '@/components/subtitle-editor/SubtitleTimelineStrip'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { useContentImageRefresh } from '@/hooks/useContentImageRefresh'
@@ -102,6 +107,12 @@ export default function SharePage() {
   const [initialVideoIndex, setInitialVideoIndex] = useState<number>(0)
   const [shareToken, setShareToken] = useState<string | null>(null)
   const [isAdminSession, setIsAdminSession] = useState(false)
+  // Client name capture: 'checking' until we know whether a name is already
+  // stored/derivable for the current project, then 'needed' (show the blocking modal)
+  // or 'done'. Re-evaluated per project so it stays correct across project switches.
+  const [nameCaptureState, setNameCaptureState] = useState<'checking' | 'needed' | 'done'>('checking')
+  // Adjustable width for the Project Activity panel, shared with the Comment Display width.
+  const activityPanelResize = useResizableSidePanel()
   const [switchableProjects, setSwitchableProjects] = useState<SwitchableProject[]>([])
   const [switchProjectsLoading, setSwitchProjectsLoading] = useState(false)
   const [switchProjectsError, setSwitchProjectsError] = useState<string | null>(null)
@@ -112,6 +123,9 @@ export default function SharePage() {
   const [uploadTransferItems, setUploadTransferItems] = useState<TransferItem[]>([])
   const [uploadTransferPanelVersion, setUploadTransferPanelVersion] = useState(0)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
+  // Set to the subtitle editor's discard-guard while editing (see effect below),
+  // so sidebar/album/uploads navigation also prompts on unsaved subtitle edits.
+  const subtitleGuardRef = useRef<(() => boolean) | null>(null)
   const uploadAbortControllersRef = useRef<Map<string, AbortController>>(new Map())
   const uploadCancelRequestedRef = useRef(false)
   const lastFilesRefreshAtRef = useRef(0)
@@ -251,7 +265,12 @@ export default function SharePage() {
 
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
-    return guard ? guard.confirmDiscardDraft() : true
+    if (guard && !guard.confirmDiscardDraft()) return false
+    // Also honor unsaved subtitle edits (sidebar/album/uploads switches bypass
+    // the player's own video-switch guard).
+    const subGuard = subtitleGuardRef.current
+    if (subGuard && !subGuard()) return false
+    return true
   }, [])
 
   const markVideoApproved = useCallback((videoId: string) => {
@@ -566,7 +585,7 @@ export default function SharePage() {
         setAllVideosByName({})
 
         // Fetch comments after project loads (if not hidden)
-        if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
+        if (!projectData.hideFeedback) {
           fetchComments(projectData.shareToken || tokenOverride)
         }
       }
@@ -868,7 +887,7 @@ export default function SharePage() {
               setMainCompanyDomain(projectData.settings.mainCompanyDomain || null)
             }
 
-            if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
+            if (!projectData.hideFeedback) {
               fetchComments(projectData.shareToken)
             }
           }
@@ -1214,12 +1233,80 @@ export default function SharePage() {
     resolveDownloadTarget,
   })
 
+  // Identity picked in the comment name picker (persisted by useCommentManagement).
+  // Threaded into uploads/approvals so activity-feed attribution matches comments.
+  const loadCommentIdentity = useCallback((): { authorName: string | null; recipientId: string | null } => {
+    if (!project?.id || typeof window === 'undefined') return { authorName: null, recipientId: null }
+    try {
+      const stored = sessionStorage.getItem(`comment-name-${project.id}`)
+      const parsed = stored ? JSON.parse(stored) : null
+      return {
+        authorName: typeof parsed?.authorName === 'string' && parsed.authorName.trim() ? parsed.authorName : null,
+        recipientId: typeof parsed?.recipientId === 'string' && parsed.recipientId ? parsed.recipientId : null,
+      }
+    } catch {
+      return { authorName: null, recipientId: null }
+    }
+  }, [project?.id])
+
+  // Persist the chosen client identity in the same sessionStorage slot the comment
+  // name picker (useCommentManagement) reads, so comments/uploads/approvals all agree.
+  const persistCommentIdentity = useCallback((name: string, recipientId: string | null) => {
+    if (!project?.id || typeof window === 'undefined') return
+    try {
+      sessionStorage.setItem(
+        `comment-name-${project.id}`,
+        JSON.stringify({ authorName: name, recipientId: recipientId || null }),
+      )
+    } catch {
+      // sessionStorage unavailable — attribution falls back to generic labels.
+    }
+  }, [project?.id])
+
+  // Decide whether to prompt a client for their name. We ask whenever we don't already
+  // know who they are — regardless of auth mode — so the check is per-project and never
+  // goes stale across project switches (auth mode isn't refreshed on switch). Skips
+  // admins, anyone who already chose a name for this project, and OTP sessions whose
+  // email maps to a project recipient (auto-derived).
+  useEffect(() => {
+    if (isAdminSession) { setNameCaptureState('done'); return }
+    if (!isAuthenticated || !project) return
+
+    const existing = loadCommentIdentity()
+    if (existing.authorName || existing.recipientId) { setNameCaptureState('done'); return }
+
+    if (otpSessionEmail && Array.isArray(project.recipients)) {
+      const normalized = otpSessionEmail.toLowerCase().trim()
+      const match = (project.recipients as any[]).find(
+        (r) => String(r?.email || '').toLowerCase().trim() === normalized,
+      )
+      if (match) {
+        persistCommentIdentity(String(match.name || otpSessionEmail).trim(), String(match.id))
+        setNameCaptureState('done')
+        return
+      }
+    }
+
+    setNameCaptureState('needed')
+  }, [isAdminSession, isAuthenticated, project, otpSessionEmail, loadCommentIdentity, persistCommentIdentity])
+
+  const handleNameChosen = useCallback((name: string, recipientId: string | null) => {
+    persistCommentIdentity(name, recipientId)
+    setNameCaptureState('done')
+  }, [persistCommentIdentity])
+
   const handleCreateUploadFolder = useCallback(async (parentPath: string, folderName: string) => {
     const authHeader: Record<string, string> = !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : {}
+    const identity = loadCommentIdentity()
     const response = await apiFetch(`/api/share/${token}/uploads`, {
       method: 'POST',
       headers: { ...authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parentPath, folderName }),
+      body: JSON.stringify({
+        parentPath,
+        folderName,
+        recipientId: identity.recipientId,
+        authorName: identity.authorName,
+      }),
     })
 
     if (!response.ok) {
@@ -1228,18 +1315,24 @@ export default function SharePage() {
     }
 
     await fetchDownloadableFiles()
-  }, [isAdminSession, shareToken, token, fetchDownloadableFiles])
+  }, [isAdminSession, shareToken, token, fetchDownloadableFiles, loadCommentIdentity])
 
   const handleApproveVideo = useCallback(async (file: DownloadableFile) => {
     if (!file.videoId) throw new Error('Video ID is missing')
     if (!project?.id) throw new Error('Project not loaded')
 
     const url = `/api/projects/${project.id}/approve`
+    const identity = loadCommentIdentity()
+    const approveBody = JSON.stringify({
+      selectedVideoId: file.videoId,
+      recipientId: !isAdminSession ? identity.recipientId : null,
+      authorName: !isAdminSession ? identity.authorName : null,
+    })
     const response = isAdminSession
       ? await apiFetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ selectedVideoId: file.videoId }),
+          body: approveBody,
         })
       : shareToken
         ? await fetch(url, {
@@ -1248,12 +1341,12 @@ export default function SharePage() {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${shareToken}`,
             },
-            body: JSON.stringify({ selectedVideoId: file.videoId }),
+            body: approveBody,
           })
         : await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ selectedVideoId: file.videoId }),
+            body: approveBody,
           })
 
     if (!response.ok) {
@@ -1265,7 +1358,7 @@ export default function SharePage() {
     window.dispatchEvent(new CustomEvent('videoApprovalChanged', { detail: { videoId: file.videoId } }))
     void fetchProjectData()
     void fetchDownloadableFiles()
-  }, [project?.id, isAdminSession, shareToken, markVideoApproved, fetchProjectData, fetchDownloadableFiles])
+  }, [project?.id, isAdminSession, shareToken, markVideoApproved, fetchProjectData, fetchDownloadableFiles, loadCommentIdentity])
 
   const handleUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
     if (!Array.isArray(files) || files.length === 0) return
@@ -1273,6 +1366,7 @@ export default function SharePage() {
 
     let authToken: string | null = !isAdminSession ? (loadShareToken(storageKey) || shareToken) : null
     const useS3Multipart = await isS3Mode()
+    const uploadIdentity = loadCommentIdentity()
 
     const performRequest = async (
       url: string,
@@ -1580,6 +1674,8 @@ export default function SharePage() {
                 fileType: file.type || 'application/octet-stream',
                 folderPath,
                 mediaMetadata,
+                recipientId: uploadIdentity.recipientId,
+                authorName: uploadIdentity.authorName,
               }),
             },
             true,
@@ -1596,6 +1692,8 @@ export default function SharePage() {
           if (mediaMetadata) {
             formData.append('mediaMetadata', JSON.stringify(mediaMetadata))
           }
+          if (uploadIdentity.recipientId) formData.append('recipientId', uploadIdentity.recipientId)
+          if (uploadIdentity.authorName) formData.append('authorName', uploadIdentity.authorName)
 
           const uploadWithProgress = (bearerToken: string | null): Promise<{ status: number; responseText: string }> => {
             return new Promise((resolve, reject) => {
@@ -1734,6 +1832,7 @@ export default function SharePage() {
     storageKey,
     fetchDownloadableFiles,
     fetchProjectData,
+    loadCommentIdentity,
   ])
 
   const handleDeleteUploadFile = useCallback(async (fileId: string) => {
@@ -2193,6 +2292,12 @@ export default function SharePage() {
               timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
             }
 
+            let subtitlesVttUrl = null
+            if (video.hasSubtitles) {
+              const subtitlesToken = await fetchVideoToken(video.id, 'subtitles-vtt')
+              subtitlesVttUrl = subtitlesToken ? `/api/content/${subtitlesToken}` : null
+            }
+
             const tokenized = {
               ...video,
               streamUrl480p,
@@ -2205,6 +2310,7 @@ export default function SharePage() {
               thumbnailUrl,
               timelineVttUrl,
               timelineSpriteUrl,
+              subtitlesVttUrl,
             }
 
             tokenCacheRef.current.set(video.id, tokenized)
@@ -2452,6 +2558,25 @@ export default function SharePage() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${shareToken}` },
         body: JSON.stringify({ activityType: 'VIEWING_ALBUM', albumId, albumName: album?.name ?? null }),
       }).catch(() => {})
+    }
+  }
+
+  // Open the video version / album referenced by a Project Activity entry.
+  const handleOpenActivityTarget = (target: { videoId?: string; videoName?: string; albumId?: string }) => {
+    if (target.albumId) {
+      handleAlbumSelect(String(target.albumId))
+      return
+    }
+    if (target.videoId) {
+      if (!confirmShareDraftNavigation()) return
+      if (target.videoName) activateVideoFolder(String(target.videoName))
+      setDesktopContentTab('view')
+      const videoId = String(target.videoId)
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
+        window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId } }))
+        window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId, videoVersion: null, autoPlay: true } }))
+      }, 0)
     }
   }
 
@@ -2857,18 +2982,10 @@ export default function SharePage() {
     ? []
     : activeVideos.filter((v: any) => v.status === 'READY')
 
-  const shareOnlyMode = project.status === 'SHARE_ONLY'
-
   // If any video is approved, show ONLY approved videos (for both admin and client)
   const hasApprovedVideo = readyVideos.some((v: any) => v.approved)
   if (hasApprovedVideo) {
     readyVideos = readyVideos.filter((v: any) => v.approved)
-  }
-
-  // Share Only mode: hide version selection by only showing the newest ready version.
-  if (shareOnlyMode && readyVideos.length > 1) {
-    const latestVersion = Math.max(...readyVideos.map((v: any) => Number(v.version) || 0))
-    readyVideos = readyVideos.filter((v: any) => (Number(v.version) || 0) === latestVersion)
   }
 
   const hasMultipleVideos = project.videosByName && Object.keys(project.videosByName).length > 1
@@ -2880,10 +2997,10 @@ export default function SharePage() {
     return !comment.videoId || activeVideoIds.has(comment.videoId)
   })
 
-  // Video-only mode: share-only or hidden feedback (no scrollable comments below).
+  // Video-only mode: hidden feedback (no scrollable comments below).
   // Use overflow-hidden on mobile so the flex layout constrains the video within the
   // viewport minus the mobile sidebar height, preventing the bottom from being clipped.
-  const isVideoOnlyShareMode = project.hideFeedback || shareOnlyMode
+  const isVideoOnlyShareMode = project.hideFeedback
 
   // Header breadcrumb computed values
   const activeAlbum = albums.find((a: any) => String(a.id) === activeAlbumId) || null
@@ -2916,6 +3033,12 @@ export default function SharePage() {
       className="h-dvh min-h-0 bg-background flex flex-col overflow-hidden"
       style={{ '--admin-header-height': '56px' } as React.CSSProperties}
     >
+      {nameCaptureState === 'needed' && (
+        <ShareNameCaptureModal
+          recipients={(project.recipients as any[]) || []}
+          onConfirm={handleNameChosen}
+        />
+      )}
       {/* Sticky breadcrumb header — spans full width above sidebar + content */}
       <div className="shrink-0 h-12 my-[4px] border border-border bg-card rounded-lg flex items-center pl-4 pr-3 lg:pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
@@ -3109,6 +3232,8 @@ export default function SharePage() {
         >
           {/* Content Area */}
           {desktopContentTab === 'files' ? (
+            <div className="flex-1 min-h-0 flex flex-col gap-2 lg:flex-row lg:gap-1">
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
             <ShareFilesBrowser
               groups={downloadableFilesWithOptimisticUploads}
               rootFolderLabel={String(project.title || 'PROJECT')}
@@ -3150,12 +3275,52 @@ export default function SharePage() {
               onDeleteUploadFolder={undefined}
               onRenameUploadFolder={undefined}
             />
+            </div>
+            <div
+              ref={activityPanelResize.containerRef}
+              className="relative shrink-0 flex flex-col min-h-0 max-lg:h-[420px] lg:w-[420px]"
+              style={activityPanelResize.isDesktop ? { width: Math.round(activityPanelResize.width) } : undefined}
+            >
+              <div
+                onMouseDown={activityPanelResize.startResize}
+                className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-transparent hover:bg-primary/15 cursor-col-resize select-none z-10 group transition-colors"
+              >
+                <div className="h-8 w-0.5 rounded-full bg-primary/45 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <ProjectActivityPanel
+                fetchUrl={`/api/share/${token}/activity-feed`}
+                authToken={!isAdminSession ? shareToken : null}
+                onOpenTarget={handleOpenActivityTarget}
+              />
+            </div>
+            </div>
           ) : activeAlbumId ? (
+            <div className="flex-1 min-h-0 flex flex-col gap-2 lg:flex-row lg:gap-1">
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
             <ShareAlbumViewer
               shareSlug={token}
               shareToken={shareToken}
               albumId={activeAlbumId}
             />
+            </div>
+            <div
+              ref={activityPanelResize.containerRef}
+              className="relative shrink-0 flex flex-col min-h-0 max-lg:h-[420px] lg:w-[420px]"
+              style={activityPanelResize.isDesktop ? { width: Math.round(activityPanelResize.width) } : undefined}
+            >
+              <div
+                onMouseDown={activityPanelResize.startResize}
+                className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-transparent hover:bg-primary/15 cursor-col-resize select-none z-10 group transition-colors"
+              >
+                <div className="h-8 w-0.5 rounded-full bg-primary/45 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+              <ProjectActivityPanel
+                fetchUrl={`/api/share/${token}/activity-feed`}
+                authToken={!isAdminSession ? shareToken : null}
+                onOpenTarget={handleOpenActivityTarget}
+              />
+            </div>
+            </div>
           ) : project.enableVideos === false ? (
             <Card className="bg-card border-border">
               <CardContent className="py-12 text-center">
@@ -3167,11 +3332,11 @@ export default function SharePage() {
             </Card>
           ) : (
             <div
-              className={`flex-1 min-h-0 ${(project.hideFeedback || project.status === 'SHARE_ONLY')
+              className={`flex-1 min-h-0 ${project.hideFeedback
                 ? 'flex flex-col w-full'
                 : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
             >
-              {(project.hideFeedback || project.status === 'SHARE_ONLY') ? (
+              {project.hideFeedback ? (
                 <div className="flex-1 min-h-0 flex flex-col">
                   <VideoPlayer
                     videos={readyVideos}
@@ -3237,9 +3402,11 @@ export default function SharePage() {
                   onDraftGuardChange={(guard) => {
                     draftGuardRef.current = guard
                   }}
+                  subtitleGuardRef={subtitleGuardRef}
                   onApprove={fetchProjectData}
                   onCloseVideo={() => setDesktopContentTab('files')}
                   onStreamError={handleVideoStreamError}
+                  fetchContentToken={fetchVideoToken}
                 />
               )}
 
@@ -3268,9 +3435,11 @@ function ShareFeedbackGrid({
   hasLogo,
   mainCompanyDomain,
   onDraftGuardChange,
+  subtitleGuardRef,
   onApprove,
   onCloseVideo,
   onStreamError,
+  fetchContentToken,
 }: {
   project: any
   readyVideos: any[]
@@ -3287,9 +3456,12 @@ function ShareFeedbackGrid({
   hasLogo: boolean
   mainCompanyDomain: string | null
   onDraftGuardChange?: (guard: DraftNavigationGuard | null) => void
+  // Owned by the page (so its navigation guard can read it); the grid populates it.
+  subtitleGuardRef: { current: (() => boolean) | null }
   onApprove: () => void
   onCloseVideo?: () => void
   onStreamError?: (videoId: string) => void
+  fetchContentToken: (videoId: string, quality: string) => Promise<string | null>
 }) {
   const logoSrc = '/api/branding/logo'
   const [isDesktop, setIsDesktop] = useState(false)
@@ -3500,13 +3672,35 @@ function ShareFeedbackGrid({
     setAuthorName(nextName)
   }, [isPasswordProtected, project?.recipients, authorName, setAuthorName, otpSessionEmail])
 
-  const isApproved = project.status === 'APPROVED' || project.status === 'SHARE_ONLY'
+  const isApproved = project.status === 'APPROVED'
 
   const latestVideoVersion = readyVideos.length > 0
     ? Math.max(...readyVideos.map((v: any) => v.version))
     : null
 
   const selectedVideo = readyVideos.find((v: any) => v.id === management.selectedVideoId)
+
+  // Subtitle edit mode: swaps the comments panel for the subtitle editor and
+  // (desktop) shows the timeline strip under the player. Entered from the
+  // player's CC menu → Edit.
+  const [isEditingSubtitles, setIsEditingSubtitles] = useState(false)
+  const subtitleEditor = useSubtitleEditor({
+    videoId: selectedVideo?.id ?? null,
+    videoName: String(selectedVideo?.name ?? 'Video'),
+    versionLabel: String(selectedVideo?.versionLabel ?? ''),
+    videoDurationSec: typeof selectedVideo?.duration === 'number' ? selectedVideo.duration : 0,
+    shareToken,
+    isAdmin: false,
+    active: isEditingSubtitles,
+    hasWaveform: Boolean(selectedVideo?.hasWaveformPeaks),
+    fetchContentToken,
+    onExit: () => setIsEditingSubtitles(false),
+  })
+  const subtitleGuard = subtitleEditor.guard
+  useEffect(() => {
+    subtitleGuardRef.current = isEditingSubtitles ? subtitleGuard : null
+    return () => { subtitleGuardRef.current = null }
+  }, [isEditingSubtitles, subtitleGuard, subtitleGuardRef])
   const selectedVideoApproved = selectedVideo ? Boolean(selectedVideo.approved) : false
   const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
   const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved)
@@ -3555,10 +3749,22 @@ function ShareFeedbackGrid({
               onCloseVideo={onCloseVideo}
               fillContainer
               pinControlsToBottom={false}
+              onEnterSubtitleEditMode={() => {
+                if (isEditingSubtitles) subtitleEditor.confirmAndExit()
+                else setIsEditingSubtitles(true)
+              }}
+              isEditingSubtitles={isEditingSubtitles}
+              videoSwitchGuardRef={subtitleGuardRef}
             />
           </div>
 
-          {!commentsDisabled ? (
+          {isEditingSubtitles && isDesktop && (
+            <div className="shrink-0">
+              <SubtitleTimelineStrip editor={subtitleEditor} />
+            </div>
+          )}
+
+          {!commentsDisabled && !isEditingSubtitles ? (
             <div className="mt-3 lg:hidden">
               <CommentInput
                 newComment={management.newComment}
@@ -3630,6 +3836,11 @@ function ShareFeedbackGrid({
           </div>
 
           <div className="lg:flex-1 lg:min-h-0 overflow-hidden flex flex-col">
+            {isEditingSubtitles ? (
+              <div className="lg:flex-1 max-lg:flex-none max-lg:h-[70dvh] min-h-0 border border-border rounded-lg bg-card">
+                <SubtitleEditPanel editor={subtitleEditor} />
+              </div>
+            ) : (
             <CommentSectionView
               projectId={project.id}
               projectSlug={shareSlug}
@@ -3656,9 +3867,10 @@ function ShareFeedbackGrid({
               cardClassName={!commentsDisabled && isDesktop ? 'rounded-b-none' : undefined}
               management={management as any}
             />
+            )}
           </div>
 
-          {!commentsDisabled ? (
+          {!commentsDisabled && !isEditingSubtitles ? (
             <div className="hidden lg:block shrink-0">
               <CommentInput
                 newComment={management.newComment}
@@ -3725,5 +3937,90 @@ function ShareFeedbackGrid({
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * Blocking first-login prompt for password-authenticated clients: they must pick a
+ * project recipient or type a name before they can use the page. The chosen name is
+ * persisted (by the caller) into the same slot the comment name picker reads, so all
+ * attribution — comments, uploads, approvals — is consistent.
+ */
+function ShareNameCaptureModal({
+  recipients,
+  onConfirm,
+}: {
+  recipients: Array<{ id: string; name?: string | null }>
+  onConfirm: (name: string, recipientId: string | null) => void
+}) {
+  const namedRecipients = recipients.filter((r) => String(r?.name || '').trim())
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [customName, setCustomName] = useState('')
+
+  const canConfirm = selectedId ? true : customName.trim().length > 0
+
+  const handleConfirm = () => {
+    if (selectedId) {
+      const recipient = namedRecipients.find((r) => r.id === selectedId)
+      onConfirm(String(recipient?.name || '').trim(), selectedId)
+    } else if (customName.trim()) {
+      onConfirm(customName.trim(), null)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+      <Card className="bg-card border-border w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Welcome — who are you?</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Please choose or enter your name so we can attribute your comments, uploads and approvals.
+          </p>
+
+          {namedRecipients.length > 0 && (
+            <div className="space-y-2">
+              {namedRecipients.map((recipient) => (
+                <button
+                  key={recipient.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(recipient.id)
+                    setCustomName('')
+                  }}
+                  className={cn(
+                    'w-full text-left px-3 py-2 rounded-lg border transition-colors',
+                    selectedId === recipient.id
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border hover:bg-muted text-foreground',
+                  )}
+                >
+                  {recipient.name}
+                </button>
+              ))}
+              <p className="text-xs text-muted-foreground pt-1">Or enter a different name:</p>
+            </div>
+          )}
+
+          <Input
+            value={customName}
+            onChange={(e) => {
+              setCustomName(e.target.value)
+              setSelectedId(null)
+            }}
+            placeholder="Your name"
+            maxLength={100}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && canConfirm) handleConfirm()
+            }}
+          />
+
+          <Button type="button" className="w-full" disabled={!canConfirm} onClick={handleConfirm}>
+            Continue
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
   )
 }

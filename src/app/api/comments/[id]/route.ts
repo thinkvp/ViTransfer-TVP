@@ -80,8 +80,8 @@ export async function PATCH(
       )
     }
 
-    // SECURITY: If feedback is hidden (or Share Only mode), reject comment updates
-    if (existingComment.project.hideFeedback || existingComment.project.status === 'SHARE_ONLY') {
+    // SECURITY: If feedback is hidden, reject comment updates
+    if (existingComment.project.hideFeedback) {
       return NextResponse.json(
         { error: 'Comments are disabled for this project' },
         { status: 403 }
@@ -264,7 +264,7 @@ export async function DELETE(
       )
     }
 
-    if (existingComment.project.status === 'SHARE_ONLY') {
+    if (existingComment.project.hideFeedback) {
       return NextResponse.json(
         { error: 'Comments are disabled for this project' },
         { status: 403 }

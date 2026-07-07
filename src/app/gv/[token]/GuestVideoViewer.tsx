@@ -24,6 +24,7 @@ type ResolvePayload = {
     thumbnailUrl?: string | null
     timelineVttUrl?: string | null
     timelineSpriteUrl?: string | null
+    subtitlesVttUrl?: string | null
     timelinePreviewsReady?: boolean
     downloadUrl?: string | null
   }
@@ -150,6 +151,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
     thumbnailUrl: data.video.thumbnailUrl,
     timelineVttUrl: data.video.timelineVttUrl,
     timelineSpriteUrl: data.video.timelineSpriteUrl,
+    subtitlesVttUrl: data.video.subtitlesVttUrl,
     timelinePreviewsReady: data.video.timelinePreviewsReady,
     downloadUrl: null,
   }

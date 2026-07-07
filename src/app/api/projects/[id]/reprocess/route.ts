@@ -368,7 +368,7 @@ export async function POST(
       })
 
       await shareUploadPreviewQueue
-        .remove(`share-preview:videoAsset:${asset.id}`)
+        .remove(`share-preview-videoAsset-${asset.id}`)
         .catch(() => {})
       await enqueueShareUploadPreview({
         type: 'videoAsset',

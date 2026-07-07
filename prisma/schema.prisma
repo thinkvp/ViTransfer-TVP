@@ -55,6 +55,8 @@ model User {
   expenses Expense[]
   journalEntries JournalEntry[]
 
+  aiAssistantRequests AiAssistantRequest[]
+
   @@index([active])
 }
 
@@ -548,6 +550,9 @@ model Album {
   // Whether social-media-sized photo derivatives (long edge scaled to 2048px) are generated for this album.
   socialCopiesEnabled Boolean @default(true)
 
+  createdById   String?
+  createdByName String?
+
   photos AlbumPhoto[]
   analytics AlbumAnalytics[]
 
@@ -595,6 +600,7 @@ model AlbumPhoto {
   @@index([albumId, status])
   @@index([albumId, socialStatus])
   @@index([albumId, thumbnailStatus])
+  @@index([albumId, createdAt])
 }
 
 enum AlbumPhotoStatus {
@@ -647,14 +653,16 @@ model ShareUploadFolder {
   folderName   String
   storagePath  String
 
-  createdById   String?
-  createdByName String?
+  createdById          String?
+  createdByRecipientId String?
+  createdByName        String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([projectId, relativePath])
   @@index([projectId, folderName])
+  @@index([projectId, createdAt])
 }
 
 model ShareUploadFile {
@@ -671,8 +679,9 @@ model ShareUploadFile {
   mediaHeight        Int?
   mediaCodec         String?
 
-  uploadedById   String?
-  uploadedByName String?
+  uploadedById          String?
+  uploadedByRecipientId String?
+  uploadedByName        String?
 
   // Preview lifecycle
   previewStatus      String?   // PENDING | PROCESSING | READY | FAILED
@@ -695,6 +704,7 @@ model ShareUploadFile {
   @@index([projectId, category])
   @@index([previewStatus])
   @@index([projectId, previewStatus])
+  @@index([projectId, createdAt])
 }
 
 model ProjectUser {
@@ -734,7 +744,6 @@ enum ProjectStatus {
   IN_REVIEW
   ON_HOLD
   APPROVED
-  SHARE_ONLY
   NOT_STARTED
   IN_PROGRESS
   REVIEWED
@@ -791,6 +800,19 @@ model Video {
   approvedAt DateTime?
   allowApproval Boolean @default(false)
 
+  // Approval attribution (latest approve / latest unapprove only)
+  approvedById          String?
+  approvedByRecipientId String?
+  approvedByName        String?
+  unapprovedAt          DateTime?
+  unapprovedById        String?
+  unapprovedByRecipientId String?
+  unapprovedByName      String?
+
+  // Upload attribution
+  uploadedById   String?
+  uploadedByName String?
+
   // Timeline hover previews (sprite sheets + VTT)
   timelinePreviewsReady Boolean @default(false)
 
@@ -799,6 +821,14 @@ model Video {
   // HLS packaging format version. 0 = none/legacy (non-keyframe-aligned, ABR-unsafe);
   // >=1 = renditions are keyframe-aligned, so the player may enable hls.js adaptive bitrate.
   hlsVersion Int @default(0)
+
+  // Whisper auto-subtitles. null = feature off / never attempted
+  transcriptionStatus String? // PENDING | PROCESSING | READY | FAILED | SKIPPED (over the OpenAI 60-min limit)
+  transcriptionError  String?
+  // Per-version opt-out for Whisper auto-generation (default on). When false, the
+  // version skips the Whisper run (waveform still generates); admins set captions
+  // manually (upload SRT / copy from another version). A forced Regenerate overrides.
+  autoGenerateSubtitles Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -815,6 +845,7 @@ model Video {
   @@index([projectId, name])
   @@index([status])
   @@index([projectId, status])
+  @@index([projectId, createdAt])
 }
 
 model VideoAsset {
@@ -924,6 +955,8 @@ model Comment {
   @@index([parentId, createdAt])
   @@index([userId])
   @@index([recipientId])
+  // Chronological-per-project scan for the Project Activity feed.
+  @@index([projectId, createdAt])
 }
 
 model ProjectInternalComment {
@@ -1095,8 +1128,61 @@ model Settings {
   s3LocalBackupLastRunResult String? // Human-readable summary of last backup run
   s3LocalBackupRunning    Boolean  @default(false) // Lock flag: backup job currently in progress
 
+  // AI Assistant Configuration
+  aiProvider        String? @default("NONE") // Options: "NONE", "OLLAMA", "ANTHROPIC", "OPENAI"
+  aiOllamaUrl       String? // e.g. "http://127.0.0.1:11434" — must be reachable from the WORKER (inference runs there)
+  aiOllamaModel     String? // e.g. "qwen3:30b-a3b"
+  aiAnthropicModel  String? @default("claude-opus-4-8")
+  aiAnthropicApiKey String? // Encrypted with encrypt() like smtpPassword
+  aiOpenaiModel     String? @default("gpt-4o")
+  aiOpenaiApiKey    String? // Encrypted with encrypt() like smtpPassword
+
+  // AI Assistant customisation ("house style")
+  aiReplyDraftsEnabled Boolean @default(false) // Draft a copy/paste enquiry reply on generation
+  aiReplySignature     String? @db.Text        // Sign-off appended to drafted replies
+  aiInstructions       String? @db.Text        // Freeform studio guidance injected into the prompt
+  aiPortfolioJson      String? @default("[]")  // JSON array [{id,title,url,description}] — model picks by id, code fills URLs
+
+  // Whisper transcription (auto-subtitles + dictation)
+  transcriptionEnabled      Boolean @default(false)
+  transcriptionProvider     String? @default("LOCAL") // "LOCAL" (self-hosted OpenAI-compatible server) | "OPENAI" (api.openai.com)
+  transcriptionWhisperUrl   String? // LOCAL: e.g. "http://127.0.0.1:8000" — must be reachable from the WORKER
+  transcriptionWhisperModel String? @default("deepdml/faster-whisper-large-v3-turbo-ct2")
+  transcriptionOpenaiApiKey String? // Encrypted with encrypt(); used when provider = OPENAI
+  transcriptionOpenaiModel  String? @default("whisper-1") // OpenAI: only whisper-1 returns timestamps needed for subtitles
+  transcriptionLanguage     String? @default("en") // language hint for Whisper; empty = autodetect
+  // Caption formatting applied at generation time (readability of the displayed captions)
+  transcriptionMaxCharsPerLine Int? @default(42) // 0/null = no wrapping
+  transcriptionMaxLines        Int? @default(2)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model AiAssistantRequest {
+  id     String @id @default(cuid())
+  kind   String // "combined" | "connection_test"
+  status String @default("QUEUED") // QUEUED | PROCESSING | COMPLETED | FAILED
+
+  prompt      String  @db.Text
+  // Uploaded attachments: [{fileName, kind, size, contentBase64?, extractedText?, extractionError?}]
+  // The worker extracts text then clears contentBase64 (originals stay in the browser
+  // and are attached to the created project via the existing upload endpoints).
+  attachmentsJson Json?
+  contextJson Json? // Snapshot of context sent to the LLM (audit)
+  resultJson  Json? // Zod-validated proposal JSON
+  error       String? @db.Text
+  provider    String? // Provider/model actually used, e.g. "OLLAMA:qwen3:30b-a3b"
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([createdById, createdAt])
 }
 
 model WebPushSubscription {
@@ -2023,6 +2109,9 @@ enum FileRole {
   SOCIAL
   TIMELINE_VTT
   TIMELINE_SPRITES
+  SUBTITLES_VTT
+  WAVEFORM_PEAKS
+  TRANSCRIPTION_AUDIO
   HLS_PLAYLIST
   HLS_SEGMENTS
   AVATAR

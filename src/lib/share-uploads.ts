@@ -23,6 +23,54 @@ export interface ShareUploadAccessContext {
   isAdmin: boolean
   isGuest: boolean
   shareTokenSessionId?: string
+  adminUserId?: string
+  adminUserName?: string
+  shareRecipientId?: string
+}
+
+// Resolved uploader identity stamped onto ShareUploadFile/ShareUploadFolder rows.
+export interface ShareUploadActor {
+  userId: string | null
+  recipientId: string | null
+  name: string
+}
+
+/**
+ * Resolve who is performing a share-upload action.
+ * Priority: admin session → explicit recipient pick from the request body
+ * (the share page's comment name picker) → recipientId embedded in the OTP
+ * share token → free-text authorName → generic 'Admin'/'Client'.
+ * recipientId values are validated against the project's recipients.
+ */
+export async function resolveShareUploadActor(
+  access: ShareUploadAccessContext,
+  body?: { recipientId?: unknown; authorName?: unknown },
+): Promise<ShareUploadActor> {
+  if (access.isAdmin) {
+    return {
+      userId: access.adminUserId || null,
+      recipientId: null,
+      name: access.adminUserName || 'Admin',
+    }
+  }
+
+  const requestedRecipientId =
+    typeof body?.recipientId === 'string' && body.recipientId.trim() ? body.recipientId.trim() : null
+  const recipientId = requestedRecipientId || access.shareRecipientId || null
+
+  if (recipientId) {
+    const recipient = await prisma.projectRecipient.findFirst({
+      where: { id: recipientId, projectId: access.project.id },
+      select: { id: true, name: true },
+    })
+    if (recipient) {
+      return { userId: null, recipientId: recipient.id, name: recipient.name || 'Client' }
+    }
+  }
+
+  const authorName =
+    typeof body?.authorName === 'string' ? body.authorName.trim().slice(0, 100) : ''
+  return { userId: null, recipientId: null, name: authorName || 'Client' }
 }
 
 export function resolveProjectStoragePath(project: ShareUploadProjectContext): string {
@@ -77,5 +125,8 @@ export async function resolveShareUploadAccess(
     isAdmin: access.isAdmin,
     isGuest,
     shareTokenSessionId: access.shareTokenSessionId,
+    adminUserId: access.adminUserId,
+    adminUserName: access.adminUserName,
+    shareRecipientId: access.shareRecipientId,
   }
 }

@@ -1,5 +1,5 @@
 import { Worker, Queue } from 'bullmq'
-import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload, ShareUploadPreviewJob, AssetTimelineJob, UploadTimelineJob, PasswordEmailJob } from '../lib/queue'
+import { VideoProcessingJob, AssetProcessingJob, ClientFileProcessingJob, UserFileProcessingJob, ProjectFileProcessingJob, ProjectEmailProcessingJob, AlbumPhotoSocialJob, AlbumPhotoThumbnailJob, AlbumPhotoZipJob, FolderRenameJobPayload, ShareUploadPreviewJob, AssetTimelineJob, UploadTimelineJob, PasswordEmailJob, AiAssistantJob, TranscriptionJob } from '../lib/queue'
 import { initStorage } from '../lib/storage'
 import { runCleanup } from '../lib/upload-cleanup'
 import { getRedisForQueue, closeRedisConnection, getRedis } from '../lib/redis'
@@ -17,6 +17,8 @@ import { processAlbumPhotoThumbnail } from './album-photo-thumbnail-processor'
 import { processAlbumPhotoZip } from './album-photo-zip-processor'
 import { processPasswordEmail } from './password-email-processor'
 import { processFolderRename } from './folder-rename-processor'
+import { processAiAssistantRequest } from './ai-assistant-processor'
+import { processTranscription } from './transcription-processor'
 import { processShareUploadPreview, reconcileShareUploadPreviews } from './share-upload-preview-processor'
 import { processAdminNotifications } from './admin-notifications'
 import { processClientNotifications } from './client-notifications'
@@ -399,6 +401,48 @@ async function main() {
   })
 
   console.log('[WORKER] Folder rename worker started')
+
+  // Create AI assistant worker (LLM proposal extraction — Ollama runs on this box)
+  const aiAssistantWorker = new Worker<AiAssistantJob>('ai-assistant', processAiAssistantRequest, {
+    connection: getRedisForQueue(),
+    // One generation at a time — a local 30B-class model saturates the NAS CPU
+    concurrency: 1,
+    // Local generations can take minutes — generous lock duration with auto-renewal
+    lockDuration: 10 * 60 * 1000,
+    stalledInterval: 5 * 60 * 1000,
+    maxStalledCount: 1,
+  })
+
+  aiAssistantWorker.on('completed', (job) => {
+    console.log(`[WORKER] AI assistant job ${job.id} completed successfully`)
+  })
+
+  aiAssistantWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] AI assistant job ${job?.id} failed:`, err instanceof Error ? err.message : err)
+  })
+
+  console.log('[WORKER] AI assistant worker started')
+
+  // Create transcription worker (Whisper subtitles + dictation — Whisper server runs on this box)
+  const transcriptionWorker = new Worker<TranscriptionJob>('transcription', processTranscription, {
+    connection: getRedisForQueue(),
+    // One transcription at a time — the Whisper server shares NAS CPU with Ollama
+    concurrency: 1,
+    // Long videos take a while on CPU — generous lock duration with auto-renewal
+    lockDuration: 30 * 60 * 1000,
+    stalledInterval: 5 * 60 * 1000,
+    maxStalledCount: 1,
+  })
+
+  transcriptionWorker.on('completed', (job) => {
+    console.log(`[WORKER] Transcription job ${job.id} completed successfully`)
+  })
+
+  transcriptionWorker.on('failed', (job, err) => {
+    console.error(`[WORKER ERROR] Transcription job ${job?.id} failed:`, err instanceof Error ? err.message : err)
+  })
+
+  console.log('[WORKER] Transcription worker started')
 
   // Create share-upload preview worker
   const shareUploadPreviewWorker = new Worker<ShareUploadPreviewJob>('share-upload-preview', processShareUploadPreview, {
@@ -1094,6 +1138,8 @@ async function main() {
       albumPhotoZipWorker.close(),
       passwordEmailWorker.close(),
       shareUploadPreviewWorker.close(),
+      aiAssistantWorker.close(),
+      transcriptionWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),
     ])
@@ -1115,6 +1161,8 @@ async function main() {
       albumPhotoZipWorker.close(),
       passwordEmailWorker.close(),
       shareUploadPreviewWorker.close(),
+      aiAssistantWorker.close(),
+      transcriptionWorker.close(),
       notificationWorker.close(),
       notificationQueue.close(),
     ])

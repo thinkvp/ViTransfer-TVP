@@ -34,6 +34,10 @@ export async function verifyProjectAccess(
   isAuthenticated: boolean
   isGuest?: boolean
   shareTokenSessionId?: string
+  // Actor attribution (Project Activity feed): admin identity or share-session recipient.
+  adminUserId?: string
+  adminUserName?: string
+  shareRecipientId?: string
   errorResponse?: Response
 }> {
   // Check if user is admin (admins bypass password protection)
@@ -114,6 +118,8 @@ export async function verifyProjectAccess(
       isAdmin: true,
       isAuthenticated: true,
       shareTokenSessionId: `admin:${currentUser.id}`,
+      adminUserId: currentUser.id,
+      adminUserName: currentUser.name || currentUser.email,
     }
   }
 
@@ -192,5 +198,6 @@ export async function verifyProjectAccess(
     isAuthenticated: true,
     isGuest,
     shareTokenSessionId: shareContext.sessionId,
+    shareRecipientId: shareContext.recipientId,
   }
 }

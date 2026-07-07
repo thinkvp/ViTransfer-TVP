@@ -328,7 +328,7 @@ Multiple layers of protection beyond standard security measures:
 - **Rate Limit Scoping** — Rate limits scoped per admin+resource (e.g., `${auth.id}:${albumId}`) to prevent IP-based lockouts during bulk operations
 
 ### Detailed Status Workflow
-Intelligent project lifecycle management with 8 distinct statuses (NOT_STARTED, IN_PROGRESS, IN_REVIEW, REVIEWED, ON_HOLD, SHARE_ONLY, APPROVED, CLOSED). The workflow includes:
+Intelligent project lifecycle management with 7 distinct statuses (NOT_STARTED, IN_PROGRESS, IN_REVIEW, REVIEWED, ON_HOLD, APPROVED, CLOSED). The workflow includes:
 - **Automated transitions**: Projects automatically move to IN_REVIEW when clients are notified, to APPROVED when all videos are approved (configurable), and can auto-close X days after approval
 - **Auto-start on Key Dates**: Projects can automatically transition from NOT_STARTED to IN_PROGRESS on their SHOOTING key date
 - **Audit trail**: Every status change is logged with timestamp, source (ADMIN/CLIENT/SYSTEM), and responsible user

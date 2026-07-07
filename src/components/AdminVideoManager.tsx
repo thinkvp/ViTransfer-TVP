@@ -31,6 +31,8 @@ interface AdminVideoManagerProps {
   onRefresh?: () => void
   sortMode?: 'status' | 'alphabetical'
   s3Mode?: boolean
+  /** Whisper enabled globally — shows the per-version "Auto-generate subtitles" tickbox on upload. */
+  transcriptionEnabled?: boolean
 }
 
 export default function AdminVideoManager({
@@ -44,6 +46,7 @@ export default function AdminVideoManager({
   onVideoSelect,
   onRefresh,
   sortMode = 'alphabetical',
+  transcriptionEnabled = false,
   s3Mode = false,
 }: AdminVideoManagerProps) {
   const router = useRouter()
@@ -460,6 +463,7 @@ export default function AdminVideoManager({
                           videoName={groupName}
                           allowApproval={canFullControl ? undefined : false}
                           showAllowApprovalField={canFullControl}
+                          transcriptionEnabled={transcriptionEnabled}
                           onUploadComplete={() => {
                             setShowNewVersionForGroup(null)
                             handleUploadComplete()
@@ -522,6 +526,7 @@ export default function AdminVideoManager({
             onOpenChange={setAddVideosOpen}
             projectId={projectId}
             canFullControl={canFullControl}
+            transcriptionEnabled={transcriptionEnabled}
             onUploadComplete={handleUploadComplete}
           />
         </div>

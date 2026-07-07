@@ -50,6 +50,12 @@ export interface Video {
   downloadUrl?: string | null
   timelineVttUrl?: string | null
   timelineSpriteUrl?: string | null
+  // Whisper auto-subtitles: token-gated playback VTT URL + availability flag
+  subtitlesVttUrl?: string | null
+  hasSubtitles?: boolean
+  // Waveform peaks artifact exists (subtitle editor timeline strip)
+  hasWaveformPeaks?: boolean
+  transcriptionStatus?: string | null
   originalFileName?: string
   originalFileSize?: string // stringified number
 

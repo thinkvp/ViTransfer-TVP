@@ -1,5 +1,10 @@
 import { Job } from 'bullmq'
-import { VideoProcessingJob } from '../lib/queue'
+import path from 'path'
+import fs from 'fs'
+import { VideoProcessingJob, enqueueVideoSubtitles } from '../lib/queue'
+import { TEMP_DIR } from './cleanup'
+import { extractAudioForTranscription } from '@/lib/ffmpeg'
+import { isTranscriptionEnabled, storeTranscriptionAudio, TRANSCRIPTION_AUDIO_MP3_KBPS } from '@/lib/transcription-audio'
 import {
   TempFiles,
   isVideoRecordMissingError,
@@ -78,24 +83,41 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
     regenerateThumbnail === false &&
     regenerateTimelinePreviews === false
 
+  // Partial reprocess modes end by ensuring the subtitle waveform exists —
+  // enqueueVideoSubtitles is a no-op when subtitles + waveform are already
+  // present, and never overwrites hand-edited cues (heal-only when subtitles
+  // exist), so this simply backfills a missing waveform on any reprocess.
+  const ensureSubtitleArtifacts = () =>
+    enqueueVideoSubtitles(videoId).catch((e) =>
+      console.warn(`[WORKER] Subtitle/waveform ensure failed for video ${videoId}:`, e)
+    )
+
   // Timeline-only mode: skip transcode/thumbnail, just generate sprites.
   // The video stays in READY status — no interruption to viewing.
   if (timelineOnly) {
-    return processTimelineOnly(videoId, storagePath, projectId)
+    await processTimelineOnly(videoId, storagePath, projectId)
+    await ensureSubtitleArtifacts()
+    return
   }
 
   if (thumbnailOnly) {
-    return processThumbnailOnly(videoId, storagePath, projectId)
+    await processThumbnailOnly(videoId, storagePath, projectId)
+    await ensureSubtitleArtifacts()
+    return
   }
 
   // HLS-only: (re)package HLS from already-generated previews. Video stays READY — used by
   // the backfill and to recover/regenerate HLS without a full transcode.
   if (hlsOnly) {
-    return processHlsOnly(videoId, projectId)
+    await processHlsOnly(videoId, projectId)
+    await ensureSubtitleArtifacts()
+    return
   }
 
   if (previewOnly) {
-    return processPreviewOnly(videoId, storagePath, projectId, requestedPreviewResolutions)
+    await processPreviewOnly(videoId, storagePath, projectId, requestedPreviewResolutions)
+    await ensureSubtitleArtifacts()
+    return
   }
 
   console.log(`[WORKER] Processing video ${videoId}`)
@@ -211,6 +233,30 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
       )
       if (!updated) return
     }
+
+    // Cache the transcription audio while the original is still local, so the
+    // transcription job (and later Regens) reuse this small mp3 instead of
+    // re-downloading the full original from storage. Gated on the feature being
+    // enabled; non-fatal (a failure just means the transcription job extracts it
+    // itself on first run). Only in the full transcode path — partial reprocess
+    // modes don't touch the original, and the cache is unchanged anyway.
+    if (await isTranscriptionEnabled().catch(() => false)) {
+      const audioMp3Path = path.join(TEMP_DIR, `${videoId}-transcription-audio.mp3`)
+      try {
+        await extractAudioForTranscription(videoInfo.path, audioMp3Path, 'mp3', TRANSCRIPTION_AUDIO_MP3_KBPS)
+        await storeTranscriptionAudio({ videoId, projectId, mp3LocalPath: audioMp3Path })
+      } catch (e) {
+        console.warn(`[WORKER] Transcription audio cache failed for video ${videoId} (non-fatal):`, e instanceof Error ? e.message : e)
+      } finally {
+        await fs.promises.rm(audioMp3Path, { force: true }).catch(() => {})
+      }
+    }
+
+    // Queue Whisper subtitle generation (no-op unless enabled in Settings).
+    // Non-fatal by design — transcription must never fail the transcode job.
+    await enqueueVideoSubtitles(videoId).catch((e) =>
+      console.warn(`[WORKER] Subtitle enqueue failed for video ${videoId}:`, e)
+    )
 
     await Promise.all([
       recalculateAndStoreProjectTotalBytes(projectId),

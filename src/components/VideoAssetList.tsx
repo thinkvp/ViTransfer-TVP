@@ -14,6 +14,7 @@ import {
   Trash2,
   Loader2,
   Copy,
+  Captions,
 } from 'lucide-react'
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
@@ -61,6 +62,8 @@ export function VideoAssetList({
   const [currentThumbnailPath, setCurrentThumbnailPath] = useState<string | null>(null)
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<{ id: string; name: string } | null>(null)
   const [pendingThumbnailAsset, setPendingThumbnailAsset] = useState<{ id: string; name: string; action: 'set' | 'remove'; message: string } | null>(null)
+  const [settingSubtitles, setSettingSubtitles] = useState<string | null>(null)
+  const [pendingSubtitlesAsset, setPendingSubtitlesAsset] = useState<{ id: string; name: string; message: string } | null>(null)
 
   const fetchAssets = useCallback(async () => {
     try {
@@ -133,6 +136,16 @@ export function VideoAssetList({
 
     return allowedThumbnailMimeTypes.includes(fileType) || allowedThumbnailExtensions.includes(ext)
   }
+
+  // An .srt asset can be promoted to the video's active playback subtitles.
+  const canSetSubtitles = (asset: VideoAsset) => {
+    const fileName = asset.fileName.toLowerCase()
+    const cat = asset.category?.toLowerCase() || ''
+    return fileName.endsWith('.srt') || cat === 'subtitle' || cat === 'subtitles'
+  }
+
+  // The canonical playback subtitles asset is the one with category 'subtitles'.
+  const isActiveSubtitles = (asset: VideoAsset) => asset.category === 'subtitles'
 
   const formatFileSizeBigInt = (bytes: string) => {
     return formatFileSize(Number(bytes))
@@ -246,6 +259,34 @@ export function VideoAssetList({
     return currentThumbnailPath.includes(asset.id) || currentThumbnailPath.includes(asset.fileName)
   }
 
+  // Promote an uploaded .srt asset to be this version's active playback subtitles
+  // (parallels "Set as thumbnail"). Upload the SRT like any other asset, then Set it.
+  const handleSetSubtitles = (assetId: string, fileName: string) => {
+    if (!canManage) return
+    const asset = assets.find((a) => a.id === assetId)
+    if (!asset || isActiveSubtitles(asset)) return
+    const hasActive = assets.some((a) => a.category === 'subtitles')
+    const message = hasActive
+      ? `Set "${fileName}" as this version's subtitles? This replaces the current captions (the previous file is kept as an asset).`
+      : `Set "${fileName}" as this version's subtitles?`
+    setPendingSubtitlesAsset({ id: assetId, name: fileName, message })
+  }
+
+  const confirmSetSubtitles = () => {
+    const { id: assetId } = pendingSubtitlesAsset!
+    setPendingSubtitlesAsset(null)
+    setSettingSubtitles(assetId)
+
+    apiPost(`/api/videos/${videoId}/assets/${assetId}/set-subtitles`, {})
+      .then((res: any) => {
+        toast.success(`Subtitles set${res?.cueCount ? ` (${res.cueCount} cues)` : ''}`)
+        return fetchAssets()
+      })
+      .then(() => { if (onAssetDeleted) onAssetDeleted() })
+      .catch((e: any) => toast.error(e?.message || 'Failed to set subtitles'))
+      .finally(() => setSettingSubtitles(null))
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -270,11 +311,11 @@ export function VideoAssetList({
     <>
       <div className="mt-4 pt-4 border-t">
       <div className="space-y-2">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 gap-2">
           <div className="text-sm font-medium text-muted-foreground">
             Uploaded Assets ({assets.length})
           </div>
-          {canManage && assets.length > 0 && (
+          {canManage && (
             <Button
               type="button"
               variant="outline"
@@ -324,6 +365,22 @@ export function VideoAssetList({
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                {canManage && canSetSubtitles(asset) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleSetSubtitles(asset.id, asset.fileName)}
+                    disabled={settingSubtitles === asset.id}
+                    title={isActiveSubtitles(asset) ? "Active playback subtitles" : "Set as the video's subtitles"}
+                  >
+                    {settingSubtitles === asset.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Captions className={`h-4 w-4 ${isActiveSubtitles(asset) ? 'text-green-600' : ''}`} />
+                    )}
+                  </Button>
+                )}
                 {canManage && canSetAsThumbnail(asset) && (
                   <Button
                     type="button"
@@ -394,6 +451,15 @@ export function VideoAssetList({
         confirmLabel={pendingThumbnailAsset?.action === 'remove' ? 'Remove' : 'Set'}
         variant="default"
         onConfirm={confirmSetThumbnail}
+      />
+      <ConfirmDialog
+        open={pendingSubtitlesAsset !== null}
+        onOpenChange={(v) => { if (!v) setPendingSubtitlesAsset(null) }}
+        title="Set subtitles"
+        description={pendingSubtitlesAsset?.message}
+        confirmLabel="Set"
+        variant="default"
+        onConfirm={confirmSetSubtitles}
       />
     </>
   )

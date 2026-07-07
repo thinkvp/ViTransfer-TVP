@@ -129,10 +129,20 @@ export type AlbumSocialJob = {
   totalCount: number
 }
 
+/** Subtitle/waveform (transcription) generation job for one video version. */
+export type SubtitleJob = {
+  id: string
+  videoName: string
+  versionLabel: string | null
+  projectId: string
+  projectName: string
+  status: 'active' | 'queued'
+}
+
 /** A server-side job that has recently completed (kept for 30 min). */
 export type CompletedServerJob = {
   id: string
-  type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename' | 'videoAssetPreview' | 'albumSocial' | 'system'
+  type: 'processing' | 'albumZip' | 'albumThumbnail' | 'folderRename' | 'videoAssetPreview' | 'albumSocial' | 'subtitle' | 'system'
   label: string
   sublabel: string
   /** Clean project name for grouping display (distinct from the job-specific `sublabel`). */
@@ -210,6 +220,8 @@ export type UploadManagerContextType = {
   videoAssetPreviewJobs: VideoAssetPreviewJob[]
   /** Album photo social derivative jobs grouped by album (polled from DB). */
   albumSocialJobs: AlbumSocialJob[]
+  /** Subtitle/waveform (transcription) generation jobs per video version (polled). */
+  subtitleJobs: SubtitleJob[]
   /** Recently completed server-side jobs (kept for 30 min). */
   completedServerJobs: CompletedServerJob[]
   /** Badge count: queued + uploading + paused + processing + album jobs. */
@@ -305,6 +317,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const [folderRenameJobs, setFolderRenameJobs] = useState<FolderRenameJob[]>([])
   const [videoAssetPreviewJobs, setVideoAssetPreviewJobs] = useState<VideoAssetPreviewJob[]>([])
   const [albumSocialJobs, setAlbumSocialJobs] = useState<AlbumSocialJob[]>([])
+  const [subtitleJobs, setSubtitleJobs] = useState<SubtitleJob[]>([])
   const [completedServerJobs, setCompletedServerJobs] = useState<CompletedServerJob[]>([])
   const [pollError, setPollError] = useState<string | null>(null)
 
@@ -333,6 +346,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const latestFolderRenameJobsRef = useRef<FolderRenameJob[]>([])
   const latestVideoAssetPreviewJobsRef = useRef<VideoAssetPreviewJob[]>([])
   const latestAlbumSocialJobsRef = useRef<AlbumSocialJob[]>([])
+  const latestSubtitleJobsRef = useRef<SubtitleJob[]>([])
 
   useEffect(() => {
     dismissedServerJobIdsRef.current = loadDismissedServerJobIds()
@@ -975,6 +989,23 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
             latestAlbumSocialJobsRef.current = incoming
           }
 
+          // --- Subtitle/waveform (transcription) jobs ---
+          // Active/queued surface as progress entries; failures are pushed as
+          // completed-with-error. Deliberately NO success completions (a quietly
+          // finished transcription needs no announcement).
+          if (data.subtitleJobs?.active != null || data.subtitleJobs?.failed != null) {
+            const incoming = (data.subtitleJobs.active ?? []) as SubtitleJob[]
+            setSubtitleJobs(incoming)
+            latestSubtitleJobsRef.current = incoming
+
+            for (const j of (data.subtitleJobs.failed ?? []) as any[]) {
+              const key = getCompletedServerJobKeyByParts('subtitle', j.id)
+              if (!dismissedServerJobIdsRef.current.has(key)) {
+                newCompleted.push({ ...j, type: 'subtitle' } as CompletedServerJob)
+              }
+            }
+          }
+
           // --- System queue failures (admin-only, failure-only channel) ---
           if (Array.isArray(data.systemFailedJobs)) {
             for (const j of data.systemFailedJobs as CompletedServerJob[]) {
@@ -1008,6 +1039,9 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
           }
           for (const job of latestAlbumSocialJobsRef.current) {
             allActiveJobKeys.add(getCompletedServerJobKeyByParts('albumSocial', job.albumId))
+          }
+          for (const job of latestSubtitleJobsRef.current) {
+            allActiveJobKeys.add(getCompletedServerJobKeyByParts('subtitle', job.id))
           }
 
           let dismissedChanged = false
@@ -1305,7 +1339,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     albumThumbnailJobs.length +
     folderRenameJobs.length +
     videoAssetPreviewJobs.length +
-    albumSocialJobs.length
+    albumSocialJobs.length +
+    subtitleJobs.length
 
   // Like totalActiveCount, but grouped job types contribute their per-item count
   // instead of counting as a single job: drop the one-per-group placeholders, then
@@ -1346,6 +1381,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     folderRenameJobs,
     videoAssetPreviewJobs,
     albumSocialJobs,
+    subtitleJobs,
     completedServerJobs,
     totalActiveCount,
     totalActiveItems,
@@ -1366,6 +1402,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     folderRenameJobs,
     videoAssetPreviewJobs,
     albumSocialJobs,
+    subtitleJobs,
     completedServerJobs,
     totalActiveCount,
     totalActiveItems,

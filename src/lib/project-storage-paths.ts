@@ -306,6 +306,11 @@ export function buildVideoTimelineStorageRoot(projectId: string, videoId: string
   return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), 'timeline-previews')
 }
 
+/** Root for a video's auto-generated subtitles (SRT + playback VTT). ID-keyed (rename-immune). */
+export function buildVideoSubtitlesStorageRoot(projectId: string, videoId: string): string {
+  return path.posix.join(buildVideoPreviewsRoot(projectId, videoId), 'subtitles')
+}
+
 /**
  * Root for a video's HLS packaging output: the master playlist, per-rendition
  * variant playlists, fMP4 init segments and media segments all live under here.

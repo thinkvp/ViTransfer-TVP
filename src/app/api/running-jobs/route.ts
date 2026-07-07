@@ -19,6 +19,7 @@ import {
   getProjectFileQueue,
   getProjectEmailQueue,
   getPasswordEmailQueue,
+  getTranscriptionQueue,
 } from '@/lib/queue'
 import { getAlbumZipJobId, type AlbumZipVariant } from '@/lib/album-photo-zip'
 import { getAlbumThumbnailQueueJobId } from '@/lib/album-photo-thumbnail'
@@ -488,6 +489,7 @@ export async function GET(request: NextRequest) {
       albumThumbnailJobs,
       folderRenameJobs,
       albumSocialJobs,
+      subtitleJobs,
       systemFailedJobs,
     ] = await Promise.all([
       prisma.video.findMany({
@@ -520,6 +522,7 @@ export async function GET(request: NextRequest) {
       buildAlbumThumbnailJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-thumbnail builder failed:', err); return { active: [], completed: [] } }),
       buildFolderRenameJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] folder-rename builder failed:', err); return { active: [], completed: [] } }),
       buildAlbumSocialJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] album-social builder failed:', err); return { active: [], completed: [] } }),
+      buildSubtitleJobs({ isSystemAdmin, userId: authResult.id, allowedStatuses }).catch((err) => { console.error('[running-jobs] subtitle builder failed:', err); return { active: [], failed: [] } }),
       buildSystemFailedJobs(isSystemAdmin).catch((err) => { console.error('[running-jobs] system-failed builder failed:', err); return [] }),
     ])
 
@@ -553,6 +556,7 @@ export async function GET(request: NextRequest) {
       // assets moved into their version's composite in `jobs`).
       videoAssetPreviewJobs: uploadsJobs,
       albumSocialJobs,
+      subtitleJobs,
       systemFailedJobs,
     }
 
@@ -1425,5 +1429,117 @@ async function buildAlbumSocialJobs({
     return { active, completed }
   } catch {
     return { active: [], completed: [] }
+  }
+}
+
+// -----------------------------------------------------------------------
+// Subtitle/waveform (transcription) jobs helper
+// -----------------------------------------------------------------------
+
+/**
+ * Surfaces the `transcription` queue — the background step that generates
+ * subtitles + the audio waveform for a video version after its transcode
+ * finishes (invisible otherwise, since the transcode composite is long gone by
+ * then). Reports active/queued work per project and, separately, recent
+ * FAILURES (which would otherwise be completely silent — the processor marks
+ * Video.transcriptionStatus='FAILED' then rethrows into the failed set). No
+ * success entries: a quietly-finished transcription needs no announcement.
+ * Only the `video-subtitles` job kind is surfaced (dictation / whisper-test
+ * share the queue but aren't video work).
+ */
+async function buildSubtitleJobs({
+  isSystemAdmin,
+  userId,
+  allowedStatuses,
+}: {
+  isSystemAdmin: boolean
+  userId: string
+  allowedStatuses: string[]
+}) {
+  try {
+    const failedCutoff = Date.now() - FAILED_JOB_RETENTION_MS
+    const queue = getTranscriptionQueue()
+    const [activeJobs, waitingJobs, failedJobs] = await Promise.all([
+      queue.getJobs(['active'], 0, QUEUE_SCAN_CAP),
+      queue.getJobs(['waiting', 'prioritized', 'delayed'], 0, QUEUE_SCAN_CAP),
+      queue.getJobs(['failed'], 0, QUEUE_SCAN_CAP),
+    ])
+
+    const isVideoSubtitles = (data: unknown): data is { kind: 'video-subtitles'; videoId: string } =>
+      !!data && (data as { kind?: string }).kind === 'video-subtitles' && typeof (data as { videoId?: unknown }).videoId === 'string'
+
+    const statusByVideo = new Map<string, 'active' | 'queued'>()
+    for (const j of activeJobs) if (isVideoSubtitles(j.data)) statusByVideo.set(j.data.videoId, 'active')
+    for (const j of waitingJobs) if (isVideoSubtitles(j.data) && !statusByVideo.has(j.data.videoId)) statusByVideo.set(j.data.videoId, 'queued')
+
+    // Recent failures — but not if the video is currently retrying (active/queued).
+    const failedAtByVideo = new Map<string, number>()
+    for (const j of failedJobs) {
+      if (!isVideoSubtitles(j.data)) continue
+      const finishedOn = j.finishedOn
+      if (!finishedOn || finishedOn < failedCutoff) continue
+      if (statusByVideo.has(j.data.videoId)) continue
+      const prev = failedAtByVideo.get(j.data.videoId)
+      if (!prev || finishedOn > prev) failedAtByVideo.set(j.data.videoId, finishedOn)
+    }
+
+    const videoIds = new Set<string>([...statusByVideo.keys(), ...failedAtByVideo.keys()])
+    if (videoIds.size === 0) return { active: [], failed: [] }
+
+    const videos = await prisma.video.findMany({
+      where: {
+        id: { in: [...videoIds] },
+        project: {
+          status: allowedStatuses.length > 0 ? { in: allowedStatuses as any } : undefined,
+          ...(isSystemAdmin ? {} : { assignedUsers: { some: { userId } } }),
+        },
+      },
+      select: { id: true, name: true, version: true, versionLabel: true, projectId: true, project: { select: { title: true } } },
+    })
+
+    const active: Array<{
+      id: string
+      videoName: string
+      versionLabel: string | null
+      projectId: string
+      projectName: string
+      status: 'active' | 'queued'
+    }> = []
+    const failed: Array<{
+      id: string
+      type: 'subtitle'
+      label: string
+      sublabel: string
+      projectName: string
+      projectId: string
+      completedAt: number
+      error: true
+    }> = []
+
+    for (const v of videos) {
+      const versionLabel = v.versionLabel || `v${v.version}`
+      const st = statusByVideo.get(v.id)
+      if (st) {
+        active.push({ id: v.id, videoName: v.name, versionLabel, projectId: v.projectId, projectName: v.project.title, status: st })
+      } else {
+        const finishedOn = failedAtByVideo.get(v.id)
+        if (finishedOn) {
+          failed.push({
+            id: v.id,
+            type: 'subtitle',
+            label: `${v.name} ${versionLabel}`,
+            sublabel: `${v.project.title} · Subtitles failed`,
+            projectName: v.project.title,
+            projectId: v.projectId,
+            completedAt: finishedOn,
+            error: true,
+          })
+        }
+      }
+    }
+
+    return { active, failed }
+  } catch {
+    return { active: [], failed: [] }
   }
 }

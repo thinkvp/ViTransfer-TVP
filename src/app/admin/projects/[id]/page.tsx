@@ -56,6 +56,7 @@ export default function ProjectPage() {
   const [loading, setLoading] = useState(true)
   const [shareUrl, setShareUrl] = useState('')
   const [companyName, setCompanyName] = useState('Studio')
+  const [transcriptionEnabled, setTranscriptionEnabled] = useState(false)
   const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [albumSummary, setAlbumSummary] = useState<{ albumCount: number; photoCount: number }>({ albumCount: 0, photoCount: 0 })
   const [adminUser, setAdminUser] = useState<any>(null)
@@ -418,6 +419,7 @@ export default function ProjectPage() {
         if (response.ok) {
           const data = await response.json()
           setCompanyName(data.companyName || 'Studio')
+          setTranscriptionEnabled(data.transcriptionEnabled === true)
         }
       } catch (error) {
         console.error('Error fetching company name:', error)
@@ -870,6 +872,7 @@ export default function ProjectPage() {
                   restrictToLatestVersion={project.restrictCommentsToLatestVersion}
                   companyName={companyName}
                   canFullControl={canDeleteInternalFiles}
+                  transcriptionEnabled={transcriptionEnabled}
                   onVideoSelect={handleVideoSelect}
                   onRefresh={() => {
                     bumpProjectStorageRefresh()

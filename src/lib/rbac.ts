@@ -1,6 +1,6 @@
 import type { ProjectStatus } from '@/lib/project-status'
 
-export type MenuKey = 'projects' | 'sharePage' | 'clients' | 'sales' | 'accounting' | 'settings' | 'users' | 'security' | 'analytics'
+export type MenuKey = 'projects' | 'sharePage' | 'clients' | 'sales' | 'accounting' | 'assistant' | 'settings' | 'users' | 'security' | 'analytics'
 
 export type ActionKey =
   | 'projectsPhotoVideoUploads'
@@ -39,7 +39,7 @@ export interface RolePermissions {
   actions: Record<ActionKey, boolean>
 }
 
-const ALL_MENUS: MenuKey[] = ['projects', 'sharePage', 'clients', 'sales', 'accounting', 'settings', 'users', 'security', 'analytics']
+const ALL_MENUS: MenuKey[] = ['projects', 'sharePage', 'clients', 'sales', 'accounting', 'assistant', 'settings', 'users', 'security', 'analytics']
 const ALL_ACTIONS: ActionKey[] = [
   'projectsPhotoVideoUploads',
   'projectsFullControl',
@@ -81,6 +81,7 @@ const FALLBACK_ACTIONS_BY_MENU: Record<MenuKey, ActionKey[]> = {
   clients: ['manageClients', 'manageClientFiles'],
   sales: [],
   accounting: [],
+  assistant: [],
   settings: ['changeSettings', 'sendTestEmail'],
   users: ['manageUsers', 'manageRoles'],
   security: ['viewSecurityEvents', 'manageSecurityEvents', 'viewSecurityBlocklists', 'manageSecurityBlocklists', 'viewSecurityRateLimits', 'manageSecurityRateLimits'],
@@ -231,6 +232,6 @@ export function adminAllPermissions(): RolePermissions {
   const p = defaultRolePermissions()
   for (const key of ALL_MENUS) p.menuVisibility[key] = true
   for (const key of ALL_ACTIONS) p.actions[key] = true
-  p.projectVisibility.statuses = ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED']
+  p.projectVisibility.statuses = ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'ON_HOLD', 'APPROVED', 'CLOSED']
   return p
 }

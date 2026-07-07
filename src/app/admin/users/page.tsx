@@ -78,6 +78,11 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     actions: [],
   },
   {
+    key: 'assistant',
+    label: 'AI Assistant',
+    actions: [],
+  },
+  {
     key: 'settings',
     label: 'Settings',
     actions: [],
@@ -661,7 +666,7 @@ export default function UsersPage() {
                   {(
                     [
                       ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED'],
-                      ['SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED'],
+                      ['ON_HOLD', 'APPROVED', 'CLOSED'],
                     ] as ProjectStatus[][]
                   ).map((row) => (
                     <div key={row.join('|')} className="flex items-center justify-center gap-2">

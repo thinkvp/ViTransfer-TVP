@@ -861,6 +861,43 @@ export async function getVideosWithCustomThumbnail(videoIds: string[]): Promise<
 }
 
 /**
+ * Every FileRole a video-delivery route may serve or gate on for a VIDEO entity.
+ *
+ * Delivery routes (token minting, /api/content streaming, share/guest pages) must
+ * query with an explicit role whitelist rather than fetching all roles for the
+ * entity: rows can carry roles added by a newer schema (written by a newer worker
+ * or dev server against the shared DB), and a running build whose Prisma client
+ * predates that enum value throws P2023 deserializing them — taking down playback
+ * for the whole video. App and worker deploy independently (VPS app / NAS worker),
+ * so this writer-newer-than-reader skew is a real production topology, not just a
+ * dev concern.
+ */
+export const VIDEO_DELIVERY_ROLES: FileRole[] = [
+  'ORIGINAL',
+  'PREVIEW_480',
+  'PREVIEW_720',
+  'PREVIEW_1080',
+  'THUMBNAIL',
+  'TIMELINE_VTT',
+  'TIMELINE_SPRITES',
+  'SUBTITLES_VTT',
+  'WAVEFORM_PEAKS',
+  'HLS_PLAYLIST',
+  'HLS_SEGMENTS',
+]
+
+/** Same as {@link VIDEO_DELIVERY_ROLES}, for VIDEO_ASSET entities. */
+export const ASSET_DELIVERY_ROLES: FileRole[] = [
+  'ORIGINAL',
+  'PREVIEW_MP4',
+  'PREVIEW_IMAGE',
+  'TIMELINE_VTT',
+  'TIMELINE_SPRITES',
+  'HLS_PLAYLIST',
+  'HLS_SEGMENTS',
+]
+
+/**
  * Get StoredFile records for a set of entities, with configurable select.
  * Used by API routes that need file metadata (fileSize, fileName, etc.)
  * for multiple entities at once.

@@ -199,7 +199,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, name, versionLabel, videoNotes, allowApproval, confirmed } = body
+    const { approved, name, versionLabel, videoNotes, allowApproval, autoGenerateSubtitles, confirmed } = body
 
     // Validate inputs
     if (approved !== undefined && typeof approved !== 'boolean') {
@@ -237,6 +237,13 @@ export async function PATCH(
       )
     }
 
+    if (autoGenerateSubtitles !== undefined && typeof autoGenerateSubtitles !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid request: autoGenerateSubtitles must be a boolean' },
+        { status: 400 }
+      )
+    }
+
     if (typeof videoNotes === 'string' && videoNotes.trim().length > 500) {
       return NextResponse.json(
         { error: 'Invalid request: videoNotes must be 500 characters or fewer' },
@@ -245,7 +252,7 @@ export async function PATCH(
     }
 
     // At least one field must be provided
-    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined) {
+    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined && autoGenerateSubtitles === undefined) {
       return NextResponse.json(
         { error: 'Invalid request: at least one field must be provided' },
         { status: 400 }
@@ -279,7 +286,7 @@ export async function PATCH(
     }
 
     // RBAC: conservative - any admin-side mutation requires Projects Full Control.
-    if (approved !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined) {
+    if (approved !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined || autoGenerateSubtitles !== undefined) {
       const forbidden = requireActionAccess(authResult, 'projectsFullControl')
       if (forbidden) return forbidden
     }
@@ -333,6 +340,26 @@ export async function PATCH(
     if (approved !== undefined) {
       updateData.approved = approved
       updateData.approvedAt = approved ? new Date() : null
+      if (approved) {
+        updateData.approvedById = admin.id
+        updateData.approvedByRecipientId = null
+        updateData.approvedByName = admin.name || admin.email
+      } else if (video.approved) {
+        updateData.unapprovedAt = new Date()
+        updateData.unapprovedById = admin.id
+        updateData.unapprovedByRecipientId = null
+        updateData.unapprovedByName = admin.name || admin.email
+      }
+    }
+
+    // Attribution stamped onto sibling versions that get auto-unapproved when this one is approved.
+    const siblingUnapproveData = {
+      approved: false,
+      approvedAt: null,
+      unapprovedAt: new Date(),
+      unapprovedById: admin.id,
+      unapprovedByRecipientId: null,
+      unapprovedByName: admin.name || admin.email,
     }
 
     if (name !== undefined) {
@@ -455,6 +482,10 @@ export async function PATCH(
       updateData.allowApproval = allowApproval
     }
 
+    if (autoGenerateSubtitles !== undefined) {
+      updateData.autoGenerateSubtitles = autoGenerateSubtitles
+    }
+
     if (videoRenamePlan) {
       const siblingFolderByVideoId = new Map(
         videoRenamePlan.siblingVideos.map((row) => [row.id, row.storageFolderName || row.name] as const)
@@ -483,7 +514,11 @@ export async function PATCH(
                 : {
                     name: updateData.name,
                     storageFolderName: videoRenamePlan.newVideoFolderName,
-                    ...(approved ? { approved: false, approvedAt: null } : {}),
+                    ...(approved
+                      ? autoUnapprovedIds.includes(siblingVideo.id)
+                        ? siblingUnapproveData
+                        : { approved: false, approvedAt: null }
+                      : {}),
                   },
           })
         }
@@ -529,9 +564,14 @@ export async function PATCH(
             where: {
               projectId: video.projectId,
               name: video.name,
-              id: { not: id },
+              id: { not: id, notIn: autoUnapprovedIds },
             },
             data: { approved: false, approvedAt: null },
+          }),
+          // Previously-approved siblings get full unapproval attribution.
+          prisma.video.updateMany({
+            where: { id: { in: autoUnapprovedIds } },
+            data: siblingUnapproveData,
           }),
           prisma.video.update({ where: { id }, data: updateData }),
         ])

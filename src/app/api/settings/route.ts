@@ -94,6 +94,17 @@ export async function GET(request: NextRequest) {
     const decryptedSettings = {
       ...settingsForClient,
       smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
+      aiAnthropicApiKey: settings.aiAnthropicApiKey ? decrypt(settings.aiAnthropicApiKey) : null,
+      aiOpenaiApiKey: settings.aiOpenaiApiKey ? decrypt(settings.aiOpenaiApiKey) : null,
+      transcriptionOpenaiApiKey: settings.transcriptionOpenaiApiKey ? decrypt(settings.transcriptionOpenaiApiKey) : null,
+      aiPortfolio: (() => {
+        try {
+          const arr = JSON.parse(settings.aiPortfolioJson || '[]')
+          return Array.isArray(arr) ? arr : []
+        } catch {
+          return []
+        }
+      })(),
     }
 
     const smtpConfigured = !!(
@@ -201,7 +212,151 @@ export async function PATCH(request: NextRequest) {
       emailHeaderTextMode,
       s3LocalBackupEnabled,
       s3LocalBackupCategories,
+      aiProvider,
+      aiOllamaUrl,
+      aiOllamaModel,
+      aiAnthropicModel,
+      aiAnthropicApiKey,
+      aiOpenaiModel,
+      aiOpenaiApiKey,
+      aiReplyDraftsEnabled,
+      aiReplySignature,
+      aiInstructions,
+      aiPortfolio,
+      transcriptionEnabled,
+      transcriptionProvider,
+      transcriptionWhisperUrl,
+      transcriptionWhisperModel,
+      transcriptionOpenaiApiKey,
+      transcriptionOpenaiModel,
+      transcriptionLanguage,
+      transcriptionMaxCharsPerLine,
+      transcriptionMaxLines,
     } = body
+
+    // SECURITY: Validate AI assistant settings
+    if (aiProvider !== undefined && aiProvider !== null) {
+      const validProviders = ['NONE', 'OLLAMA', 'ANTHROPIC', 'OPENAI']
+      if (!validProviders.includes(aiProvider)) {
+        return NextResponse.json(
+          { error: 'Invalid aiProvider. Must be NONE, OLLAMA, ANTHROPIC, or OPENAI.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (transcriptionProvider !== undefined && transcriptionProvider !== null) {
+      if (!['LOCAL', 'OPENAI'].includes(transcriptionProvider)) {
+        return NextResponse.json(
+          { error: 'Invalid transcriptionProvider. Must be LOCAL or OPENAI.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    for (const [field, value] of [
+      ['transcriptionMaxCharsPerLine', transcriptionMaxCharsPerLine],
+      ['transcriptionMaxLines', transcriptionMaxLines],
+    ] as const) {
+      if (value !== undefined && value !== null) {
+        if (!Number.isInteger(value) || value < 0 || value > 200) {
+          return NextResponse.json(
+            { error: `Invalid ${field}. Must be an integer between 0 and 200.` },
+            { status: 400 }
+          )
+        }
+      }
+    }
+
+    if (aiOllamaUrl !== undefined && aiOllamaUrl !== null && aiOllamaUrl !== '') {
+      const trimmedOllamaUrl = typeof aiOllamaUrl === 'string' ? aiOllamaUrl.trim() : ''
+      let ollamaUrlValid = false
+      try {
+        const parsedUrl = new URL(trimmedOllamaUrl)
+        ollamaUrlValid = parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:'
+      } catch {
+        ollamaUrlValid = false
+      }
+      if (!ollamaUrlValid) {
+        return NextResponse.json(
+          { error: 'Invalid aiOllamaUrl. Must be an http(s) URL, e.g. http://127.0.0.1:11434.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // SECURITY: Validate Whisper transcription settings
+    if (transcriptionEnabled !== undefined && typeof transcriptionEnabled !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid value for transcriptionEnabled. Must be a boolean.' },
+        { status: 400 }
+      )
+    }
+
+    if (transcriptionWhisperUrl !== undefined && transcriptionWhisperUrl !== null && transcriptionWhisperUrl !== '') {
+      const trimmedWhisperUrl = typeof transcriptionWhisperUrl === 'string' ? transcriptionWhisperUrl.trim() : ''
+      let whisperUrlValid = false
+      try {
+        const parsedUrl = new URL(trimmedWhisperUrl)
+        whisperUrlValid = (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') && trimmedWhisperUrl.length <= 500
+      } catch {
+        whisperUrlValid = false
+      }
+      if (!whisperUrlValid) {
+        return NextResponse.json(
+          { error: 'Invalid transcriptionWhisperUrl. Must be an http(s) URL, e.g. http://127.0.0.1:8000.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (transcriptionWhisperModel !== undefined && transcriptionWhisperModel !== null && typeof transcriptionWhisperModel !== 'string') {
+      return NextResponse.json(
+        { error: 'Invalid transcriptionWhisperModel. Must be a string.' },
+        { status: 400 }
+      )
+    }
+
+    if (transcriptionLanguage !== undefined && transcriptionLanguage !== null) {
+      if (typeof transcriptionLanguage !== 'string' || transcriptionLanguage.trim().length > 10) {
+        return NextResponse.json(
+          { error: 'Invalid transcriptionLanguage. Must be a short language code like "en", or empty for autodetect.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    // Validate + normalize the AI portfolio library (array of {id,title,url,description})
+    let aiPortfolioJson: string | undefined
+    if (aiPortfolio !== undefined) {
+      if (!Array.isArray(aiPortfolio)) {
+        return NextResponse.json({ error: 'aiPortfolio must be an array.' }, { status: 400 })
+      }
+      if (aiPortfolio.length > 200) {
+        return NextResponse.json({ error: 'Too many portfolio items (max 200).' }, { status: 400 })
+      }
+      const normalized = []
+      for (const raw of aiPortfolio) {
+        const title = typeof raw?.title === 'string' ? raw.title.trim() : ''
+        const url = typeof raw?.url === 'string' ? raw.url.trim() : ''
+        if (!title || !url) continue // drop incomplete rows
+        try {
+          const u = new URL(url)
+          if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+            return NextResponse.json({ error: `Portfolio URL must be http(s): "${url}"` }, { status: 400 })
+          }
+        } catch {
+          return NextResponse.json({ error: `Invalid portfolio URL: "${url}"` }, { status: 400 })
+        }
+        normalized.push({
+          id: typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : `pf-${normalized.length + 1}`,
+          title: title.slice(0, 300),
+          url: url.slice(0, 2000),
+          description: typeof raw?.description === 'string' ? raw.description.trim().slice(0, 500) : '',
+        })
+      }
+      aiPortfolioJson = JSON.stringify(normalized)
+    }
 
     // SECURITY: Validate auto-close settings
     if (autoCloseApprovedProjectsEnabled !== undefined && typeof autoCloseApprovedProjectsEnabled !== 'boolean') {
@@ -413,6 +568,45 @@ export async function PATCH(request: NextRequest) {
       passwordUpdate = undefined
     }
 
+    // Handle AI API key update - only update if actually changed (mirrors smtpPassword)
+    let aiApiKeyUpdate: string | null | undefined
+    if (aiAnthropicApiKey !== undefined) {
+      const currentAiSettings = await prisma.settings.findUnique({
+        where: { id: 'default' },
+        select: { aiAnthropicApiKey: true },
+      })
+      const currentAiKey = currentAiSettings?.aiAnthropicApiKey ? decrypt(currentAiSettings.aiAnthropicApiKey) : null
+
+      if (aiAnthropicApiKey === null || aiAnthropicApiKey === '') {
+        aiApiKeyUpdate = currentAiKey !== null ? null : undefined
+      } else if (aiAnthropicApiKey !== currentAiKey) {
+        aiApiKeyUpdate = encrypt(aiAnthropicApiKey)
+      } else {
+        aiApiKeyUpdate = undefined
+      }
+    } else {
+      aiApiKeyUpdate = undefined
+    }
+
+    // Same "encrypt only if changed" logic for the two OpenAI keys (assistant + transcription)
+    async function resolveEncryptedKeyUpdate(
+      incoming: unknown,
+      column: 'aiOpenaiApiKey' | 'transcriptionOpenaiApiKey',
+    ): Promise<string | null | undefined> {
+      if (incoming === undefined) return undefined
+      const current = await prisma.settings.findUnique({
+        where: { id: 'default' },
+        select: { [column]: true } as Record<string, true>,
+      })
+      const stored = (current as Record<string, string | null> | null)?.[column] ?? null
+      const currentKey = stored ? decrypt(stored) : null
+      if (incoming === null || incoming === '') return currentKey !== null ? null : undefined
+      if (typeof incoming === 'string' && incoming !== currentKey) return encrypt(incoming)
+      return undefined
+    }
+    const aiOpenaiApiKeyUpdate = await resolveEncryptedKeyUpdate(aiOpenaiApiKey, 'aiOpenaiApiKey')
+    const transcriptionOpenaiApiKeyUpdate = await resolveEncryptedKeyUpdate(transcriptionOpenaiApiKey, 'transcriptionOpenaiApiKey')
+
     // Build update data (only include password if it should be updated)
     const updateData: any = {
       companyName,
@@ -470,11 +664,39 @@ export async function PATCH(request: NextRequest) {
       emailHeaderTextMode: emailHeaderTextMode === 'LIGHT' || emailHeaderTextMode === 'DARK' ? emailHeaderTextMode : undefined,
       s3LocalBackupEnabled: typeof s3LocalBackupEnabled === 'boolean' ? s3LocalBackupEnabled : undefined,
       s3LocalBackupCategories: Array.isArray(s3LocalBackupCategories) ? JSON.stringify(s3LocalBackupCategories) : undefined,
+      aiProvider,
+      aiOllamaUrl: typeof aiOllamaUrl === 'string' ? (aiOllamaUrl.trim() || null) : aiOllamaUrl,
+      aiOllamaModel: typeof aiOllamaModel === 'string' ? (aiOllamaModel.trim() || null) : aiOllamaModel,
+      aiAnthropicModel: typeof aiAnthropicModel === 'string' ? (aiAnthropicModel.trim() || null) : aiAnthropicModel,
+      aiOpenaiModel: typeof aiOpenaiModel === 'string' ? (aiOpenaiModel.trim() || null) : aiOpenaiModel,
+      aiReplyDraftsEnabled: typeof aiReplyDraftsEnabled === 'boolean' ? aiReplyDraftsEnabled : undefined,
+      aiReplySignature: typeof aiReplySignature === 'string' ? (aiReplySignature.trim() || null) : aiReplySignature,
+      aiInstructions: typeof aiInstructions === 'string' ? (aiInstructions.trim() || null) : aiInstructions,
+      aiPortfolioJson,
+      transcriptionEnabled: typeof transcriptionEnabled === 'boolean' ? transcriptionEnabled : undefined,
+      transcriptionProvider: transcriptionProvider === 'LOCAL' || transcriptionProvider === 'OPENAI' ? transcriptionProvider : undefined,
+      transcriptionWhisperUrl: typeof transcriptionWhisperUrl === 'string' ? (transcriptionWhisperUrl.trim() || null) : transcriptionWhisperUrl,
+      transcriptionWhisperModel: typeof transcriptionWhisperModel === 'string' ? (transcriptionWhisperModel.trim().slice(0, 200) || null) : transcriptionWhisperModel,
+      transcriptionOpenaiModel: typeof transcriptionOpenaiModel === 'string' ? (transcriptionOpenaiModel.trim().slice(0, 100) || null) : transcriptionOpenaiModel,
+      transcriptionLanguage: typeof transcriptionLanguage === 'string' ? (transcriptionLanguage.trim() || null) : transcriptionLanguage,
+      transcriptionMaxCharsPerLine: Number.isInteger(transcriptionMaxCharsPerLine) ? transcriptionMaxCharsPerLine : undefined,
+      transcriptionMaxLines: Number.isInteger(transcriptionMaxLines) ? transcriptionMaxLines : undefined,
     }
 
     // Only update password if it's not the placeholder
     if (passwordUpdate !== undefined) {
       updateData.smtpPassword = passwordUpdate
+    }
+
+    // Only update the AI API keys if they actually changed
+    if (aiApiKeyUpdate !== undefined) {
+      updateData.aiAnthropicApiKey = aiApiKeyUpdate
+    }
+    if (aiOpenaiApiKeyUpdate !== undefined) {
+      updateData.aiOpenaiApiKey = aiOpenaiApiKeyUpdate
+    }
+    if (transcriptionOpenaiApiKeyUpdate !== undefined) {
+      updateData.transcriptionOpenaiApiKey = transcriptionOpenaiApiKeyUpdate
     }
 
     // Update or create the settings
@@ -531,6 +753,17 @@ export async function PATCH(request: NextRequest) {
     const decryptedSettings = {
       ...settingsForClient2,
       smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
+      aiAnthropicApiKey: settings.aiAnthropicApiKey ? decrypt(settings.aiAnthropicApiKey) : null,
+      aiOpenaiApiKey: settings.aiOpenaiApiKey ? decrypt(settings.aiOpenaiApiKey) : null,
+      transcriptionOpenaiApiKey: settings.transcriptionOpenaiApiKey ? decrypt(settings.transcriptionOpenaiApiKey) : null,
+      aiPortfolio: (() => {
+        try {
+          const arr = JSON.parse(settings.aiPortfolioJson || '[]')
+          return Array.isArray(arr) ? arr : []
+        } catch {
+          return []
+        }
+      })(),
     }
 
     const response = NextResponse.json(decryptedSettings)

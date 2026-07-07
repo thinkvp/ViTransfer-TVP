@@ -4,7 +4,7 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireAnyActionAccess } from '@/lib/rbac-api'
-import { getStoredFileRecords } from '@/lib/stored-file'
+import { getStoredFileRecords, VIDEO_DELIVERY_ROLES } from '@/lib/stored-file'
 import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 
 export const runtime = 'nodejs'
@@ -31,6 +31,10 @@ function canIssueAdminVideoToken(storedRoles: Set<string>, quality: string): boo
       return storedRoles.has('TIMELINE_VTT')
     case 'timeline-sprite':
       return storedRoles.has('TIMELINE_SPRITES')
+    case 'subtitles-vtt':
+      return storedRoles.has('SUBTITLES_VTT')
+    case 'waveform-peaks':
+      return storedRoles.has('WAVEFORM_PEAKS')
     case 'original':
     case 'download':
       return canUseOriginal
@@ -108,6 +112,7 @@ export async function POST(request: NextRequest) {
 
   // Resolve available file roles (and thumbnail storage paths) for every video in one query.
   const storedFiles = await getStoredFileRecords('VIDEO', videoIds, {
+    fileRoles: VIDEO_DELIVERY_ROLES,
     select: { entityId: true, fileRole: true, storagePath: true },
   })
   const rolesByVideoId = new Map<string, Set<string>>()

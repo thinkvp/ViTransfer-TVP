@@ -204,7 +204,7 @@ export async function POST(
       const isVideo = String(file.fileType || '').toLowerCase().startsWith('video/')
       const originalPath = await getStoredFilePathForProject('SHARE_UPLOAD_FILE', file.id, 'ORIGINAL', projectId) || ''
       await prisma.shareUploadFile.update({ where: { id: file.id }, data: { previewStatus: 'PENDING', previewError: null, previewGeneratedAt: null, previewAttempts: 0, previewQueuedAt: null, ...(isVideo ? { timelinePreviewsReady: false } : {}) } })
-      await shareUploadPreviewQueue.remove(`share-preview:shareUploadFile:${file.id}`).catch(() => {})
+      await shareUploadPreviewQueue.remove(`share-preview-shareUploadFile-${file.id}`).catch(() => {})
       await enqueueShareUploadPreview({ type: 'shareUploadFile', recordId: file.id, storagePath: originalPath, fileType: file.fileType, fileName: file.fileName, durationSeconds: file.mediaDurationSeconds })
       queuedUploadPreviewJobs++
       if (isVideo) { await uploadTimelineQueue.add('process-upload-timeline', { uploadFileId: file.id, projectId, storagePath: originalPath, durationSeconds: typeof file.mediaDurationSeconds === 'number' ? file.mediaDurationSeconds : 0, width: 0, height: 0 }); queuedUploadTimelineJobs++ }
@@ -217,7 +217,7 @@ export async function POST(
       const isVideo = String(asset.fileType || '').toLowerCase().startsWith('video/')
       const originalPath = await getStoredFilePathForProject('VIDEO_ASSET', asset.id, 'ORIGINAL', projectId) || ''
       await prisma.videoAsset.update({ where: { id: asset.id }, data: { previewStatus: 'PENDING', previewError: null, previewGeneratedAt: null, previewAttempts: 0, previewQueuedAt: null, ...(isVideo ? { timelinePreviewsReady: false } : {}) } })
-      await shareUploadPreviewQueue.remove(`share-preview:videoAsset:${asset.id}`).catch(() => {})
+      await shareUploadPreviewQueue.remove(`share-preview-videoAsset-${asset.id}`).catch(() => {})
       await enqueueShareUploadPreview({ type: 'videoAsset', recordId: asset.id, storagePath: originalPath, fileType: asset.fileType, fileName: asset.fileName })
       queuedVideoAssetPreviewJobs++
       if (isVideo) { await assetTimelineQueue.add('process-asset-timeline', { assetId: asset.id, videoId: asset.videoId, projectId, storagePath: originalPath, durationSeconds: 0, width: 0, height: 0 }); queuedAssetTimelineJobs++ }

@@ -272,7 +272,11 @@ export async function computeProjectPreviewBytes(
   // Collect all preview file paths for the project in one query via the denormalized
   // projectId (covers VIDEO, VIDEO_ASSET and SHARE_UPLOAD_FILE preview derivatives).
   const previewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL',
-    'TIMELINE_VTT', 'TIMELINE_SPRITES', 'PREVIEW_IMAGE', 'PREVIEW_MP4', 'HLS_SEGMENTS']
+    'TIMELINE_VTT', 'TIMELINE_SPRITES', 'PREVIEW_IMAGE', 'PREVIEW_MP4', 'HLS_SEGMENTS',
+    // Subtitle playback VTT + waveform peaks + cached transcription audio are
+    // ID-keyed derived artifacts under the previews tree (local mode counts them
+    // via the directory walk above).
+    'SUBTITLES_VTT', 'WAVEFORM_PEAKS', 'TRANSCRIPTION_AUDIO']
   // Directory-style roles whose storagePath is a prefix to sum, not a single object.
   // HLS_SEGMENTS covers the whole hls/ tree (variant playlists + init + segments AND the
   // master.m3u8), so HLS_PLAYLIST is deliberately omitted to avoid double-counting it.

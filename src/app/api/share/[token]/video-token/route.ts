@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getShareContext } from '@/lib/auth'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
-import { getStoredFileRecords } from '@/lib/stored-file'
+import { getStoredFileRecords, VIDEO_DELIVERY_ROLES } from '@/lib/stored-file'
 import { getDirectStreamUrl, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
@@ -36,6 +36,14 @@ function canIssueShareVideoToken(
       return storedRoles.has('TIMELINE_VTT')
     case 'timeline-sprite':
       return storedRoles.has('TIMELINE_SPRITES')
+    // Captions are needed while reviewing, so like timeline previews they are
+    // NOT approval-gated (the SRT asset download stays approval-gated).
+    case 'subtitles-vtt':
+      return storedRoles.has('SUBTITLES_VTT')
+    // Waveform peaks back the subtitle editor's timeline strip — edit-time
+    // artifact, NOT approval-gated (same rationale as subtitles-vtt).
+    case 'waveform-peaks':
+      return storedRoles.has('WAVEFORM_PEAKS')
     case 'original':
     case 'download':
       return canUseOriginal && storedRoles.has('ORIGINAL')
@@ -100,6 +108,7 @@ export async function GET(
     // Resolve available file roles + paths from StoredFile registry. Roles gate which
     // qualities may be issued; paths let us mint a direct-to-R2 stream URL (Option B).
     const storedFiles = await getStoredFileRecords('VIDEO', [videoId], {
+      fileRoles: VIDEO_DELIVERY_ROLES,
       select: { fileRole: true, storagePath: true },
     })
     storedRoles = new Set(storedFiles.map(f => f.fileRole))

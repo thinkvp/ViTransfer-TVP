@@ -73,7 +73,7 @@ const updateProjectSchema = z.object({
   slug: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
   clientId: z.string().regex(/^c[a-z0-9]{24}$/).optional(),
-  status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'SHARE_ONLY', 'ON_HOLD', 'APPROVED', 'CLOSED']).optional(),
+  status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'ON_HOLD', 'APPROVED', 'CLOSED']).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),
   hideFeedback: z.boolean().optional(),
   useFullTimecode: z.boolean().optional(),
@@ -312,7 +312,7 @@ export async function GET(
       videos: await Promise.all(project.videos.map(async (video: any) => {
         const [origFile, previews] = await Promise.all([
           getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['ORIGINAL'], select: { fileSize: true, fileName: true } }).then(r => r[0] ?? null),
-          getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL'], select: { fileRole: true } }),
+          getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL', 'SUBTITLES_VTT', 'WAVEFORM_PEAKS'], select: { fileRole: true } }),
         ])
         const previewSet = new Set(previews.map(p => p.fileRole))
         return {
@@ -325,6 +325,8 @@ export async function GET(
           preview720Path: previewSet.has('PREVIEW_720'),
           preview1080Path: previewSet.has('PREVIEW_1080'),
           originalStoragePath: previewSet.has('ORIGINAL'),   // boolean for admin share page
+          hasSubtitles: previewSet.has('SUBTITLES_VTT'),
+          hasWaveformPeaks: previewSet.has('WAVEFORM_PEAKS'),
         }
       })),
       comments: sanitizedComments,

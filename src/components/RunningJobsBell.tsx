@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import {
   Activity,
   AlertTriangle,
+  Captions,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -39,6 +40,7 @@ import {
   type FolderRenameJob,
   type VideoAssetPreviewJob,
   type AlbumSocialJob,
+  type SubtitleJob,
   type ClearRunningJobTarget,
 } from '@/components/UploadManagerProvider'
 import { useRouter } from 'next/navigation'
@@ -84,6 +86,7 @@ type JobKind =
   | 'rename'
   | 'asset-preview'
   | 'social'
+  | 'subtitle'
   | 'system'
 
 type JobStatus = 'queued' | 'active' | 'done' | 'failed'
@@ -134,6 +137,7 @@ const KIND_ICON: Record<JobKind, React.ComponentType<{ className?: string }>> = 
   'rename': FolderSync,
   'asset-preview': Film,
   'social': Share2,
+  'subtitle': Captions,
   'system': Wrench,
 }
 
@@ -147,6 +151,7 @@ const KIND_LABEL: Record<JobKind, string> = {
   'rename': 'Rename',
   'asset-preview': 'Preview',
   'social': 'Social',
+  'subtitle': 'Subtitles',
   'system': 'System',
 }
 
@@ -745,6 +750,30 @@ function normalizeAlbumSocial(job: AlbumSocialJob): UnifiedJob {
   }
 }
 
+function normalizeSubtitle(job: SubtitleJob): UnifiedJob {
+  const isActive = job.status === 'active'
+  return {
+    key: `subtitle:${job.id}`,
+    itemCount: 1,
+    kind: 'subtitle',
+    projectId: job.projectId,
+    projectName: job.projectName,
+    label: job.videoName,
+    sublabel: job.versionLabel || undefined,
+    detail: job.projectName,
+    status: isActive ? 'active' : 'queued',
+    progress: 0,
+    // Whisper is a single opaque call — no progress %, so show a spinner/shimmer.
+    indeterminate: isActive,
+    statusLine: isActive ? 'Generating subtitles…' : 'Queued for subtitles…',
+    completedAt: 0,
+    canClear: false,
+    canDismiss: false,
+    canPause: false,
+    canResume: false,
+  }
+}
+
 function normalizeCompletedServerJob(
   job: CompletedServerJob,
   onDismiss: (id: string) => void,
@@ -757,6 +786,7 @@ function normalizeCompletedServerJob(
     : job.type === 'albumThumbnail' ? 'Thumbnails complete'
     : job.type === 'videoAssetPreview' ? 'Uploads complete'
     : job.type === 'albumSocial' ? 'Social copies complete'
+    : job.type === 'subtitle' ? 'Subtitles complete'
     : job.type === 'system' ? 'Background job complete'
     : 'Folder rename complete'
 
@@ -766,6 +796,7 @@ function normalizeCompletedServerJob(
     : job.type === 'albumThumbnail' ? 'Thumbnails failed'
     : job.type === 'videoAssetPreview' ? 'Uploads failed'
     : job.type === 'albumSocial' ? 'Social copies failed'
+    : job.type === 'subtitle' ? 'Subtitles failed'
     : job.type === 'system' ? 'Background job failed'
     : 'Folder rename failed'
 
@@ -775,6 +806,7 @@ function normalizeCompletedServerJob(
     : job.type === 'albumThumbnail' ? 'thumbnail'
     : job.type === 'videoAssetPreview' ? 'upload'
     : job.type === 'albumSocial' ? 'social'
+    : job.type === 'subtitle' ? 'subtitle'
     : job.type === 'system' ? 'system'
     : 'rename'
 
@@ -826,6 +858,7 @@ const KIND_NOUN: Record<JobKind, [singular: string, plural: string]> = {
   'rename': ['rename', 'renames'],
   'asset-preview': ['preview', 'previews'],
   'social': ['social copy', 'social copies'],
+  'subtitle': ['subtitle job', 'subtitle jobs'],
   'system': ['system job', 'system jobs'],
 }
 
@@ -1141,6 +1174,7 @@ export default function RunningJobsBell() {
     folderRenameJobs,
     videoAssetPreviewJobs,
     albumSocialJobs,
+    subtitleJobs,
     completedServerJobs,
     totalActiveCount,
     totalActiveItems,
@@ -1236,6 +1270,10 @@ export default function RunningJobsBell() {
       jobs.push(normalizeAlbumSocial(s))
     }
 
+    for (const s of subtitleJobs) {
+      jobs.push(normalizeSubtitle(s))
+    }
+
     for (const c of completedServerJobs) {
       jobs.push(normalizeCompletedServerJob(c, dismissCompletedJob))
     }
@@ -1243,7 +1281,7 @@ export default function RunningJobsBell() {
     return jobs
   }, [
     uploads, processingJobs, albumZipJobs, albumThumbnailJobs, folderRenameJobs,
-    videoAssetPreviewJobs, albumSocialJobs, completedServerJobs,
+    videoAssetPreviewJobs, albumSocialJobs, subtitleJobs, completedServerJobs,
     cancelUpload, pauseUpload, resumeUpload, dismissUpload, dismissCompletedJob, handleClearJob,
   ])
 

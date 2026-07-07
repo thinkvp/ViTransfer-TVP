@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/components/AuthProvider'
 import { Button } from '@/components/ui/button'
-import { LogOut, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2, Car } from 'lucide-react'
+import { LogOut, Settings, Users, FolderKanban, Shield, Building2, DollarSign, Menu, ChevronDown, ChevronRight, LayoutDashboard, FileText, Receipt, CreditCard, Eye, EyeOff, BookOpen, Landmark, ListOrdered, BarChart2, Car, Sparkles } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import NotificationsBell from '@/components/NotificationsBell'
@@ -199,6 +199,7 @@ export default function AdminHeader() {
     canSeeMenu(permissions, 'clients') ? { href: '/admin/clients', label: 'Clients', icon: Building2 } : null,
     canSeeMenu(permissions, 'sales') ? { href: '/admin/sales', label: 'Sales', icon: DollarSign } : null,
     canSeeMenu(permissions, 'accounting') ? { href: '/admin/accounting', label: 'Accounting', icon: BookOpen } : null,
+    canSeeMenu(permissions, 'assistant') ? { href: '/admin/assistant', label: 'Assistant', icon: Sparkles } : null,
     canSeeMenu(permissions, 'settings') ? { href: '/admin/settings', label: 'Settings', icon: Settings } : null,
     canSeeMenu(permissions, 'users') ? { href: '/admin/users', label: 'Users', icon: Users } : null,
   ].filter(Boolean) as Array<{ href: string; label: string; icon: any }>

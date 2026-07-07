@@ -106,7 +106,7 @@ const PROJECT_TITLES = [
 // 12 open projects with varying statuses, 8 closed
 const OPEN_STATUSES: ProjectStatus[] = [
   'NOT_STARTED', 'IN_PROGRESS', 'IN_PROGRESS', 'IN_REVIEW', 'IN_REVIEW',
-  'IN_REVIEW', 'ON_HOLD', 'REVIEWED', 'IN_PROGRESS', 'SHARE_ONLY',
+  'IN_REVIEW', 'ON_HOLD', 'REVIEWED', 'IN_PROGRESS', 'IN_REVIEW',
   'NOT_STARTED', 'IN_PROGRESS',
 ]
 const CLOSED_STATUSES: ProjectStatus[] = [
@@ -166,7 +166,7 @@ async function main() {
       accounting: false, settings: false, users: false, security: false, analytics: false,
     },
     projectVisibility: {
-      statuses: ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD', 'REVIEWED', 'APPROVED', 'CLOSED', 'SHARE_ONLY'],
+      statuses: ['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'ON_HOLD', 'REVIEWED', 'APPROVED', 'CLOSED'],
     },
     actions: {
       projectsPhotoVideoUploads: true,

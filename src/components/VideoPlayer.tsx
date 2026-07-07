@@ -5,8 +5,9 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import Hls from 'hls.js'
 import Image from 'next/image'
 import type { Video } from '@/types/video'
+import { parseSrt } from '@/lib/subtitles'
 // Avoid importing Prisma runtime types in client components.
-type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'SHARE_ONLY' | 'APPROVED' | 'CLOSED'
+type ProjectStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'IN_REVIEW' | 'REVIEWED' | 'ON_HOLD' | 'APPROVED' | 'CLOSED'
 import { Button } from './ui/button'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings, Loader2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
@@ -134,6 +135,20 @@ interface VideoPlayerProps {
   // expired stream token). The parent can re-mint tokens and feed back fresh URLs.
   // Fired at most once per failed source until a subsequent load succeeds.
   onStreamError?: (videoId: string) => void
+
+  // Optional: when provided, the CC menu shows an "Edit" item that asks the
+  // parent page to enter subtitle edit mode (panel swap + timeline strip).
+  // Availability is declarative — pages that don't support the editor (guest
+  // video links, hidden-feedback layouts) simply don't pass it. When already in
+  // edit mode, invoking it again is treated as a request to close (the page runs
+  // the unsaved-changes guard); `isEditingSubtitles` drives the menu-item label.
+  onEnterSubtitleEditMode?: () => void
+  isEditingSubtitles?: boolean
+
+  // Optional: consulted before player-internal video switches (mirrors the
+  // page-level draftGuardRef pattern). Return false to block the switch —
+  // used by the subtitle editor to protect unsaved cue edits.
+  videoSwitchGuardRef?: React.MutableRefObject<(() => boolean) | null>
 }
 
 export default function VideoPlayer({
@@ -165,6 +180,9 @@ export default function VideoPlayer({
   showTimeDisplayToggle = false, // Default: hide the toggle (admin view)
   onCloseVideo,
   onStreamError,
+  onEnterSubtitleEditMode,
+  isEditingSubtitles,
+  videoSwitchGuardRef,
 }: VideoPlayerProps) {
   const [selectedVideoIndex, setSelectedVideoIndex] = useState(initialVideoIndex)
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
@@ -271,6 +289,50 @@ export default function VideoPlayer({
   const [isBuffering, setIsBuffering] = useState(false)
   const desktopQualityControlsRef = useRef<HTMLDivElement>(null)
   const mobileQualityControlsRef = useRef<HTMLDivElement>(null)
+
+  // Subtitles (CC) state — auto-generated Whisper captions rendered via a native
+  // <track>. Enabled state persists per device.
+  const [captionsEnabled, setCaptionsEnabled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      return window.localStorage.getItem('player-captions-enabled') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [showCcMenu, setShowCcMenu] = useState(false)
+  // Mobile consolidates quality + playback speed + subtitles into one cog menu
+  // with a YouTube-style drill-down: a short top level (one row per setting,
+  // showing its current value) that opens a sub-panel for the chosen setting.
+  const [showMobileSettingsMenu, setShowMobileSettingsMenu] = useState(false)
+  const [mobileSettingsPanel, setMobileSettingsPanel] = useState<null | 'quality' | 'speed' | 'subtitles'>(null)
+  const [captionsBadgeVisible, setCaptionsBadgeVisible] = useState(false)
+  // Bumped after a successful subtitle edit so the <track> src changes and the
+  // browser refetches the VTT (it caches per-URL for the element's lifetime).
+  // The subtitle editor (page-owned) announces saves via 'subtitlesUpdated'.
+  const [subtitlesCacheBust, setSubtitlesCacheBust] = useState(0)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { videoId?: string } | undefined
+      if (detail?.videoId && detail.videoId === selectedVideoIdRef.current) {
+        setSubtitlesCacheBust((n) => n + 1)
+      }
+    }
+    window.addEventListener('subtitlesUpdated', handler as EventListener)
+    return () => window.removeEventListener('subtitlesUpdated', handler as EventListener)
+  }, [])
+  const desktopCcControlsRef = useRef<HTMLDivElement>(null)
+  const mobileCcControlsRef = useRef<HTMLDivElement>(null)
+  const mobileSettingsControlsRef = useRef<HTMLDivElement>(null)
+
+  const setCaptionsEnabledPersistent = useCallback((v: boolean) => {
+    setCaptionsEnabled(v)
+    try {
+      window.localStorage.setItem('player-captions-enabled', v ? 'true' : 'false')
+    } catch {
+      // localStorage unavailable (private mode) — session-only toggle
+    }
+  }, [])
   const bufferingTimeoutRef = useRef<number | null>(null)
   const suppressAutoDowngradeUntilRef = useRef(0)
 
@@ -750,6 +812,42 @@ export default function VideoPlayer({
   const selectedVideoTimelineVttUrl = selectedVideo?.timelineVttUrl as string | null | undefined
   const selectedVideoTimelineSpriteUrl = selectedVideo?.timelineSpriteUrl as string | null | undefined
   const selectedVideoTimelinePreviewsReady = selectedVideo?.timelinePreviewsReady === true
+
+  // Auto-generated Whisper captions (token-gated VTT minted by the parent page)
+  const selectedVideoSubtitlesUrl = selectedVideo?.subtitlesVttUrl as string | null | undefined
+  // Live edit preview: serialized VTT *text* pushed from the subtitle editor
+  // (via 'subtitlePreview') so unsaved cue edits show on the video immediately.
+  // Scoped to the current video; takes precedence over the server track.
+  const [subtitlePreview, setSubtitlePreview] = useState<{ videoId: string; vtt: string } | null>(null)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { videoId?: string; vtt?: string | null } | undefined
+      if (!detail) return
+      if (!detail.vtt) { setSubtitlePreview(null); return }
+      if (detail.videoId) setSubtitlePreview({ videoId: detail.videoId, vtt: detail.vtt })
+    }
+    window.addEventListener('subtitlePreview', handler as EventListener)
+    return () => window.removeEventListener('subtitlePreview', handler as EventListener)
+  }, [])
+  const activePreviewVtt = subtitlePreview && subtitlePreview.videoId === selectedVideo?.id ? subtitlePreview.vtt : null
+  const captionsAvailable = !!selectedVideoSubtitlesUrl || !!activePreviewVtt
+
+  // Server VTT text, fetched and cached per (video, cache-bust). Captions render
+  // through ONE imperatively-managed <track> whose cues we populate (see the
+  // cue-population effect) rather than swapping the element's `src` — src swaps
+  // left stale TextTracks/cues behind, which stacked two captions at once. A live
+  // edit preview, when present, takes precedence over this.
+  const [serverVttText, setServerVttText] = useState<string | null>(null)
+  useEffect(() => {
+    if (!selectedVideoSubtitlesUrl) { setServerVttText(null); return }
+    let cancelled = false
+    const url = `${selectedVideoSubtitlesUrl}${selectedVideoSubtitlesUrl.includes('?') ? '&' : '?'}v=${subtitlesCacheBust}`
+    fetch(url)
+      .then((r) => (r.ok ? r.text() : null))
+      .then((txt) => { if (!cancelled) setServerVttText(txt) })
+      .catch(() => { if (!cancelled) setServerVttText(null) })
+    return () => { cancelled = true }
+  }, [selectedVideoSubtitlesUrl, subtitlesCacheBust])
 
   const desktopOffsetPx =
     typeof viewportHeightOffsetPx === 'number' && Number.isFinite(viewportHeightOffsetPx)
@@ -1279,7 +1377,7 @@ export default function VideoPlayer({
 
   // Safety check: ensure selectedVideo exists before accessing properties
   const isVideoApproved = selectedVideo ? selectedVideo.approved === true : false
-  const isProjectApproved = projectStatus === 'APPROVED' || projectStatus === 'SHARE_ONLY'
+  const isProjectApproved = projectStatus === 'APPROVED'
   const approvedDownloadUrl = selectedVideo?.downloadUrl as string | null | undefined
   const canShowApprovedDownload =
     !hideDownloadButton && !isAdmin && !isGuest && isVideoApproved && Boolean(approvedDownloadUrl)
@@ -1507,6 +1605,112 @@ export default function VideoPlayer({
     document.addEventListener('pointerdown', handleClickOutside)
     return () => document.removeEventListener('pointerdown', handleClickOutside)
   }, [showQualityMenu])
+
+  // Close CC menu on click outside (mirrors the quality menu)
+  useEffect(() => {
+    if (!showCcMenu) return
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node
+      const insideDesktop = Boolean(desktopCcControlsRef.current?.contains(target))
+      const insideMobile = Boolean(mobileCcControlsRef.current?.contains(target))
+      if (!insideDesktop && !insideMobile) {
+        setShowCcMenu(false)
+      }
+    }
+    document.addEventListener('pointerdown', handleClickOutside)
+    return () => document.removeEventListener('pointerdown', handleClickOutside)
+  }, [showCcMenu])
+
+  // Close the consolidated mobile settings menu on click outside.
+  useEffect(() => {
+    if (!showMobileSettingsMenu) return
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node
+      if (!mobileSettingsControlsRef.current?.contains(target)) {
+        setShowMobileSettingsMenu(false)
+        setMobileSettingsPanel(null)
+      }
+    }
+    document.addEventListener('pointerdown', handleClickOutside)
+    return () => document.removeEventListener('pointerdown', handleClickOutside)
+  }, [showMobileSettingsMenu])
+
+  // Drive caption visibility imperatively via textTracks[].mode — the `default`
+  // attribute on <track> is applied inconsistently across browsers, and the
+  // element remounts per video (key={video.id}) so this must re-run on switch.
+  // 'addtrack' covers the async track attach after (re)mount and VTT refetch.
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+    // Respect the viewer's CC on/off choice even while editing — a live preview
+    // must NOT force-show captions (that made "Subtitles off" a no-op in the
+    // editor). Live edits still overlay the video whenever captions are on.
+    const shouldShow = captionsAvailable && captionsEnabled
+    const apply = () => {
+      for (let i = 0; i < el.textTracks.length; i++) {
+        const track = el.textTracks[i]
+        if (track.kind === 'captions' || track.kind === 'subtitles') {
+          track.mode = shouldShow ? 'showing' : 'hidden'
+        }
+      }
+    }
+    // NOTE: do NOT toggle mode to 'disabled' on seek to "force re-evaluation".
+    // 'disabled' stops the browser maintaining the track's active cues, and
+    // re-enabling doesn't recompute them until the next "time marches on" tick —
+    // so after a click-to-seek (video paused) captions go blank and never return.
+    // With a single track carrying non-overlapping cues the browser already
+    // shows exactly the cue at the seeked position; no nudge is needed.
+    apply()
+    el.textTracks.addEventListener('addtrack', apply)
+    return () => {
+      el.textTracks.removeEventListener('addtrack', apply)
+    }
+  }, [captionsEnabled, captionsAvailable, activePreviewVtt, selectedVideo?.id, selectedVideoHlsUrl])
+
+  // Populate the single caption <track> imperatively from the active VTT source
+  // (live edit preview if present, else the fetched server VTT). Clearing and
+  // re-adding cues on ONE persistent track guarantees exactly one set of cues —
+  // the browser never accumulates stale cues from a swapped `src`.
+  useEffect(() => {
+    const el = videoRef.current
+    if (!el) return
+    const vtt = activePreviewVtt ?? serverVttText
+    const populate = () => {
+      let track: TextTrack | null = null
+      for (let i = 0; i < el.textTracks.length; i++) {
+        const t = el.textTracks[i]
+        if (t.kind === 'captions' || t.kind === 'subtitles') { track = t; break }
+      }
+      if (!track) return
+      if (track.cues) {
+        for (let i = track.cues.length - 1; i >= 0; i--) track.removeCue(track.cues[i])
+      }
+      if (!vtt) return
+      for (const c of parseSrt(vtt)) {
+        try {
+          track.addCue(new VTTCue(c.startMs / 1000, c.endMs / 1000, c.text))
+        } catch {
+          // skip a malformed cue rather than dropping the whole track
+        }
+      }
+    }
+    populate()
+    // The <track> element attaches its TextTrack asynchronously after (re)mount.
+    el.textTracks.addEventListener('addtrack', populate)
+    return () => el.textTracks.removeEventListener('addtrack', populate)
+  }, [activePreviewVtt, serverVttText, selectedVideo?.id])
+
+  // "English (auto-generated)" badge: shown for 3s when captions turn on and
+  // again on each video switch while they stay enabled.
+  useEffect(() => {
+    if (!captionsEnabled || !captionsAvailable) {
+      setCaptionsBadgeVisible(false)
+      return
+    }
+    setCaptionsBadgeVisible(true)
+    const timer = window.setTimeout(() => setCaptionsBadgeVisible(false), 3000)
+    return () => window.clearTimeout(timer)
+  }, [captionsEnabled, captionsAvailable, selectedVideo?.id])
 
   // Ask the parent to re-mint tokens after an unrecoverable stream failure. Latches per
   // videoId (cleared on the next successful loadedmetadata) so an error→refresh→error
@@ -2091,6 +2295,11 @@ export default function VideoPlayer({
 
       // If videoId is specified and different from current, try to switch to it
       if (videoId && videoId !== selectedVideo.id) {
+        // Subtitle edit mode: block the switch when there are unsaved cue edits
+        // and the user declines the confirm (guard ref mirrors draftGuardRef).
+        if (videoSwitchGuardRef?.current && !videoSwitchGuardRef.current()) {
+          return
+        }
         const targetVideoIndex = displayVideos.findIndex(v => v.id === videoId)
         if (targetVideoIndex !== -1) {
           if (effectiveAutoPlay) {
@@ -2130,7 +2339,7 @@ export default function VideoPlayer({
     return () => {
       window.removeEventListener('seekToTime' as any, handleSeekToTime as EventListener)
     }
-  }, [selectedVideo.id, displayVideos, isLgViewport])
+  }, [selectedVideo.id, displayVideos, isLgViewport, videoSwitchGuardRef])
 
   // Pause video when user starts typing a comment
   useEffect(() => {
@@ -2917,10 +3126,30 @@ export default function VideoPlayer({
                     ? { WebkitTouchCallout: 'none', WebkitUserSelect: 'none', userSelect: 'none' }
                     : {}),
                 }}
-              />
+              >
+                {captionsAvailable && (
+                  // Srcless + keyed by video id: one persistent, empty caption
+                  // track per video. Its cues are populated imperatively (see the
+                  // cue-population effect); we never swap `src`, which is what
+                  // stacked duplicate captions before.
+                  <track
+                    key={selectedVideo?.id}
+                    kind="captions"
+                    label="English (auto-generated)"
+                    srcLang="en"
+                  />
+                )}
+              </video>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-card-foreground">
                 {hlsWaitElapsed ? 'This video is currently not available.' : 'Preparing video stream…'}
+              </div>
+            )}
+
+            {/* CC provenance badge — mirrors YouTube's auto-caption notice */}
+            {captionsBadgeVisible && (
+              <div className="absolute top-3 left-3 z-20 rounded bg-black/70 text-white text-xs px-2 py-1 pointer-events-none">
+                English (auto-generated)
               </div>
             )}
 
@@ -4005,7 +4234,7 @@ export default function VideoPlayer({
                     size="sm"
                     onClick={toggleMute}
                     aria-label={isMuted ? 'Unmute' : 'Mute'}
-                    className="relative overflow-hidden w-14 px-0"
+                    className="relative overflow-hidden"
                   >
                     {Math.round(volume * 100) > 0 && Math.round(volume * 100) < 100 && (
                       <span
@@ -4049,7 +4278,11 @@ export default function VideoPlayer({
                 </div>
 
                 {!shouldHideSpeedControls && (
-                  <>
+                  // Segmented block: frame-back · speed-down · speed-up · frame-forward.
+                  // Buttons share borders (rounded only on the outer corners, -ml-px
+                  // collapses the seam) to save horizontal space. Frame steps drop out
+                  // on narrow desktop, leaving the two speed buttons as the block.
+                  <div className="flex items-center">
                     {!isDesktopControlsNarrow && (
                       <Button
                         type="button"
@@ -4058,6 +4291,7 @@ export default function VideoPlayer({
                         onClick={handleStepFrameBackward}
                         aria-label="Previous frame"
                         title="Previous frame"
+                        className="relative rounded-r-none w-9 px-0"
                       >
                         <ChevronLeft className="w-4 h-4" />
                       </Button>
@@ -4069,7 +4303,11 @@ export default function VideoPlayer({
                       size="sm"
                       onClick={handleDecreaseSpeed}
                       aria-label="Decrease playback speed"
-                      className={cn(playbackSpeed !== 1.0 && playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                      className={cn(
+                        'relative rounded-none',
+                        isDesktopControlsNarrow ? 'rounded-l-md' : '-ml-px',
+                        playbackSpeed !== 1.0 && playbackSpeed < 1.0 ? 'z-10 bg-primary/10 border-primary/50 text-primary' : '',
+                      )}
                     >
                       <Rewind className="w-4 h-4" />
                     </Button>
@@ -4080,7 +4318,11 @@ export default function VideoPlayer({
                       size="sm"
                       onClick={handleIncreaseSpeed}
                       aria-label="Increase playback speed"
-                      className={cn(playbackSpeed !== 1.0 && playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
+                      className={cn(
+                        'relative -ml-px rounded-none',
+                        isDesktopControlsNarrow && 'rounded-r-md',
+                        playbackSpeed !== 1.0 && playbackSpeed > 1.0 ? 'z-10 bg-primary/10 border-primary/50 text-primary' : '',
+                      )}
                     >
                       <FastForward className="w-4 h-4" />
                     </Button>
@@ -4093,11 +4335,12 @@ export default function VideoPlayer({
                         onClick={handleStepFrameForward}
                         aria-label="Next frame"
                         title="Next frame"
+                        className="relative -ml-px rounded-l-none w-9 px-0"
                       >
                         <ChevronRight className="w-4 h-4" />
                       </Button>
                     )}
-                  </>
+                  </div>
                 )}
               </div>
 
@@ -4148,20 +4391,85 @@ export default function VideoPlayer({
                 )}
               </div>
 
-              {/* Right: Quality, Comments (fullscreen), Fullscreen, Download */}
+              {/* Right: Captions, Quality, Comments (fullscreen), Fullscreen, Download */}
               <div className="flex items-center gap-[6px] justify-end">
-                {showQualitySelector && (
-                  <div ref={desktopQualityControlsRef} className="relative shrink-0">
+                {captionsAvailable && (
+                  <div ref={desktopCcControlsRef} className="relative shrink-0">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={hasOriginalOnly ? undefined : () => setShowQualityMenu((v) => !v)}
-                      aria-label="Select quality"
-                      className="text-xs px-2"
+                      onClick={() => setShowCcMenu((v) => !v)}
+                      aria-label="Subtitles"
+                      title="Subtitles"
+                      className={cn('px-2', captionsEnabled ? 'bg-primary/10 border-primary/50 text-primary' : '')}
                     >
-                      {qualityLabel}
+                      <span aria-hidden className="text-[11px] font-bold leading-none tracking-tight rounded-[3px] border border-current px-[3px] py-[1.5px]">CC</span>
                     </Button>
+
+                    {showCcMenu && (
+                      <div className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[150px]">
+                        <button
+                          type="button"
+                          className={cn(
+                            'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                            captionsEnabled && 'bg-accent font-medium'
+                          )}
+                          onClick={() => { setCaptionsEnabledPersistent(true); setShowCcMenu(false) }}
+                        >
+                          Subtitles on
+                        </button>
+                        <button
+                          type="button"
+                          className={cn(
+                            'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
+                            !captionsEnabled && 'bg-accent font-medium'
+                          )}
+                          onClick={() => { setCaptionsEnabledPersistent(false); setShowCcMenu(false) }}
+                        >
+                          Subtitles off
+                        </button>
+                        {onEnterSubtitleEditMode && (
+                          <>
+                            <div className="my-1 border-t border-border" />
+                            <button
+                              type="button"
+                              className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                              onClick={() => { onEnterSubtitleEditMode(); setShowCcMenu(false) }}
+                            >
+                              {isEditingSubtitles ? 'Close editor' : 'Edit'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {showQualitySelector && (
+                  <div ref={desktopQualityControlsRef} className="relative shrink-0">
+                    {hasOriginalOnly ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        aria-label="Quality: Original"
+                        className="text-xs px-2"
+                      >
+                        {qualityLabel}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowQualityMenu((v) => !v)}
+                        aria-label="Select quality"
+                        title={qualityLabel}
+                      >
+                        <Settings className="w-4 h-4" />
+                      </Button>
+                    )}
 
                     {showQualityMenu && !hasOriginalOnly && (
                       <div
@@ -4324,91 +4632,150 @@ export default function VideoPlayer({
                   </Button>
                 </div>
 
-                {!shouldHideSpeedControls && (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={handleDecreaseSpeed}
-                      aria-label="Decrease playback speed"
-                      className={cn('h-8 w-8', playbackSpeed < 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-                    >
-                      <Rewind className="w-4 h-4" />
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={handleIncreaseSpeed}
-                      aria-label="Increase playback speed"
-                      className={cn('h-8 w-8', playbackSpeed > 1.0 ? 'bg-primary/10 border-primary/50 text-primary' : '')}
-                    >
-                      <FastForward className="w-4 h-4" />
-                    </Button>
-                  </>
-                )}
-
-                {/* Mobile quality selector (cog icon, or "Original" label when no previews) */}
-                {showQualitySelector && (
-                  <div ref={mobileQualityControlsRef} className="relative shrink-0">
-                    {hasOriginalOnly ? (
+                {/* Mobile consolidated settings: Quality · Playback speed · Subtitles */}
+                {(() => {
+                  const showQualitySection = showQualitySelector && !hasOriginalOnly
+                  const showSpeedSection = !shouldHideSpeedControls
+                  const showCcSection = captionsAvailable
+                  const hasAnySection = showQualitySection || showSpeedSection || showCcSection
+                  // hasOriginalOnly with no other section: keep the plain "Original" label.
+                  if (!hasAnySection) {
+                    return showQualitySelector && hasOriginalOnly ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         aria-label="Quality: Original"
-                        className="text-xs px-2 h-8"
+                        className="text-xs px-2 h-8 shrink-0"
                       >
                         Original
                       </Button>
-                    ) : (
+                    ) : null
+                  }
+                  // YouTube-style drill-down: a short top level (never overflows —
+                  // one row per setting, current value on the right) opening a
+                  // sub-panel per setting. This replaced a single tall flat menu
+                  // whose top got clipped by the player above the controls.
+                  const closeMenu = () => { setShowMobileSettingsMenu(false); setMobileSettingsPanel(null) }
+                  const itemCls = (active: boolean) => cn(
+                    'w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center gap-2',
+                    active ? 'bg-accent font-medium' : '',
+                  )
+                  const rowCls = 'w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent transition-colors'
+                  const valueCls = 'ml-auto flex items-center gap-1 min-w-0 justify-end text-muted-foreground'
+                  const qualityValueLabel = selectedQuality === 'auto' ? `Auto (${autoResolvedQuality})` : selectedQuality
+                  const speedValueLabel = playbackSpeed === 1 ? 'Normal' : `${playbackSpeed}×`
+                  return (
+                    <div ref={mobileSettingsControlsRef} className="relative shrink-0">
                       <Button
                         type="button"
                         variant="outline"
                         size="icon"
-                        onClick={() => setShowQualityMenu((v) => !v)}
-                        aria-label="Select quality"
-                        className="h-8 w-8"
+                        onClick={() => { setShowMobileSettingsMenu((v) => !v); setMobileSettingsPanel(null) }}
+                        aria-label="Settings"
+                        className={cn('h-8 w-8', showMobileSettingsMenu ? 'bg-primary/10 border-primary/50 text-primary' : '')}
                       >
                         <Settings className="w-4 h-4" />
                       </Button>
-                    )}
 
-                    {showQualityMenu && !hasOriginalOnly && (
-                      <div
-                        className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[120px]"
-                      >
-                        <button
-                          type="button"
-                          className={cn(
-                            'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
-                            selectedQuality === 'auto' && 'bg-accent font-medium'
-                          )}
-                          onClick={() => { setSelectedQuality('auto'); setShowQualityMenu(false) }}
-                        >
-                          Auto {selectedQuality === 'auto' && `(${autoResolvedQuality})`}
-                        </button>
-                        {qualityMenuOptions.map((q) =>
-                          availableQualities.includes(q) ? (
-                            <button
-                              key={q}
-                              type="button"
-                              className={cn(
-                                'w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors',
-                                selectedQuality === q && 'bg-accent font-medium'
+                      {showMobileSettingsMenu && (
+                        <div className="absolute bottom-full right-0 mb-2 z-20 rounded-md border border-border bg-card shadow-elevation-sm py-1 min-w-[230px] max-h-[60vh] overflow-y-auto">
+                          {/* Top level — one row per setting, value + chevron */}
+                          {mobileSettingsPanel === null && (
+                            <>
+                              {showQualitySection && (
+                                <button type="button" className={rowCls} onClick={() => setMobileSettingsPanel('quality')}>
+                                  <span className="shrink-0">Quality</span>
+                                  <span className={valueCls}>
+                                    <span className="truncate">{qualityValueLabel}</span>
+                                    <ChevronRight className="w-4 h-4 shrink-0" />
+                                  </span>
+                                </button>
                               )}
-                              onClick={() => { setSelectedQuality(q); setShowQualityMenu(false) }}
-                            >
-                              {q}
-                            </button>
-                          ) : null
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                              {showSpeedSection && (
+                                <button type="button" className={rowCls} onClick={() => setMobileSettingsPanel('speed')}>
+                                  <span className="shrink-0">Playback speed</span>
+                                  <span className={valueCls}>
+                                    <span className="truncate">{speedValueLabel}</span>
+                                    <ChevronRight className="w-4 h-4 shrink-0" />
+                                  </span>
+                                </button>
+                              )}
+                              {showCcSection && (
+                                <button type="button" className={rowCls} onClick={() => setMobileSettingsPanel('subtitles')}>
+                                  <span className="shrink-0">Subtitles/CC</span>
+                                  <span className={valueCls}>
+                                    <span className="truncate">{captionsEnabled ? 'On' : 'Off'}</span>
+                                    <ChevronRight className="w-4 h-4 shrink-0" />
+                                  </span>
+                                </button>
+                              )}
+                            </>
+                          )}
+
+                          {/* Quality sub-panel */}
+                          {mobileSettingsPanel === 'quality' && (
+                            <>
+                              <button type="button" className="w-full flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium hover:bg-accent transition-colors" onClick={() => setMobileSettingsPanel(null)}>
+                                <ChevronLeft className="w-4 h-4" /> Quality
+                              </button>
+                              <div className="border-t border-border mb-1" />
+                              <button type="button" className={itemCls(selectedQuality === 'auto')} onClick={() => { setSelectedQuality('auto'); closeMenu() }}>
+                                Auto {selectedQuality === 'auto' && `(${autoResolvedQuality})`}
+                              </button>
+                              {qualityMenuOptions.map((q) =>
+                                availableQualities.includes(q) ? (
+                                  <button key={q} type="button" className={itemCls(selectedQuality === q)} onClick={() => { setSelectedQuality(q); closeMenu() }}>
+                                    {q}
+                                  </button>
+                                ) : null
+                              )}
+                            </>
+                          )}
+
+                          {/* Playback speed sub-panel */}
+                          {mobileSettingsPanel === 'speed' && (
+                            <>
+                              <button type="button" className="w-full flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium hover:bg-accent transition-colors" onClick={() => setMobileSettingsPanel(null)}>
+                                <ChevronLeft className="w-4 h-4" /> Playback speed
+                              </button>
+                              <div className="border-t border-border mb-1" />
+                              {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((s) => (
+                                <button key={s} type="button" className={itemCls(playbackSpeed === s)} onClick={() => { setPlaybackSpeed(s); closeMenu() }}>
+                                  {s === 1 ? 'Normal' : `${s}×`}
+                                </button>
+                              ))}
+                            </>
+                          )}
+
+                          {/* Subtitles/CC sub-panel */}
+                          {mobileSettingsPanel === 'subtitles' && (
+                            <>
+                              <button type="button" className="w-full flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium hover:bg-accent transition-colors" onClick={() => setMobileSettingsPanel(null)}>
+                                <ChevronLeft className="w-4 h-4" /> Subtitles/CC
+                              </button>
+                              <div className="border-t border-border mb-1" />
+                              <button type="button" className={itemCls(captionsEnabled)} onClick={() => { setCaptionsEnabledPersistent(true); closeMenu() }}>
+                                On
+                              </button>
+                              <button type="button" className={itemCls(!captionsEnabled)} onClick={() => { setCaptionsEnabledPersistent(false); closeMenu() }}>
+                                Off
+                              </button>
+                              {onEnterSubtitleEditMode && (
+                                <>
+                                  <div className="my-1 border-t border-border" />
+                                  <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors" onClick={() => { onEnterSubtitleEditMode(); closeMenu() }}>
+                                    {isEditingSubtitles ? 'Close subtitle editor' : 'Edit subtitles…'}
+                                  </button>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 <Button
                   type="button"
@@ -4505,6 +4872,7 @@ export default function VideoPlayer({
           isAdmin={isAdmin}
         />
       ) : null}
+
     </div>
   )
 }

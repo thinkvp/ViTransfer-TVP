@@ -28,6 +28,7 @@ type QueuedVideo = {
   versionLabel: string
   videoNotes: string
   allowApproval: boolean
+  autoGenerateSubtitles: boolean
   status: UploadStatus
   error: string | null
 }
@@ -81,12 +82,14 @@ export default function MultiVideoUploadModal({
   onOpenChange,
   projectId,
   canFullControl,
+  transcriptionEnabled = false,
   onUploadComplete,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string
   canFullControl: boolean
+  transcriptionEnabled?: boolean
   onUploadComplete?: () => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -158,6 +161,7 @@ export default function MultiVideoUploadModal({
           versionLabel: parsed.versionLabel,
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
+          autoGenerateSubtitles: true,
           status: 'pending',
           error: null,
         })
@@ -280,6 +284,7 @@ export default function MultiVideoUploadModal({
             versionLabel: trimmedVersionLabel,
             videoNotes: trimmedVideoNotes,
             allowApproval: item.allowApproval === true,
+            autoGenerateSubtitles: transcriptionEnabled ? item.autoGenerateSubtitles === true : true,
             originalFileName: item.file.name,
             originalFileSize: item.file.size,
             name: trimmedVideoName,
@@ -439,8 +444,9 @@ export default function MultiVideoUploadModal({
                       />
                     </div>
 
-                    {canFullControl && (
+                    {(canFullControl || transcriptionEnabled) && (
                       <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {canFullControl && (
                         <div className="space-y-2">
                           <div className="text-sm font-medium">Allow approval of version</div>
                           <div className="flex items-center gap-2 h-10">
@@ -455,6 +461,23 @@ export default function MultiVideoUploadModal({
                             </span>
                           </div>
                         </div>
+                        )}
+                        {transcriptionEnabled && (
+                        <div className="space-y-2">
+                          <div className="text-sm font-medium">Subtitles</div>
+                          <div className="flex items-center gap-2 h-10">
+                            <Checkbox
+                              checked={item.autoGenerateSubtitles}
+                              onCheckedChange={(v) => updateItem(item.id, { autoGenerateSubtitles: Boolean(v) })}
+                              disabled={item.status !== 'pending'}
+                              aria-label="Auto-generate subtitles"
+                            />
+                            <span className={item.autoGenerateSubtitles ? 'text-sm text-muted-foreground' : 'text-sm text-muted-foreground/70'}>
+                              {item.autoGenerateSubtitles ? 'Auto-generate' : 'Off — set manually'}
+                            </span>
+                          </div>
+                        </div>
+                        )}
                       </div>
                     )}
 

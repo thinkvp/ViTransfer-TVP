@@ -76,12 +76,17 @@ export async function POST(
 
     // Conditionally unapprove videos based on the parameter
     if (unapproveVideos) {
-      // Unapprove ALL videos in the project
+      // Unapprove ALL videos in the project.
+      // Stamp unapproval attribution only on versions that were actually approved.
       await prisma.video.updateMany({
-        where: { projectId },
+        where: { projectId, approved: true },
         data: {
           approved: false,
-          approvedAt: null
+          approvedAt: null,
+          unapprovedAt: new Date(),
+          unapprovedById: admin.id,
+          unapprovedByRecipientId: null,
+          unapprovedByName: admin.name || admin.email,
         }
       })
 

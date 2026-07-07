@@ -10,6 +10,7 @@ import {
   buildVideoAssetPreviewStoragePath,
 } from '@/lib/project-storage-paths'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
+import { readCuesForVideo, writeCuesForVideo } from '@/lib/subtitle-store'
 import {
   allocateUniqueStorageName,
   buildVideoAssetStoragePath,
@@ -192,6 +193,30 @@ export async function POST(
     // Physically copy each asset file to the target version's assets folder
     const copiedAssets = [] as Array<unknown>
     for (const asset of assets) {
+      // Subtitles are dual-artifact (SRT VideoAsset + playback VTT). A plain file
+      // clone would give the target an SRT but no VTT, so captions wouldn't play.
+      // Instead, read the source video's cues and write BOTH artifacts on the
+      // target (replace semantics — one subtitles asset per video), then mark the
+      // target READY so its captions show and auto-gen won't clobber them.
+      if (asset.category === 'subtitles') {
+        try {
+          const { cues } = await readCuesForVideo(sourceVideoId)
+          if (cues.length > 0) {
+            await writeCuesForVideo(targetVideoId, cues, {
+              uploadedByName: `Copied from ${sourceVideo.versionLabel || `v${sourceVideo.version}`}`,
+            })
+            await prisma.video.update({
+              where: { id: targetVideoId },
+              data: { transcriptionStatus: 'READY', transcriptionError: null },
+            }).catch(() => {})
+            copiedAssets.push({ id: asset.id })
+          }
+        } catch (e) {
+          console.warn(`[copy-to-version] Subtitles copy failed for asset ${asset.id}:`, e instanceof Error ? e.message : e)
+        }
+        continue
+      }
+
       const stored = storedByAsset.get(asset.id)
       const originalStored = stored?.get('ORIGINAL')
       const sourcePath = originalStored?.path

@@ -7,7 +7,7 @@ import { getClientIpAddress } from '@/lib/utils'
 import { getRedis } from '@/lib/redis'
 import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 import { touchProjectLastAccessForRequest } from '@/lib/project-last-access'
-import { getStoredFilePathForProject, getStoredFileRecords } from '@/lib/stored-file'
+import { getStoredFilePathForProject, getStoredFileRecords, VIDEO_DELIVERY_ROLES } from '@/lib/stored-file'
 import { getDirectStreamUrl, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
 
 export const runtime = 'nodejs'
@@ -164,6 +164,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const storedPaths = new Map<string, string>()
   try {
     const storedFiles = await getStoredFileRecords('VIDEO', [link.video.id], {
+      fileRoles: VIDEO_DELIVERY_ROLES,
       select: { fileRole: true, storagePath: true },
     })
     for (const f of storedFiles) storedPaths.set(f.fileRole, f.storagePath)
@@ -172,7 +173,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   const canServeOriginal = link.video.approved
 
-  const [token480, token720, token1080, thumbToken, vttToken, spriteToken, direct480, direct720, direct1080] = await Promise.all([
+  const wantSubtitles = storedPaths.has('SUBTITLES_VTT')
+
+  const [token480, token720, token1080, thumbToken, vttToken, spriteToken, subtitlesToken, direct480, direct720, direct1080] = await Promise.all([
     generateVideoAccessToken(link.video.id, link.project.id, '480p', request, sessionId).catch(() => ''),
     generateVideoAccessToken(link.video.id, link.project.id, '720p', request, sessionId).catch(() => ''),
     generateVideoAccessToken(link.video.id, link.project.id, '1080p', request, sessionId).catch(() => ''),
@@ -182,6 +185,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       : Promise.resolve(''),
     wantTimeline
       ? generateVideoAccessToken(link.video.id, link.project.id, 'timeline-sprite', request, sessionId).catch(() => '')
+      : Promise.resolve(''),
+    wantSubtitles
+      ? generateVideoAccessToken(link.video.id, link.project.id, 'subtitles-vtt', request, sessionId).catch(() => '')
       : Promise.resolve(''),
     getDirectStreamUrl({ storedPaths, quality: '480p', canServeOriginal, sessionId, videoId: link.video.id }).catch(() => null),
     getDirectStreamUrl({ storedPaths, quality: '720p', canServeOriginal, sessionId, videoId: link.video.id }).catch(() => null),
@@ -226,6 +232,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       thumbnailUrl: thumbToken ? `/api/content/${thumbToken}` : null,
       timelineVttUrl: vttToken ? `/api/content/${vttToken}` : null,
       timelineSpriteUrl: spriteToken ? `/api/content/${spriteToken}` : null,
+      subtitlesVttUrl: subtitlesToken ? `/api/content/${subtitlesToken}` : null,
     },
   }
 

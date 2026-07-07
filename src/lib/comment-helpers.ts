@@ -96,8 +96,8 @@ export async function validateCommentPermissions(params: {
     }
   }
 
-  // SECURITY: If feedback is hidden (or Share Only mode), reject comment creation
-  if (project.hideFeedback || project.status === 'SHARE_ONLY') {
+  // SECURITY: If feedback is hidden, reject comment creation
+  if (project.hideFeedback) {
     return { valid: false, error: 'Comments are disabled for this project', errorStatus: 403 }
   }
 

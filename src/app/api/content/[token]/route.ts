@@ -3,11 +3,11 @@ import { verifyVideoAccessToken, detectHotlinking, logSecurityEvent, getSecurity
 import { getRedis } from '@/lib/redis'
 import { prisma } from '@/lib/db'
 import { createReadStream, existsSync, statSync } from 'fs'
-import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { getFilePath, sanitizeFilenameForHeader, downloadFile } from '@/lib/storage'
 import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 // Token-based auth; entity types (VIDEO_ASSET, SHARE_UPLOAD_FILE) resolved via tokens, not projectId.
 // eslint-disable-next-line no-restricted-imports
-import { getStoredFilePath, getStoredFileRecords } from '@/lib/stored-file'
+import { getStoredFilePath, getStoredFileRecords, VIDEO_DELIVERY_ROLES, ASSET_DELIVERY_ROLES } from '@/lib/stored-file'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
@@ -202,6 +202,7 @@ export async function GET(
     let storedFileNames: Map<string, string> = new Map()
     if (!isUploadEntity && video) {
       const files = await getStoredFileRecords('VIDEO', [video.id], {
+        fileRoles: VIDEO_DELIVERY_ROLES,
         select: { fileRole: true, storagePath: true, fileName: true },
       })
       storedPaths = new Map(files.map(f => [f.fileRole, f.storagePath]))
@@ -248,6 +249,7 @@ export async function GET(
 
       // Batch all asset StoredFile lookups into one query
       const assetFiles = await getStoredFileRecords('VIDEO_ASSET', [assetId], {
+        fileRoles: ASSET_DELIVERY_ROLES,
         select: { fileRole: true, storagePath: true },
       })
       const assetPaths = new Map(assetFiles.map(f => [f.fileRole, f.storagePath]))
@@ -360,6 +362,12 @@ export async function GET(
           filePath = `${spriteDir(spritesBasePath)}${spriteFile}`
           contentType = 'image/jpeg'
         }
+      } else if (verifiedToken.quality === 'subtitles-vtt') {
+        filePath = storedPaths.get('SUBTITLES_VTT') ?? null
+        contentType = 'text/vtt'
+      } else if (verifiedToken.quality === 'waveform-peaks') {
+        filePath = storedPaths.get('WAVEFORM_PEAKS') ?? null
+        contentType = 'application/json'
       } else if (
         verifiedToken.quality === 'original' ||
         verifiedToken.quality === 'download' ||
@@ -379,11 +387,14 @@ export async function GET(
 
     const isThumbnail = verifiedToken.quality === 'thumbnail'
     const isTimelineAsset = verifiedToken.quality === 'timeline-vtt' || verifiedToken.quality === 'timeline-sprite'
+    // Subtitle/waveform artifacts: like timeline assets, fetching them is not
+    // "watching the video" — exempt from STREAMING_VIDEO activity records.
+    const isEditorAsset = verifiedToken.quality === 'subtitles-vtt' || verifiedToken.quality === 'waveform-peaks'
 
     if (!isAdminRequest && !isProbe) {
       const activityType = isDownload
         ? (assetId ? 'DOWNLOADING_ASSET' : 'DOWNLOADING_VIDEO')
-        : (isAssetPreview ? null : (!isThumbnail && !isTimelineAsset ? 'STREAMING_VIDEO' : null))
+        : (isAssetPreview ? null : (!isThumbnail && !isTimelineAsset && !isEditorAsset ? 'STREAMING_VIDEO' : null))
 
       if (activityType) {
         // Fire-and-forget: activity tracking is analytics-only and must not
@@ -411,6 +422,39 @@ export async function GET(
 
     if (isDownload && (isThumbnail || isTimelineAsset)) {
       return NextResponse.json({ error: 'Thumbnails cannot be downloaded directly' }, { status: 403 })
+    }
+
+    // Subtitles VTT and waveform peaks are streamed through the app in BOTH
+    // storage modes — never a 302 to R2. A <track> element on a same-origin
+    // <video> will not load a cross-origin (redirected-to-R2) VTT without
+    // `crossorigin` on the media element (which risks HLS playback), and the
+    // editor fetch()es the peaks JSON, which would need bucket CORS on a
+    // redirect. Both are small (KBs); no-cache so edits/regeneration show up
+    // immediately.
+    if (verifiedToken.quality === 'subtitles-vtt' || verifiedToken.quality === 'waveform-peaks') {
+      if (isDownload) {
+        return NextResponse.json({ error: 'This content cannot be downloaded directly' }, { status: 403 })
+      }
+      try {
+        const stream = await downloadFile(filePath)
+        const chunks: Buffer[] = []
+        for await (const chunk of stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        }
+        const body = Buffer.concat(chunks)
+        return new NextResponse(new Uint8Array(body), {
+          headers: {
+            'Content-Type': verifiedToken.quality === 'waveform-peaks'
+              ? 'application/json; charset=utf-8'
+              : 'text/vtt; charset=utf-8',
+            'Content-Length': String(body.length),
+            'Cache-Control': 'private, no-cache',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+          },
+        })
+      } catch {
+        return NextResponse.json({ error: 'Access denied' }, { status: 404 })
+      }
     }
 
     // ---------------------------------------------------------------------------

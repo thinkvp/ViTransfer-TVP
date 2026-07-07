@@ -104,7 +104,6 @@ export default function ProjectStatusPicker({
 
           <div className="space-y-2">
             {visibleOptions.map((opt) => {
-              const isShareOnly = opt.value === 'SHARE_ONLY'
               const isClosed = opt.value === 'CLOSED'
               const isSelected = normalizedValue === opt.value
 
@@ -129,12 +128,6 @@ export default function ProjectStatusPicker({
                   >
                     {opt.label}
                   </Button>
-
-                  {isShareOnly && (
-                    <p className="text-xs text-muted-foreground mt-1 px-1">
-                      Comments &amp; version selection will be hidden.
-                    </p>
-                  )}
 
                   {isClosed && (
                     <p className="text-xs text-muted-foreground mt-1 px-1">

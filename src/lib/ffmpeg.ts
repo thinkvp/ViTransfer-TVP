@@ -622,3 +622,63 @@ export async function generateThumbnail(
     })
   })
 }
+
+/**
+ * Extract mono 16 kHz audio for Whisper transcription. Whisper resamples to
+ * 16 kHz mono internally, so anything richer is wasted bytes.
+ *  - 'wav' (default): PCM, no lossy re-encode — best for a self-hosted server.
+ *  - 'mp3': ~32 kbps mono (~0.24 MB/min) — used for OpenAI, whose upload cap is
+ *    25 MB (WAV would blow that at ~13 min; mp3 gives ~100 min of headroom).
+ */
+export async function extractAudioForTranscription(
+  inputPath: string,
+  outputPath: string,
+  format: 'wav' | 'mp3' | 'aac' = 'wav',
+  bitrateKbps = 128
+): Promise<void> {
+  const kbps = Math.max(8, Math.round(bitrateKbps))
+  const codecArgs = format === 'mp3'
+    ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`]
+    : format === 'aac'
+      // AAC-LC — ~2× more efficient than mp3 at low bitrates; container inferred
+      // from the output extension (.m4a). Used to fit long audio under OpenAI's cap.
+      ? ['-c:a', 'aac', '-b:a', `${kbps}k`]
+      : ['-c:a', 'pcm_s16le']
+  const args = [
+    '-v', 'error',
+    '-i', inputPath,
+    '-vn', // drop video
+    '-ac', '1', // mono
+    '-ar', '16000', // 16 kHz
+    ...codecArgs,
+    '-y',
+    outputPath
+  ]
+
+  if (DEBUG) {
+    console.log('[FFMPEG DEBUG] Audio extract command:', ffmpegPath, args.join(' '))
+  }
+
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn(ffmpegPath, args, {
+      stdio: ['ignore', 'ignore', 'pipe']
+    })
+    let stderr = ''
+
+    ffmpeg.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    ffmpeg.on('close', (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`FFmpeg audio extraction failed: ${stderr.slice(0, 2000)}`))
+      }
+    })
+
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`Failed to start FFmpeg: ${err.message}`))
+    })
+  })
+}

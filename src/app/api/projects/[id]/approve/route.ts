@@ -20,6 +20,7 @@ const approveSchema = z.object({
   authorName: z.string().trim().max(100, 'Name too long').optional().nullable(),
   authorEmail: z.string().email().max(255, 'Email too long').optional().nullable(),
   selectedVideoId: z.string().min(1, 'Selected video is required'),
+  recipientId: z.string().trim().max(64).optional().nullable(),
 })
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
     }
 
-    const { authorName, authorEmail, selectedVideoId } = parsed.data
+    const { authorName, authorEmail, selectedVideoId, recipientId } = parsed.data
 
     console.log('[APPROVAL] Starting approval process for project:', projectId)
     console.log('[APPROVAL] Selected video:', selectedVideoId)
@@ -94,17 +95,48 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ message: 'Video already approved' })
     }
 
+    // Resolve who is approving, for activity-feed attribution.
+    // Admin session → admin identity; otherwise the recipient picked on the share page
+    // (validated against this project) or the recipient embedded in the OTP share token,
+    // falling back to the free-text authorName.
+    let approvedById: string | null = null
+    let approvedByRecipientId: string | null = null
+    let approvedByName: string | null = null
+    if (accessCheck.isAdmin) {
+      approvedById = accessCheck.adminUserId || null
+      approvedByName = accessCheck.adminUserName || 'Admin'
+    } else {
+      const candidateRecipientId = (recipientId && recipientId.trim()) || accessCheck.shareRecipientId || null
+      if (candidateRecipientId) {
+        const recipient = await prisma.projectRecipient.findFirst({
+          where: { id: candidateRecipientId, projectId },
+          select: { id: true, name: true },
+        })
+        if (recipient) {
+          approvedByRecipientId = recipient.id
+          approvedByName = recipient.name || null
+        }
+      }
+      if (!approvedByName) approvedByName = (authorName && authorName.trim()) || 'Client'
+    }
+
     // IMPORTANT: When approving a video, unapprove all other versions of the SAME video
     // This ensures only ONE version per video name can be approved at a time
+    const now = new Date()
     await prisma.video.updateMany({
       where: {
         projectId,
         name: selectedVideo.name, // Same video name
         id: { not: selectedVideoId }, // But different version
+        approved: true,
       },
       data: {
         approved: false,
         approvedAt: null,
+        unapprovedAt: now,
+        unapprovedById: approvedById,
+        unapprovedByRecipientId: approvedByRecipientId,
+        unapprovedByName: approvedByName,
       },
     })
 
@@ -113,7 +145,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       where: { id: selectedVideoId },
       data: {
         approved: true,
-        approvedAt: new Date(),
+        approvedAt: now,
+        approvedById,
+        approvedByRecipientId,
+        approvedByName,
       },
     })
 

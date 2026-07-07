@@ -8,7 +8,7 @@ import {
   buildProjectUploadsRoot,
   normalizeProjectUploadRelativePath,
 } from '@/lib/project-storage-paths'
-import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
+import { resolveProjectStoragePath, resolveShareUploadAccess, resolveShareUploadActor } from '@/lib/share-uploads'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
@@ -86,6 +86,11 @@ export async function POST(
   }))
   const storedFileName = path.posix.basename(key)
 
+  const actor = await resolveShareUploadActor(access, {
+    recipientId: body?.recipientId,
+    authorName: body?.authorName,
+  })
+
   try {
     await s3CompleteMultipartUpload(key, uploadId, completedParts)
   } catch (error) {
@@ -108,7 +113,9 @@ export async function POST(
           mediaWidth: mediaMetadata?.width ?? null,
           mediaHeight: mediaMetadata?.height ?? null,
           mediaCodec: mediaMetadata?.codec ?? null,
-          uploadedByName: access.isAdmin ? 'Admin' : 'Client',
+          uploadedById: actor.userId,
+          uploadedByRecipientId: actor.recipientId,
+          uploadedByName: actor.name,
         },
         select: {
           id: true,
@@ -154,7 +161,9 @@ export async function POST(
         relativePath: folderPath,
         folderName: folderPath.split('/').pop() || folderPath,
         storagePath: folderStoragePath,
-        createdByName: access.isAdmin ? 'Admin' : 'Client',
+        createdById: actor.userId,
+        createdByRecipientId: actor.recipientId,
+        createdByName: actor.name,
       },
     })
   }

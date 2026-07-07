@@ -825,11 +825,6 @@ export function ShareFilesBrowser({
     [sortedGroups]
   )
 
-  const rootUploadsSectionGroups = useMemo(
-    () => rootUploadGroups.filter((group) => group.name === 'UPLOADS'),
-    [rootUploadGroups]
-  )
-
   const projectRootGroups = useMemo(
     () => sortedGroups.filter((group) => group.groupType !== 'uploads'),
     [sortedGroups]
@@ -842,6 +837,17 @@ export function ShareFilesBrowser({
       subFiles: [],
     }
   }, [rootUploadGroups])
+
+  // Render exactly one top-level UPLOADS card whenever any uploads group exists.
+  // The server only emits a literal `UPLOADS` group when files live at the uploads
+  // root (or uploads are empty); when files sit only in subfolders the groups are
+  // named `UPLOADS / <path>` and there is no root group. In that case fall back to
+  // the synthetic `uploadsRootGroup` so the main browser still shows the section —
+  // matching the sidebar, which shows UPLOADS whenever any uploads group exists.
+  const rootUploadsSectionGroups = useMemo(
+    () => (rootUploadGroups.length > 0 ? [uploadsRootGroup] : []),
+    [rootUploadGroups, uploadsRootGroup]
+  )
 
   const splitRootSections = [
     rootVideoGroups.length > 0,

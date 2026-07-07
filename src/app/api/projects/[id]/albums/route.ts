@@ -195,6 +195,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       storageFolderName,
       notes,
       socialCopiesEnabled: parsed.data.socialCopiesEnabled !== false,
+      createdById: auth.id,
+      createdByName: auth.name || auth.email,
     },
   })
 

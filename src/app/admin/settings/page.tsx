@@ -3,11 +3,13 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Settings as SettingsIcon, Save, Palette, Globe, Mail, Cpu, HardDrive, Video, FolderKanban, Wrench, Bell, Shield } from 'lucide-react'
+import { Settings as SettingsIcon, Save, Palette, Globe, Mail, Cpu, HardDrive, Video, FolderKanban, Wrench, Bell, Shield, Sparkles, Captions } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CompanyBrandingSection } from '@/components/settings/CompanyBrandingSection'
 import { DomainConfigurationSection } from '@/components/settings/DomainConfigurationSection'
 import { EmailSettingsSection } from '@/components/settings/EmailSettingsSection'
+import { AiAssistantSettingsSection } from '@/components/settings/AiAssistantSettingsSection'
+import { TranscriptionSettingsSection } from '@/components/settings/TranscriptionSettingsSection'
 import { VideoProcessingSettingsSection } from '@/components/settings/VideoProcessingSettingsSection'
 import { ProjectBehaviorSection } from '@/components/settings/ProjectBehaviorSection'
 import { DeveloperToolsSection } from '@/components/settings/DeveloperToolsSection'
@@ -117,6 +119,8 @@ const SETTING_SECTIONS = [
   { id: 'storage', label: 'Storage Overview', icon: HardDrive },
   { id: 'video-processing', label: 'Default Project Settings', icon: Video },
   { id: 'project-behavior', label: 'Project Behavior', icon: FolderKanban },
+  { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles },
+  { id: 'transcription', label: 'Subtitles & Transcription', icon: Captions },
   { id: 'developer-tools', label: 'Developer Tools', icon: Wrench },
   { id: 'push-notifications', label: 'Push Notifications', icon: Bell },
   { id: 'security', label: 'Advanced Security', icon: Shield },
@@ -159,6 +163,26 @@ export default function GlobalSettingsPage() {
   const [emailCustomFooterText, setEmailCustomFooterText] = useState<string | null>(null)
   const [smtpFromAddress, setSmtpFromAddress] = useState('')
   const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
+  const [aiProvider, setAiProvider] = useState('NONE')
+  const [aiOllamaUrl, setAiOllamaUrl] = useState('')
+  const [aiOllamaModel, setAiOllamaModel] = useState('')
+  const [aiAnthropicModel, setAiAnthropicModel] = useState('claude-opus-4-8')
+  const [aiAnthropicApiKey, setAiAnthropicApiKey] = useState('')
+  const [aiOpenaiModel, setAiOpenaiModel] = useState('gpt-4o')
+  const [aiOpenaiApiKey, setAiOpenaiApiKey] = useState('')
+  const [aiReplyDraftsEnabled, setAiReplyDraftsEnabled] = useState(false)
+  const [aiReplySignature, setAiReplySignature] = useState('')
+  const [aiInstructions, setAiInstructions] = useState('')
+  const [aiPortfolio, setAiPortfolio] = useState<Array<{ id?: string; title: string; url: string; description: string }>>([])
+  const [transcriptionEnabled, setTranscriptionEnabled] = useState(false)
+  const [transcriptionProvider, setTranscriptionProvider] = useState('LOCAL')
+  const [transcriptionWhisperUrl, setTranscriptionWhisperUrl] = useState('')
+  const [transcriptionWhisperModel, setTranscriptionWhisperModel] = useState('deepdml/faster-whisper-large-v3-turbo-ct2')
+  const [transcriptionOpenaiApiKey, setTranscriptionOpenaiApiKey] = useState('')
+  const [transcriptionOpenaiModel, setTranscriptionOpenaiModel] = useState('whisper-1')
+  const [transcriptionMaxCharsPerLine, setTranscriptionMaxCharsPerLine] = useState<number | ''>(42)
+  const [transcriptionMaxLines, setTranscriptionMaxLines] = useState<number | ''>(2)
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState('en')
   const [appDomain, setAppDomain] = useState('')
   const [mainCompanyDomain, setMainCompanyDomain] = useState('')
   const [defaultPreviewResolutions, setDefaultPreviewResolutions] = useState<string[]>(['720p'])
@@ -274,6 +298,8 @@ export default function GlobalSettingsPage() {
   const [showProjectBehavior, setShowProjectBehavior] = useState(false)
   const [showPushNotifications, setShowPushNotifications] = useState(false)
   const [showStorageOverview, setShowStorageOverview] = useState(false)
+  const [showAiAssistant, setShowAiAssistant] = useState(false)
+  const [showTranscription, setShowTranscription] = useState(false)
 
   // CPU Configuration state
   const [showCpuConfig, setShowCpuConfig] = useState(false)
@@ -325,6 +351,12 @@ export default function GlobalSettingsPage() {
     pushNotifySalesInvoicePaid, pushNotifySalesReminders,
     pushNotifyPasswordResetRequested, pushNotifyPasswordResetSuccess,
     cpuFfmpegThreadsPerJob, cpuVideoWorkerConcurrency, cpuDynamicThreadAllocation,
+    aiProvider, aiOllamaUrl, aiOllamaModel, aiAnthropicModel, aiAnthropicApiKey,
+    aiOpenaiModel, aiOpenaiApiKey,
+    aiReplyDraftsEnabled, aiReplySignature, aiInstructions, aiPortfolio,
+    transcriptionEnabled, transcriptionProvider, transcriptionWhisperUrl, transcriptionWhisperModel,
+    transcriptionOpenaiApiKey, transcriptionOpenaiModel, transcriptionLanguage,
+    transcriptionMaxCharsPerLine, transcriptionMaxLines,
   })
   const hasUnsavedChanges = dataLoaded && savedSnapshot !== '' && settingsSnapshot !== savedSnapshot
   useUnsavedChanges(hasUnsavedChanges)
@@ -365,6 +397,26 @@ export default function GlobalSettingsPage() {
         setEmailCustomFooterText(data.emailCustomFooterText ?? null)
         setSmtpFromAddress(data.smtpFromAddress || '')
         setSmtpSecure(data.smtpSecure || 'STARTTLS')
+        setAiProvider(data.aiProvider || 'NONE')
+        setAiOllamaUrl(data.aiOllamaUrl || '')
+        setAiOllamaModel(data.aiOllamaModel || '')
+        setAiAnthropicModel(data.aiAnthropicModel || 'claude-opus-4-8')
+        setAiAnthropicApiKey(data.aiAnthropicApiKey || '')
+        setAiOpenaiModel(data.aiOpenaiModel || 'gpt-4o')
+        setAiOpenaiApiKey(data.aiOpenaiApiKey || '')
+        setAiReplyDraftsEnabled(data.aiReplyDraftsEnabled ?? false)
+        setAiReplySignature(data.aiReplySignature || '')
+        setAiInstructions(data.aiInstructions || '')
+        setAiPortfolio(Array.isArray(data.aiPortfolio) ? data.aiPortfolio : [])
+        setTranscriptionEnabled(data.transcriptionEnabled ?? false)
+        setTranscriptionProvider(data.transcriptionProvider || 'LOCAL')
+        setTranscriptionWhisperUrl(data.transcriptionWhisperUrl || '')
+        setTranscriptionWhisperModel(data.transcriptionWhisperModel || 'deepdml/faster-whisper-large-v3-turbo-ct2')
+        setTranscriptionOpenaiApiKey(data.transcriptionOpenaiApiKey || '')
+        setTranscriptionOpenaiModel(data.transcriptionOpenaiModel || 'whisper-1')
+        setTranscriptionLanguage(data.transcriptionLanguage ?? 'en')
+        setTranscriptionMaxCharsPerLine(typeof data.transcriptionMaxCharsPerLine === 'number' ? data.transcriptionMaxCharsPerLine : 42)
+        setTranscriptionMaxLines(typeof data.transcriptionMaxLines === 'number' ? data.transcriptionMaxLines : 2)
         setAppDomain(data.appDomain || '')
         setMainCompanyDomain(data.mainCompanyDomain || '')
         setDefaultPreviewResolutions((() => {
@@ -737,6 +789,26 @@ export default function GlobalSettingsPage() {
         clientEmailProjectApproved,
         s3LocalBackupEnabled,
         s3LocalBackupCategories,
+        aiProvider: aiProvider || 'NONE',
+        aiOllamaUrl: aiOllamaUrl || null,
+        aiOllamaModel: aiOllamaModel || null,
+        aiAnthropicModel: aiAnthropicModel || null,
+        aiAnthropicApiKey: aiAnthropicApiKey || null,
+        aiOpenaiModel: aiOpenaiModel || null,
+        aiOpenaiApiKey: aiOpenaiApiKey || null,
+        aiReplyDraftsEnabled,
+        aiReplySignature: aiReplySignature || null,
+        aiInstructions: aiInstructions || null,
+        aiPortfolio,
+        transcriptionEnabled,
+        transcriptionProvider: transcriptionProvider || 'LOCAL',
+        transcriptionWhisperUrl: transcriptionWhisperUrl || null,
+        transcriptionWhisperModel: transcriptionWhisperModel || null,
+        transcriptionOpenaiApiKey: transcriptionOpenaiApiKey || null,
+        transcriptionOpenaiModel: transcriptionOpenaiModel || null,
+        transcriptionLanguage: transcriptionLanguage.trim(),
+        transcriptionMaxCharsPerLine: transcriptionMaxCharsPerLine === '' ? 0 : transcriptionMaxCharsPerLine,
+        transcriptionMaxLines: transcriptionMaxLines === '' ? 2 : transcriptionMaxLines,
       }
 
       // Save global settings
@@ -830,6 +902,26 @@ export default function GlobalSettingsPage() {
         setEmailCustomFooterText(refreshedData.emailCustomFooterText ?? null)
         setSmtpFromAddress(refreshedData.smtpFromAddress || '')
         setSmtpSecure(refreshedData.smtpSecure || 'STARTTLS')
+        setAiProvider(refreshedData.aiProvider || 'NONE')
+        setAiOllamaUrl(refreshedData.aiOllamaUrl || '')
+        setAiOllamaModel(refreshedData.aiOllamaModel || '')
+        setAiAnthropicModel(refreshedData.aiAnthropicModel || 'claude-opus-4-8')
+        setAiAnthropicApiKey(refreshedData.aiAnthropicApiKey || '')
+        setAiOpenaiModel(refreshedData.aiOpenaiModel || 'gpt-4o')
+        setAiOpenaiApiKey(refreshedData.aiOpenaiApiKey || '')
+        setAiReplyDraftsEnabled(refreshedData.aiReplyDraftsEnabled ?? false)
+        setAiReplySignature(refreshedData.aiReplySignature || '')
+        setAiInstructions(refreshedData.aiInstructions || '')
+        setAiPortfolio(Array.isArray(refreshedData.aiPortfolio) ? refreshedData.aiPortfolio : [])
+        setTranscriptionEnabled(refreshedData.transcriptionEnabled ?? false)
+        setTranscriptionProvider(refreshedData.transcriptionProvider || 'LOCAL')
+        setTranscriptionWhisperUrl(refreshedData.transcriptionWhisperUrl || '')
+        setTranscriptionWhisperModel(refreshedData.transcriptionWhisperModel || 'deepdml/faster-whisper-large-v3-turbo-ct2')
+        setTranscriptionOpenaiApiKey(refreshedData.transcriptionOpenaiApiKey || '')
+        setTranscriptionOpenaiModel(refreshedData.transcriptionOpenaiModel || 'whisper-1')
+        setTranscriptionLanguage(refreshedData.transcriptionLanguage ?? 'en')
+        setTranscriptionMaxCharsPerLine(typeof refreshedData.transcriptionMaxCharsPerLine === 'number' ? refreshedData.transcriptionMaxCharsPerLine : 42)
+        setTranscriptionMaxLines(typeof refreshedData.transcriptionMaxLines === 'number' ? refreshedData.transcriptionMaxLines : 2)
         setAppDomain(refreshedData.appDomain || '')
         setMainCompanyDomain(refreshedData.mainCompanyDomain || '')
         setDefaultPreviewResolutions((() => {
@@ -1141,6 +1233,56 @@ export default function GlobalSettingsPage() {
             setAdminEmailUserKeyDates={setAdminEmailUserKeyDates}
             show={showEmailSettings}
             setShow={setShowEmailSettings}
+          />
+
+          <AiAssistantSettingsSection
+            aiProvider={aiProvider}
+            setAiProvider={setAiProvider}
+            aiOllamaUrl={aiOllamaUrl}
+            setAiOllamaUrl={setAiOllamaUrl}
+            aiOllamaModel={aiOllamaModel}
+            setAiOllamaModel={setAiOllamaModel}
+            aiAnthropicModel={aiAnthropicModel}
+            setAiAnthropicModel={setAiAnthropicModel}
+            aiAnthropicApiKey={aiAnthropicApiKey}
+            setAiAnthropicApiKey={setAiAnthropicApiKey}
+            aiOpenaiModel={aiOpenaiModel}
+            setAiOpenaiModel={setAiOpenaiModel}
+            aiOpenaiApiKey={aiOpenaiApiKey}
+            setAiOpenaiApiKey={setAiOpenaiApiKey}
+            aiReplyDraftsEnabled={aiReplyDraftsEnabled}
+            setAiReplyDraftsEnabled={setAiReplyDraftsEnabled}
+            aiReplySignature={aiReplySignature}
+            setAiReplySignature={setAiReplySignature}
+            aiInstructions={aiInstructions}
+            setAiInstructions={setAiInstructions}
+            aiPortfolio={aiPortfolio}
+            setAiPortfolio={setAiPortfolio}
+            show={showAiAssistant}
+            setShow={setShowAiAssistant}
+          />
+
+          <TranscriptionSettingsSection
+            transcriptionEnabled={transcriptionEnabled}
+            setTranscriptionEnabled={setTranscriptionEnabled}
+            transcriptionProvider={transcriptionProvider}
+            setTranscriptionProvider={setTranscriptionProvider}
+            transcriptionWhisperUrl={transcriptionWhisperUrl}
+            setTranscriptionWhisperUrl={setTranscriptionWhisperUrl}
+            transcriptionWhisperModel={transcriptionWhisperModel}
+            setTranscriptionWhisperModel={setTranscriptionWhisperModel}
+            transcriptionOpenaiApiKey={transcriptionOpenaiApiKey}
+            setTranscriptionOpenaiApiKey={setTranscriptionOpenaiApiKey}
+            transcriptionOpenaiModel={transcriptionOpenaiModel}
+            setTranscriptionOpenaiModel={setTranscriptionOpenaiModel}
+            transcriptionLanguage={transcriptionLanguage}
+            setTranscriptionLanguage={setTranscriptionLanguage}
+            transcriptionMaxCharsPerLine={transcriptionMaxCharsPerLine}
+            setTranscriptionMaxCharsPerLine={setTranscriptionMaxCharsPerLine}
+            transcriptionMaxLines={transcriptionMaxLines}
+            setTranscriptionMaxLines={setTranscriptionMaxLines}
+            show={showTranscription}
+            setShow={setShowTranscription}
           />
 
           <CpuConfigurationSection
@@ -1463,6 +1605,62 @@ export default function GlobalSettingsPage() {
                 setAdminEmailProjectKeyDates={setAdminEmailProjectKeyDates}
                 adminEmailUserKeyDates={adminEmailUserKeyDates}
                 setAdminEmailUserKeyDates={setAdminEmailUserKeyDates}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'ai-assistant' && (
+              <AiAssistantSettingsSection
+                aiProvider={aiProvider}
+                setAiProvider={setAiProvider}
+                aiOllamaUrl={aiOllamaUrl}
+                setAiOllamaUrl={setAiOllamaUrl}
+                aiOllamaModel={aiOllamaModel}
+                setAiOllamaModel={setAiOllamaModel}
+                aiAnthropicModel={aiAnthropicModel}
+                setAiAnthropicModel={setAiAnthropicModel}
+                aiAnthropicApiKey={aiAnthropicApiKey}
+                setAiAnthropicApiKey={setAiAnthropicApiKey}
+                aiOpenaiModel={aiOpenaiModel}
+                setAiOpenaiModel={setAiOpenaiModel}
+                aiOpenaiApiKey={aiOpenaiApiKey}
+                setAiOpenaiApiKey={setAiOpenaiApiKey}
+                aiReplyDraftsEnabled={aiReplyDraftsEnabled}
+                setAiReplyDraftsEnabled={setAiReplyDraftsEnabled}
+                aiReplySignature={aiReplySignature}
+                setAiReplySignature={setAiReplySignature}
+                aiInstructions={aiInstructions}
+                setAiInstructions={setAiInstructions}
+                aiPortfolio={aiPortfolio}
+                setAiPortfolio={setAiPortfolio}
+                show={true}
+                setShow={() => {}}
+                hideCollapse
+              />
+            )}
+
+            {activeSection === 'transcription' && (
+              <TranscriptionSettingsSection
+                transcriptionEnabled={transcriptionEnabled}
+                setTranscriptionEnabled={setTranscriptionEnabled}
+                transcriptionProvider={transcriptionProvider}
+                setTranscriptionProvider={setTranscriptionProvider}
+                transcriptionWhisperUrl={transcriptionWhisperUrl}
+                setTranscriptionWhisperUrl={setTranscriptionWhisperUrl}
+                transcriptionWhisperModel={transcriptionWhisperModel}
+                setTranscriptionWhisperModel={setTranscriptionWhisperModel}
+                transcriptionOpenaiApiKey={transcriptionOpenaiApiKey}
+                setTranscriptionOpenaiApiKey={setTranscriptionOpenaiApiKey}
+                transcriptionOpenaiModel={transcriptionOpenaiModel}
+                setTranscriptionOpenaiModel={setTranscriptionOpenaiModel}
+                transcriptionLanguage={transcriptionLanguage}
+                setTranscriptionLanguage={setTranscriptionLanguage}
+                transcriptionMaxCharsPerLine={transcriptionMaxCharsPerLine}
+                setTranscriptionMaxCharsPerLine={setTranscriptionMaxCharsPerLine}
+                transcriptionMaxLines={transcriptionMaxLines}
+                setTranscriptionMaxLines={setTranscriptionMaxLines}
                 show={true}
                 setShow={() => {}}
                 hideCollapse

@@ -10,12 +10,17 @@ import VideoSidebar from '@/components/VideoSidebar'
 import { ShareFilesBrowser } from '@/components/ShareFilesBrowser'
 import { ShareProjectSwitcher, type ShareProjectOption } from '@/components/ShareProjectSwitcher'
 import { ShareAlbumViewer } from '@/components/ShareAlbumViewer'
+import { ProjectActivityPanel } from '@/components/ProjectActivityPanel'
+import { useResizableSidePanel } from '@/hooks/useResizableSidePanel'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowLeft } from 'lucide-react'
 import { apiFetch, attemptRefresh } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
+import { useSubtitleEditor } from '@/hooks/useSubtitleEditor'
+import { SubtitleEditPanel } from '@/components/subtitle-editor/SubtitleEditPanel'
+import { SubtitleTimelineStrip } from '@/components/subtitle-editor/SubtitleTimelineStrip'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { useContentImageRefresh } from '@/hooks/useContentImageRefresh'
@@ -67,6 +72,8 @@ export default function AdminSharePage() {
   const urlVersion = searchParams?.get('version') ? parseInt(searchParams.get('version')!, 10) : null
 
   const [project, setProject] = useState<any>(null)
+  // Adjustable width for the Project Activity panel, shared with the Comment Display width.
+  const activityPanelResize = useResizableSidePanel()
   const [comments, setComments] = useState<any[]>([])
   const [commentsLoading, setCommentsLoading] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -97,6 +104,9 @@ export default function AdminSharePage() {
   const [uploadTransferItems, setUploadTransferItems] = useState<TransferItem[]>([])
   const [uploadTransferPanelVersion, setUploadTransferPanelVersion] = useState(0)
   const draftGuardRef = useRef<DraftNavigationGuard | null>(null)
+  // Set to the subtitle editor's discard-guard while editing (see effect below),
+  // so sidebar/album/uploads navigation also prompts on unsaved subtitle edits.
+  const subtitleGuardRef = useRef<(() => boolean) | null>(null)
   const uploadAbortControllersRef = useRef<Map<string, AbortController>>(new Map())
   const uploadCancelRequestedRef = useRef(false)
   const lastFilesRefreshAtRef = useRef(0)
@@ -124,7 +134,12 @@ export default function AdminSharePage() {
 
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
-    return guard ? guard.confirmDiscardDraft() : true
+    if (guard && !guard.confirmDiscardDraft()) return false
+    // Also honor unsaved subtitle edits (sidebar/album/uploads switches bypass
+    // the player's own video-switch guard).
+    const subGuard = subtitleGuardRef.current
+    if (subGuard && !subGuard()) return false
+    return true
   }, [])
 
   // Mobile edge-swipe navigation: drag in from the left edge → back to the
@@ -436,6 +451,12 @@ export default function AdminSharePage() {
               timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
             }
 
+            let subtitlesVttUrl = null
+            if (video.hasSubtitles) {
+              const subtitlesToken = await getAdminVideoToken(video.id, 'subtitles-vtt')
+              subtitlesVttUrl = subtitlesToken ? `/api/content/${subtitlesToken}` : null
+            }
+
             const tokenized = {
               ...video,
               streamUrl480p,
@@ -448,6 +469,7 @@ export default function AdminSharePage() {
               thumbnailUrl,
               timelineVttUrl,
               timelineSpriteUrl,
+              subtitlesVttUrl,
             }
 
             tokenCacheRef.current.set(video.id, tokenized)
@@ -567,7 +589,7 @@ export default function AdminSharePage() {
             // Use project/company fallback for studio name and preview quality
             setDefaultQuality(projectData.previewResolution || '720p')
 
-            if (!(projectData.hideFeedback || projectData.status === 'SHARE_ONLY')) {
+            if (!projectData.hideFeedback) {
               fetchComments()
             }
           }
@@ -1165,6 +1187,25 @@ export default function AdminSharePage() {
     setActiveAlbumId(albumId)
     setRequestedFilesFolderName(String(album?.name || ''))
     setDesktopContentTab('files')
+  }
+
+  // Open the video version / album referenced by a Project Activity entry.
+  const handleOpenActivityTarget = (target: { videoId?: string; videoName?: string; albumId?: string }) => {
+    if (target.albumId) {
+      handleAlbumSelect(String(target.albumId))
+      return
+    }
+    if (target.videoId) {
+      if (!confirmShareDraftNavigation()) return
+      if (target.videoName) activateVideoFolder(String(target.videoName))
+      setDesktopContentTab('view')
+      const videoId = String(target.videoId)
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('selectVideoForComments', { detail: { videoId } }))
+        window.dispatchEvent(new CustomEvent('videoTimeUpdated', { detail: { time: 0, videoId } }))
+        window.dispatchEvent(new CustomEvent('seekToTime', { detail: { timestamp: 0, videoId, videoVersion: null } }))
+      }, 0)
+    }
   }
 
   // Toggle the UPLOADS folder in the Files browser (UPLOADS ⇄ project root).
@@ -2341,6 +2382,8 @@ export default function AdminSharePage() {
           >
             {/* Main Content */}
             {desktopContentTab === 'files' ? (
+              <div className="flex-1 min-h-0 flex flex-col gap-2 lg:flex-row lg:gap-1">
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col">
               <ShareFilesBrowser
                 groups={downloadableFilesWithOptimisticUploads}
                 rootFolderLabel={String(project.title || 'PROJECT')}
@@ -2382,8 +2425,40 @@ export default function AdminSharePage() {
                 onDeleteUploadFolder={handleDeleteUploadFolder}
                 onRenameUploadFolder={handleRenameUploadFolder}
               />
+              </div>
+              <div
+                ref={activityPanelResize.containerRef}
+                className="relative shrink-0 flex flex-col min-h-0 max-lg:h-[420px] lg:w-[420px]"
+                style={activityPanelResize.isDesktop ? { width: Math.round(activityPanelResize.width) } : undefined}
+              >
+                <div
+                  onMouseDown={activityPanelResize.startResize}
+                  className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-transparent hover:bg-primary/15 cursor-col-resize select-none z-10 group transition-colors"
+                >
+                  <div className="h-8 w-0.5 rounded-full bg-primary/45 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                <ProjectActivityPanel fetchUrl={`/api/projects/${project.id}/activity`} onOpenTarget={handleOpenActivityTarget} />
+              </div>
+              </div>
             ) : activeAlbumId ? (
+              <div className="flex-1 min-h-0 flex flex-col gap-2 lg:flex-row lg:gap-1">
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col">
               <ShareAlbumViewer shareSlug={String(project.slug)} shareToken={null} albumId={activeAlbumId} />
+              </div>
+              <div
+                ref={activityPanelResize.containerRef}
+                className="relative shrink-0 flex flex-col min-h-0 max-lg:h-[420px] lg:w-[420px]"
+                style={activityPanelResize.isDesktop ? { width: Math.round(activityPanelResize.width) } : undefined}
+              >
+                <div
+                  onMouseDown={activityPanelResize.startResize}
+                  className="hidden lg:flex lg:items-center lg:justify-center absolute left-0 top-0 bottom-0 w-[5px] bg-transparent hover:bg-primary/15 cursor-col-resize select-none z-10 group transition-colors"
+                >
+                  <div className="h-8 w-0.5 rounded-full bg-primary/45 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                <ProjectActivityPanel fetchUrl={`/api/projects/${project.id}/activity`} onOpenTarget={handleOpenActivityTarget} />
+              </div>
+              </div>
             ) : project.enableVideos === false ? (
               <Card className="bg-card border-border rounded-lg">
                 <CardContent className="py-12 text-center">
@@ -2402,11 +2477,11 @@ export default function AdminSharePage() {
               </Card>
             ) : (
               <div
-                className={`flex-1 min-h-0 ${(project.hideFeedback || project.status === 'SHARE_ONLY')
+                className={`flex-1 min-h-0 ${project.hideFeedback
                   ? 'flex flex-col w-full'
                   : 'flex flex-col lg:flex-row gap-4 sm:gap-6 lg:-mx-8 lg:-my-8'}`}
               >
-                {(project.hideFeedback || project.status === 'SHARE_ONLY') ? (
+                {project.hideFeedback ? (
                   <div className="flex-1 min-h-0 flex flex-col">
                     <VideoPlayer
                       videos={readyVideos}
@@ -2444,6 +2519,8 @@ export default function AdminSharePage() {
                     onDraftGuardChange={(guard) => {
                       draftGuardRef.current = guard
                     }}
+                    subtitleGuardRef={subtitleGuardRef}
+                    fetchContentToken={getAdminVideoToken}
                   />
                 )}
               </div>
@@ -2467,6 +2544,8 @@ function AdminShareFeedbackGrid({
   adminUser,
   clientDisplayName,
   onDraftGuardChange,
+  subtitleGuardRef,
+  fetchContentToken,
 }: {
   project: any
   readyVideos: any[]
@@ -2479,6 +2558,9 @@ function AdminShareFeedbackGrid({
   adminUser: any
   clientDisplayName: string
   onDraftGuardChange?: (guard: DraftNavigationGuard | null) => void
+  // Owned by the page (so its navigation guard can read it); the grid populates it.
+  subtitleGuardRef: { current: (() => boolean) | null }
+  fetchContentToken: (videoId: string, quality: string) => Promise<string | null>
 }) {
   const [isDesktop, setIsDesktop] = useState(false)
   const [commentsWidth, setCommentsWidth] = useState(420)
@@ -2663,7 +2745,7 @@ function AdminShareFeedbackGrid({
     return () => onDraftGuardChange(null)
   }, [confirmDiscardDraft, onDraftGuardChange])
 
-  const isApproved = project.status === 'APPROVED' || project.status === 'SHARE_ONLY'
+  const isApproved = project.status === 'APPROVED'
 
   const latestVideoVersion = readyVideos.length > 0
     ? Math.max(...readyVideos.map((v: any) => v.version))
@@ -2673,6 +2755,27 @@ function AdminShareFeedbackGrid({
   const selectedVideoApproved = selectedVideo ? Boolean(selectedVideo.approved) : false
   const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
   const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved || !canManageShareComments)
+
+  // Subtitle edit mode: swaps the comments panel for the subtitle editor and
+  // (desktop) shows the timeline strip under the player (CC menu → Edit).
+  const [isEditingSubtitles, setIsEditingSubtitles] = useState(false)
+  const subtitleEditor = useSubtitleEditor({
+    videoId: selectedVideo?.id ?? null,
+    videoName: String(selectedVideo?.name ?? 'Video'),
+    versionLabel: String(selectedVideo?.versionLabel ?? ''),
+    videoDurationSec: typeof selectedVideo?.duration === 'number' ? selectedVideo.duration : 0,
+    shareToken: null,
+    isAdmin: true,
+    active: isEditingSubtitles,
+    hasWaveform: Boolean(selectedVideo?.hasWaveformPeaks),
+    fetchContentToken,
+    onExit: () => setIsEditingSubtitles(false),
+  })
+  const subtitleGuard = subtitleEditor.guard
+  useEffect(() => {
+    subtitleGuardRef.current = isEditingSubtitles ? subtitleGuard : null
+    return () => { subtitleGuardRef.current = null }
+  }, [isEditingSubtitles, subtitleGuard, subtitleGuardRef])
 
   const currentVideoRestricted = Boolean(
     project.restrictCommentsToLatestVersion &&
@@ -2716,10 +2819,22 @@ function AdminShareFeedbackGrid({
               showTimeDisplayToggle={true}
               fillContainer
               pinControlsToBottom={false}
+              onEnterSubtitleEditMode={() => {
+                if (isEditingSubtitles) subtitleEditor.confirmAndExit()
+                else setIsEditingSubtitles(true)
+              }}
+              isEditingSubtitles={isEditingSubtitles}
+              videoSwitchGuardRef={subtitleGuardRef}
             />
           </div>
 
-          {!commentsDisabled ? (
+          {isEditingSubtitles && isDesktop && (
+            <div className="shrink-0">
+              <SubtitleTimelineStrip editor={subtitleEditor} />
+            </div>
+          )}
+
+          {!commentsDisabled && !isEditingSubtitles ? (
             <div className="mt-3 lg:hidden">
               <CommentInput
                 newComment={management.newComment}
@@ -2787,6 +2902,11 @@ function AdminShareFeedbackGrid({
           </div>
 
           <div className="lg:flex-1 lg:min-h-0 overflow-hidden flex flex-col">
+            {isEditingSubtitles ? (
+              <div className="lg:flex-1 max-lg:flex-none max-lg:h-[70dvh] min-h-0 border border-border rounded-lg bg-card">
+                <SubtitleEditPanel editor={subtitleEditor} />
+              </div>
+            ) : (
             <CommentSectionView
               projectId={project.id}
               projectSlug={project.slug}
@@ -2815,9 +2935,10 @@ function AdminShareFeedbackGrid({
               cardClassName={!commentsDisabled && isDesktop ? 'rounded-b-none' : undefined}
               management={management as any}
             />
+            )}
           </div>
 
-          {!commentsDisabled ? (
+          {!commentsDisabled && !isEditingSubtitles ? (
             <div className="hidden lg:block shrink-0">
               <CommentInput
                 newComment={management.newComment}
