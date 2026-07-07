@@ -1,4 +1,7 @@
 import type { ProjectStatus } from '@/lib/project-status'
+import { PROJECT_STATUS_OPTIONS } from '@/lib/project-status'
+
+const VALID_PROJECT_STATUSES = new Set<string>(PROJECT_STATUS_OPTIONS.map((s) => s.value))
 
 export type MenuKey = 'projects' | 'sharePage' | 'clients' | 'sales' | 'accounting' | 'assistant' | 'settings' | 'users' | 'security' | 'analytics'
 
@@ -110,7 +113,12 @@ export function normalizeRolePermissions(raw: unknown): RolePermissions {
 
   const projectVisibilityRaw = isRecord(raw.projectVisibility) ? raw.projectVisibility : {}
   const statusesRaw = Array.isArray(projectVisibilityRaw.statuses) ? projectVisibilityRaw.statuses : []
-  base.projectVisibility.statuses = statusesRaw.filter((s): s is ProjectStatus => typeof s === 'string') as ProjectStatus[]
+  // Only keep values that are still real ProjectStatus members. Roles saved before a
+  // status was removed from the enum (e.g. the retired SHARE_ONLY) can otherwise leak a
+  // dead value into `project.status.in`, which Prisma rejects for the whole query.
+  base.projectVisibility.statuses = statusesRaw.filter(
+    (s): s is ProjectStatus => typeof s === 'string' && VALID_PROJECT_STATUSES.has(s)
+  )
 
   const actionsRaw = isRecord(raw.actions) ? raw.actions : {}
   for (const key of ALL_ACTIONS) {

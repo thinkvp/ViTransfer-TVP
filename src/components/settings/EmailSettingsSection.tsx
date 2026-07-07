@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { PasswordInput } from '@/components/ui/password-input'
+import { SecretField } from '@/components/settings/SecretField'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
@@ -18,6 +18,9 @@ interface EmailSettingsSectionProps {
   setSmtpUsername: (value: string) => void
   smtpPassword: string
   setSmtpPassword: (value: string) => void
+  smtpPasswordConfigured?: boolean
+  smtpPasswordMarkedForRemoval?: boolean
+  onToggleRemoveSmtpPassword?: () => void
   emailTrackingPixelsEnabled: boolean
   setEmailTrackingPixelsEnabled: (value: boolean) => void
   emailCustomFooterText: string | null
@@ -73,6 +76,9 @@ export function EmailSettingsSection({
   setSmtpUsername,
   smtpPassword,
   setSmtpPassword,
+  smtpPasswordConfigured = false,
+  smtpPasswordMarkedForRemoval = false,
+  onToggleRemoveSmtpPassword = () => {},
   emailTrackingPixelsEnabled,
   setEmailTrackingPixelsEnabled,
   emailCustomFooterText,
@@ -242,18 +248,20 @@ export function EmailSettingsSection({
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="smtpPassword">SMTP Password</Label>
-          <PasswordInput
-            id="smtpPassword"
-            value={smtpPassword}
-            onChange={(e) => setSmtpPassword(e.target.value)}
-            placeholder="SMTP password or app password"
-          />
+        <SecretField
+          id="smtpPassword"
+          label="SMTP Password"
+          value={smtpPassword}
+          onChange={setSmtpPassword}
+          configured={smtpPasswordConfigured}
+          markedForRemoval={smtpPasswordMarkedForRemoval}
+          onToggleRemoval={onToggleRemoveSmtpPassword}
+          placeholder="SMTP password or app password"
+        >
           <p className="text-xs text-muted-foreground">
             For iCloud or Gmail, use an App Specific Password. For other providers, use your SMTP password.
           </p>
-        </div>
+        </SecretField>
 
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-0.5 flex-1">

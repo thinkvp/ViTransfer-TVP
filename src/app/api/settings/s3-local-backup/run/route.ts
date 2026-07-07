@@ -107,19 +107,17 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Optimistic lock â€” prevent concurrent runs
-  const current = await prisma.settings.findUnique({
-    where: { id: 'default' },
-    select: { s3LocalBackupRunning: true },
-  })
-  if (current?.s3LocalBackupRunning) {
+  // Optimistic lock â€” prevent concurrent runs. getS3LocalBackupSettings() applies the
+  // stale-lock self-heal, so a flag orphaned by a hung/killed run won't block a new run.
+  const currentSettings = await getS3LocalBackupSettings()
+  if (currentSettings?.running) {
     return NextResponse.json({ error: 'A backup run is already in progress' }, { status: 409 })
   }
 
   await prisma.settings.upsert({
     where: { id: 'default' },
-    update: { s3LocalBackupRunning: true },
-    create: { id: 'default', s3LocalBackupRunning: true },
+    update: { s3LocalBackupRunning: true, s3LocalBackupStartedAt: new Date() },
+    create: { id: 'default', s3LocalBackupRunning: true, s3LocalBackupStartedAt: new Date() },
   })
 
   // Progress callback â€” writes live status to DB so the UI can poll it.
@@ -147,6 +145,7 @@ export async function POST(request: NextRequest) {
         s3LocalBackupLastRunAt: new Date(),
         s3LocalBackupLastRunResult: summary,
         s3LocalBackupRunning: false,
+        s3LocalBackupStartedAt: null,
       },
     })
 
@@ -164,6 +163,7 @@ export async function POST(request: NextRequest) {
       data: {
         s3LocalBackupLastRunResult: `Error: ${message}`,
         s3LocalBackupRunning: false,
+        s3LocalBackupStartedAt: null,
       },
     }).catch(() => {})
     upsertS3BackupFailureNotification(message).catch(() => {})

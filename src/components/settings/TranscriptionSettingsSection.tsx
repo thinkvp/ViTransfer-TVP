@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { PasswordInput } from '@/components/ui/password-input'
+import { SecretField } from '@/components/settings/SecretField'
 import { Loader2, ChevronDown, ChevronUp, PlugZap } from 'lucide-react'
 import { apiPost, apiFetch } from '@/lib/api-client'
 
@@ -20,6 +20,9 @@ interface TranscriptionSettingsSectionProps {
   setTranscriptionWhisperModel: (value: string) => void
   transcriptionOpenaiApiKey: string
   setTranscriptionOpenaiApiKey: (value: string) => void
+  transcriptionOpenaiApiKeyConfigured?: boolean
+  transcriptionOpenaiApiKeyMarkedForRemoval?: boolean
+  onToggleRemoveTranscriptionOpenaiApiKey?: () => void
   transcriptionOpenaiModel: string
   setTranscriptionOpenaiModel: (value: string) => void
   transcriptionLanguage: string
@@ -47,6 +50,9 @@ export function TranscriptionSettingsSection({
   setTranscriptionWhisperModel,
   transcriptionOpenaiApiKey,
   setTranscriptionOpenaiApiKey,
+  transcriptionOpenaiApiKeyConfigured = false,
+  transcriptionOpenaiApiKeyMarkedForRemoval = false,
+  onToggleRemoveTranscriptionOpenaiApiKey = () => {},
   transcriptionOpenaiModel,
   setTranscriptionOpenaiModel,
   transcriptionLanguage,
@@ -234,16 +240,18 @@ export function TranscriptionSettingsSection({
                 </div>
               ) : (
                 <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                  <div className="space-y-2">
-                    <Label htmlFor="transcriptionOpenaiApiKey">OpenAI API Key</Label>
-                    <PasswordInput
-                      id="transcriptionOpenaiApiKey"
-                      value={transcriptionOpenaiApiKey}
-                      onChange={(e) => setTranscriptionOpenaiApiKey(e.target.value)}
-                      placeholder="sk-..."
-                    />
-                    <p className="text-xs text-muted-foreground">Stored encrypted; only decrypted by the worker at call time.</p>
-                  </div>
+                  <SecretField
+                    id="transcriptionOpenaiApiKey"
+                    label="OpenAI API Key"
+                    value={transcriptionOpenaiApiKey}
+                    onChange={setTranscriptionOpenaiApiKey}
+                    configured={transcriptionOpenaiApiKeyConfigured}
+                    markedForRemoval={transcriptionOpenaiApiKeyMarkedForRemoval}
+                    onToggleRemoval={onToggleRemoveTranscriptionOpenaiApiKey}
+                    placeholder="sk-..."
+                  >
+                    <p className="text-xs text-muted-foreground">Stored encrypted and never shown again; only decrypted by the worker at call time.</p>
+                  </SecretField>
                   <div className="space-y-2">
                     <Label htmlFor="transcriptionOpenaiModel">Model</Label>
                     <Input

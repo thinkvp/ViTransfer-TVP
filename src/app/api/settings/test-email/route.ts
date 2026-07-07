@@ -3,6 +3,8 @@ import { requireApiUser } from '@/lib/auth'
 import { testEmailConnection } from '@/lib/email'
 import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
+import { prisma } from '@/lib/db'
+import { decrypt } from '@/lib/encryption'
 export const runtime = 'nodejs'
 
 
@@ -48,6 +50,17 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid email address format' },
         { status: 400 }
       )
+    }
+
+    // Write-only secret: the browser no longer holds the saved SMTP password. If the admin
+    // is testing without typing a new one, fall back to the stored (decrypted) password so a
+    // test still exercises the real credentials. The plaintext never leaves the server.
+    if (smtpConfig && (!smtpConfig.smtpPassword || String(smtpConfig.smtpPassword).trim() === '')) {
+      const stored = await prisma.settings.findUnique({
+        where: { id: 'default' },
+        select: { smtpPassword: true },
+      })
+      smtpConfig.smtpPassword = stored?.smtpPassword ? decrypt(stored.smtpPassword) : null
     }
 
     // Test email connection and send test email with provided config or saved config

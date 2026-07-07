@@ -95,6 +95,7 @@ export default function AdminUploadManager({
   const [savingFolderId, setSavingFolderId] = useState<string | null>(null)
 
   const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
+  const [draggingFolderId, setDraggingFolderId] = useState<string | null>(null)
   const [pendingDeleteFolder, setPendingDeleteFolder] = useState<{ id: string; name: string } | null>(null)
   const [pendingDeleteFile, setPendingDeleteFile] = useState<{ folderId: string; fileId: string; fileName: string } | null>(null)
 
@@ -260,6 +261,14 @@ export default function AdminUploadManager({
     void uploadFilesToFolder(folderId, selected)
   }
 
+  const handleFolderDrop = (e: React.DragEvent, folderId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDraggingFolderId(null)
+    const dropped = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : []
+    if (dropped.length > 0) void uploadFilesToFolder(folderId, dropped)
+  }
+
   return (
     <div className="space-y-4">
       {/* Single hidden input reused across folders; target folder tracked via ref. */}
@@ -286,69 +295,98 @@ export default function AdminUploadManager({
             const isEditing = editingFolderId === folder.id
             const folderPending = pendingUploads.filter((p) => p.folderId === folder.id)
             return (
-              <Card key={folder.id} className="overflow-hidden">
-                <div
+              <Card key={folder.id} className="overflow-hidden transition-shadow hover:shadow-sm">
+                <CardHeader
                   className={cn(
-                    'flex items-center justify-between gap-2 p-3 cursor-pointer hover:bg-accent/50 transition-colors',
-                    isExpanded && 'border-b',
+                    'cursor-pointer hover:bg-accent/50 transition-colors',
+                    'flex flex-row items-center justify-between space-y-0 py-3',
                   )}
                   onClick={() => { if (!isEditing) setExpandedFolderId(isExpanded ? null : folder.id) }}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Folder className="w-4 h-4 text-primary shrink-0" />
-                    {isEditing ? (
-                      <InlineEdit
-                        value={editValue}
-                        onChange={setEditValue}
-                        onSave={() => void handleRenameFolder(folder.id)}
-                        onCancel={() => { setEditingFolderId(null); setEditValue('') }}
-                        disabled={savingFolderId === folder.id}
-                        stopPropagation
-                      />
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <div className="relative shrink-0 w-12 h-12 sm:w-14 sm:h-14 rounded-md overflow-hidden bg-muted ring-1 ring-border flex items-center justify-center">
+                      <Folder className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="min-w-0">
+                        {isEditing ? (
+                          <InlineEdit
+                            value={editValue}
+                            onChange={setEditValue}
+                            onSave={() => void handleRenameFolder(folder.id)}
+                            onCancel={() => { setEditingFolderId(null); setEditValue('') }}
+                            disabled={savingFolderId === folder.id}
+                            inputClassName="h-8 w-full sm:w-64"
+                            stopPropagation
+                          />
+                        ) : (
+                          <CardTitle className="text-lg leading-snug wrap-break-word">
+                            <span>{folder.folderName}</span>
+                            {projectStatus !== 'APPROVED' && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="ml-1 h-6 w-6 text-muted-foreground hover:text-primary hover:bg-primary-visible inline-flex align-text-top"
+                                onClick={(e) => { e.stopPropagation(); setEditingFolderId(folder.id); setEditValue(folder.folderName) }}
+                                title="Rename folder"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </Button>
+                            )}
+                          </CardTitle>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        {folderFiles.length} file{folderFiles.length === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-muted-foreground shrink-0" />
                     ) : (
-                      <>
-                        <span className="font-medium truncate">{folder.folderName}</span>
-                        <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground shrink-0">
-                          {folderFiles.length} {folderFiles.length === 1 ? 'file' : 'files'}
-                        </span>
-                      </>
+                      <ChevronDown className="w-5 h-5 text-muted-foreground shrink-0" />
                     )}
                   </div>
-                  {!isEditing && (
-                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        title="Rename folder"
-                        onClick={() => { setEditingFolderId(folder.id); setEditValue(folder.folderName) }}
-                      >
-                        <Pencil className="w-4 h-4" />
-                      </Button>
-                      {canDelete && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          title="Delete folder"
-                          onClick={() => setPendingDeleteFolder({ id: folder.id, name: folder.folderName })}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      )}
-                      <span className="text-muted-foreground">
-                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </span>
-                    </div>
-                  )}
-                </div>
+                </CardHeader>
 
                 {isExpanded && (
-                  <CardContent className="p-3 space-y-3">
-                    <Button variant="outline" size="sm" onClick={() => openFilePicker(folder.id)}>
-                      <Upload className="w-4 h-4 mr-2" />
-                      Upload Files
-                    </Button>
+                  <CardContent className="border-t border-border pt-4 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <h4 className="text-sm font-medium">Upload Files</h4>
+                        {canDelete && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setPendingDeleteFolder({ id: folder.id, name: folder.folderName })
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4 mr-2 text-destructive" />
+                            Delete folder
+                          </Button>
+                        )}
+                      </div>
+                      <div
+                        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDraggingFolderId(folder.id) }}
+                        onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDraggingFolderId(null) }}
+                        onDrop={(e) => handleFolderDrop(e, folder.id)}
+                        className={cn(
+                          'rounded-lg border-2 border-dashed transition-all',
+                          draggingFolderId === folder.id ? 'border-primary bg-primary/5 scale-[1.01] p-4' : 'border-transparent',
+                        )}
+                      >
+                        <Button type="button" variant="outline" onClick={() => openFilePicker(folder.id)} className="w-full">
+                          <Upload className="w-4 h-4 mr-2" />
+                          {folderFiles.length > 0 ? 'Add More Files' : 'Drag & Drop or Click to Choose'}
+                        </Button>
+                      </div>
+                    </div>
 
                     {folderPending.length > 0 && (
                       <div className="space-y-1">

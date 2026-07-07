@@ -84,8 +84,10 @@ export async function cancelProjectJobs(projectId: string): Promise<{ cancelled:
         for (const variant of ['full', 'social'] as AlbumZipVariant[]) {
           const jobId = getAlbumZipJobId({ albumId: album.id, variant })
           try {
-            await zipQueue.remove(jobId)
-            cancelled++
+            // remove() returns the number of keys removed; it does NOT throw when
+            // the job is absent, so only count when something was actually removed.
+            const removed = await zipQueue.remove(jobId)
+            if (removed > 0) cancelled++
           } catch {
             // Job may not exist or already completed
           }
@@ -127,8 +129,10 @@ export async function cancelProjectJobs(projectId: string): Promise<{ cancelled:
       const thumbnailQueue = getAlbumPhotoThumbnailQueue()
       for (const album of albums) {
         try {
-          await thumbnailQueue.remove(getAlbumThumbnailQueueJobId(album.id))
-          cancelled++
+          // remove() returns the number of keys removed; it does NOT throw when
+          // the job is absent, so only count when something was actually removed.
+          const removed = await thumbnailQueue.remove(getAlbumThumbnailQueueJobId(album.id))
+          if (removed > 0) cancelled++
         } catch {
           // Job may not exist or already completed
         }

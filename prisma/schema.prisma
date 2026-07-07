@@ -1127,6 +1127,7 @@ model Settings {
   s3LocalBackupLastRunAt  DateTime? // Timestamp of most recent completed backup run
   s3LocalBackupLastRunResult String? // Human-readable summary of last backup run
   s3LocalBackupRunning    Boolean  @default(false) // Lock flag: backup job currently in progress
+  s3LocalBackupStartedAt  DateTime? // When the current run acquired the lock; used to self-heal a stale flag left by a hung/killed run
 
   // AI Assistant Configuration
   aiProvider        String? @default("NONE") // Options: "NONE", "OLLAMA", "ANTHROPIC", "OPENAI"

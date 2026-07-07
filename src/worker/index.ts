@@ -879,7 +879,7 @@ async function main() {
           }
 
           console.log(`[S3-BACKUP] Starting scheduled backup (categories: ${backupSettings.categories.join(', ')})`)
-          await prisma.settings.update({ where: { id: 'default' }, data: { s3LocalBackupRunning: true } })
+          await prisma.settings.update({ where: { id: 'default' }, data: { s3LocalBackupRunning: true, s3LocalBackupStartedAt: new Date() } })
 
           try {
             const result = await runS3LocalBackup(backupSettings.categories)
@@ -890,6 +890,7 @@ async function main() {
                 s3LocalBackupLastRunAt: new Date(),
                 s3LocalBackupLastRunResult: summary,
                 s3LocalBackupRunning: false,
+                s3LocalBackupStartedAt: null,
               },
             })
             console.log(`[S3-BACKUP] ${summary}`)
@@ -902,7 +903,7 @@ async function main() {
             const msg = innerErr instanceof Error ? innerErr.message : String(innerErr)
             await prisma.settings.update({
               where: { id: 'default' },
-              data: { s3LocalBackupLastRunResult: `Error: ${msg}`, s3LocalBackupRunning: false },
+              data: { s3LocalBackupLastRunResult: `Error: ${msg}`, s3LocalBackupRunning: false, s3LocalBackupStartedAt: null },
             }).catch(() => {})
             upsertS3BackupFailureNotification(msg).catch(() => {})
             throw innerErr

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
-import { encrypt, decrypt } from '@/lib/encryption'
+import { encrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { invalidateEmailSettingsCache } from '@/lib/email'
 import { invalidateSettingsCaches } from '@/lib/settings'
@@ -23,6 +23,30 @@ export const runtime = 'nodejs'
 
 // Prevent static generation for this route
 export const dynamic = 'force-dynamic'
+
+/**
+ * Client-safe view of the encrypted secret columns. Write-only secrets are NEVER sent back to
+ * the browser — not as plaintext and not as ciphertext. We null the value and emit a boolean
+ * saying whether one is stored, so the UI can show a "saved" state and offer replace/remove
+ * without ever exposing the secret. Consumed by both the GET and PATCH responses.
+ */
+function secretStatusFields(settings: {
+  smtpPassword: string | null
+  aiAnthropicApiKey: string | null
+  aiOpenaiApiKey: string | null
+  transcriptionOpenaiApiKey: string | null
+}) {
+  return {
+    smtpPassword: null,
+    aiAnthropicApiKey: null,
+    aiOpenaiApiKey: null,
+    transcriptionOpenaiApiKey: null,
+    smtpPasswordConfigured: !!settings.smtpPassword,
+    aiAnthropicApiKeyConfigured: !!settings.aiAnthropicApiKey,
+    aiOpenaiApiKeyConfigured: !!settings.aiOpenaiApiKey,
+    transcriptionOpenaiApiKeyConfigured: !!settings.transcriptionOpenaiApiKey,
+  }
+}
 
 export async function GET(request: NextRequest) {
   // Check authentication
@@ -87,16 +111,13 @@ export async function GET(request: NextRequest) {
     settings = settings!
     securitySettings = securitySettings!
 
-    // Decrypt sensitive fields before sending to admin.
+    // Mask secrets before sending to admin (write-only — see secretStatusFields).
     // Exclude internal BigInt fields (accountingFilesBytes) that are not
     // needed by the settings UI and cannot be JSON-serialised.
     const { accountingFilesBytes: _accountingFilesBytes, ...settingsForClient } = settings
     const decryptedSettings = {
       ...settingsForClient,
-      smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
-      aiAnthropicApiKey: settings.aiAnthropicApiKey ? decrypt(settings.aiAnthropicApiKey) : null,
-      aiOpenaiApiKey: settings.aiOpenaiApiKey ? decrypt(settings.aiOpenaiApiKey) : null,
-      transcriptionOpenaiApiKey: settings.transcriptionOpenaiApiKey ? decrypt(settings.transcriptionOpenaiApiKey) : null,
+      ...secretStatusFields(settings),
       aiPortfolio: (() => {
         try {
           const arr = JSON.parse(settings.aiPortfolioJson || '[]')
@@ -174,6 +195,11 @@ export async function PATCH(request: NextRequest) {
       smtpPassword,
       smtpFromAddress,
       smtpSecure,
+      // Write-only secret removal flags (true = clear the stored value)
+      removeSmtpPassword,
+      removeAiAnthropicApiKey,
+      removeAiOpenaiApiKey,
+      removeTranscriptionOpenaiApiKey,
       emailTrackingPixelsEnabled,
       appDomain,
       mainCompanyDomain,
@@ -535,77 +561,21 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    // Handle SMTP password update - only update if actually changed
-    let passwordUpdate: string | null | undefined
-    if (smtpPassword !== undefined) {
-      // Get current settings to compare password
-      const currentSettings = await prisma.settings.findUnique({
-        where: { id: 'default' },
-        select: { smtpPassword: true },
-      })
-
-      // Decrypt current password for comparison
-      const currentPassword = currentSettings?.smtpPassword ? decrypt(currentSettings.smtpPassword) : null
-
-      // Only update if password actually changed
-      if (smtpPassword === null || smtpPassword === '') {
-        // Clearing password
-        if (currentPassword !== null) {
-          passwordUpdate = null
-        } else {
-          passwordUpdate = undefined // Already null, don't update
-        }
-      } else {
-        // Setting/updating password - only if different from current
-        if (smtpPassword !== currentPassword) {
-          passwordUpdate = encrypt(smtpPassword)
-        } else {
-          passwordUpdate = undefined // Same password, don't update
-        }
-      }
-    } else {
-      // Password not provided in request, don't update
-      passwordUpdate = undefined
-    }
-
-    // Handle AI API key update - only update if actually changed (mirrors smtpPassword)
-    let aiApiKeyUpdate: string | null | undefined
-    if (aiAnthropicApiKey !== undefined) {
-      const currentAiSettings = await prisma.settings.findUnique({
-        where: { id: 'default' },
-        select: { aiAnthropicApiKey: true },
-      })
-      const currentAiKey = currentAiSettings?.aiAnthropicApiKey ? decrypt(currentAiSettings.aiAnthropicApiKey) : null
-
-      if (aiAnthropicApiKey === null || aiAnthropicApiKey === '') {
-        aiApiKeyUpdate = currentAiKey !== null ? null : undefined
-      } else if (aiAnthropicApiKey !== currentAiKey) {
-        aiApiKeyUpdate = encrypt(aiAnthropicApiKey)
-      } else {
-        aiApiKeyUpdate = undefined
-      }
-    } else {
-      aiApiKeyUpdate = undefined
-    }
-
-    // Same "encrypt only if changed" logic for the two OpenAI keys (assistant + transcription)
-    async function resolveEncryptedKeyUpdate(
-      incoming: unknown,
-      column: 'aiOpenaiApiKey' | 'transcriptionOpenaiApiKey',
-    ): Promise<string | null | undefined> {
-      if (incoming === undefined) return undefined
-      const current = await prisma.settings.findUnique({
-        where: { id: 'default' },
-        select: { [column]: true } as Record<string, true>,
-      })
-      const stored = (current as Record<string, string | null> | null)?.[column] ?? null
-      const currentKey = stored ? decrypt(stored) : null
-      if (incoming === null || incoming === '') return currentKey !== null ? null : undefined
-      if (typeof incoming === 'string' && incoming !== currentKey) return encrypt(incoming)
+    // Write-only secrets. The plaintext is never sent to the client, so there is nothing to
+    // compare against here: a blank/absent value means "keep the stored secret", an explicit
+    // remove flag clears it, and any non-empty value replaces it (encrypted at rest).
+    //   undefined => leave the column untouched
+    //   null      => clear the stored secret
+    //   string    => encrypt and store as the new secret
+    function resolveSecretUpdate(incoming: unknown, remove: unknown): string | null | undefined {
+      if (remove === true) return null
+      if (typeof incoming === 'string' && incoming.trim() !== '') return encrypt(incoming.trim())
       return undefined
     }
-    const aiOpenaiApiKeyUpdate = await resolveEncryptedKeyUpdate(aiOpenaiApiKey, 'aiOpenaiApiKey')
-    const transcriptionOpenaiApiKeyUpdate = await resolveEncryptedKeyUpdate(transcriptionOpenaiApiKey, 'transcriptionOpenaiApiKey')
+    const passwordUpdate = resolveSecretUpdate(smtpPassword, removeSmtpPassword)
+    const aiApiKeyUpdate = resolveSecretUpdate(aiAnthropicApiKey, removeAiAnthropicApiKey)
+    const aiOpenaiApiKeyUpdate = resolveSecretUpdate(aiOpenaiApiKey, removeAiOpenaiApiKey)
+    const transcriptionOpenaiApiKeyUpdate = resolveSecretUpdate(transcriptionOpenaiApiKey, removeTranscriptionOpenaiApiKey)
 
     // Build update data (only include password if it should be updated)
     const updateData: any = {
@@ -748,14 +718,11 @@ export async function PATCH(request: NextRequest) {
   invalidateSettingsCaches()
     invalidateEmailSettingsCache()
 
-    // Decrypt sensitive fields before sending to admin
+    // Mask secrets before sending to admin (write-only — see secretStatusFields)
     const { accountingFilesBytes: _accountingFilesBytes2, ...settingsForClient2 } = settings
     const decryptedSettings = {
       ...settingsForClient2,
-      smtpPassword: settings.smtpPassword ? decrypt(settings.smtpPassword) : null,
-      aiAnthropicApiKey: settings.aiAnthropicApiKey ? decrypt(settings.aiAnthropicApiKey) : null,
-      aiOpenaiApiKey: settings.aiOpenaiApiKey ? decrypt(settings.aiOpenaiApiKey) : null,
-      transcriptionOpenaiApiKey: settings.transcriptionOpenaiApiKey ? decrypt(settings.transcriptionOpenaiApiKey) : null,
+      ...secretStatusFields(settings),
       aiPortfolio: (() => {
         try {
           const arr = JSON.parse(settings.aiPortfolioJson || '[]')

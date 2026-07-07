@@ -6,6 +6,7 @@ import { prisma } from '../lib/db'
 import type { TranscriptionJob } from '../lib/queue'
 import { whisperTranscribe, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
 import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues } from '../lib/subtitles'
+import { usesBritishSpelling, convertToBritishEnglish } from '../lib/american-to-british'
 import { extractAudioForTranscription } from '../lib/ffmpeg'
 import { computeWaveformPeaksFromWav } from '../lib/waveform-peaks'
 import { decrypt } from '../lib/encryption'
@@ -330,6 +331,13 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       return
     }
 
+    // Whisper emits US spelling regardless of the language hint. When the
+    // configured locale is British English (e.g. en-AU/en-GB), convert the
+    // cue text before re-flow/serialize so the stored SRT + VTT match.
+    if (usesBritishSpelling(config.language)) {
+      cues = cues.map((cue) => ({ ...cue, text: convertToBritishEnglish(cue.text) }))
+    }
+
     // Collapse Whisper's end-of-audio hallucination loops (runs of adjacent
     // identical short cues over trailing silence), then re-flow for on-screen
     // readability (max chars/line + max lines), then canonically re-serialize so
@@ -479,7 +487,7 @@ async function processDictation(requestId: string) {
     }
 
     const buffer = Buffer.from(audio.contentBase64, 'base64')
-    const text = (
+    let text = (
       await whisperTranscribe({
         config,
         audio: buffer,
@@ -489,6 +497,7 @@ async function processDictation(requestId: string) {
         timeoutMs: DICTATION_TRANSCRIBE_TIMEOUT_MS,
       })
     ).trim()
+    if (usesBritishSpelling(config.language)) text = convertToBritishEnglish(text)
 
     // Drop the raw base64 from the DB now that it has been consumed
     const strippedAttachments = attachments.map(({ contentBase64: _omit, ...rest }) => rest)

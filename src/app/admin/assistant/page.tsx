@@ -212,9 +212,9 @@ export default function AssistantPage() {
   const [attachError, setAttachError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
 
-  // Intent pills
-  const [wantProject, setWantProject] = useState(true)
-  const [wantQuote, setWantQuote] = useState(true)
+  // Intent pills — nothing selected by default; the user picks what to build
+  const [wantProject, setWantProject] = useState(false)
+  const [wantQuote, setWantQuote] = useState(false)
   const [wantInvoice, setWantInvoice] = useState(false)
   const [wantResponse, setWantResponse] = useState(false)
 
@@ -707,7 +707,7 @@ export default function AssistantPage() {
     >
       {/* Header */}
       <div className="shrink-0 border-b border-border/60 px-4 py-3">
-        <div className="mx-auto max-w-3xl flex items-center justify-between gap-3">
+        <div className="mx-auto max-w-4xl flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
               <Sparkles className="w-4 h-4 text-primary" />
@@ -729,7 +729,7 @@ export default function AssistantPage() {
 
       {/* Transcript */}
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
+        <div className="mx-auto max-w-4xl px-4 py-6 space-y-6">
           {turns.length === 0 ? (
             <div className="flex flex-col items-center justify-center text-center py-16 sm:py-24">
               <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-5">
@@ -872,10 +872,10 @@ export default function AssistantPage() {
 
       {/* Composer — pinned to the bottom of the viewport */}
       <div className="shrink-0 border-t border-border/60 bg-background/80 backdrop-blur">
-        <div className="mx-auto max-w-3xl px-4 py-3 space-y-2.5">
+        <div className="mx-auto max-w-4xl px-4 py-3 space-y-2.5">
           {/* Intent pills (create only — a continued message refines the result above) */}
           {!isRefine && (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-center gap-2">
               <Pill active={wantProject} disabled={running} onClick={() => setWantProject((v) => !v)} icon={FolderKanban}>
                 Project
               </Pill>

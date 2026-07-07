@@ -163,6 +163,10 @@ export default function GlobalSettingsPage() {
   const [emailCustomFooterText, setEmailCustomFooterText] = useState<string | null>(null)
   const [smtpFromAddress, setSmtpFromAddress] = useState('')
   const [smtpSecure, setSmtpSecure] = useState('STARTTLS')
+  // Write-only secrets: the server sends only a "configured" flag (never the value). Track which
+  // secrets are stored (for the "Saved" state) and which the admin has marked to remove on save.
+  const [secretConfigured, setSecretConfigured] = useState({ smtp: false, aiAnthropic: false, aiOpenai: false, transcription: false })
+  const [secretRemove, setSecretRemove] = useState({ smtp: false, aiAnthropic: false, aiOpenai: false, transcription: false })
   const [aiProvider, setAiProvider] = useState('NONE')
   const [aiOllamaUrl, setAiOllamaUrl] = useState('')
   const [aiOllamaModel, setAiOllamaModel] = useState('')
@@ -417,6 +421,13 @@ export default function GlobalSettingsPage() {
         setTranscriptionLanguage(data.transcriptionLanguage ?? 'en')
         setTranscriptionMaxCharsPerLine(typeof data.transcriptionMaxCharsPerLine === 'number' ? data.transcriptionMaxCharsPerLine : 42)
         setTranscriptionMaxLines(typeof data.transcriptionMaxLines === 'number' ? data.transcriptionMaxLines : 2)
+        setSecretConfigured({
+          smtp: !!data.smtpPasswordConfigured,
+          aiAnthropic: !!data.aiAnthropicApiKeyConfigured,
+          aiOpenai: !!data.aiOpenaiApiKeyConfigured,
+          transcription: !!data.transcriptionOpenaiApiKeyConfigured,
+        })
+        setSecretRemove({ smtp: false, aiAnthropic: false, aiOpenai: false, transcription: false })
         setAppDomain(data.appDomain || '')
         setMainCompanyDomain(data.mainCompanyDomain || '')
         setDefaultPreviewResolutions((() => {
@@ -796,6 +807,11 @@ export default function GlobalSettingsPage() {
         aiAnthropicApiKey: aiAnthropicApiKey || null,
         aiOpenaiModel: aiOpenaiModel || null,
         aiOpenaiApiKey: aiOpenaiApiKey || null,
+        // Write-only secret removal flags (true clears the stored value server-side)
+        removeSmtpPassword: secretRemove.smtp,
+        removeAiAnthropicApiKey: secretRemove.aiAnthropic,
+        removeAiOpenaiApiKey: secretRemove.aiOpenai,
+        removeTranscriptionOpenaiApiKey: secretRemove.transcription,
         aiReplyDraftsEnabled,
         aiReplySignature: aiReplySignature || null,
         aiInstructions: aiInstructions || null,
@@ -922,6 +938,13 @@ export default function GlobalSettingsPage() {
         setTranscriptionLanguage(refreshedData.transcriptionLanguage ?? 'en')
         setTranscriptionMaxCharsPerLine(typeof refreshedData.transcriptionMaxCharsPerLine === 'number' ? refreshedData.transcriptionMaxCharsPerLine : 42)
         setTranscriptionMaxLines(typeof refreshedData.transcriptionMaxLines === 'number' ? refreshedData.transcriptionMaxLines : 2)
+        setSecretConfigured({
+          smtp: !!refreshedData.smtpPasswordConfigured,
+          aiAnthropic: !!refreshedData.aiAnthropicApiKeyConfigured,
+          aiOpenai: !!refreshedData.aiOpenaiApiKeyConfigured,
+          transcription: !!refreshedData.transcriptionOpenaiApiKeyConfigured,
+        })
+        setSecretRemove({ smtp: false, aiAnthropic: false, aiOpenai: false, transcription: false })
         setAppDomain(refreshedData.appDomain || '')
         setMainCompanyDomain(refreshedData.mainCompanyDomain || '')
         setDefaultPreviewResolutions((() => {
@@ -1013,9 +1036,10 @@ export default function GlobalSettingsPage() {
         companyLogoUrl: companyLogoMode === 'LINK' ? (companyLogoUrl || null) : null,
       }
 
-      // Validate that all required fields are filled
+      // Validate that all required fields are filled. The password may be blank when one is
+      // already saved (write-only) — the server falls back to the stored password for the test.
       if (!smtpConfig.smtpServer || !smtpConfig.smtpPort || !smtpConfig.smtpUsername ||
-          !smtpConfig.smtpPassword || !smtpConfig.smtpFromAddress) {
+          (!smtpConfig.smtpPassword && !secretConfigured.smtp) || !smtpConfig.smtpFromAddress) {
         setTestEmailResult({
           type: 'error',
           message: 'Please fill in all SMTP fields before testing'
@@ -1198,6 +1222,9 @@ export default function GlobalSettingsPage() {
             setSmtpUsername={setSmtpUsername}
             smtpPassword={smtpPassword}
             setSmtpPassword={setSmtpPassword}
+            smtpPasswordConfigured={secretConfigured.smtp}
+            smtpPasswordMarkedForRemoval={secretRemove.smtp}
+            onToggleRemoveSmtpPassword={() => setSecretRemove((p) => ({ ...p, smtp: !p.smtp }))}
             emailTrackingPixelsEnabled={emailTrackingPixelsEnabled}
             setEmailTrackingPixelsEnabled={setEmailTrackingPixelsEnabled}
             emailCustomFooterText={emailCustomFooterText}
@@ -1246,10 +1273,16 @@ export default function GlobalSettingsPage() {
             setAiAnthropicModel={setAiAnthropicModel}
             aiAnthropicApiKey={aiAnthropicApiKey}
             setAiAnthropicApiKey={setAiAnthropicApiKey}
+            aiAnthropicApiKeyConfigured={secretConfigured.aiAnthropic}
+            aiAnthropicApiKeyMarkedForRemoval={secretRemove.aiAnthropic}
+            onToggleRemoveAiAnthropicApiKey={() => setSecretRemove((p) => ({ ...p, aiAnthropic: !p.aiAnthropic }))}
             aiOpenaiModel={aiOpenaiModel}
             setAiOpenaiModel={setAiOpenaiModel}
             aiOpenaiApiKey={aiOpenaiApiKey}
             setAiOpenaiApiKey={setAiOpenaiApiKey}
+            aiOpenaiApiKeyConfigured={secretConfigured.aiOpenai}
+            aiOpenaiApiKeyMarkedForRemoval={secretRemove.aiOpenai}
+            onToggleRemoveAiOpenaiApiKey={() => setSecretRemove((p) => ({ ...p, aiOpenai: !p.aiOpenai }))}
             aiReplyDraftsEnabled={aiReplyDraftsEnabled}
             setAiReplyDraftsEnabled={setAiReplyDraftsEnabled}
             aiReplySignature={aiReplySignature}
@@ -1273,6 +1306,9 @@ export default function GlobalSettingsPage() {
             setTranscriptionWhisperModel={setTranscriptionWhisperModel}
             transcriptionOpenaiApiKey={transcriptionOpenaiApiKey}
             setTranscriptionOpenaiApiKey={setTranscriptionOpenaiApiKey}
+            transcriptionOpenaiApiKeyConfigured={secretConfigured.transcription}
+            transcriptionOpenaiApiKeyMarkedForRemoval={secretRemove.transcription}
+            onToggleRemoveTranscriptionOpenaiApiKey={() => setSecretRemove((p) => ({ ...p, transcription: !p.transcription }))}
             transcriptionOpenaiModel={transcriptionOpenaiModel}
             setTranscriptionOpenaiModel={setTranscriptionOpenaiModel}
             transcriptionLanguage={transcriptionLanguage}
@@ -1572,6 +1608,9 @@ export default function GlobalSettingsPage() {
                 setSmtpUsername={setSmtpUsername}
                 smtpPassword={smtpPassword}
                 setSmtpPassword={setSmtpPassword}
+                smtpPasswordConfigured={secretConfigured.smtp}
+                smtpPasswordMarkedForRemoval={secretRemove.smtp}
+                onToggleRemoveSmtpPassword={() => setSecretRemove((p) => ({ ...p, smtp: !p.smtp }))}
                 emailTrackingPixelsEnabled={emailTrackingPixelsEnabled}
                 setEmailTrackingPixelsEnabled={setEmailTrackingPixelsEnabled}
                 emailCustomFooterText={emailCustomFooterText}
@@ -1623,10 +1662,16 @@ export default function GlobalSettingsPage() {
                 setAiAnthropicModel={setAiAnthropicModel}
                 aiAnthropicApiKey={aiAnthropicApiKey}
                 setAiAnthropicApiKey={setAiAnthropicApiKey}
+                aiAnthropicApiKeyConfigured={secretConfigured.aiAnthropic}
+                aiAnthropicApiKeyMarkedForRemoval={secretRemove.aiAnthropic}
+                onToggleRemoveAiAnthropicApiKey={() => setSecretRemove((p) => ({ ...p, aiAnthropic: !p.aiAnthropic }))}
                 aiOpenaiModel={aiOpenaiModel}
                 setAiOpenaiModel={setAiOpenaiModel}
                 aiOpenaiApiKey={aiOpenaiApiKey}
                 setAiOpenaiApiKey={setAiOpenaiApiKey}
+                aiOpenaiApiKeyConfigured={secretConfigured.aiOpenai}
+                aiOpenaiApiKeyMarkedForRemoval={secretRemove.aiOpenai}
+                onToggleRemoveAiOpenaiApiKey={() => setSecretRemove((p) => ({ ...p, aiOpenai: !p.aiOpenai }))}
                 aiReplyDraftsEnabled={aiReplyDraftsEnabled}
                 setAiReplyDraftsEnabled={setAiReplyDraftsEnabled}
                 aiReplySignature={aiReplySignature}
@@ -1653,6 +1698,9 @@ export default function GlobalSettingsPage() {
                 setTranscriptionWhisperModel={setTranscriptionWhisperModel}
                 transcriptionOpenaiApiKey={transcriptionOpenaiApiKey}
                 setTranscriptionOpenaiApiKey={setTranscriptionOpenaiApiKey}
+                transcriptionOpenaiApiKeyConfigured={secretConfigured.transcription}
+                transcriptionOpenaiApiKeyMarkedForRemoval={secretRemove.transcription}
+                onToggleRemoveTranscriptionOpenaiApiKey={() => setSecretRemove((p) => ({ ...p, transcription: !p.transcription }))}
                 transcriptionOpenaiModel={transcriptionOpenaiModel}
                 setTranscriptionOpenaiModel={setTranscriptionOpenaiModel}
                 transcriptionLanguage={transcriptionLanguage}

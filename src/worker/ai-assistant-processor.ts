@@ -283,6 +283,7 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
       libraryById: new Map(libraryItems.map((item) => [item.id, item])),
       portfolioById: new Map(),
       replySignature,
+      studioKnowledge: studioInstructions,
     })
 
     // Surface it loudly when the model skipped a section the user asked for —

@@ -175,6 +175,13 @@ async function listS3Keys(
   return results
 }
 
+/**
+ * Idle timeout for a single download: if no bytes are written to disk for this long
+ * the transfer is considered stalled and aborted. Belt-and-braces on top of the S3
+ * client's socket timeout — guarantees one wedged object can never hang the whole run.
+ */
+const DOWNLOAD_IDLE_TIMEOUT_MS = Number(process.env.S3_BACKUP_DOWNLOAD_IDLE_TIMEOUT_MS) || 120_000
+
 /** Download one S3 key to the given local absolute path, creating parent dirs as needed. */
 async function downloadKey(
   client: ReturnType<typeof getS3Client>,
@@ -183,17 +190,39 @@ async function downloadKey(
   localAbsPath: string,
 ): Promise<void> {
   await fs.promises.mkdir(path.dirname(localAbsPath), { recursive: true })
-  const resp = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+  const controller = new AbortController()
+  const resp = await client.send(
+    new GetObjectCommand({ Bucket: bucket, Key: key }),
+    { abortSignal: controller.signal },
+  )
   if (!resp.Body) throw new Error(`No body returned for key: ${key}`)
   const readable = resp.Body as unknown as Readable
   // Write to a temp file first so a partial download never replaces a good file.
   const tmpPath = `${localAbsPath}.s3backup-tmp`
+  const writeStream = fs.createWriteStream(tmpPath)
+
+  // Watchdog: poll bytes actually written and abort if no progress within the idle
+  // window. Uses bytesWritten (not stream 'data' events) so it never perturbs the
+  // pipe or risks dropping chunks.
+  let lastBytes = 0
+  let lastProgressAt = Date.now()
+  const idleInterval = setInterval(() => {
+    if (writeStream.bytesWritten > lastBytes) {
+      lastBytes = writeStream.bytesWritten
+      lastProgressAt = Date.now()
+    } else if (Date.now() - lastProgressAt > DOWNLOAD_IDLE_TIMEOUT_MS) {
+      controller.abort(new Error(`Download stalled: no bytes written for ${DOWNLOAD_IDLE_TIMEOUT_MS}ms`))
+    }
+  }, Math.min(DOWNLOAD_IDLE_TIMEOUT_MS, 15_000)).unref()
+
   try {
-    await pipeline(readable, fs.createWriteStream(tmpPath))
+    await pipeline(readable, writeStream, { signal: controller.signal })
     await fs.promises.rename(tmpPath, localAbsPath)
   } catch (err) {
     await fs.promises.unlink(tmpPath).catch(() => {})
     throw err
+  } finally {
+    clearInterval(idleInterval)
   }
 }
 
@@ -500,6 +529,14 @@ export async function runS3LocalBackup(
   }
 }
 
+/**
+ * Ceiling on how long the `running` lock may be held before it's treated as stale.
+ * A hung/killed run that never reset the flag self-heals after this window, so the
+ * UI stops spinning and future scheduled runs are no longer skipped. Generous
+ * (default 6h) — a normal run is minutes — but well under the 24h scheduling gap.
+ */
+export const BACKUP_STALE_LOCK_MS = Number(process.env.S3_BACKUP_STALE_LOCK_MS) || 6 * 60 * 60 * 1000
+
 /** Load current backup settings from DB. Returns null if S3 is not active. */
 export async function getS3LocalBackupSettings(): Promise<{
   enabled: boolean
@@ -507,6 +544,7 @@ export async function getS3LocalBackupSettings(): Promise<{
   lastRunAt: Date | null
   lastRunResult: string | null
   running: boolean
+  startedAt: Date | null
 } | null> {
   if (!isS3Mode()) return null
 
@@ -518,6 +556,7 @@ export async function getS3LocalBackupSettings(): Promise<{
       s3LocalBackupLastRunAt: true,
       s3LocalBackupLastRunResult: true,
       s3LocalBackupRunning: true,
+      s3LocalBackupStartedAt: true,
     },
   })
 
@@ -535,12 +574,34 @@ export async function getS3LocalBackupSettings(): Promise<{
     // ignore parse errors
   }
 
+  // Self-heal a stale lock: if it's been held past the ceiling, clear it so the UI
+  // stops showing "Backing up…" and the next scheduled run isn't skipped. A missing
+  // startedAt on a running lock is itself treated as stale (legacy / crashed set).
+  let running = settings.s3LocalBackupRunning
+  const startedAt = settings.s3LocalBackupStartedAt
+  if (running) {
+    const heldMs = startedAt ? Date.now() - startedAt.getTime() : Infinity
+    if (heldMs > BACKUP_STALE_LOCK_MS) {
+      running = false
+      await prisma.settings.update({
+        where: { id: 'default' },
+        data: {
+          s3LocalBackupRunning: false,
+          s3LocalBackupStartedAt: null,
+          s3LocalBackupLastRunResult:
+            'Previous run did not finish cleanly (lock expired and was cleared automatically).',
+        },
+      }).catch(() => {})
+    }
+  }
+
   return {
     enabled: settings.s3LocalBackupEnabled,
     categories,
     lastRunAt: settings.s3LocalBackupLastRunAt,
     lastRunResult: settings.s3LocalBackupLastRunResult,
-    running: settings.s3LocalBackupRunning,
+    running,
+    startedAt,
   }
 }
 

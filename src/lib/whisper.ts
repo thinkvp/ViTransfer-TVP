@@ -63,7 +63,9 @@ export async function whisperTranscribe(params: {
   form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), fileName)
   form.append('model', config.model)
   form.append('response_format', responseFormat)
-  const language = config.language?.trim()
+  // Whisper (and OpenAI) require a bare ISO 639-1 code, not a BCP-47 locale.
+  // Strip any region subtag so "en-GB"/"en_AU" → "en".
+  const language = config.language?.trim().split(/[-_]/)[0].toLowerCase()
   if (language) form.append('language', language)
 
   const controller = new AbortController()

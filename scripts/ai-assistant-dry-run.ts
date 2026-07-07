@@ -101,6 +101,7 @@ const GUARD_CTX = {
     ['pf-brand', { id: 'pf-brand', title: 'Acme Brand Launch', url: 'https://studio.example/work/acme', description: 'brand video' }],
   ]),
   replySignature: 'Cheers,\nThe Studio Team',
+  studioKnowledge: 'About us: we make brand films.\nPortfolio: Acme Brand Launch — https://studio.example/work/acme',
 }
 
 async function main() {

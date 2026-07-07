@@ -176,6 +176,55 @@ export interface ProposalGuardContext {
   portfolioById: Map<string, PortfolioItem>
   /** Sign-off appended to a drafted reply */
   replySignature: string | null
+  /**
+   * The freeform studio knowledge doc (Settings house-style text) verbatim. Any URL the
+   * model puts in a reply must appear literally here, or the guard strips it — this is the
+   * anti-hallucination backstop that lets the model cite portfolio links from plain text.
+   */
+  studioKnowledge: string | null
+}
+
+/** Normalise a URL for verbatim comparison: drop scheme, lowercase, trim trailing slash/punctuation. */
+function normalizeUrlForMatch(url: string): string {
+  return url
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/[).,;!?'"\]]+$/, '')
+    .replace(/\/+$/, '')
+    .toLowerCase()
+}
+
+/**
+ * Strip any URL from a reply body that does not appear verbatim in the studio knowledge doc.
+ * Markdown links `[text](badurl)` collapse to their text; bare URLs are removed. Returns the
+ * cleaned body plus the list of dropped URLs (for an assumptions note). If the doc is empty,
+ * every URL is treated as unverified and stripped.
+ */
+function stripUnverifiedUrls(body: string, knowledge: string | null): { body: string; dropped: string[] } {
+  const haystack = (knowledge ?? '').replace(/^https?:\/\//gim, '').toLowerCase()
+  const dropped: string[] = []
+  const isAllowed = (url: string): boolean => {
+    const norm = normalizeUrlForMatch(url)
+    return norm.length > 0 && haystack.includes(norm)
+  }
+
+  // Markdown links first: [text](url)
+  let cleaned = body.replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi, (_m, text: string, url: string) => {
+    if (isAllowed(url)) return `[${text}](${url})`
+    dropped.push(url)
+    return text
+  })
+
+  // Then any remaining bare URLs
+  cleaned = cleaned.replace(/https?:\/\/[^\s)>\]]+/gi, (url: string) => {
+    if (isAllowed(url)) return url
+    dropped.push(url)
+    return ''
+  })
+
+  // Tidy whitespace left behind by removed bare URLs
+  cleaned = cleaned.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+\n/g, '\n')
+  return { body: cleaned, dropped }
 }
 
 function normalizeName(value: string): string {
@@ -393,14 +442,24 @@ export function applyProposalGuards(input: AssistantResult, ctx: ProposalGuardCo
   }
 
   if (result.reply) {
-    // Resolve portfolio picks to real title/url — the model only supplies ids, never URLs,
-    // so a hallucinated id is dropped rather than producing a dead link in the reply.
     const resolved = result.reply as ResolvedReplyDraft
+
+    // Portfolio links now live inline in the reply body (drawn from the freeform studio
+    // knowledge doc), not the legacy structured id-list. Strip any URL the model produced
+    // that does not appear verbatim in that doc — the anti-hallucination backstop.
+    const { body, dropped } = stripUnverifiedUrls(result.reply.body, ctx.studioKnowledge)
+    result.reply.body = body
+    if (dropped.length > 0) {
+      note(
+        `Reply: removed ${dropped.length} link(s) not found in your studio knowledge (house-style) doc: ${dropped.join(', ')}. Add them there for the assistant to use.`
+      )
+    }
+
+    // Legacy structured picks: resolved from the (now usually empty) portfolio-by-id map.
     const picks: ResolvedPortfolioPick[] = []
     for (const id of result.reply.portfolioItemIds) {
       const item = ctx.portfolioById.get(id)
       if (item) picks.push({ id: item.id, title: item.title, url: item.url })
-      else note(`Reply: portfolio reference "${id}" is not a known portfolio item — dropped.`)
     }
     resolved.portfolio = picks
     resolved.signature = ctx.replySignature

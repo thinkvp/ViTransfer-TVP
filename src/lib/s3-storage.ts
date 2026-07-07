@@ -29,6 +29,7 @@ import {
   ListMultipartUploadsCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { NodeHttpHandler } from '@smithy/node-http-handler'
 import { Readable } from 'stream'
 import * as fs from 'fs'
 
@@ -75,6 +76,17 @@ export function getS3Client(): S3Client {
     // which is why stream uploads use s3UploadFileWithRetry (re-opens the body).
     maxAttempts: 5,
     retryMode: 'adaptive',
+    // Bound every request with connection + socket-idle timeouts. Without these the
+    // Node handler waits forever: a half-open TCP socket to R2 (common on the
+    // worker's cross-network path) leaves a GetObject body stream stalled with no
+    // error, hanging the caller indefinitely. requestTimeout is an *idle* timeout
+    // (fires only when the socket sees no activity for the interval), so it aborts
+    // wedged streams without killing slow-but-progressing large transfers — and the
+    // resulting abort is retryable under maxAttempts.
+    requestHandler: new NodeHttpHandler({
+      connectionTimeout: Number(process.env.S3_CONNECTION_TIMEOUT_MS) || 10_000,
+      requestTimeout: Number(process.env.S3_REQUEST_TIMEOUT_MS) || 120_000,
+    }),
   })
 
   return g.__s3Client

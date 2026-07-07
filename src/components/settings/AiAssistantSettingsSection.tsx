@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { PasswordInput } from '@/components/ui/password-input'
+import { SecretField } from '@/components/settings/SecretField'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2, ChevronDown, ChevronUp, PlugZap } from 'lucide-react'
 import { apiPost, apiFetch } from '@/lib/api-client'
@@ -28,10 +28,16 @@ interface AiAssistantSettingsSectionProps {
   setAiAnthropicModel: (value: string) => void
   aiAnthropicApiKey: string
   setAiAnthropicApiKey: (value: string) => void
+  aiAnthropicApiKeyConfigured?: boolean
+  aiAnthropicApiKeyMarkedForRemoval?: boolean
+  onToggleRemoveAiAnthropicApiKey?: () => void
   aiOpenaiModel: string
   setAiOpenaiModel: (value: string) => void
   aiOpenaiApiKey: string
   setAiOpenaiApiKey: (value: string) => void
+  aiOpenaiApiKeyConfigured?: boolean
+  aiOpenaiApiKeyMarkedForRemoval?: boolean
+  onToggleRemoveAiOpenaiApiKey?: () => void
   /** Vestigial: reply drafting is now opt-in per request via the assistant page "Response" pill */
   aiReplyDraftsEnabled?: boolean
   setAiReplyDraftsEnabled?: (value: boolean) => void
@@ -61,10 +67,16 @@ export function AiAssistantSettingsSection({
   setAiAnthropicModel,
   aiAnthropicApiKey,
   setAiAnthropicApiKey,
+  aiAnthropicApiKeyConfigured = false,
+  aiAnthropicApiKeyMarkedForRemoval = false,
+  onToggleRemoveAiAnthropicApiKey = () => {},
   aiOpenaiModel,
   setAiOpenaiModel,
   aiOpenaiApiKey,
   setAiOpenaiApiKey,
+  aiOpenaiApiKeyConfigured = false,
+  aiOpenaiApiKeyMarkedForRemoval = false,
+  onToggleRemoveAiOpenaiApiKey = () => {},
   aiReplySignature,
   setAiReplySignature,
   aiInstructions,
@@ -247,16 +259,18 @@ export function AiAssistantSettingsSection({
 
           {aiProvider === 'ANTHROPIC' && (
             <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-              <div className="space-y-2">
-                <Label htmlFor="aiAnthropicApiKey">API Key</Label>
-                <PasswordInput
-                  id="aiAnthropicApiKey"
-                  value={aiAnthropicApiKey}
-                  onChange={(e) => setAiAnthropicApiKey(e.target.value)}
-                  placeholder="sk-ant-..."
-                />
-                <p className="text-xs text-muted-foreground">Stored encrypted; only decrypted by the worker at call time.</p>
-              </div>
+              <SecretField
+                id="aiAnthropicApiKey"
+                label="API Key"
+                value={aiAnthropicApiKey}
+                onChange={setAiAnthropicApiKey}
+                configured={aiAnthropicApiKeyConfigured}
+                markedForRemoval={aiAnthropicApiKeyMarkedForRemoval}
+                onToggleRemoval={onToggleRemoveAiAnthropicApiKey}
+                placeholder="sk-ant-..."
+              >
+                <p className="text-xs text-muted-foreground">Stored encrypted and never shown again; only decrypted by the worker at call time.</p>
+              </SecretField>
               <div className="space-y-2">
                 <Label htmlFor="aiAnthropicModel">Model</Label>
                 <Input
@@ -272,16 +286,18 @@ export function AiAssistantSettingsSection({
 
           {aiProvider === 'OPENAI' && (
             <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-              <div className="space-y-2">
-                <Label htmlFor="aiOpenaiApiKey">API Key</Label>
-                <PasswordInput
-                  id="aiOpenaiApiKey"
-                  value={aiOpenaiApiKey}
-                  onChange={(e) => setAiOpenaiApiKey(e.target.value)}
-                  placeholder="sk-..."
-                />
-                <p className="text-xs text-muted-foreground">Stored encrypted; only decrypted by the worker at call time.</p>
-              </div>
+              <SecretField
+                id="aiOpenaiApiKey"
+                label="API Key"
+                value={aiOpenaiApiKey}
+                onChange={setAiOpenaiApiKey}
+                configured={aiOpenaiApiKeyConfigured}
+                markedForRemoval={aiOpenaiApiKeyMarkedForRemoval}
+                onToggleRemoval={onToggleRemoveAiOpenaiApiKey}
+                placeholder="sk-..."
+              >
+                <p className="text-xs text-muted-foreground">Stored encrypted and never shown again; only decrypted by the worker at call time.</p>
+              </SecretField>
               <div className="space-y-2">
                 <Label htmlFor="aiOpenaiModel">Model</Label>
                 <Input
@@ -345,28 +361,34 @@ export function AiAssistantSettingsSection({
                   rows={3}
                   value={aiReplySignature}
                   onChange={(e) => setAiReplySignature(e.target.value)}
-                  placeholder={'Cheers,\nThe ThinkVP Team\n03 1234 5678'}
+                  placeholder={'Kind regards,\nThe Studio Team\n+1 555 0100'}
                 />
               </div>
 
               {/* Freeform studio instructions */}
               <div className="space-y-2">
-                <Label htmlFor="aiInstructions">Studio instructions (house style)</Label>
+                <Label htmlFor="aiInstructions">Studio knowledge &amp; house style</Label>
                 <Textarea
                   id="aiInstructions"
-                  rows={5}
+                  rows={8}
                   value={aiInstructions}
                   onChange={(e) => setAiInstructions(e.target.value)}
                   placeholder={
-                    'Free-form guidance, one per line. e.g.\n' +
-                    '- Australian English, warm but concise, no exclamation marks.\n' +
-                    '- We don’t quote weddings — flag those instead of quoting.\n' +
-                    '- If no delivery date is given, assume 3 weeks after the shoot.'
+                    'Free-form notes the assistant reads every time — a single knowledge doc for your studio.\n\n' +
+                    'House style:\n' +
+                    '- Warm but concise; no exclamation marks.\n' +
+                    '- We don’t quote weddings — flag those instead of quoting.\n\n' +
+                    'About us / portfolio (the assistant may cite these links in enquiry replies):\n' +
+                    '- Corporate brand film — https://your-site.example/portfolio/brand-film\n' +
+                    '- Product launch series — https://your-site.example/portfolio/'
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Like a house-style note the assistant reads every time. Good for tone, phrasing and default
-                  assumptions — not a place for rules that must never break (those are enforced in code).
+                  A single free-form doc the assistant reads every time — tone, defaults, and studio facts like
+                  your services and portfolio. Paste portfolio links here (as plain URLs); the assistant may
+                  weave a relevant one into enquiry replies, but only links that appear <em>verbatim</em> in this
+                  box — it will never invent a URL. Not a place for rules that must never break (those are
+                  enforced in code).
                 </p>
               </div>
             </div>
