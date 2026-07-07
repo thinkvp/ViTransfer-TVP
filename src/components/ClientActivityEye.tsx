@@ -56,21 +56,43 @@ function getActivityLabel(activity: ClientActivityRow): string {
   }
 }
 
-function getPrimaryLabel(activity: ClientActivityRow): string {
-  if (activity.activityType === 'DOWNLOADING_ASSET' && activity.assetName) return activity.assetName
-  if (activity.activityType === 'VIEWING_ALBUM' && activity.albumName) return activity.albumName
-  if (activity.videoName) return activity.videoName
+// The project is always the header line, shown exactly once.
+function getProjectLabel(activity: ClientActivityRow): string {
   return activity.projectTitle || 'Client activity'
 }
 
-function getSecondaryLabel(activity: ClientActivityRow): string {
-  const details = [activity.projectTitle, activity.email, activity.accessMethod]
-    .filter((value): value is string => !!value)
+// The specific thing being viewed/streamed/downloaded, shown as a line under the
+// project. Returns null when there's nothing more specific than the project itself
+// (e.g. just viewing the share page). When the video/folder shares the project's
+// name, the name is dropped so it isn't echoed — the version (if any) still shows.
+function getContextLabel(activity: ClientActivityRow): { name: string | null; version: string | null } | null {
+  let name: string | null = null
+  let version: string | null = null
 
-  return details.join(' · ')
+  if (activity.activityType === 'DOWNLOADING_ASSET') {
+    name = activity.assetName
+  } else if (activity.activityType === 'VIEWING_ALBUM') {
+    name = activity.albumName
+  } else if (activity.activityType === 'STREAMING_VIDEO' || activity.activityType === 'DOWNLOADING_VIDEO') {
+    name = activity.videoName
+    version = activity.versionLabel || null
+  }
+
+  if (name && name === activity.projectTitle) name = null
+  if (!name && !version) return null
+  return { name, version }
+}
+
+// Session identity only — the project now owns the header line, so it's dropped here.
+function getMetaLabel(activity: ClientActivityRow): string {
+  return [activity.email, activity.accessMethod]
+    .filter((value): value is string => !!value)
+    .join(' · ')
 }
 
 function ActivityRow({ activity, onNavigate }: { activity: ClientActivityRow; onNavigate: (projectId: string) => void }) {
+  const context = getContextLabel(activity)
+  const meta = getMetaLabel(activity)
   return (
     <div
       className="px-4 py-3 cursor-pointer hover:bg-accent/40 transition-colors"
@@ -78,19 +100,26 @@ function ActivityRow({ activity, onNavigate }: { activity: ClientActivityRow; on
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex min-w-0 items-baseline gap-2">
-            <div className="min-w-0 truncate text-sm font-medium text-foreground">{getPrimaryLabel(activity)}</div>
-            {activity.videoName && activity.versionLabel ? (
-              <div className="max-w-[45%] truncate text-[11px] text-muted-foreground">{activity.versionLabel}</div>
-            ) : null}
-          </div>
+          <div className="min-w-0 truncate text-sm font-medium text-foreground">{getProjectLabel(activity)}</div>
+          {context ? (
+            <div className="flex min-w-0 items-baseline gap-2 text-[12px]">
+              {context.name ? (
+                <span className="min-w-0 truncate text-foreground/90">{context.name}</span>
+              ) : null}
+              {context.version ? (
+                <span className="shrink-0 rounded border border-border px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+                  {context.name ? context.version : `Version ${context.version}`}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
             <span className="inline-flex h-2 w-2 rounded-full bg-primary" />
             <span>{getActivityLabel(activity)}</span>
             <span>{formatRelativeTime(activity.updatedAt)}</span>
           </div>
-          {getSecondaryLabel(activity) ? (
-            <div className="truncate text-[11px] text-muted-foreground">{getSecondaryLabel(activity)}</div>
+          {meta ? (
+            <div className="truncate text-[11px] text-muted-foreground">{meta}</div>
           ) : null}
         </div>
       </div>

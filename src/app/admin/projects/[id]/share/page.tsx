@@ -1190,9 +1190,13 @@ export default function AdminSharePage() {
   }
 
   // Open the video version / album referenced by a Project Activity entry.
-  const handleOpenActivityTarget = (target: { videoId?: string; videoName?: string; albumId?: string }) => {
+  const handleOpenActivityTarget = (target: { videoId?: string; videoName?: string; albumId?: string; uploads?: { folderPath?: string } }) => {
     if (target.albumId) {
       handleAlbumSelect(String(target.albumId))
+      return
+    }
+    if (target.uploads) {
+      handleUploadsSelect(target.uploads.folderPath)
       return
     }
     if (target.videoId) {

@@ -18,6 +18,7 @@ import {
 	renderPasswordEmail,
 	renderProjectApprovedEmail,
 	renderProjectGeneralNotificationEmail,
+	renderNewItemsReadyEmail,
 	firstWordName,
 	renderEmailShell,
 } from '../src/lib/email'
@@ -140,6 +141,27 @@ async function main() {
 				{ name: 'Behind the Scenes', photoCount: 24 },
 				{ name: 'Day 1 Photos', photoCount: 46 },
 			],
+			isPasswordProtected: false,
+			trackingToken: undefined,
+			branding,
+		})).html
+	)
+
+	await writeHtml(
+		outDir,
+		'06b-new-items-ready.html',
+		(await renderNewItemsReadyEmail({
+			clientName: 'Alex',
+			projectTitle: 'Winter Campaign',
+			shareUrl: 'http://localhost:3000/share/demo',
+			videos: [
+				{ name: 'Cut A', versionLabel: 'v3', approved: false },
+				{ name: 'Promo Reel', versionLabel: 'v2', approved: true },
+			],
+			albums: [
+				{ name: 'Behind the Scenes', photoCount: 24 },
+			],
+			notes: 'A couple of fresh deliverables for you — the rest is still in progress.',
 			isPasswordProtected: false,
 			trackingToken: undefined,
 			branding,

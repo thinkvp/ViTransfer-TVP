@@ -6,6 +6,9 @@ import { Readable } from 'stream'
 import { downloadFile } from '@/lib/storage'
 import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { buildVideoHlsStorageRoot, buildVideoAssetHlsStorageRoot } from '@/lib/project-storage-paths'
+import { recordClientActivity } from '@/lib/client-activity'
+import { getClientIpAddress } from '@/lib/utils'
+import { isLikelyAdminIp } from '@/lib/admin-ip-match'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -115,6 +118,33 @@ export async function GET(
   if (pathParts.length === 2 && RENDITION_LABELS.has(pathParts[0]) && pathParts[1] === 'index.m3u8') {
     const label = pathParts[0]
     const cacheKey = `hls_variant:${sessionId}:${verified.videoId}:${label}`
+
+    // Mark this session as streaming. hls.js fetches the variant playlist when a
+    // rendition starts playing, so this is a reliable "started watching" signal.
+    // Fire-and-forget + throttled so it never delays the playlist response (mirrors
+    // /api/content). Asset playback previews are exempt, matching how /api/content
+    // treats isAssetPreview — fetching an asset preview isn't "watching the video".
+    // For VOD this fires once at start; the client heartbeat (see /api/track/video-
+    // heartbeat) keeps the presence alive thereafter. videoName is filled in by that
+    // heartbeat; this DB-free marker just guarantees streaming shows even if the
+    // client beacon is blocked.
+    if (verified.entityType !== 'asset') {
+      const ipAddress = getClientIpAddress(request)
+      void (async () => {
+        // Skip admins previewing the share page from an internal IP — matches every
+        // other client-activity recorder so admin previews don't inflate the feed.
+        if (await isLikelyAdminIp(ipAddress).catch(() => false)) return
+        await recordClientActivity({
+          sessionId,
+          projectId: verified.projectId,
+          videoId: verified.videoId,
+          activityType: 'STREAMING_VIDEO',
+          ipAddress: ipAddress || null,
+          throttleKey: `${sessionId}:${verified.videoId}:hls:STREAMING_VIDEO`,
+          throttleSeconds: 15,
+        })
+      })().catch(() => undefined)
+    }
 
     const cached = await redis.get(cacheKey).catch(() => null)
     if (cached) return playlistResponse(cached)

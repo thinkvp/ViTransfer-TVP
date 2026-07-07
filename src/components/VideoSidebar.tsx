@@ -1252,10 +1252,10 @@ export default function VideoSidebar({
         )}
       >
         <div
-          className="shrink-0 rounded overflow-hidden relative bg-linear-to-br from-muted to-muted-foreground/50 flex items-center justify-center"
+          className="shrink-0 rounded overflow-hidden relative bg-primary/15 border border-primary/30 flex items-center justify-center"
           style={{ width: videoThumbnailWidth, height: videoThumbnailHeight }}
         >
-          <Folder className="w-4 h-4 text-muted-foreground/70 relative z-10" />
+          <Folder className="w-6 h-6 text-primary relative z-10" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm leading-snug line-clamp-2 wrap-break-word">{folder.folderName}</p>

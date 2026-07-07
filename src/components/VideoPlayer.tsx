@@ -233,6 +233,35 @@ export default function VideoPlayer({
   // briefly, before the first frame. The paired ref carries the seek time (usually 0).
   const autoPlayRequestRef = useRef<string | null>(null)
   const autoPlaySeekRef = useRef<number>(0)
+
+  // Client Activity "Streaming video" heartbeat (share-token sessions only). HLS/direct-
+  // to-R2 playback bypasses /api/content, so the server can't observe ongoing playback;
+  // the player pings /api/track/video-heartbeat on play and on a timer to keep the live
+  // presence fresh, and stops on pause/end/unmount. Interval stays well under the 120s
+  // activity TTL so a single missed beat never drops the presence.
+  const STREAMING_HEARTBEAT_MS = 45_000
+  const streamingHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const sendStreamingHeartbeat = (videoId: string) => {
+    void fetch('/api/track/video-heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${shareToken}` },
+      body: JSON.stringify({ videoId }),
+    }).catch(() => {})
+  }
+  const stopStreamingHeartbeat = () => {
+    if (streamingHeartbeatRef.current) {
+      clearInterval(streamingHeartbeatRef.current)
+      streamingHeartbeatRef.current = null
+    }
+  }
+  const startStreamingHeartbeat = (videoId: string) => {
+    if (isAdmin || !shareToken || !videoId) return
+    stopStreamingHeartbeat()
+    sendStreamingHeartbeat(videoId)
+    streamingHeartbeatRef.current = setInterval(() => sendStreamingHeartbeat(videoId), STREAMING_HEARTBEAT_MS)
+  }
+  // Belt-and-braces: clear any running heartbeat when the player unmounts (video closed).
+  useEffect(() => () => stopStreamingHeartbeat(), [])
   // State mirror of autoPlayRequestRef for the <video> poster prop (render-time read).
   // Cleared on onPlay rather than onCanPlay: once playback has started the poster is
   // never displayed again, so restoring it there cannot flash the thumbnail.
@@ -3094,12 +3123,21 @@ export default function VideoPlayer({
                       },
                       body: JSON.stringify({ videoId }),
                     }).catch(() => {})
+
+                    // Keep the Client Activity "Streaming video" presence alive while playing.
+                    startStreamingHeartbeat(videoId)
                   } catch {
                     // best-effort
                   }
                 }}
-                onPause={() => setIsPlaying(false)}
-                onEnded={() => setIsPlaying(false)}
+                onPause={() => {
+                  setIsPlaying(false)
+                  stopStreamingHeartbeat()
+                }}
+                onEnded={() => {
+                  setIsPlaying(false)
+                  stopStreamingHeartbeat()
+                }}
                 onContextMenu={suppressDownloadUi ? (e) => e.preventDefault() : undefined}
                 playsInline
                 preload={!isAdmin || hideDownloadButton ? 'auto' : 'metadata'}

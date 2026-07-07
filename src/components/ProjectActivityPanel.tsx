@@ -14,6 +14,7 @@ import {
   Activity,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { cn, formatDateTime } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 
@@ -32,7 +33,13 @@ interface ActivityEvent {
   id: string
   type: ActivityEventType
   timestamp: string
-  actor: { name: string; kind: 'USER' | 'RECIPIENT' | 'UNKNOWN'; color: string | null }
+  actor: {
+    name: string
+    kind: 'USER' | 'RECIPIENT' | 'UNKNOWN'
+    color: string | null
+    userId?: string | null
+    named?: boolean
+  }
   count?: number
   target: {
     videoId?: string
@@ -51,13 +58,15 @@ export interface ProjectActivityOpenTarget {
   videoName?: string
   albumId?: string
   albumName?: string
+  /** Present for uploads entries: open this UPLOADS folder (undefined path = UPLOADS root). */
+  uploads?: { folderPath?: string }
 }
 
 interface ProjectActivityPanelProps {
   fetchUrl: string
   authToken?: string | null
   className?: string
-  /** Called when a video/album entry is clicked, to open that video version or album. */
+  /** Called when a video/album/uploads entry is clicked, to open that target. */
   onOpenTarget?: (target: ProjectActivityOpenTarget) => void
 }
 
@@ -172,6 +181,9 @@ function openTargetFor(event: ActivityEvent): ProjectActivityOpenTarget | null {
   }
   if (event.target.videoId) {
     return { videoId: event.target.videoId, videoName: event.target.videoName }
+  }
+  if (event.type === 'UPLOADS_ADDED' || event.type === 'UPLOAD_FOLDER_ADDED') {
+    return { uploads: { folderPath: event.target.folderPath } }
   }
   return null
 }
@@ -339,29 +351,45 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
                           }
                         : {})}
                     >
-                      <Icon
-                        className={cn(
-                          'w-4 h-4 mt-0.5 shrink-0 text-muted-foreground',
-                          EVENT_ICON_CLASSES[event.type],
-                        )}
-                      />
+                      {event.actor.named ? (
+                        // Named person → identity avatar (photo or colour-tinted initials), with a
+                        // small event-type badge so the action ("commented"/"approved"/…) stays scannable.
+                        <div className="relative shrink-0 mt-0.5">
+                          <InitialsAvatar
+                            name={event.actor.name}
+                            displayColor={event.actor.color}
+                            avatarUrl={
+                              event.actor.userId ? `/api/users/${event.actor.userId}/avatar` : null
+                            }
+                            className="h-7 w-7 text-[11px]"
+                            title={event.actor.name}
+                          />
+                          <span
+                            className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full border border-border bg-card"
+                            aria-hidden
+                          >
+                            <Icon
+                              className={cn('h-2.5 w-2.5 text-muted-foreground', EVENT_ICON_CLASSES[event.type])}
+                            />
+                          </span>
+                        </div>
+                      ) : (
+                        // Generic "Admin"/"Client" or unattributed → event-type icon, boxed to the
+                        // same footprint as an avatar so the text column stays aligned across rows.
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+                          <Icon
+                            className={cn('h-4 w-4 text-muted-foreground', EVENT_ICON_CLASSES[event.type])}
+                          />
+                        </div>
+                      )}
                       <div className="min-w-0 flex-1">
                         <p className="text-sm leading-snug break-words">
-                          <span className="font-medium inline-flex items-center gap-1.5">
-                            {event.actor.color && (
-                              <span
-                                className="inline-block w-2 h-2 rounded-full shrink-0"
-                                style={{ backgroundColor: event.actor.color }}
-                                aria-hidden
-                              />
-                            )}
-                            {event.actor.name}
-                          </span>{' '}
+                          <span className="font-medium">{event.actor.name}</span>{' '}
                           <span className="text-foreground/90">{eventDescription(event)}</span>
                         </p>
                         {event.type === 'COMMENT_ADDED' && event.target.commentPreview && (
                           <p
-                            className="text-xs text-foreground/80 mt-1 truncate rounded-md border border-border bg-muted/50 px-2 py-1"
+                            className="text-xs text-foreground mt-1.5 rounded-md border border-border bg-accent px-2.5 py-1.5 shadow-sm line-clamp-3"
                             title={event.target.commentPreview}
                           >
                             {event.target.commentPreview}

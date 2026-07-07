@@ -28,6 +28,17 @@ export interface ProjectActivityActor {
   name: string
   kind: 'USER' | 'RECIPIENT' | 'UNKNOWN'
   color: string | null
+  /**
+   * Admin-user id, for avatar-image lookup (`/api/users/{id}/avatar`). Only present for named
+   * USER actors on non-guest audiences; null for recipients, unknown actors, and guests (who
+   * must not be able to resolve an admin's identity).
+   */
+  userId?: string | null
+  /**
+   * True when the actor is a real, named person (not a generic "Admin"/"Client" fallback).
+   * Drives whether the UI shows an initials/photo avatar or falls back to the event-type icon.
+   */
+  named?: boolean
 }
 
 export interface ProjectActivityEvent {
@@ -103,10 +114,19 @@ function resolveActor(
       : defaultKind
   const generic = kind === 'USER' ? 'Admin' : 'Client'
   if (audience === 'guest') {
-    // Guests only learn admin-vs-client, never names.
-    return { name: generic, kind, color: raw.color ?? null }
+    // Guests only learn admin-vs-client, never names — and never a userId that would let
+    // them fetch an admin's avatar image and identify them.
+    return { name: generic, kind, color: raw.color ?? null, userId: null, named: false }
   }
-  return { name: (raw.name && raw.name.trim()) || generic, kind, color: raw.color ?? null }
+  const realName = (raw.name && raw.name.trim()) || ''
+  return {
+    name: realName || generic,
+    kind,
+    color: raw.color ?? null,
+    // Only admin users have avatar images; recipients fall back to initials.
+    userId: kind === 'USER' ? raw.userId ?? null : null,
+    named: realName.length > 0,
+  }
 }
 
 function actorGroupKey(raw: RawActorRef): string {

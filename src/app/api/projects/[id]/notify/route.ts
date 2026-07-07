@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { sendNewAlbumReadyEmail, sendNewVersionEmail, sendProjectGeneralNotificationEmail, isSmtpConfigured, getEmailSettings, buildCompanyLogoUrl, sendEmail } from '@/lib/email'
+import { sendNewAlbumReadyEmail, sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendNewItemsReadyEmail, isSmtpConfigured, getEmailSettings, buildCompanyLogoUrl, sendEmail } from '@/lib/email'
 import { getPasswordEmailQueue } from '@/lib/queue'
 import { generateNotificationSummaryEmail, generateProjectInviteInternalUsersEmail, generateAdminSummaryEmail } from '@/lib/email-templates'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const { id: projectId } = await params
     const body = await request.json()
-    const { videoId, albumId, notifyEntireProject, sendPasswordSeparately, notes, notificationType, internalUserIds, projectFileIds, recipientIds } = body
+    const { videoId, albumId, videoIds, albumIds, notifyEntireProject, sendPasswordSeparately, notes, notificationType, internalUserIds, projectFileIds, recipientIds } = body
 
     const trimmedNotes = typeof notes === 'string' ? notes.trim() : ''
 
@@ -609,8 +609,59 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     let video = null
     let album: { id: string; name: string; notes: string | null; projectId: string } | null = null
 
-    const isSpecificAlbum = !notifyEntireProject && !!albumId
-    const isSpecificVideo = !notifyEntireProject && !albumId
+    const isSelectedItems = notificationType === 'selected-items'
+    const isSpecificAlbum = !notifyEntireProject && !isSelectedItems && !!albumId
+    const isSpecificVideo = !notifyEntireProject && !isSelectedItems && !albumId
+
+    // Selected items: a hand-picked subset of ready videos and/or albums (not the whole project)
+    let selectedVideos: Array<{ name: string; versionLabel: string; approved: boolean }> = []
+    let selectedAlbums: Array<{ name: string; photoCount: number }> = []
+
+    if (isSelectedItems) {
+      const requestedVideoIds = Array.from(
+        new Set((Array.isArray(videoIds) ? videoIds : []).map((x: any) => String(x)).filter(Boolean))
+      )
+      const requestedAlbumIds = Array.from(
+        new Set((Array.isArray(albumIds) ? albumIds : []).map((x: any) => String(x)).filter(Boolean))
+      )
+
+      if (requestedVideoIds.length === 0 && requestedAlbumIds.length === 0) {
+        return NextResponse.json({ error: 'Please select at least one video or album to notify about.' }, { status: 400 })
+      }
+
+      if (requestedVideoIds.length > 0) {
+        const readyVideoById = new Map(project.videos.map((v) => [v.id, v]))
+        const invalidVideoIds = requestedVideoIds.filter((id) => !readyVideoById.has(id))
+        if (invalidVideoIds.length > 0) {
+          return NextResponse.json(
+            { error: 'One or more selected videos are not ready or not part of this project.' },
+            { status: 400 }
+          )
+        }
+        selectedVideos = requestedVideoIds.map((id) => {
+          const v = readyVideoById.get(id)!
+          return { name: v.name, versionLabel: v.versionLabel, approved: v.approved }
+        })
+      }
+
+      if (requestedAlbumIds.length > 0) {
+        if (project.enablePhotos === false) {
+          return NextResponse.json({ error: 'Photos are disabled for this project' }, { status: 400 })
+        }
+        const albumById = new Map((project.albums || []).map((a) => [a.id, a]))
+        const invalidAlbumIds = requestedAlbumIds.filter((id) => !albumById.has(id))
+        if (invalidAlbumIds.length > 0) {
+          return NextResponse.json(
+            { error: 'One or more selected albums are not part of this project.' },
+            { status: 400 }
+          )
+        }
+        selectedAlbums = requestedAlbumIds.map((id) => {
+          const a = albumById.get(id)!
+          return { name: a.name, photoCount: a._count?.photos ?? 0 }
+        })
+      }
+    }
 
     if (isSpecificVideo) {
       if (!videoId) {
@@ -657,9 +708,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const trackingType = notifyEntireProject
       ? 'ALL_READY_VIDEOS'
+      : isSelectedItems
+      ? 'SELECTED_ITEMS_READY'
       : isSpecificAlbum
       ? 'SPECIFIC_ALBUM_READY'
       : 'SPECIFIC_VIDEO_VERSION'
+
+    // Emails that cover more than a single video version don't get a videoId link.
+    const hasSingleVideo = isSpecificVideo
 
     // Send emails to all recipients with email addresses
     const emailPromises = filteredRecipientsWithEmail
@@ -671,7 +727,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             token: crypto.randomBytes(32).toString('base64url'),
             projectId,
             type: trackingType,
-            videoId: notifyEntireProject || isSpecificAlbum ? null : videoId,
+            videoId: hasSingleVideo ? videoId : null,
             recipientEmail: recipient.email!,
           },
         })
@@ -684,6 +740,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             shareUrl,
             readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel, approved: v.approved })),
             readyAlbums,
+            notes: trimmedNotes ? trimmedNotes : null,
+            isPasswordProtected,
+            trackingToken: trackingToken.token,
+          })
+        } else if (isSelectedItems) {
+          return sendNewItemsReadyEmail({
+            clientEmail: recipient.email!,
+            clientName: recipient.name || 'Client',
+            projectTitle: project.title,
+            shareUrl,
+            videos: selectedVideos,
+            albums: selectedAlbums,
             notes: trimmedNotes ? trimmedNotes : null,
             isPasswordProtected,
             trackingToken: trackingToken.token,
@@ -791,7 +859,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           data: {
             projectId,
             type: trackingType,
-            videoId: notifyEntireProject || isSpecificAlbum ? null : videoId,
+            videoId: hasSingleVideo ? videoId : null,
             recipientEmails: recipientEmailsJson,
           },
         })

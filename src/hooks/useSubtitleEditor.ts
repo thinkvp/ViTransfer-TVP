@@ -26,6 +26,11 @@ import {
 
 const UNDO_LIMIT = 50
 
+// When a clicked cue shares its start frame with (or is overlapped by) the
+// previous cue, land the seek this many ms past that overlap so only the
+// clicked cue shows — enough margin to clear seek imprecision.
+const SEEK_INTO_CUE_MS = 20
+
 export interface UseSubtitleEditorArgs {
   videoId: string | null
   videoName: string
@@ -273,8 +278,27 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
   const selectCue = useCallback((id: string | null, opts?: { seek?: boolean }) => {
     setSelectedCueId(id)
     if (id && opts?.seek) {
-      const cue = cuesRef.current.find((c) => c.id === id)
-      if (cue) seekTo(cue.startMs)
+      const list = cuesRef.current
+      const cue = list.find((c) => c.id === id)
+      if (!cue) return
+      // Seeking to the exact start renders TWO captions when a preceding cue
+      // ends on the same frame as (or overlapping) this cue's start — both are
+      // active at that instant. When that's the case, land the playhead just
+      // past the overlap so only the clicked cue shows; otherwise seek to the
+      // exact start. Clamped to stay inside the clicked cue.
+      let floor = cue.startMs
+      let overlaps = false
+      for (const other of list) {
+        if (other.id === cue.id) continue
+        if (other.startMs < cue.startMs && other.endMs >= cue.startMs && other.endMs < cue.endMs) {
+          overlaps = true
+          if (other.endMs > floor) floor = other.endMs
+        }
+      }
+      const target = overlaps
+        ? Math.max(cue.startMs, Math.min(floor + SEEK_INTO_CUE_MS, cue.endMs - 1))
+        : cue.startMs
+      seekTo(target)
     }
   }, [seekTo])
 

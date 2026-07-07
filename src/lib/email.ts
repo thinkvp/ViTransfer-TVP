@@ -1927,6 +1927,161 @@ export async function sendProjectGeneralNotificationEmail({
   })
 }
 
+/**
+ * Email template: New items ready (a hand-picked subset of videos and/or albums —
+ * not the entire project). Lists the selected items in a single "New Items" card.
+ */
+export async function renderNewItemsReadyEmail({
+  clientName,
+  projectTitle,
+  shareUrl,
+  videos = [],
+  albums = [],
+  notes,
+  isPasswordProtected = false,
+  trackingToken,
+  branding,
+}: {
+  clientName: string
+  projectTitle: string
+  shareUrl: string
+  videos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
+  albums?: Array<{ name: string; photoCount: number }>
+  notes?: string | null
+  isPasswordProtected?: boolean
+  trackingToken?: string
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+
+  const itemCount = videos.length + albums.length
+  const subject = `New ${itemCount === 1 ? 'Item' : 'Items'} Ready for Review: ${projectTitle}`
+
+  const passwordNotice = isPasswordProtected
+    ? `<div style="${emailCardStyle({ paddingPx: 14, borderRadiusPx: 10, marginBottomPx: 14 })}">
+        Password protected. Use the password sent separately to open the link.
+      </div>`
+    : ''
+
+  // Group videos by name, combining all version labels onto one line, sorted A→Z
+  const videoGroupMap = new Map<string, { versionLabels: string[]; anyApproved: boolean }>()
+  for (const v of videos) {
+    const g = videoGroupMap.get(v.name)
+    if (g) {
+      g.versionLabels.push(v.versionLabel)
+      if (v.approved) g.anyApproved = true
+    } else {
+      videoGroupMap.set(v.name, { versionLabels: [v.versionLabel], anyApproved: !!v.approved })
+    }
+  }
+  const videoGroups = Array.from(videoGroupMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    .map(([name, { versionLabels, anyApproved }]) => ({ name, versionLabels, anyApproved }))
+
+  const sortedAlbums = [...albums].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+
+  const approvedPillHtml = `<span style="display:inline-block;background:#dcfce7;color:#166534;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;vertical-align:middle;">Approved</span>`
+
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
+  const notesCardStyle = emailCardStyle({ borderRadiusPx: 8 })
+  const notesCardTitleStyle = emailCardTitleStyle()
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient,
+    headerTextColor,
+    title: `New ${itemCount === 1 ? 'Item' : 'Items'} Ready`,
+    subtitle: projectTitle,
+    trackingToken,
+    trackingPixelsEnabled: resolved.trackingPixelsEnabled,
+    appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
+    bodyContent: `
+      <p style="margin:0 0 20px; font-size:16px;">
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
+      </p>
+      <p style="margin:0 0 24px; font-size:15px;">
+        ${itemCount === 1 ? 'A new item is' : 'Some new items are'} ready for you to review. Click below to view and leave feedback.
+      </p>
+      ${renderNotesCard(notes, { cardStyle: notesCardStyle, cardTitleStyle: notesCardTitleStyle })}
+      ${videoGroups.length > 0 || sortedAlbums.length > 0 ? `
+        <div style="${emailCardStyle({ paddingPx: 20, borderRadiusPx: 8, marginBottomPx: 24 })}">
+          <div style="${emailCardTitleStyle()}">${itemCount === 1 ? 'New Item' : 'New Items'}</div>
+          ${videoGroups.length > 0 ? `
+            <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:2px; margin-bottom:8px;">Videos</div>
+            ${videoGroups.map(g => `
+              <div style="font-size:15px; color:#374151; padding:6px 0;">
+                &#8226; ${escapeHtml(g.name)}${g.versionLabels.map(label => ` ${emailVersionPillHtml(label, resolved.accentColor, resolved.accentTextMode)}`).join('')}${g.anyApproved ? ` ${approvedPillHtml}` : ''}
+              </div>
+            `).join('')}
+          ` : ''}
+
+          ${sortedAlbums.length > 0 ? `
+            <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:${videoGroups.length > 0 ? 14 : 2}px; margin-bottom:8px;">Albums</div>
+            ${sortedAlbums.map(a => `
+              <div style="font-size:15px; color:#374151; padding:6px 0;">
+                &#8226; ${escapeHtml(a.name)} <span style="color:${EMAIL_THEME.textMuted};">(${Number(a.photoCount) || 0} photos)</span>
+              </div>
+            `).join('')}
+          ` : ''}
+        </div>
+      ` : ''}
+      ${passwordNotice}
+      <div style="text-align:center; margin:32px 0;">
+        <a href="${escapeHtml(shareUrl)}" style="${primaryButtonStyle}">
+          View Project
+        </a>
+      </div>
+
+      ${renderEmailFooterNotice(resolved.emailCustomFooterText)}
+    `,
+  })
+
+  return { subject, html }
+}
+
+export async function sendNewItemsReadyEmail({
+  clientEmail,
+  clientName,
+  projectTitle,
+  shareUrl,
+  videos = [],
+  albums = [],
+  notes,
+  isPasswordProtected = false,
+  trackingToken,
+}: {
+  clientEmail: string
+  clientName: string
+  projectTitle: string
+  shareUrl: string
+  videos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
+  albums?: Array<{ name: string; photoCount: number }>
+  notes?: string | null
+  isPasswordProtected?: boolean
+  trackingToken?: string
+}) {
+  const { subject, html } = await renderNewItemsReadyEmail({
+    clientName,
+    projectTitle,
+    shareUrl,
+    videos,
+    albums,
+    notes,
+    isPasswordProtected,
+    trackingToken,
+  })
+
+  return sendEmail({
+    to: clientEmail,
+    subject,
+    html,
+  })
+}
+
 function formatProjectKeyDateTypeLabel(type: string): string {
   if (type === 'PRE_PRODUCTION') return 'Pre-production'
   if (type === 'SHOOTING') return 'Shooting'

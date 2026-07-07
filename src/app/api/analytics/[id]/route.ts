@@ -398,6 +398,8 @@ export async function GET(
       type: 'EMAIL' as const,
       description: evt.type === 'ALL_READY_VIDEOS'
         ? 'All Ready Videos'
+        : evt.type === 'SELECTED_ITEMS_READY'
+        ? 'Selected Items Ready'
         : evt.type === 'SPECIFIC_ALBUM_READY'
         ? 'Specific Album Ready'
         : evt.type === 'NEW_COMMENT'
@@ -418,6 +420,8 @@ export async function GET(
       type: 'EMAIL_OPEN' as const,
       description: tracking.type === 'ALL_READY_VIDEOS'
         ? 'All Ready Videos'
+        : tracking.type === 'SELECTED_ITEMS_READY'
+        ? 'Selected Items Ready'
         : tracking.type === 'SPECIFIC_ALBUM_READY'
         ? 'Specific Album Ready'
         : tracking.type === 'NEW_COMMENT'

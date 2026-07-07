@@ -61,10 +61,13 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
-  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'comment-summary' | 'specific-album' | 'internal-invite'>('entire-project')
+  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'selected-items' | 'comment-summary' | 'specific-album' | 'internal-invite'>('entire-project')
   const [selectedVideoName, setSelectedVideoName] = useState<string>('')
   const [selectedVideoId, setSelectedVideoId] = useState<string>('')
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('')
+  const [selectedItemVideoIds, setSelectedItemVideoIds] = useState<string[]>([])
+  const [selectedItemAlbumIds, setSelectedItemAlbumIds] = useState<string[]>([])
+  const [selectedItemsNotes, setSelectedItemsNotes] = useState<string>('')
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [entireProjectNotes, setEntireProjectNotes] = useState<string>('')
@@ -150,11 +153,14 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const hasAnyReadyForEntireProject = readyVideos.length > 0 || (photosEnabled && albumCount > 0)
 
   // Reset selections when notification type changes
-  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'comment-summary' | 'specific-album' | 'internal-invite') => {
+  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'selected-items' | 'comment-summary' | 'specific-album' | 'internal-invite') => {
     setNotificationType(type)
     setSelectedVideoName('')
     setSelectedVideoId('')
     setSelectedAlbumId('')
+    setSelectedItemVideoIds([])
+    setSelectedItemAlbumIds([])
+    setSelectedItemsNotes('')
     setEntireProjectNotes('')
     setInternalInviteNotes('')
     setSelectedRecipientIds([])
@@ -172,7 +178,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   useEffect(() => {
     const shouldFetchAlbums =
       showNotificationModal &&
-      notificationType === 'specific-album' &&
+      (notificationType === 'specific-album' || notificationType === 'selected-items') &&
       photosEnabled
 
     if (!shouldFetchAlbums) return
@@ -377,6 +383,15 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       return
     }
 
+    if (
+      notificationType === 'selected-items' &&
+      selectedItemVideoIds.length === 0 &&
+      selectedItemAlbumIds.length === 0
+    ) {
+      setMessage({ type: 'error', text: 'Please select at least one video or album' })
+      return
+    }
+
     if (notificationType === 'internal-invite') {
       if (selectedInternalUserIds.length === 0) {
         setMessage({ type: 'error', text: 'Please select at least one user' })
@@ -396,10 +411,14 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       notificationType,
       videoId: notificationType === 'specific-video' ? selectedVideoId : null,
       albumId: notificationType === 'specific-album' ? selectedAlbumId : null,
+      videoIds: notificationType === 'selected-items' ? selectedItemVideoIds : undefined,
+      albumIds: notificationType === 'selected-items' ? selectedItemAlbumIds : undefined,
       notifyEntireProject: notificationType === 'entire-project',
       notes:
         notificationType === 'entire-project'
           ? entireProjectNotes
+          : notificationType === 'selected-items'
+          ? selectedItemsNotes
           : notificationType === 'internal-invite'
           ? internalInviteNotes
           : null,
@@ -413,6 +432,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         // Keep selections intact (recipients/users/video/version/album) so the UI doesn't
         // appear to "refresh" and select everything again after a router refresh.
         setEntireProjectNotes('')
+        setSelectedItemsNotes('')
         setInternalInviteNotes('')
         setSendPasswordSeparately(false)
 
@@ -647,6 +667,9 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                   <SelectItem value="specific-video">
                     Specific Video & Version
                   </SelectItem>
+                  <SelectItem value="selected-items">
+                    Multiple Items (Pick Videos & Albums)
+                  </SelectItem>
                   <SelectItem value="comment-summary">
                     Comment Summary
                   </SelectItem>
@@ -800,6 +823,96 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               </>
             )}
 
+            {notificationType === 'selected-items' && (
+              <>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Videos</label>
+                  <div className="space-y-2 border rounded-md p-3 bg-muted/30">
+                    {readyVideos.length === 0 ? (
+                      <div className="text-xs text-muted-foreground">No ready videos.</div>
+                    ) : (
+                      readyVideos.map((v) => {
+                        const checked = selectedItemVideoIds.includes(v.id)
+                        return (
+                          <label key={v.id} className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 mt-0.5"
+                              checked={checked}
+                              onChange={(e) => {
+                                setSelectedItemVideoIds((prev) =>
+                                  e.target.checked ? Array.from(new Set([...prev, v.id])) : prev.filter((x) => x !== v.id)
+                                )
+                              }}
+                              disabled={loading}
+                            />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-medium truncate">{v.name}</span>
+                              <span className="block text-xs text-muted-foreground truncate">{v.versionLabel}</span>
+                            </span>
+                            {v.approved && (
+                              <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-success-visible text-success border border-success-visible shrink-0">
+                                approved
+                              </span>
+                            )}
+                          </label>
+                        )
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {photosEnabled && (
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">Albums</label>
+                    <div className="space-y-2 border rounded-md p-3 bg-muted/30">
+                      {albumsLoading ? (
+                        <div className="text-xs text-muted-foreground">Loading albums…</div>
+                      ) : albums.length === 0 ? (
+                        <div className="text-xs text-muted-foreground">No albums.</div>
+                      ) : (
+                        albums.map((a) => {
+                          const checked = selectedItemAlbumIds.includes(a.id)
+                          const photoCount = a._count?.photos ?? 0
+                          return (
+                            <label key={a.id} className="flex items-start gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 mt-0.5"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setSelectedItemAlbumIds((prev) =>
+                                    e.target.checked ? Array.from(new Set([...prev, a.id])) : prev.filter((x) => x !== a.id)
+                                  )
+                                }}
+                                disabled={loading}
+                              />
+                              <span className="min-w-0">
+                                <span className="block text-sm font-medium truncate">{a.name}</span>
+                                <span className="block text-xs text-muted-foreground truncate">{photoCount} photos</span>
+                              </span>
+                            </label>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Notes</label>
+                  <Textarea
+                    value={selectedItemsNotes}
+                    onChange={(e) => setSelectedItemsNotes(e.target.value)}
+                    placeholder="Optional notes to include in the email"
+                    className="resize-none"
+                    rows={4}
+                    disabled={loading}
+                  />
+                </div>
+              </>
+            )}
+
             {notificationType === 'internal-invite' && (
               <>
                 <div>
@@ -942,6 +1055,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 (notificationType === 'entire-project' && !hasAnyReadyForEntireProject) ||
                 (notificationType === 'specific-video' && !selectedVideoId) ||
                 (notificationType === 'specific-album' && !selectedAlbumId) ||
+                (notificationType === 'selected-items' && selectedItemVideoIds.length === 0 && selectedItemAlbumIds.length === 0) ||
                 (notificationType === 'internal-invite' && (selectedInternalUserIds.length === 0 || attachmentsTooLarge))
               }
               className="w-full"
@@ -974,6 +1088,8 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             <p className="text-xs text-muted-foreground">
               {notificationType === 'entire-project'
                 ? 'This will send an email to the selected recipients with access to all ready videos in this project.'
+                : notificationType === 'selected-items'
+                ? 'This will send an email to the selected recipients listing the chosen videos and albums.'
                 : notificationType === 'specific-album'
                 ? 'This will send an email to the selected recipients with a link to view the selected album.'
                 : notificationType === 'comment-summary'
