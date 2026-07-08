@@ -1,30 +1,17 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { prisma } from '@/lib/db'
 import { isS3Mode } from '@/lib/s3-storage'
 import {
-  runS3LocalBackup,
   getS3LocalBackupSettings,
-  formatBackupResultSummary,
   ALL_BACKUP_CATEGORIES,
   type BackupCategory,
-  type BackupProgressFn,
 } from '@/lib/s3-local-backup'
-import { upsertS3BackupFailureNotification } from '@/lib/s3-backup-failure-notifications'
+import { enqueueS3LocalBackup } from '@/lib/queue'
 
 export const runtime = 'nodejs'
-export const maxDuration = 300 // 5 minutes max â€” backups can be large
-
-// Human-readable label for a category key, e.g. "videoPreviewsBytes" â†’ "Video Previews"
-function categoryLabel(cat: BackupCategory): string {
-  return cat
-    .replace(/Bytes$/, '')
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, (c) => c.toUpperCase())
-    .trim()
-}
 
 export async function GET(request: NextRequest) {
   const authResult = await requireApiUser(request)
@@ -96,77 +83,46 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Dry run — scan and report without downloading or updating DB
-  if (dryRun) {
-    try {
-      const result = await runS3LocalBackup(categories, undefined, { dryRun: true })
-      const summary = formatBackupResultSummary(result)
-      return NextResponse.json({ ok: true, result, summary })
-    } catch (err: any) {
-      return NextResponse.json({ error: err?.message || 'Dry run failed' }, { status: 500 })
-    }
-  }
-
-  // Optimistic lock â€” prevent concurrent runs. getS3LocalBackupSettings() applies the
+  // Optimistic lock — prevent concurrent runs. getS3LocalBackupSettings() applies the
   // stale-lock self-heal, so a flag orphaned by a hung/killed run won't block a new run.
   const currentSettings = await getS3LocalBackupSettings()
   if (currentSettings?.running) {
     return NextResponse.json({ error: 'A backup run is already in progress' }, { status: 409 })
   }
 
+  // Run on the WORKER, never in this web process. The backup mirrors S3 to local disk,
+  // and that disk is the worker's (bulk storage) — running it here would fill the app
+  // host's disk, which is exactly what caused the 2026-07-08 outage. Both the real run
+  // and the dry-run are enqueued so the worker owns execution and the on-disk comparison
+  // reflects the mirror's actual location. Enqueue FIRST, then take the lock, so a Redis
+  // failure can't leave a stuck "running" flag behind.
+  try {
+    await enqueueS3LocalBackup(categories, { dryRun })
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message || 'Could not queue the backup — is the job queue reachable?' },
+      { status: 500 },
+    )
+  }
+
+  const queuedMessage = dryRun
+    ? 'Queued dry run — waiting for the backup worker…'
+    : 'Queued — waiting for the backup worker…'
+
   await prisma.settings.upsert({
     where: { id: 'default' },
-    update: { s3LocalBackupRunning: true, s3LocalBackupStartedAt: new Date() },
-    create: { id: 'default', s3LocalBackupRunning: true, s3LocalBackupStartedAt: new Date() },
+    update: {
+      s3LocalBackupRunning: true,
+      s3LocalBackupStartedAt: new Date(),
+      s3LocalBackupLastRunResult: queuedMessage,
+    },
+    create: {
+      id: 'default',
+      s3LocalBackupRunning: true,
+      s3LocalBackupStartedAt: new Date(),
+      s3LocalBackupLastRunResult: queuedMessage,
+    },
   })
 
-  // Progress callback â€” writes live status to DB so the UI can poll it.
-  const onProgress: BackupProgressFn = async (info) => {
-    const label = categoryLabel(info.currentCategory)
-    const fileProgress = info.filesInCategory > 0
-      ? ` \u2014 ${info.filesProcessed}/${info.filesInCategory} files`
-      : ''
-    const text = info.filesProcessed === 0
-      ? `Starting ${label} (category ${info.categoryIndex + 1}/${info.totalCategories})...`
-      : `${label} (${info.categoryIndex + 1}/${info.totalCategories})${fileProgress} \u2014 ${info.downloaded} downloaded, ${info.skipped} already up-to-date`
-    await prisma.settings.update({
-      where: { id: 'default' },
-      data: { s3LocalBackupLastRunResult: text },
-    }).catch(() => {})
-  }
-
-  try {
-    const result = await runS3LocalBackup(categories, onProgress)
-    const summary = formatBackupResultSummary(result)
-
-    await prisma.settings.update({
-      where: { id: 'default' },
-      data: {
-        s3LocalBackupLastRunAt: new Date(),
-        s3LocalBackupLastRunResult: summary,
-        s3LocalBackupRunning: false,
-        s3LocalBackupStartedAt: null,
-      },
-    })
-
-    // If the backup completed with failures, fire a pinned system notification
-    if (!result.ok && result.failed > 0) {
-      const errorSummary = result.errors.slice(0, 3).join('; ') || 'Unknown error'
-      upsertS3BackupFailureNotification(`${result.failed} file(s) failed. ${errorSummary}`).catch(() => {})
-    }
-
-    return NextResponse.json({ ok: true, result, summary })
-  } catch (err: any) {
-    const message = err?.message || 'Backup failed unexpectedly'
-    await prisma.settings.update({
-      where: { id: 'default' },
-      data: {
-        s3LocalBackupLastRunResult: `Error: ${message}`,
-        s3LocalBackupRunning: false,
-        s3LocalBackupStartedAt: null,
-      },
-    }).catch(() => {})
-    upsertS3BackupFailureNotification(message).catch(() => {})
-    return NextResponse.json({ error: message }, { status: 500 })
-  }
+  return NextResponse.json({ ok: true, queued: true, dryRun })
 }

@@ -319,6 +319,8 @@ export async function GET(
           ...video,
           originalFileSize: (origFile?.fileSize ?? BigInt(0)).toString(),
           originalFileName: origFile?.fileName ?? video.name ?? '',
+          viewCount: viewCountsByVideoId.get(video.id) ?? 0,
+          downloadCount: downloadCountsByVideoId.get(video.id) ?? 0,
           hasThumbnail: previewSet.has('THUMBNAIL'),
           thumbnailPath: previewSet.has('THUMBNAIL'),      // boolean for admin share page
           preview480Path: previewSet.has('PREVIEW_480'),     // boolean for admin share page

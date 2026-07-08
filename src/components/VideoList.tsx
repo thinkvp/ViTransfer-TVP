@@ -8,7 +8,7 @@ import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download, Captions, Loader2 } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -24,6 +24,8 @@ interface VideoListProps {
   canApprove?: boolean
   canManageAllowApproval?: boolean
   s3Mode?: boolean
+  /** Whisper enabled globally — shows the per-version subtitle generate/regenerate button. */
+  transcriptionEnabled?: boolean
 }
 
 export default function VideoList({
@@ -33,6 +35,7 @@ export default function VideoList({
   canDelete,
   canApprove,
   canManageAllowApproval,
+  transcriptionEnabled = false,
 }: VideoListProps) {
   const effectiveCanDelete = canDelete ?? isAdmin
   const effectiveCanApprove = canApprove ?? isAdmin
@@ -54,6 +57,8 @@ export default function VideoList({
   const [expandedVideoIds, setExpandedVideoIds] = useState<string[]>([])
   const [pendingDeleteVideoId, setPendingDeleteVideoId] = useState<string | null>(null)
   const [pendingApprovalVideo, setPendingApprovalVideo] = useState<{ id: string; approved: boolean } | null>(null)
+  const [generatingSubtitlesId, setGeneratingSubtitlesId] = useState<string | null>(null)
+  const [pendingSubtitlesRegenerateId, setPendingSubtitlesRegenerateId] = useState<string | null>(null)
 
   // S3 version label rename confirmation
   const [versionRenameConfirm, setVersionRenameConfirm] = useState<{ videoId: string; newLabel: string } | null>(null)
@@ -187,6 +192,37 @@ export default function VideoList({
     } finally {
       setSavingAllowApprovalId(null)
     }
+  }
+
+  const doGenerateSubtitles = async (videoId: string) => {
+    if (generatingSubtitlesId) return
+    const previousStatus = (videos.find(v => v.id === videoId) as any)?.transcriptionStatus ?? null
+    setGeneratingSubtitlesId(videoId)
+
+    setVideos(prev => prev.map(v =>
+      v.id === videoId ? ({ ...v, transcriptionStatus: 'PENDING', transcriptionError: null } as any) : v
+    ))
+
+    try {
+      await apiPost(`/api/videos/${videoId}/subtitles/regenerate`, {})
+      onRefresh?.()
+    } catch (error: any) {
+      setVideos(prev => prev.map(v =>
+        v.id === videoId ? ({ ...v, transcriptionStatus: previousStatus } as any) : v
+      ))
+      toast.error(error?.message || 'Failed to queue subtitle generation')
+    } finally {
+      setGeneratingSubtitlesId(null)
+    }
+  }
+
+  const handleGenerateSubtitles = (videoId: string, alreadyGenerated: boolean) => {
+    if (generatingSubtitlesId) return
+    if (alreadyGenerated) {
+      setPendingSubtitlesRegenerateId(videoId)
+      return
+    }
+    void doGenerateSubtitles(videoId)
   }
 
   const handleStartEdit = (videoId: string, currentLabel: string) => {
@@ -371,6 +407,42 @@ export default function VideoList({
                     {video.status === 'ERROR' ? 'FAILED' : video.status}
                   </span>
                 )}
+                  {isAdmin && transcriptionEnabled && video.status === 'READY' && (() => {
+                    const subtitlesStatus = (video as any).transcriptionStatus as string | null | undefined
+                    const subtitlesBusy = subtitlesStatus === 'PENDING' || subtitlesStatus === 'PROCESSING'
+                    const subtitlesReady = Boolean((video as any).hasSubtitles)
+                    const subtitlesFailed = subtitlesStatus === 'FAILED' || subtitlesStatus === 'SKIPPED'
+                    return (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleGenerateSubtitles(video.id, subtitlesReady)}
+                        disabled={subtitlesBusy || generatingSubtitlesId === video.id}
+                        className={
+                          subtitlesBusy
+                            ? 'text-warning'
+                            : subtitlesReady
+                            ? 'text-success hover:text-success hover:bg-success-visible'
+                            : subtitlesFailed
+                            ? 'text-destructive hover:text-destructive hover:bg-destructive-visible'
+                            : 'text-primary hover:text-primary/80 hover:bg-primary/10'
+                        }
+                        title={
+                          subtitlesBusy
+                            ? 'Generating subtitles…'
+                            : subtitlesReady
+                            ? 'Subtitles ready — click to regenerate'
+                            : subtitlesStatus === 'FAILED'
+                            ? 'Subtitle generation failed — click to retry'
+                            : subtitlesStatus === 'SKIPPED'
+                            ? 'Skipped (video too long for the provider) — click to retry'
+                            : 'Generate subtitles'
+                        }
+                      >
+                        {subtitlesBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Captions className="w-4 h-4" />}
+                      </Button>
+                    )
+                  })()}
                   {isAdmin && effectiveCanApprove && video.status === 'READY' && (
                   <Button
                     variant="ghost"
@@ -690,6 +762,18 @@ export default function VideoList({
         confirmLabel={pendingApprovalVideo?.approved ? 'Unapprove' : 'Approve'}
         variant="default"
         onConfirm={confirmToggleApproval}
+      />
+      <ConfirmDialog
+        open={pendingSubtitlesRegenerateId !== null}
+        onOpenChange={(v) => { if (!v) setPendingSubtitlesRegenerateId(null) }}
+        title="Regenerate Subtitles?"
+        description="This overwrites the current captions, including any manual edits, with a fresh auto-transcription."
+        confirmLabel="Regenerate"
+        onConfirm={() => {
+          const videoId = pendingSubtitlesRegenerateId!
+          setPendingSubtitlesRegenerateId(null)
+          void doGenerateSubtitles(videoId)
+        }}
       />
       <ConfirmDialog
         open={versionRenameConfirm !== null}

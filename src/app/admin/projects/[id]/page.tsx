@@ -348,9 +348,11 @@ export default function ProjectPage() {
   useEffect(() => {
     if (videos.length === 0) return
 
-    // Check if any videos are currently processing or queued
+    // Check if any videos are currently processing or queued (video encode, or subtitle generation)
     const hasProcessingVideos = videos.some(
-      (video: any) => video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'UPLOADING'
+      (video: any) =>
+        video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'UPLOADING' ||
+        video.transcriptionStatus === 'PENDING' || video.transcriptionStatus === 'PROCESSING'
     )
 
     if (hasProcessingVideos) {

@@ -334,7 +334,7 @@ async function collectKeysForCategory(
     case 'videoPreviewsBytes': {
       const entries = await collectStoredKeys(
         ['VIDEO', 'VIDEO_ASSET'],
-        ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'PREVIEW_IMAGE', 'TIMELINE_VTT', 'TIMELINE_SPRITES'],
+        ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'PREVIEW_IMAGE', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'SUBTITLES_VTT', 'WAVEFORM_PEAKS', 'TRANSCRIPTION_AUDIO'],
       )
       // Sprite sheets and the HLS bundle are stored as directory prefixes (one StoredFile row
       // each); enumerate their actual child files (incl. the HLS master.m3u8) from S3.
@@ -486,6 +486,14 @@ export async function runS3LocalBackup(
           downloaded++
         }
       } catch (err: any) {
+        // A full disk is a whole-run fatal condition, not a per-file problem: every
+        // remaining file would fail the same way, each burning a wasted S3 HeadObject.
+        // Abort immediately with a clear message so the operator frees space and re-runs.
+        if (err?.code === 'ENOSPC') {
+          const msg = `No space left on device while writing ${entry.localPath} — backup aborted after ${downloaded} downloaded / ${skipped} up-to-date. Free disk space and re-run.`
+          console.error('[S3-BACKUP]', msg)
+          throw new Error(msg)
+        }
         failed++
         const msg = `[${category}] ${entry.key}: ${err?.message || err}`
         console.error('[S3-BACKUP]', msg)

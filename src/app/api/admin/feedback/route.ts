@@ -66,6 +66,7 @@ type FeedbackComment = {
   createdAt: Date
   resolvedAt: Date | null
   videoId: string
+  hasAttachments: boolean
 }
 
 type VersionGroup = {
@@ -153,6 +154,7 @@ export async function GET(request: NextRequest) {
         user: { select: { name: true, username: true, email: true } },
         video: { select: { id: true, name: true, version: true, versionLabel: true } },
         project: { select: { id: true, title: true, companyName: true, status: true } },
+        _count: { select: { files: true } },
       },
       orderBy: { createdAt: 'asc' },
     })
@@ -220,6 +222,7 @@ export async function GET(request: NextRequest) {
         createdAt: row.createdAt,
         resolvedAt: row.resolvedAt,
         videoId: row.videoId,
+        hasAttachments: row._count.files > 0,
       })
 
       if (row.resolvedAt) {

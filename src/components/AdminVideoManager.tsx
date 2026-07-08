@@ -484,6 +484,7 @@ export default function AdminVideoManager({
                     canApprove={canFullControl}
                     canManageAllowApproval={canFullControl}
                     s3Mode={s3Mode}
+                    transcriptionEnabled={transcriptionEnabled}
                   />
                 </div>
               </CardContent>

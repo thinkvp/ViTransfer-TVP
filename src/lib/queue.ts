@@ -19,6 +19,7 @@ let uploadTimelineQueueInstance: Queue<UploadTimelineJob> | null = null
 let passwordEmailQueueInstance: Queue<PasswordEmailJob> | null = null
 let aiAssistantQueueInstance: Queue<AiAssistantJob> | null = null
 let transcriptionQueueInstance: Queue<TranscriptionJob> | null = null
+let notificationProcessingQueueInstance: Queue | null = null
 
 export interface VideoProcessingJob {
   videoId: string
@@ -116,6 +117,19 @@ export type TranscriptionJob =
   | { kind: 'dictation'; requestId: string }
   /** Whisper server liveness/model check. State lives in the AiAssistantRequest row. */
   | { kind: 'whisper-test'; requestId: string }
+
+/**
+ * Payload for a manual S3→local backup run enqueued from the admin Settings UI.
+ * The SCHEDULED backup is enqueued by the worker's own repeat timer with an empty
+ * payload; a MANUAL run carries `manual: true` so the processor overrides the
+ * enabled-toggle guard and uses the admin-supplied category list. Both run on the
+ * worker (which owns the local mirror's disk) — the app process never downloads.
+ */
+export interface S3LocalBackupJob {
+  manual: true
+  dryRun?: boolean
+  categories: string[]
+}
 
 /** Payload for a share-files preview generation job (image resize or video frame extract). */
 export interface ShareUploadPreviewJob {
@@ -576,6 +590,42 @@ export async function enqueueVideoSubtitles(
 
   await queue.add('video-subtitles', { kind: 'video-subtitles', videoId, force: options?.force }, { jobId })
   return true
+}
+
+/**
+ * Producer handle for the worker's 'notification-processing' queue (repeatable
+ * maintenance jobs + the S3 backup). The worker owns the consuming Worker and the
+ * repeat schedule; the app only ever adds one-off jobs here (e.g. a manual backup).
+ */
+export function getNotificationProcessingQueue(): Queue {
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+    throw new Error('Queue not available during build phase')
+  }
+  if (!notificationProcessingQueueInstance) {
+    notificationProcessingQueueInstance = new Queue('notification-processing', {
+      connection: getRedisForQueue(),
+    })
+  }
+  return notificationProcessingQueueInstance
+}
+
+/**
+ * Enqueue a manual S3→local backup run so it executes on the WORKER, not the app
+ * process. This is the whole point: the download mirror must land on the worker's
+ * bulk storage, never on the (small) app/VPS disk. The processor sets/clears the
+ * `s3LocalBackupRunning` lock; the caller only needs to reflect it in the UI.
+ */
+export async function enqueueS3LocalBackup(
+  categories: string[],
+  options?: { dryRun?: boolean },
+): Promise<void> {
+  if (process.env.NEXT_PHASE === 'phase-production-build') return
+  const queue = getNotificationProcessingQueue()
+  await queue.add(
+    's3-local-backup',
+    { manual: true, dryRun: options?.dryRun === true, categories } satisfies S3LocalBackupJob,
+    { removeOnComplete: true, removeOnFail: true },
+  )
 }
 
 export function getShareUploadPreviewQueue(): Queue<ShareUploadPreviewJob> {

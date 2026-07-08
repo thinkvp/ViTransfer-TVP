@@ -16,6 +16,7 @@ import {
   FolderKanban,
   Loader2,
   MessageSquare,
+  Paperclip,
   Play,
   Video as VideoIcon,
 } from 'lucide-react'
@@ -39,6 +40,7 @@ type FeedbackComment = {
   createdAt: string
   resolvedAt: string | null
   videoId: string
+  hasAttachments: boolean
 }
 
 type VersionGroup = {
@@ -562,6 +564,14 @@ function FeedbackRow({
           </span>
         </span>
         <span className="wrap-break-word">{comment.content}</span>
+        {comment.hasAttachments && (
+          <span
+            title="Has attachment(s) — download from the share page"
+            className="ml-1 inline-flex align-middle text-muted-foreground"
+          >
+            <Paperclip className="h-3 w-3 shrink-0" />
+          </span>
+        )}
       </div>
     </div>
   )

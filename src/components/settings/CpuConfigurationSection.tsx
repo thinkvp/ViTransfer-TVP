@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp, AlertTriangle, Info } from 'lucide-react'
+import { formatDateTime } from '@/lib/utils'
 
 export interface CpuWorkerReport {
   hostname: string
@@ -111,7 +112,7 @@ export function CpuConfigurationSection({
             {workerInfo ? (
               <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
                 Reported by worker <span className="font-medium text-foreground">{workerInfo.hostname}</span>
-                {' · '}last update {new Date(workerInfo.updatedAt).toLocaleString()}
+                {' · '}last update {formatDateTime(workerInfo.updatedAt)}
                 {typeof workerInfo.runningVideoConcurrency === 'number' && (
                   <> · currently running {workerInfo.runningVideoConcurrency} concurrent job{workerInfo.runningVideoConcurrency === 1 ? '' : 's'}</>
                 )}

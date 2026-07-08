@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireMenuAccess } from '@/lib/rbac-api'
+import { getStoredFileRecords } from '@/lib/stored-file'
 
 export const runtime = 'nodejs'
 
@@ -67,11 +68,21 @@ export async function GET(
         width: true,
         height: true,
         updatedAt: true,
+        transcriptionStatus: true,
+        transcriptionError: true,
       },
       orderBy: { version: 'desc' },
     })
 
-    return NextResponse.json({ videos })
+    const videoIds = videos.map((v) => v.id)
+    const subtitleFiles = videoIds.length > 0
+      ? await getStoredFileRecords('VIDEO', videoIds, { fileRoles: ['SUBTITLES_VTT'], select: { entityId: true } })
+      : []
+    const hasSubtitlesSet = new Set(subtitleFiles.map((f) => f.entityId))
+
+    return NextResponse.json({
+      videos: videos.map((v) => ({ ...v, hasSubtitles: hasSubtitlesSet.has(v.id) })),
+    })
   } catch (error) {
     console.error('[project-video-statuses] Failed to fetch:', error)
     return NextResponse.json({ error: 'Failed to fetch video statuses' }, { status: 500 })

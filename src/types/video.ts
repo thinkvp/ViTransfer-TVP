@@ -56,6 +56,7 @@ export interface Video {
   // Waveform peaks artifact exists (subtitle editor timeline strip)
   hasWaveformPeaks?: boolean
   transcriptionStatus?: string | null
+  transcriptionError?: string | null
   originalFileName?: string
   originalFileSize?: string // stringified number
 

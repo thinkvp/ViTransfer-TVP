@@ -117,10 +117,6 @@ export function StorageOverviewSection({
   const [backupRunError, setBackupRunError] = useState<string | null>(null)
   const [backupLastRunAt, setBackupLastRunAt] = useState<string | null>(null)
 
-  // Backup dry run state
-  const [backupDryRunning, setBackupDryRunning] = useState(false)
-  const [backupDryRunResult, setBackupDryRunResult] = useState<string | null>(null)
-  const [backupDryRunError, setBackupDryRunError] = useState<string | null>(null)
   const isVisible = show || Boolean(hideCollapse)
 
   // Load backup status on mount when S3 is configured
@@ -200,37 +196,22 @@ export function StorageOverviewSection({
     }
   }
 
-  async function runManualBackup() {
+  // Both the real run and the dry-run execute on the WORKER (enqueued by the API), not in
+  // the web process — so the response is just an acknowledgement. Live progress and the
+  // final result arrive via the status poll above, which also flips backupRunning off when
+  // the worker clears the lock. We keep backupRunning true here so the poll stays active.
+  async function triggerBackup(dryRun: boolean) {
     setBackupRunning(true)
     setBackupRunError(null)
-    setBackupRunResult(null)
+    setBackupRunResult(dryRun ? 'Queued dry run…' : 'Queued…')
     try {
-      const res = await apiPost('/api/settings/s3-local-backup/run', {
+      await apiPost('/api/settings/s3-local-backup/run', {
         categories: s3LocalBackupCategories,
-      }) as any
-      setBackupRunResult(res?.summary ?? 'Backup completed')
-      setBackupLastRunAt(new Date().toISOString())
+        ...(dryRun ? { dryRun: true } : {}),
+      })
     } catch (e: any) {
-      setBackupRunError(e?.message || 'Backup run failed')
-    } finally {
+      setBackupRunError(e?.message || (dryRun ? 'Dry run failed' : 'Backup run failed'))
       setBackupRunning(false)
-    }
-  }
-
-  async function runManualBackupDryRun() {
-    setBackupDryRunning(true)
-    setBackupDryRunError(null)
-    setBackupDryRunResult(null)
-    try {
-      const res = await apiPost('/api/settings/s3-local-backup/run', {
-        categories: s3LocalBackupCategories,
-        dryRun: true,
-      }) as any
-      setBackupDryRunResult(res?.summary ?? 'Dry run completed')
-    } catch (e: any) {
-      setBackupDryRunError(e?.message || 'Dry run failed')
-    } finally {
-      setBackupDryRunning(false)
     }
   }
 
@@ -496,28 +477,20 @@ export function StorageOverviewSection({
                     <p className="text-xs text-destructive">{backupRunError}</p>
                   )}
 
-                  {backupDryRunResult && (
-                    <p className="text-xs text-muted-foreground">{backupDryRunResult}</p>
-                  )}
-
-                  {backupDryRunError && (
-                    <p className="text-xs text-destructive">{backupDryRunError}</p>
-                  )}
-
                   <div className="flex justify-end gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={backupRunning || backupDryRunning || s3LocalBackupCategories.length === 0}
-                      onClick={() => void runManualBackupDryRun()}
+                      disabled={backupRunning || s3LocalBackupCategories.length === 0}
+                      onClick={() => void triggerBackup(true)}
                     >
-                      {backupDryRunning ? 'Running…' : 'Dry run'}
+                      Dry run
                     </Button>
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={backupRunning || backupDryRunning || s3LocalBackupCategories.length === 0}
-                      onClick={() => void runManualBackup()}
+                      disabled={backupRunning || s3LocalBackupCategories.length === 0}
+                      onClick={() => void triggerBackup(false)}
                     >
                       {backupRunning ? 'Backing up…' : 'Run backup now'}
                     </Button>

@@ -41,7 +41,7 @@ import { upsertOrphanProjectFilesScanNotification, clearOrphanProjectFilesScanNo
 import { PINNED_SYSTEM_NOTIFICATION_TYPES } from '@/lib/pinned-system-notifications'
 import { processAccountingReminders } from '@/lib/accounting-reminders'
 import { isS3Mode, s3AbortIncompleteMultipartUploadsOlderThan } from '@/lib/s3-storage'
-import { runS3LocalBackup, getS3LocalBackupSettings, formatBackupResultSummary } from '@/lib/s3-local-backup'
+import { runS3LocalBackup, getS3LocalBackupSettings, formatBackupResultSummary, ALL_BACKUP_CATEGORIES, type BackupCategory } from '@/lib/s3-local-backup'
 import { upsertS3BackupFailureNotification } from '@/lib/s3-backup-failure-notifications'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
@@ -863,39 +863,100 @@ async function main() {
       }
 
       if (job.name === 's3-local-backup') {
+        // Scheduled runs carry an empty payload; a manual run (from the Settings UI) sets
+        // `manual: true` and an explicit category list. This processor OWNS the backup's disk
+        // writes — the app/web process never downloads (that would fill the app host's disk).
+        const data = (job.data ?? {}) as { manual?: boolean; dryRun?: boolean; categories?: string[] }
+        const isManual = data.manual === true
+        const isDryRun = data.dryRun === true
+        const runKind = isManual ? (isDryRun ? 'manual dry-run' : 'manual') : 'scheduled'
         try {
           const backupSettings = await getS3LocalBackupSettings()
-          if (!backupSettings?.enabled) {
-            // Silently skip — backup is not enabled
+          if (!backupSettings) {
+            // Not S3 mode — nothing to back up.
             return
           }
-          if (backupSettings.categories.length === 0) {
-            console.log('[S3-BACKUP] No categories configured; skipping scheduled backup run')
+          // Scheduled runs honour the enabled toggle; a manual run overrides it (the admin
+          // deliberately clicked "Run backup now", which works even when auto-backup is off).
+          if (!isManual && !backupSettings.enabled) {
             return
           }
-          if (backupSettings.running) {
+
+          // Categories: a manual job carries an already-validated list; fall back to the
+          // settings-configured list. Re-validate defensively against the known set.
+          const requested = isManual && Array.isArray(data.categories) && data.categories.length > 0
+            ? data.categories
+            : backupSettings.categories
+          const categories = requested.filter(
+            (c): c is BackupCategory => ALL_BACKUP_CATEGORIES.includes(c as BackupCategory),
+          )
+          if (categories.length === 0) {
+            if (isManual) {
+              await prisma.settings.update({
+                where: { id: 'default' },
+                data: {
+                  s3LocalBackupRunning: false,
+                  s3LocalBackupStartedAt: null,
+                  s3LocalBackupLastRunResult: 'No valid backup categories were supplied.',
+                },
+              }).catch(() => {})
+            } else {
+              console.log('[S3-BACKUP] No categories configured; skipping scheduled backup run')
+            }
+            return
+          }
+
+          // Concurrency guard applies only to scheduled runs; a manual job already had the
+          // lock taken by the API when it was enqueued, so it must not skip on its own flag.
+          if (!isManual && backupSettings.running) {
             console.log('[S3-BACKUP] Backup already in progress; skipping scheduled run')
             return
           }
 
-          console.log(`[S3-BACKUP] Starting scheduled backup (categories: ${backupSettings.categories.join(', ')})`)
+          console.log(`[S3-BACKUP] Starting ${runKind} backup (categories: ${categories.join(', ')})`)
           await prisma.settings.update({ where: { id: 'default' }, data: { s3LocalBackupRunning: true, s3LocalBackupStartedAt: new Date() } })
 
+          // Live progress for manual runs so the Settings UI (which polls the status
+          // endpoint) shows movement. Scheduled runs stay quiet.
+          const onProgress = isManual
+            ? async (info: {
+                currentCategory: BackupCategory
+                categoryIndex: number
+                totalCategories: number
+                filesInCategory: number
+                filesProcessed: number
+                downloaded: number
+                skipped: number
+                failed: number
+              }) => {
+                const fileProgress = info.filesInCategory > 0
+                  ? ` — ${info.filesProcessed}/${info.filesInCategory} files`
+                  : ''
+                const verb = isDryRun ? 'Scanning' : 'Backing up'
+                const text = `${verb} ${info.currentCategory} (${info.categoryIndex + 1}/${info.totalCategories})${fileProgress} — ${info.downloaded} downloaded, ${info.skipped} already up-to-date`
+                await prisma.settings.update({
+                  where: { id: 'default' },
+                  data: { s3LocalBackupLastRunResult: text },
+                }).catch(() => {})
+              }
+            : undefined
+
           try {
-            const result = await runS3LocalBackup(backupSettings.categories)
+            const result = await runS3LocalBackup(categories, onProgress, { dryRun: isDryRun })
             const summary = formatBackupResultSummary(result)
             await prisma.settings.update({
               where: { id: 'default' },
               data: {
-                s3LocalBackupLastRunAt: new Date(),
+                // A dry run is only a scan — never stamp it as the last real backup time.
+                ...(isDryRun ? {} : { s3LocalBackupLastRunAt: new Date() }),
                 s3LocalBackupLastRunResult: summary,
                 s3LocalBackupRunning: false,
                 s3LocalBackupStartedAt: null,
               },
             })
             console.log(`[S3-BACKUP] ${summary}`)
-            // If any files failed, create a pinned notification + push
-            if (!result.ok && result.failed > 0) {
+            // If a real run had file failures, create a pinned notification + push.
+            if (!isDryRun && !result.ok && result.failed > 0) {
               const errorSummary = result.errors.slice(0, 3).join('; ') || 'Unknown error'
               upsertS3BackupFailureNotification(`${result.failed} file(s) failed. ${errorSummary}`).catch(() => {})
             }
@@ -905,11 +966,11 @@ async function main() {
               where: { id: 'default' },
               data: { s3LocalBackupLastRunResult: `Error: ${msg}`, s3LocalBackupRunning: false, s3LocalBackupStartedAt: null },
             }).catch(() => {})
-            upsertS3BackupFailureNotification(msg).catch(() => {})
+            if (!isDryRun) upsertS3BackupFailureNotification(msg).catch(() => {})
             throw innerErr
           }
         } catch (e) {
-          console.error('[S3-BACKUP] Scheduled backup failed:', e instanceof Error ? e.message : e)
+          console.error(`[S3-BACKUP] ${runKind} backup failed:`, e instanceof Error ? e.message : e)
         }
         return
       }

@@ -49,7 +49,7 @@ Queues are defined and lazily instantiated in `src/lib/queue.ts` (each `*Process
 
 ### StoredFile registry — single source of truth for files
 
-`src/lib/stored-file.ts` + the `StoredFile` Prisma model. Rather than scattering `*Path` columns across entity tables, **every file** (uploads, transcoded previews, thumbnails, ZIPs, branding assets) gets one `StoredFile` row keyed by `(entityType, entityId, fileRole)`. Use `registerStoredFile()` / `deleteStoredFile()` / the query helpers rather than writing path columns directly. This is the subject of recent active migration work (see `scripts/backfill-stored-files.ts`, `backfill-orphans-to-stored-files.ts`); legacy path columns still exist and are backfilled at runtime.
+`src/lib/stored-file.ts` + the `StoredFile` Prisma model. Rather than scattering `*Path` columns across entity tables, **every file** (uploads, transcoded previews, thumbnails, ZIPs, branding assets) gets one `StoredFile` row keyed by `(entityType, entityId, fileRole)`. Use `registerStoredFile()` / `deleteStoredFile()` / the query helpers rather than writing path columns directly. Legacy path columns still exist and are backfilled at runtime.
 
 ### Auth & RBAC
 

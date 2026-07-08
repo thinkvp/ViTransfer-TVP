@@ -233,6 +233,23 @@ export async function DELETE(
       }
     }
 
+    // If this is the video's active playback subtitles source (category 'subtitles'),
+    // deleting it invalidates the generated WebVTT too — clear the playback file and
+    // transcription status so the video stops reporting hasSubtitles and can be
+    // regenerated from scratch (drives the admin subtitles button back to its
+    // "not generated" state).
+    if (asset.category === 'subtitles') {
+      const vttPath = await getStoredFilePath('VIDEO', videoId, 'SUBTITLES_VTT')
+      if (vttPath) await deleteFile(vttPath).catch(() => {})
+      await deleteStoredFilesByCriteria({
+        entityType: 'VIDEO', entityIds: [videoId], fileRoles: ['SUBTITLES_VTT'],
+      }).catch(() => {})
+      await prisma.video.update({
+        where: { id: videoId },
+        data: { transcriptionStatus: null, transcriptionError: null },
+      }).catch(() => {})
+    }
+
     // Detect whether this asset is the video's *custom* thumbnail. A custom thumbnail
     // is recorded by repointing VIDEO/THUMBNAIL at the asset's own ORIGINAL file — there
     // is no VIDEO_ASSET/THUMBNAIL row — so we compare the resolved paths.
