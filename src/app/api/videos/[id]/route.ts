@@ -12,6 +12,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
+import { publishProjectEvent } from '@/lib/project-events'
 import {
   allocateUniqueStorageName,
   buildProjectAllVideosRoot,
@@ -623,6 +624,10 @@ export async function PATCH(
       console.log('[VIDEO-APPROVAL] Admin approval - emails NOT sent (by design)')
     }
 
+    // Notify open share pages / admin views so the change (rename, notes, approval
+    // toggle, playback settings) appears live.
+    await publishProjectEvent(video.projectId, 'video')
+
     return NextResponse.json({ success: true })
   } catch (error) {
     return NextResponse.json(
@@ -818,6 +823,9 @@ export async function DELETE(
     } catch (error) {
       console.error(`Failed to prune empty folders for video ${video.id}:`, error)
     }
+
+    // Notify open share pages / admin views so the deleted version disappears live.
+    await publishProjectEvent(projectId, 'video')
 
     return NextResponse.json({
       success: true,

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -72,6 +73,9 @@ export async function DELETE(
   }
 
   await prisma.projectInternalComment.delete({ where: { id: commentId } })
+
+  // Notify open admin dashboards so the deletion reflects live for other staff.
+  await publishProjectEvent(projectId, 'internal')
 
   return NextResponse.json({ ok: true })
 }

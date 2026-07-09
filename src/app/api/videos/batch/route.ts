@@ -7,6 +7,7 @@ import { moveDirectory } from '@/lib/storage'
 import { renameStoredPaths } from '@/lib/stored-file'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
+import { publishProjectEvent } from '@/lib/project-events'
 import {
   allocateUniqueStorageName,
   buildProjectStorageRoot,
@@ -201,6 +202,11 @@ export async function PATCH(request: NextRequest) {
           }
         }
       })
+    }
+
+    // Notify open share pages / admin views (one event per affected project).
+    for (const pid of projectIds) {
+      await publishProjectEvent(pid, 'video')
     }
 
     const response = NextResponse.json({

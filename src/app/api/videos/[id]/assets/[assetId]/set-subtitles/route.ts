@@ -9,6 +9,7 @@ import { getStoredFilePath } from '@/lib/stored-file'
 import { parseSrt } from '@/lib/subtitles'
 import { writeCuesForVideo } from '@/lib/subtitle-store'
 import { recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { publishProjectEvent } from '@/lib/project-events'
 export const runtime = 'nodejs'
 
 async function streamToString(storagePath: string): Promise<string> {
@@ -154,6 +155,9 @@ export async function POST(
       recalculateAndStoreProjectTotalBytes(video.projectId),
       recalculateAndStoreProjectPreviewBytes(video.projectId),
     ])
+
+    // Notify open share pages / admin views so captions become available live.
+    await publishProjectEvent(video.projectId, 'video')
 
     return NextResponse.json({ success: true, cueCount })
   } catch (error) {

@@ -9,6 +9,7 @@ import { sanitizeComment } from '@/lib/comment-sanitization'
 import { batchResolveFileSizes, getUserIdsWithAvatar } from '@/lib/stored-file'
 import { getSafeguardLimits } from '@/lib/settings'
 import { checkBodySize } from '@/lib/api-guard'
+import { publishProjectEvent } from '@/lib/project-events'
 import {
 
   validateCommentPermissions,
@@ -448,6 +449,7 @@ export async function POST(request: NextRequest) {
 
     // Client recipient activity should mark the project as Reviewed.
     // Only applies to client recipients (recipientId present) and not internal/admin users.
+    let statusChangedToReviewed = false
     if (!isInternal && recipientId && !authContext.user?.id) {
       const currentStatus = String((project as any)?.status || '')
       if (currentStatus !== 'APPROVED' && currentStatus !== 'CLOSED' && currentStatus !== 'REVIEWED') {
@@ -467,6 +469,7 @@ export async function POST(request: NextRequest) {
               },
             }),
           ])
+          statusChangedToReviewed = true
         } catch (e) {
           // Non-blocking: do not prevent comment creation
           console.error('Failed to update project status to REVIEWED:', e)
@@ -481,6 +484,13 @@ export async function POST(request: NextRequest) {
       videoId,
       parentId
     })
+
+    // Notify any open share pages / admin dashboards to refetch so this comment
+    // appears live — and the status badge too if the project flipped to Reviewed.
+    await publishProjectEvent(projectId, 'comment')
+    if (statusChangedToReviewed) {
+      await publishProjectEvent(projectId, 'status')
+    }
 
     // Fetch all comments for the project (to keep UI in sync)
     const allComments = await fetchProjectComments(projectId)

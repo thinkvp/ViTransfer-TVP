@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getSecuritySettings } from '@/lib/video-access'
 import { getClientIpAddress } from '@/lib/utils'
+import { publishProjectEvent } from '@/lib/project-events'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -132,6 +133,10 @@ export async function POST(
         },
       })
     }
+
+    // Notify any open share pages / admin dashboards so the approval badge and
+    // status (now In Review) update live for everyone viewing.
+    await publishProjectEvent(projectId, 'approval')
 
     return NextResponse.json({
       success: true,

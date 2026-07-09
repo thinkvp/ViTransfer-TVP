@@ -13,6 +13,8 @@ import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
 import { ArrowLeft, Settings, ArrowUpDown, Check, FolderKanban, Pencil, Video, Images, Upload, X } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/token-store'
+import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
 import { toast } from 'sonner'
 import ProjectStatusPicker from '@/components/ProjectStatusPicker'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -195,6 +197,9 @@ export default function ProjectPage() {
     [nowIso, projectPayments, salesRollup?.invoiceRollupById, taxRatePercent]
   )
 
+  // Bumped by live SSE events to reload the internal-comments panel.
+  const [internalCommentsRefresh, setInternalCommentsRefresh] = useState(0)
+
   // Fetch project data function (extracted so it can be called on upload complete)
   const fetchProject = useCallback(async () => {
     try {
@@ -258,6 +263,43 @@ export default function ProjectPage() {
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
   }, [fetchProject])
+
+  // Live updates: subscribe to the project's SSE stream so a second staffer sees
+  // internal comments, approvals, status changes, and finished videos without a
+  // manual refresh. Reuses the share events endpoint via the admin auth path.
+  const projectSlug: string | undefined = (project as any)?.slug
+  useEffect(() => {
+    if (!projectSlug) return
+    const authToken = getAccessToken()
+    if (!authToken) return
+
+    let projectTimer: ReturnType<typeof setTimeout> | undefined
+    const debouncedFetchProject = () => {
+      if (projectTimer) clearTimeout(projectTimer)
+      projectTimer = setTimeout(() => { void fetchProject() }, 200)
+    }
+
+    const handleEvent = (type: ProjectEventType) => {
+      if (type === 'internal') {
+        setInternalCommentsRefresh((n) => n + 1)
+      } else {
+        // comment / approval / status / video all live in the project payload
+        // (videos, status, feedback counts).
+        debouncedFetchProject()
+      }
+    }
+
+    const handle = openProjectEventStream({
+      token: projectSlug,
+      authToken,
+      onEvent: handleEvent,
+    })
+
+    return () => {
+      if (projectTimer) clearTimeout(projectTimer)
+      handle.close()
+    }
+  }, [projectSlug, fetchProject])
 
   const persistRecipients = useCallback(async (next: EditableRecipient[]) => {
     if (!canChangeProjectSettings) return
@@ -957,6 +999,7 @@ export default function ProjectPage() {
               canMakeComments={canMakeProjectComments}
               canDeleteAll={adminUser?.appRoleIsSystemAdmin === true}
               canDeleteOthers={adminUser?.appRoleIsSystemAdmin === true}
+              refreshTrigger={internalCommentsRefresh}
             />
 
             {sectionVisibility.users && canFullProjectControl && (

@@ -9,6 +9,7 @@ import { buildAlbumPhotoStoragePath, buildProjectStorageRoot } from '@/lib/proje
 import { z } from 'zod'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
 import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -254,6 +255,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })
 
   await adjustProjectTotalBytes(album.projectId, BigInt(fileSize))
+
+  // Notify open share pages / admin views so the new photo appears live.
+  await publishProjectEvent(album.projectId, 'album')
 
   return NextResponse.json({ photoId: photo.id }, { status: 201 })
 }

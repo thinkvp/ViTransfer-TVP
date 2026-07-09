@@ -10,6 +10,7 @@ import { getAutoApproveProject } from '@/lib/settings'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { publishProjectEvent } from '@/lib/project-events'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -293,6 +294,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     } catch (error) {
       console.error('[APPROVAL] Error handling approval notifications:', error)
     }
+
+    // Notify any open share pages / admin dashboards so the approval badge and
+    // (auto-approve / Reviewed) status update live for everyone viewing.
+    await publishProjectEvent(projectId, 'approval')
 
     console.log('[APPROVAL] Approval process complete, returning success')
     return NextResponse.json({ success: true })

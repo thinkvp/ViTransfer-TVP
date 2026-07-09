@@ -7,6 +7,7 @@ import { deleteFile } from '@/lib/storage'
 import { getVideoQueue } from '@/lib/queue'
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, deleteStoredFilesByCriteria, registerStoredFile, countStoredFilesByPath } from '@/lib/stored-file'
+import { publishProjectEvent } from '@/lib/project-events'
 export const runtime = 'nodejs'
 
 
@@ -178,6 +179,9 @@ export async function POST(
         await deleteFile(previousThumbnailPath).catch(() => {})
       }
     }
+
+    // Notify open share pages / admin views so the new playback thumbnail appears live.
+    await publishProjectEvent(video.projectId, 'video')
 
     return NextResponse.json({
       success: true,

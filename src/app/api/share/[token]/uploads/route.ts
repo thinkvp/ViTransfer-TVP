@@ -14,6 +14,7 @@ import {
   renameUploadFolder,
 } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess, resolveShareUploadActor } from '@/lib/share-uploads'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -179,6 +180,9 @@ export async function POST(
     },
   })
 
+  // Notify open share pages / admin views so the new folder appears live.
+  await publishProjectEvent(access.project.id, 'upload')
+
   return NextResponse.json({
     success: true,
     folder: {
@@ -222,6 +226,8 @@ export async function DELETE(
     if (!result.ok) {
       return NextResponse.json({ error: result.error || 'Failed to delete file' }, { status: result.status || 500 })
     }
+    // Notify open share pages / admin views so the deletion reflects live.
+    await publishProjectEvent(access.project.id, 'upload')
     return NextResponse.json({ success: true })
   }
 
@@ -229,6 +235,9 @@ export async function DELETE(
   if (!result.ok) {
     return NextResponse.json({ error: result.error || 'Failed to delete folder' }, { status: result.status || 500 })
   }
+
+  // Notify open share pages / admin views so the deletion reflects live.
+  await publishProjectEvent(access.project.id, 'upload')
 
   return NextResponse.json({ success: true })
 }
@@ -270,6 +279,9 @@ export async function PATCH(
   if (!result.ok) {
     return NextResponse.json({ error: result.error || 'Failed to rename folder' }, { status: result.status || 500 })
   }
+
+  // Notify open share pages / admin views so the rename reflects live.
+  await publishProjectEvent(access.project.id, 'upload')
 
   return NextResponse.json({
     success: true,

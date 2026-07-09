@@ -9,6 +9,7 @@ import { getFilePath, deleteFile, deleteDirectory, sanitizeFilenameForHeader } f
 import { deleteStoredFilesForEntity, getStoredFilePath, countStoredFilesByPath, deleteStoredFilesByCriteria, getStoredFileRecords } from '@/lib/stored-file'
 import { getVideoQueue } from '@/lib/queue'
 import { verifyProjectAccess } from '@/lib/project-access'
+import { publishProjectEvent } from '@/lib/project-events'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
@@ -336,6 +337,9 @@ export async function DELETE(
 
     // Update the stored project data total
     await recalculateAndStoreProjectTotalBytes(asset.video.projectId)
+
+    // Notify open share pages / admin views so the removed download disappears live.
+    await publishProjectEvent(asset.video.projectId, 'video')
 
     return NextResponse.json({ success: true })
   } catch (error) {

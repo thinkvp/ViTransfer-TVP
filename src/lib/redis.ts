@@ -16,6 +16,7 @@ import IORedis from 'ioredis'
 
 let redis: IORedis | null = null
 let redisForQueue: IORedis | null = null
+let redisSubscriber: IORedis | null = null
 
 /**
  * Get or create Redis connection
@@ -155,6 +156,52 @@ export function getRedisForQueue(): any {
 }
 
 /**
+ * Get or create a dedicated Redis connection for pub/sub SUBSCRIBE usage.
+ *
+ * A connection placed into subscriber mode can no longer run ordinary commands,
+ * so subscriptions must not share the general-purpose connection. Publishing is
+ * done on `getRedis()`; only SUBSCRIBE/UNSUBSCRIBE run on this one. A single
+ * shared subscriber with in-process fan-out (see `project-events.ts`) keeps the
+ * number of Redis connections flat regardless of how many SSE clients are open.
+ */
+export function getRedisSubscriber(): IORedis {
+  if (redisSubscriber) return redisSubscriber
+
+  if (!process.env.REDIS_HOST) {
+    throw new Error('REDIS_HOST environment variable is required')
+  }
+
+  redisSubscriber = new IORedis({
+    host: process.env.REDIS_HOST,
+    port: parseInt(process.env.REDIS_PORT || '6379', 10),
+    password: process.env.REDIS_PASSWORD,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: true,
+    lazyConnect: true,
+    keepAlive: 10000,
+    retryStrategy: (times) => {
+      if (process.env.NEXT_PHASE === 'phase-production-build') {
+        return null
+      }
+      return Math.min(times * 200, 5000)
+    },
+    reconnectOnError: (error) => {
+      const message = error.message || ''
+      if (message.includes('READONLY') || message.includes('ETIMEDOUT') || message.includes('ECONNRESET')) {
+        return true
+      }
+      return false
+    },
+  })
+
+  redisSubscriber.on('error', (error) => {
+    console.error('Redis (Sub) error:', error.message)
+  })
+
+  return redisSubscriber
+}
+
+/**
  * Close Redis connection gracefully
  * Should be called on application shutdown
  */
@@ -166,5 +213,9 @@ export async function closeRedisConnection(): Promise<void> {
   if (redisForQueue) {
     await redisForQueue.quit()
     redisForQueue = null
+  }
+  if (redisSubscriber) {
+    await redisSubscriber.quit()
+    redisSubscriber = null
   }
 }

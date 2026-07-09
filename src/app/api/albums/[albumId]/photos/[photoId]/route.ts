@@ -8,6 +8,7 @@ import { getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
 import { syncAlbumZipSizes } from '@/lib/album-zip-size-sync'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -176,6 +177,9 @@ export async function DELETE(
     } catch {
       // ignore
     }
+
+    // Notify open share pages / admin views so the removed photo disappears live.
+    await publishProjectEvent(photo.album.projectId, 'album')
 
     return NextResponse.json({ ok: true })
   } catch (error) {

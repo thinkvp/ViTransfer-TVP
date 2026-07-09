@@ -7,6 +7,7 @@ import { prisma } from '../lib/db'
 import os from 'os'
 import { getCpuAllocation, logCpuAllocation, loadCpuConfigOverrides, publishWorkerCpuInfo } from '../lib/cpu-config'
 import { processVideo } from './video-processor'
+import { publishProjectEvent } from '@/lib/project-events'
 import { processAsset } from './asset-processor'
 import { processClientFile } from './client-file-processor'
 import { processUserFile } from './user-file-processor'
@@ -164,6 +165,11 @@ async function main() {
 
   worker.on('completed', (job) => {
     console.log(`[WORKER] Job ${job.id} completed successfully`)
+    // Notify open share pages / admin dashboards that a video finished processing
+    // (new version ready, thumbnail/preview regenerated) so it appears live.
+    if (job.data?.projectId) {
+      void publishProjectEvent(job.data.projectId, 'video')
+    }
   })
 
   worker.on('failed', (job, err) => {
@@ -185,8 +191,20 @@ async function main() {
     concurrency: concurrency * 2, // Assets are lighter than videos
   })
 
-  assetWorker.on('completed', (job) => {
+  assetWorker.on('completed', async (job) => {
     console.log(`[WORKER] Asset job ${job.id} completed successfully`)
+    // A video asset (downloadable file) finished uploading/validation — notify open
+    // share pages / admin views so it appears live.
+    try {
+      const asset = await prisma.videoAsset.findUnique({
+        where: { id: job.data.assetId },
+        select: { video: { select: { projectId: true } } },
+      })
+      const pid = asset?.video?.projectId
+      if (pid) void publishProjectEvent(pid, 'video')
+    } catch {
+      // best-effort
+    }
   })
 
   assetWorker.on('failed', (job, err) => {

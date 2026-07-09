@@ -930,11 +930,23 @@ export function CommentSectionView({
     setApproving(true)
     try {
       const url = `/api/projects/${projectId}/approve`
+      // Thread the client's chosen identity through so the activity feed attributes
+      // the approval to them by name (matching their comments) rather than a generic
+      // "Client". Admin approvals are attributed from the authenticated admin user.
+      const approveBody = JSON.stringify(
+        isAdminView
+          ? { selectedVideoId: video.id }
+          : {
+              selectedVideoId: video.id,
+              recipientId: management.recipientId || null,
+              authorName: management.authorName || null,
+            }
+      )
       const response = isAdminView
         ? await apiFetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ selectedVideoId: video.id }),
+            body: approveBody,
           })
         : shareToken
           ? await fetch(url, {
@@ -943,12 +955,12 @@ export function CommentSectionView({
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${shareToken}`,
               },
-              body: JSON.stringify({ selectedVideoId: video.id }),
+              body: approveBody,
             })
           : await fetch(url, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ selectedVideoId: video.id }),
+              body: approveBody,
             })
 
       if (!response.ok) {

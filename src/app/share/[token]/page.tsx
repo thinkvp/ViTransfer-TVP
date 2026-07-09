@@ -22,6 +22,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Lock, Check, Mail, KeyRound } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch } from '@/lib/api-client'
+import { getAccessToken } from '@/lib/token-store'
+import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
 import { isS3Mode } from '@/lib/storage-provider-client'
 import { extractUploadMediaMetadata } from '@/lib/upload-media-metadata-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -644,6 +646,86 @@ export default function SharePage() {
       // ignore
     }
   }, [token, shareToken, isAdminSession])
+
+  // Live project updates: subscribe to the project's SSE stream so activity by
+  // anyone (a client's comment, an approval, a status change, a newly-processed
+  // video version) appears for everyone without a manual refresh. The stream
+  // only signals the change TYPE; we refetch through the authenticated
+  // endpoints. Refetches are debounced per-type to coalesce bursts, and we also
+  // refetch when the tab regains visibility as a safety net for dropped links.
+  useEffect(() => {
+    if (!token) return
+    const authToken = isAdminSession ? getAccessToken() : (loadShareToken(storageKey) || shareToken)
+    // Non-admins need a share token to read the project; without one there's nothing to stream.
+    if (!isAdminSession && !authToken) return
+
+    const timers: Record<string, ReturnType<typeof setTimeout> | undefined> = {}
+    const debounce = (key: string, fn: () => void) => {
+      if (timers[key]) clearTimeout(timers[key])
+      timers[key] = setTimeout(fn, 200)
+    }
+    const refetchComments = () => debounce('comments', () => { void fetchComments() })
+    const refetchProject = () => debounce('project', () => {
+      void fetchProjectData()
+      // Approval also changes original-quality download availability, so keep the
+      // Files browser in sync too (matches the local approve handler).
+      void fetchDownloadableFiles()
+    })
+
+    const handleEvent = (type: ProjectEventType) => {
+      // The Project Activity feed aggregates every event kind — nudge it to refresh
+      // on anything (the panel listens for this and refetches, throttled).
+      if (type !== 'internal') {
+        window.dispatchEvent(new CustomEvent('projectActivityRefresh'))
+      }
+      switch (type) {
+        case 'comment':
+          refetchComments()
+          break
+        case 'approval':
+        case 'status':
+        case 'video':
+          // Approval badges, status, and video versions all live in project data.
+          refetchProject()
+          break
+        case 'upload':
+          // A file/folder was added, removed, or renamed in the Uploads area.
+          debounce('files', () => { void fetchDownloadableFiles() })
+          break
+        case 'album':
+          // An album or photo was added/removed/renamed.
+          debounce('albums', () => { void fetchAlbums(); void fetchDownloadableFiles() })
+          break
+        case 'internal':
+          // Admin-only team chat — not shown on the share page; ignore.
+          break
+      }
+    }
+
+    const handle = openProjectEventStream({
+      token,
+      authToken,
+      onEvent: handleEvent,
+      onAuthError: () => {
+        // Session likely expired; let the existing auth flow surface the re-auth UI.
+        if (!isAdminSession) void fetchComments()
+      },
+    })
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refetchComments()
+        refetchProject()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      Object.values(timers).forEach((t) => { if (t) clearTimeout(t) })
+      document.removeEventListener('visibilitychange', onVisibility)
+      handle.close()
+    }
+  }, [token, isAdminSession, shareToken, storageKey, fetchComments, fetchProjectData, fetchDownloadableFiles, fetchAlbums])
 
   const requestFilesRefresh = useCallback((force = false) => {
     if (desktopContentTab !== 'files') return
@@ -2044,7 +2126,25 @@ export default function SharePage() {
   }, [shareToken, isAuthenticated, isAdminSession, hasAnyActiveTransfers, handleSessionExpired])
 
   const sidebarVideosByName = useMemo(() => {
-    return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
+    const base = Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
+    // The tokenized copies in `allVideosByName` cache the `approved` flag as it was
+    // when they were tokenized, and a re-tokenization race (loadTokens caching the
+    // still-stale active video before the preload rebuild) can leave a just-(un)approved
+    // version showing its old state in the sidebar. `project.videosByName` is always the
+    // fresh source of truth (refetched on every approval event), so overlay its approval
+    // flags onto the tokenized copies while keeping their thumbnail/stream URLs.
+    const fresh = project?.videosByName
+    if (!fresh) return base
+    const merged: Record<string, any[]> = {}
+    for (const [name, versions] of Object.entries(base)) {
+      const freshVersions = (fresh as Record<string, any[]>)[name]
+      if (!Array.isArray(freshVersions)) { merged[name] = versions as any[]; continue }
+      merged[name] = (versions as any[]).map((v) => {
+        const f = freshVersions.find((fv) => fv.id === v.id)
+        return f ? { ...v, approved: f.approved, approvedAt: f.approvedAt, unapprovedAt: f.unapprovedAt } : v
+      })
+    }
+    return merged
   }, [allVideosByName, project?.videosByName])
 
   const filePreviewByVideoId = useMemo(() => {

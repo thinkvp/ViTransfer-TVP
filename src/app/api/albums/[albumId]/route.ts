@@ -8,6 +8,7 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { adjustProjectTotalBytes } from '@/lib/project-total-bytes'
+import { publishProjectEvent } from '@/lib/project-events'
 import {
   allocateUniqueStorageName,
   buildAlbumStorageRoot,
@@ -213,6 +214,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     return updatedAlbum
   })
+  // Notify open share pages / admin views so the rename/settings appear live.
+  await publishProjectEvent(album.projectId, 'album')
+
   return NextResponse.json({ album: updated })
 }
 
@@ -323,6 +327,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const photosDelta = BigInt(photoSizeAgg._sum.fileSize ?? 0)
     const zipDelta = BigInt(albumZipAgg._sum.fileSize ?? 0)
     await adjustProjectTotalBytes(album.projectId, (photosDelta + zipDelta) * BigInt(-1))
+
+    // Notify open share pages / admin views so the deleted album disappears live.
+    await publishProjectEvent(album.projectId, 'album')
 
     // Best-effort: delete album directory (if empty or still present)
     try {

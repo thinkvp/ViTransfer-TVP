@@ -1659,7 +1659,7 @@ export function ShareFilesBrowser({
     if (approvedVersion) {
       const versionLabel = String(approvedVersion.versionLabel || '').trim() || 'Approved version'
       return openFolderVideoAssets.length > 0
-        ? `${versionLabel} and associated Video Assets are available for download.`
+        ? `${versionLabel} and associated Additional Assets are available for download.`
         : `${versionLabel} is available for download.`
     }
 
@@ -2871,7 +2871,7 @@ export function ShareFilesBrowser({
                 {openFolderApprovedVideoVersion ? (
                   <section className="space-y-2 border-t border-border/70 pt-4">
                     <div className="px-1 flex items-center gap-2">
-                      <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Video Assets</h4>
+                      <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Additional Assets</h4>
                       <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
                         <button
                           type="button"
@@ -2923,7 +2923,7 @@ export function ShareFilesBrowser({
                         {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, videoAssetsThumbnailSize === 'small', openFolderVideoAssets))}
                       </div>
                     ) : (
-                      <p className="px-1 text-xs text-muted-foreground italic">There are currently no Video Assets for this video.</p>
+                      <p className="px-1 text-xs text-muted-foreground italic">There are currently no Additional Assets for this video.</p>
                     )}
                   </section>
                 ) : null}

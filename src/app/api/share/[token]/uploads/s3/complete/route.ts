@@ -14,6 +14,7 @@ import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
 import { enqueueShareUploadPreview, getUploadTimelineQueue } from '@/lib/queue'
 import { registerStoredFile } from '@/lib/stored-file'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -194,6 +195,9 @@ export async function POST(
       }).catch((e) => console.warn('[TIMELINE] Failed to enqueue upload timeline after S3 complete:', e))
     }
   }
+
+  // Notify open share pages / admin views so the uploaded file appears live.
+  await publishProjectEvent(access.project.id, 'upload')
 
   return NextResponse.json({
     success: true,

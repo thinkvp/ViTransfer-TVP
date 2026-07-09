@@ -10,6 +10,7 @@ import {
   buildVideoAssetPreviewStoragePath,
 } from '@/lib/project-storage-paths'
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
+import { publishProjectEvent } from '@/lib/project-events'
 import { readCuesForVideo, writeCuesForVideo } from '@/lib/subtitle-store'
 import {
   allocateUniqueStorageName,
@@ -322,6 +323,9 @@ export async function POST(
       recalculateAndStoreProjectTotalBytes(sourceVideo.projectId),
       recalculateAndStoreProjectPreviewBytes(sourceVideo.projectId),
     ])
+
+    // Notify open share pages / admin views so the copied downloads appear live.
+    await publishProjectEvent(sourceVideo.projectId, 'video')
 
     return NextResponse.json({
       success: true,

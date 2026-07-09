@@ -7,6 +7,7 @@ import { allocateUniqueStorageName } from '@/lib/project-storage-paths'
 import { getStoredFileRecords } from '@/lib/stored-file'
 import { asNumberBigInt } from '@/lib/utils'
 import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
+import { publishProjectEvent } from '@/lib/project-events'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -199,6 +200,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       createdByName: auth.name || auth.email,
     },
   })
+
+  // Notify open share pages / admin views so the new album appears live.
+  await publishProjectEvent(projectId, 'album')
 
   return NextResponse.json(
     {

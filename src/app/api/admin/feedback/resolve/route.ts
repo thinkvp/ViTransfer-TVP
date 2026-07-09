@@ -5,6 +5,7 @@ import { requireApiAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest } from '@/lib/validation'
 import { isVisibleProjectStatusForUser } from '@/lib/rbac-api'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -83,6 +84,10 @@ export async function POST(request: NextRequest) {
         resolvedById: resolved ? user.id : null,
       },
     })
+
+    // Notify any open share pages to refetch so the resolved/unresolved state
+    // (e.g. the green tick) updates live for everyone viewing.
+    await publishProjectEvent(projectId, 'comment')
 
     return NextResponse.json(
       { success: true, count: result.count },

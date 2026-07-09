@@ -13,6 +13,7 @@ import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { resolveUploadFolderStoragePath } from '@/lib/share-upload-folder-storage'
 import { resolveProjectStoragePath, resolveShareUploadAccess, resolveShareUploadActor } from '@/lib/share-uploads'
 import { parseShareUploadMediaMetadata } from '@/lib/share-upload-media-metadata'
+import { publishProjectEvent } from '@/lib/project-events'
 import { registerStoredFile } from '@/lib/stored-file'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
 import { enqueueShareUploadPreview, getUploadTimelineQueue } from '@/lib/queue'
@@ -202,6 +203,9 @@ export async function POST(
       }).catch((e) => console.warn('[TIMELINE] Failed to enqueue upload timeline after upload:', e))
     }
   }
+
+  // Notify open share pages / admin views so the uploaded file appears live.
+  await publishProjectEvent(access.project.id, 'upload')
 
   return NextResponse.json({
     success: true,

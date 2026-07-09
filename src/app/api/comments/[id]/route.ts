@@ -11,6 +11,7 @@ import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { deleteFile } from '@/lib/storage'
 import { getStoredFileRecords, deleteStoredFilesByCriteria, getUserIdsWithAvatar } from '@/lib/stored-file'
+import { publishProjectEvent } from '@/lib/project-events'
 export const runtime = 'nodejs'
 
 // Prevent static generation for this route
@@ -146,6 +147,9 @@ export async function PATCH(
       where: { id },
       data: updateData,
     })
+
+    // Notify any open share pages to refetch so the edit appears live.
+    await publishProjectEvent(existingComment.projectId, 'comment')
 
     // Return all comments for the project (to keep UI in sync)
     const allComments = await prisma.comment.findMany({
@@ -395,6 +399,9 @@ export async function DELETE(
         entityIds: fileIds,
       }).catch(() => {})
     }
+
+    // Notify any open share pages to refetch so the deletion appears live.
+    await publishProjectEvent(existingComment.projectId, 'comment')
 
     // Return success - client will refresh to get updated comments
     return NextResponse.json({ success: true })

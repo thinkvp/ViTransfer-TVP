@@ -33,6 +33,7 @@ import type { DownloadQueueItem } from '@/lib/download-queue'
 import { useDownloadTransfers } from '@/hooks/useDownloadTransfers'
 import { calculateTransferSummary, createTransferId, isTransferActive, type TransferItem } from '@/lib/transfer-state'
 import { getAccessToken } from '@/lib/token-store'
+import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
 import { isS3Mode } from '@/lib/storage-provider-client'
 import { extractUploadMediaMetadata } from '@/lib/upload-media-metadata-client'
 
@@ -293,6 +294,42 @@ export default function AdminSharePage() {
       videosByName
     }
   }
+
+  // Re-fetch project data and force video tokens to rebuild, so approval flags
+  // (the "approved" badge) and version state reflect a change made in another
+  // session. Mirrors the public share page's fetchProjectData: without clearing
+  // the token caches the sidebar keeps its stale tokenized copies and the badge
+  // wouldn't update until a manual refresh. Transform is inlined so the callback
+  // stays stable (referencing the render-scoped transformProjectData would make
+  // it change every render and thrash the SSE subscription).
+  const refreshProjectData = useCallback(async () => {
+    if (!id) return
+    try {
+      const res = await apiFetch(`/api/projects/${id}`)
+      if (!res.ok) return
+      const data = await res.json()
+      const videosByName = (Array.isArray(data?.videos) ? data.videos : []).reduce((acc: any, video: any) => {
+        const name = video.name
+        if (!acc[name]) acc[name] = []
+        acc[name].push(video)
+        return acc
+      }, {})
+      Object.keys(videosByName).forEach((name) => {
+        videosByName[name].sort((a: any, b: any) => b.version - a.version)
+      })
+      setProject({ ...data, videosByName })
+
+      // Drop cached video tokens so the sidebar/player re-tokenize from the fresh
+      // project data (picking up updated approved flags).
+      tokenCacheRef.current.clear()
+      tokenRequestCacheRef.current.clear()
+      sidebarVideoCacheRef.current.clear()
+      sidebarThumbnailRequestCacheRef.current.clear()
+      setAllVideosByName({})
+    } catch {
+      // ignore transient errors; the poll/focus refresh will catch up
+    }
+  }, [id])
 
   // Fire the queued admin video-token requests as one batch POST and fan the tokens
   // back out to each waiting caller.
@@ -943,6 +980,66 @@ export default function AdminSharePage() {
       window.removeEventListener('commentDeleted', handleCommentDeleted)
     }
   }, [fetchComments])
+
+  // Live updates: subscribe to the project's SSE stream so this admin share view
+  // stays current when anyone else acts — the Project Activity feed, comments, and
+  // downloadable files all refresh without a manual reload. Uses the admin auth path
+  // on the same share events endpoint (keyed by slug + admin bearer).
+  const adminShareSlug: string | undefined = project?.slug
+  useEffect(() => {
+    if (!adminShareSlug) return
+    const authToken = getAccessToken()
+    if (!authToken) return
+
+    const timers: Record<string, ReturnType<typeof setTimeout> | undefined> = {}
+    const debounce = (key: string, fn: () => void) => {
+      if (timers[key]) clearTimeout(timers[key])
+      timers[key] = setTimeout(fn, 200)
+    }
+
+    const handleEvent = (type: ProjectEventType) => {
+      // The activity feed aggregates every kind of event.
+      if (type !== 'internal') {
+        window.dispatchEvent(new CustomEvent('projectActivityRefresh'))
+      }
+      switch (type) {
+        case 'comment':
+          debounce('comments', () => { void fetchComments() })
+          break
+        case 'approval':
+        case 'status':
+        case 'video':
+          // Refetch the project (approval badge / version state) AND the files
+          // browser / approve buttons; the feed covers the timeline.
+          debounce('project', () => {
+            void refreshProjectData()
+            void fetchDownloadableFiles()
+          })
+          break
+        case 'upload':
+          // A file/folder was added, removed, or renamed in the Uploads area.
+          debounce('files', () => { void fetchDownloadableFiles() })
+          break
+        case 'album':
+          // An album or photo was added/removed/renamed.
+          debounce('albums', () => { void fetchAlbums(adminShareSlug); void fetchDownloadableFiles() })
+          break
+        case 'internal':
+          break
+      }
+    }
+
+    const handle = openProjectEventStream({
+      token: adminShareSlug,
+      authToken,
+      onEvent: handleEvent,
+    })
+
+    return () => {
+      Object.values(timers).forEach((t) => { if (t) clearTimeout(t) })
+      handle.close()
+    }
+  }, [adminShareSlug, fetchComments, fetchDownloadableFiles, refreshProjectData, fetchAlbums])
 
   // Set active video when project loads, handling URL parameters
   useEffect(() => {
@@ -1965,7 +2062,23 @@ export default function AdminSharePage() {
   const transferPanelVersionCombined = transferPanelVersion + uploadTransferPanelVersion
 
   const sidebarVideosByName = useMemo(() => {
-    return Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
+    const base = Object.keys(allVideosByName).length > 0 ? allVideosByName : (project?.videosByName || {})
+    // Overlay fresh approval flags from project data onto the tokenized copies:
+    // re-tokenization can lag a just-(un)approved version's `approved` flag, leaving
+    // the sidebar grouping stale. `project.videosByName` is refetched on every
+    // approval event, so it's the source of truth. (See public share page.)
+    const fresh = project?.videosByName
+    if (!fresh) return base
+    const merged: Record<string, any[]> = {}
+    for (const [name, versions] of Object.entries(base)) {
+      const freshVersions = (fresh as Record<string, any[]>)[name]
+      if (!Array.isArray(freshVersions)) { merged[name] = versions as any[]; continue }
+      merged[name] = (versions as any[]).map((v) => {
+        const f = freshVersions.find((fv) => fv.id === v.id)
+        return f ? { ...v, approved: f.approved, approvedAt: f.approvedAt, unapprovedAt: f.unapprovedAt } : v
+      })
+    }
+    return merged
   }, [allVideosByName, project?.videosByName])
 
   const filePreviewByVideoId = useMemo(() => {

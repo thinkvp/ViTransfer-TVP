@@ -9,6 +9,7 @@ import { isSmtpConfigured, sendProjectApprovedEmail } from '@/lib/email'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { getProjectRecipients } from '@/lib/recipients'
 import { enqueueShareUploadPreview, getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
+import { publishProjectEvent } from '@/lib/project-events'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
 import { isS3Mode } from '@/lib/s3-storage'
 import {
@@ -1117,6 +1118,9 @@ export async function PATCH(
           changedById: admin.id,
         },
       })
+
+      // Notify open share pages / admin dashboards so the status badge updates live.
+      await publishProjectEvent(project.id, 'status')
 
       // Clear PROJECT_USER_ASSIGNED notifications for users who can no longer see the new status.
       // A user is "blinded" when their role's projectVisibility doesn't include the new status.

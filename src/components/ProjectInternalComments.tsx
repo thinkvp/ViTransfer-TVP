@@ -218,8 +218,10 @@ export function ProjectInternalComments(props: {
   canMakeComments: boolean
   canDeleteAll: boolean
   canDeleteOthers: boolean
+  /** Bump to force a reload (e.g. live SSE event that another staffer posted). */
+  refreshTrigger?: number
 }) {
-  const { projectId, currentUserId, canMakeComments, canDeleteAll, canDeleteOthers } = props
+  const { projectId, currentUserId, canMakeComments, canDeleteAll, canDeleteOthers, refreshTrigger } = props
 
   const [loading, setLoading] = useState(false)
   const [pendingDeleteComment, setPendingDeleteComment] = useState<InternalComment | null>(null)
@@ -256,7 +258,8 @@ export function ProjectInternalComments(props: {
 
   useEffect(() => {
     void fetchComments()
-  }, [fetchComments])
+    // `refreshTrigger` is intentionally a dep: a live SSE event bumps it to reload.
+  }, [fetchComments, refreshTrigger])
 
   useEffect(() => {
     if (topLevelComments.length === 0) return

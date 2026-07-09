@@ -273,14 +273,19 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
       if (document.visibilityState === 'visible') void refresh(false)
     }
     const onApprovalChanged = () => void refresh(true)
+    // Live push: the page's SSE subscription dispatches this on any project event
+    // (comment/approval/status/video) so the feed updates without waiting for the poll.
+    const onActivityRefresh = () => void refresh(true)
     window.addEventListener('focus', onFocusOrVisible)
     document.addEventListener('visibilitychange', onFocusOrVisible)
     window.addEventListener('videoApprovalChanged', onApprovalChanged)
+    window.addEventListener('projectActivityRefresh', onActivityRefresh)
     const interval = window.setInterval(() => void refresh(false), POLL_INTERVAL_MS)
     return () => {
       window.removeEventListener('focus', onFocusOrVisible)
       document.removeEventListener('visibilitychange', onFocusOrVisible)
       window.removeEventListener('videoApprovalChanged', onApprovalChanged)
+      window.removeEventListener('projectActivityRefresh', onActivityRefresh)
       window.clearInterval(interval)
     }
   }, [refresh])

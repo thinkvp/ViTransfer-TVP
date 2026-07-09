@@ -6,6 +6,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess }
 import { contentSchema } from '@/lib/validation'
 import { getSafeguardLimits } from '@/lib/settings'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { publishProjectEvent } from '@/lib/project-events'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -232,6 +233,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     console.warn('[INTERNAL COMMENTS] Failed to send push notification:', e)
   }
 
+  // Notify open admin dashboards so the internal comment appears live for other staff.
+  await publishProjectEvent(projectId, 'internal')
+
   return NextResponse.json(serializeComment({ ...created, replies: created.replies || [] }))
 }
 
@@ -261,6 +265,9 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
 
   await prisma.projectInternalComment.deleteMany({ where: { projectId } })
+
+  // Notify open admin dashboards so the cleared thread reflects live for other staff.
+  await publishProjectEvent(projectId, 'internal')
 
   return NextResponse.json({ ok: true })
 }
