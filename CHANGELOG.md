@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.4] - 2026-07-09
+
+### Changed
+
+- **Video version badge (e.g. "v1"/"v2") enlarged in the share page's main Files browser** — the version-label badge on each video version thumbnail was hard to notice at 11px; increased to 16px. Only this badge changed; duration, APPROVED, and FOR REVIEW badges on the same thumbnail are unchanged. Touches `src/components/ShareFilesBrowser.tsx`. No schema migration.
+
+- **"Uploads" renamed to "Additional Files" on the share page** — clients found "Uploads" confusing since everything on the share page is technically an upload; the label (sidebar section, main Files browser section/folder headers, and breadcrumb) is now "Additional Files" for both the client and admin share views. The internal group-name protocol (`'UPLOADS'` prefix used to match/route folder paths, DB models, and API routes) is unchanged — this is a display-only rename, with the breadcrumb doing a display-time substitution so the underlying folder-path matching logic keeps working unmodified. Touches `src/components/ShareFilesBrowser.tsx`, `src/components/VideoSidebar.tsx`, `src/app/share/[token]/page.tsx`, `src/app/admin/projects/[id]/share/page.tsx`. No schema migration.
+
+- **Share page file browser: two-line names, no orphan project title, Videos split by review status** — folder and file names in the client/admin share page's main Files browser (`ShareFilesBrowser`) were single-line truncated with no way to see the full name short of opening the item; names now wrap up to two lines before truncating, and every card (root folders and files inside a folder) reserves a fixed two-line height regardless of whether its name actually needs one line or two, so grid rows stay evenly sized. A hover tooltip (native `title`) now shows the full name on any truncated folder card (file cards already had one). The redundant "PROJECT"/project-title heading previously shown above the grid is removed (the project name is already shown elsewhere on the page). The root **Videos** section is now split into **Videos — For Review** and **Videos — Approved** (mirroring the sidebar's own grouping), and Videos/Albums/Uploads each get their own labeled section whenever present — previously a project with only videos (no albums) or only albums (no videos) got no section header at all. Touches `src/components/ShareFilesBrowser.tsx`, `src/app/share/[token]/page.tsx`, `src/app/admin/projects/[id]/share/page.tsx` (dropped the now-unused `rootFolderLabel` prop). No schema migration.
+
 ## [2.2.3] - 2026-07-09
 
 ### Added

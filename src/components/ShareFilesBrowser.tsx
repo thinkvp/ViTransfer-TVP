@@ -62,7 +62,6 @@ const isSelectableDownloadableFile = (file: DownloadableFile): boolean => {
 
 type ShareFilesBrowserProps = {
   groups: DownloadableGroup[]
-  rootFolderLabel?: string
   selectedFileIds: Set<string>
   setSelectedFileIds: React.Dispatch<React.SetStateAction<Set<string>>>
   onDownloadFile: (file: DownloadableFile) => Promise<void>
@@ -360,7 +359,6 @@ export function ContextMenuItems({
 
 export function ShareFilesBrowser({
   groups,
-  rootFolderLabel,
   selectedFileIds,
   setSelectedFileIds,
   onDownloadFile,
@@ -815,6 +813,25 @@ export function ShareFilesBrowser({
     [sortedGroups]
   )
 
+  // Root Videos section is split into "For Review" / "Approved" (mirrors VideoSidebar's
+  // own for-review/approved grouping), so a folder moves section the moment any of its
+  // versions is approved.
+  const rootVideoGroupsForReview = useMemo(
+    () => rootVideoGroups.filter((group) => {
+      const files = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+      return !files.some((f) => f.type === 'video' && f.isApproved === true)
+    }),
+    [rootVideoGroups]
+  )
+
+  const rootVideoGroupsApproved = useMemo(
+    () => rootVideoGroups.filter((group) => {
+      const files = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+      return files.some((f) => f.type === 'video' && f.isApproved === true)
+    }),
+    [rootVideoGroups]
+  )
+
   const rootAlbumGroups = useMemo(
     () => sortedGroups.filter((group) => group.groupType === 'album'),
     [sortedGroups]
@@ -863,11 +880,6 @@ export function ShareFilesBrowser({
     }
     return [...byTop.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
   }, [rootUploadGroups])
-
-  const splitRootSections = [
-    rootVideoGroups.length > 0,
-    rootAlbumGroups.length > 0,
-  ].filter(Boolean).length > 1
 
   const openUploadsRoot = openFolderName === 'UPLOADS' && rootUploadGroups.length > 0
 
@@ -951,7 +963,7 @@ export function ShareFilesBrowser({
 
   const getUploadsFolderLabelFromGroup = useCallback((groupName: string): string => {
     const relativePath = getUploadsFolderPathFromGroup(groupName)
-    if (!relativePath) return 'UPLOADS'
+    if (!relativePath) return 'Additional Files'
     // Show only the leaf segment. A folder card always sits inside its parent's view,
     // so the full relative path (e.g. "TEST/TEST 2") would be redundant and reads like
     // a flat sibling rather than a nested folder. The breadcrumb conveys the full path.
@@ -2330,7 +2342,7 @@ export function ShareFilesBrowser({
               ) : null}
 
               {file.type === 'video' && file.versionLabel ? (
-                <div className="absolute top-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[11px] leading-none text-white font-medium">
+                <div className="absolute top-2 right-2 rounded bg-black/80 px-1.5 py-0.5 text-[16px] leading-none text-white font-medium">
                   {file.versionLabel}
                 </div>
               ) : null}
@@ -2371,12 +2383,20 @@ export function ShareFilesBrowser({
         </div>
 
         <div className={cn(compact ? 'px-2 py-2' : 'px-3 py-2.5')}>
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <FileTypeIcon className={cn('text-muted-foreground shrink-0', compact ? 'w-3.5 h-3.5' : 'w-4 h-4')} />
-              <p className={cn('font-semibold text-foreground truncate', compact ? 'text-xs' : 'text-sm')} title={displayFileName}>{displayFileName}</p>
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <div className="flex items-start gap-2 min-w-0">
+              <FileTypeIcon className={cn('text-muted-foreground shrink-0 mt-0.5', compact ? 'w-3.5 h-3.5' : 'w-4 h-4')} />
+              <p
+                className={cn(
+                  'font-semibold text-foreground line-clamp-2 wrap-break-word',
+                  compact ? 'text-xs min-h-[2rem]' : 'text-sm min-h-[2.5rem]'
+                )}
+                title={displayFileName}
+              >
+                {displayFileName}
+              </p>
             </div>
-            {keepActionsOnTitleRow ? actionButtons : null}
+            {keepActionsOnTitleRow ? <div className="shrink-0">{actionButtons}</div> : null}
           </div>
           <div className={cn('text-muted-foreground flex items-center justify-between gap-2', compact ? 'text-[11px] mt-1' : 'text-xs mt-1.5')}>
             <div className="flex min-w-0 items-center gap-2">
@@ -2512,12 +2532,17 @@ export function ShareFilesBrowser({
             hoists the inner one out, desyncing React's tree from the DOM. The outer
             card <div> already handles open-on-click, so a plain <div> is enough. */}
         <div className="w-full text-left px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <Folder className="w-4 h-4 text-primary shrink-0" />
-              <span className="text-sm font-semibold text-foreground truncate">{displayGroupName}</span>
+          <div className="flex items-start justify-between gap-2 min-w-0">
+            <div className="flex items-start gap-2 min-w-0">
+              <Folder className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+              <span
+                className="text-sm font-semibold text-foreground line-clamp-2 wrap-break-word min-h-[2.5rem]"
+                title={displayGroupName}
+              >
+                {displayGroupName}
+              </span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
               {group.groupType === 'uploads' && canDeleteUploads && uploadFolderPath ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -2799,54 +2824,46 @@ export function ShareFilesBrowser({
         }}
       >
         {!openFolder ? (
-          <div className={cn(splitRootSections ? 'space-y-5' : 'space-y-2')}>
-            <h4 className="px-1 text-base sm:text-lg font-bold uppercase tracking-wider text-white truncate" title={rootFolderLabel || 'PROJECT'}>
-              {rootFolderLabel || 'PROJECT'}
-            </h4>
-            {splitRootSections ? (
-              <>
-                {rootVideoGroups.length > 0 ? (
-                  <section className="space-y-2">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos</h4>
+          <div className="space-y-5">
+            {rootVideoGroups.length > 0 ? (
+              <section className="space-y-4">
+                {rootVideoGroupsForReview.length > 0 ? (
+                  <div className="space-y-2">
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos — For Review</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {rootVideoGroups.map((group) => renderRootFolderCard(group))}
+                      {rootVideoGroupsForReview.map((group) => renderRootFolderCard(group))}
                     </div>
-                  </section>
+                  </div>
                 ) : null}
 
-                {rootAlbumGroups.length > 0 ? (
-                  <section className="space-y-2 border-t border-border/70 pt-4">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
+                {rootVideoGroupsApproved.length > 0 ? (
+                  <div className="space-y-2">
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos — Approved</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {rootAlbumGroups.map((group) => renderRootFolderCard(group))}
+                      {rootVideoGroupsApproved.map((group) => renderRootFolderCard(group))}
                     </div>
-                  </section>
+                  </div>
                 ) : null}
+              </section>
+            ) : null}
 
-                {rootUploadsSectionGroups.length > 0 ? (
-                  <section className="space-y-2 border-t border-border/70 pt-4">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
-                    </div>
-                  </section>
-                ) : null}
-              </>
-            ) : (
-              <>
+            {rootAlbumGroups.length > 0 ? (
+              <section className={cn('space-y-2', rootVideoGroups.length > 0 && 'border-t border-border/70 pt-4')}>
+                <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                  {projectRootGroups.map((group) => renderRootFolderCard(group))}
+                  {rootAlbumGroups.map((group) => renderRootFolderCard(group))}
                 </div>
-                {rootUploadsSectionGroups.length > 0 ? (
-                  <section className={cn('space-y-2', projectRootGroups.length > 0 ? 'border-t border-border/70 pt-4' : '')}>
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
-                    </div>
-                  </section>
-                ) : null}
-              </>
-            )}
+              </section>
+            ) : null}
+
+            {rootUploadsSectionGroups.length > 0 ? (
+              <section className={cn('space-y-2', (rootVideoGroups.length > 0 || rootAlbumGroups.length > 0) && 'border-t border-border/70 pt-4')}>
+                <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Additional Files</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                  {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
+                </div>
+              </section>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-5">
@@ -3002,7 +3019,7 @@ export function ShareFilesBrowser({
             ) : (
               <section className="space-y-2">
                 <div className="px-1 flex items-center gap-2">
-                  <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Uploads</h4>
+                  <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Additional Files</h4>
                   <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
                     <button
                       type="button"

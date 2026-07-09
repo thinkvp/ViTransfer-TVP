@@ -1661,7 +1661,7 @@ export default function VideoSidebar({
                   <button
                     type="button"
                     className="text-muted-foreground hover:text-foreground transition-colors"
-                    aria-label={isUploadsRootCollapsed ? 'Expand UPLOADS' : 'Collapse UPLOADS'}
+                    aria-label={isUploadsRootCollapsed ? 'Expand Additional Files' : 'Collapse Additional Files'}
                     onClick={() => toggleFolderCollapsed(uploadsRootFolderKey)}
                   >
                     {isUploadsRootCollapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -1686,7 +1686,7 @@ export default function VideoSidebar({
                       SIDEBAR_CHECKBOX_CLASS,
                       uploadRootFileKeys.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
                     )}
-                    aria-label="Select all files in UPLOADS"
+                    aria-label="Select all files in Additional Files"
                   />
                   <Folder className="w-3.5 h-3.5 text-primary shrink-0" />
                   <button
@@ -1701,9 +1701,9 @@ export default function VideoSidebar({
                         detail: { folderName: 'UPLOADS' },
                       }))
                     }}
-                    title="Open UPLOADS in Files"
+                    title="Open Additional Files in Files"
                   >
-                    UPLOADS
+                    Additional Files
                   </button>
                 </div>
 
@@ -2179,7 +2179,7 @@ export default function VideoSidebar({
                       <div>
                         <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
                           <Upload className="w-3 h-3" />
-                          Uploads
+                          Additional Files
                         </div>
                         <div className="space-y-1 px-2 py-2">
                           {uploadFolderEntries.map(renderUploadFolderButton)}

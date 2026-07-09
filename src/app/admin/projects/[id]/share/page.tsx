@@ -132,6 +132,9 @@ export default function AdminSharePage() {
   const isUploadsFilesBrowse = desktopContentTab === 'files'
     && String(requestedFilesFolderName || '').trim().startsWith('UPLOADS')
   const uploadsHeaderPath = isUploadsFilesBrowse ? String(requestedFilesFolderName || '').trim() : ''
+  // Display-only: the internal group-name protocol still uses the 'UPLOADS' prefix
+  // (matched elsewhere via startsWith('UPLOADS')), but admins see "Additional Files" too.
+  const uploadsHeaderPathDisplay = uploadsHeaderPath.replace(/^UPLOADS\b/, 'Additional Files')
 
   const confirmShareDraftNavigation = useCallback(() => {
     const guard = draftGuardRef.current
@@ -2313,9 +2316,9 @@ export default function AdminSharePage() {
             <span className="text-muted-foreground shrink-0">/</span>
             <span
               className="text-foreground whitespace-nowrap shrink-0 max-w-[40%] truncate"
-              title={uploadsHeaderPath}
+              title={uploadsHeaderPathDisplay}
             >
-              {uploadsHeaderPath}
+              {uploadsHeaderPathDisplay}
             </span>
           </>
         ) : null}
@@ -2470,7 +2473,6 @@ export default function AdminSharePage() {
               <div className="flex-1 min-w-0 min-h-0 flex flex-col">
               <ShareFilesBrowser
                 groups={downloadableFilesWithOptimisticUploads}
-                rootFolderLabel={String(project.title || 'PROJECT')}
                 selectedFileIds={selectedFileIds}
                 setSelectedFileIds={setSelectedFileIds}
                 onDownloadFile={handleDownloadFile}
