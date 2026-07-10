@@ -6,6 +6,7 @@ import { sumLineItemsSubtotal } from '@/lib/sales/money'
 import type { SalesLineItem } from '@/lib/sales/types'
 import { listSalesCashReceiptsInRange, cashReceiptReportingAmountCents } from '@/lib/accounting/sales-cash-receipts'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
+import { expenseReportingDate, expenseReportingDateWhere } from '@/lib/accounting/expense-reporting'
 import { getAccountingReportingBasis } from '@/lib/accounting/settings'
 
 export const runtime = 'nodejs'
@@ -231,9 +232,10 @@ export async function GET(request: NextRequest) {
   // ── COGS ─────────────────────────────────────────────────────────────────────
 
   const [cogsExpenses, cogsBankTxns, cogsJournals, cogsSplits] = await Promise.all([
+    // Basis-aware: on cash basis expenses count when PAID (bank txn date) — see expense-reporting.ts
     prisma.expense.findMany({
-      where: { date: { gte: from, lte: to }, status: { in: ['APPROVED', 'RECONCILED'] }, account: { type: 'COGS' } },
-      select: { date: true, amountExGst: true },
+      where: { ...expenseReportingDateWhere(basis, { gte: from, lte: to }), account: { type: 'COGS' } },
+      select: { date: true, amountExGst: true, bankTransaction: { select: { date: true } } },
     }),
     prisma.bankTransaction.findMany({
       where: { date: { gte: from, lte: to }, status: 'MATCHED', matchType: 'MANUAL', account: { type: 'COGS' } },
@@ -252,7 +254,7 @@ export async function GET(request: NextRequest) {
     }),
   ])
 
-  for (const e of cogsExpenses) addTo(ym(e.date), 'cogsCents', e.amountExGst)
+  for (const e of cogsExpenses) addTo(ym(expenseReportingDate(e, basis)), 'cogsCents', e.amountExGst)
   for (const t of cogsBankTxns) addTo(ym(t.date), 'cogsCents', -amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent))
   for (const j of cogsJournals) addTo(ym(j.date), 'cogsCents', amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent))
   for (const s of cogsSplits) addTo(ym(s.bankTransaction.date), 'cogsCents', -amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent))
@@ -261,8 +263,8 @@ export async function GET(request: NextRequest) {
 
   const [opExpenses, opBankTxns, opJournals, opSplits] = await Promise.all([
     prisma.expense.findMany({
-      where: { date: { gte: from, lte: to }, status: { in: ['APPROVED', 'RECONCILED'] }, account: { type: 'EXPENSE' } },
-      select: { date: true, amountExGst: true },
+      where: { ...expenseReportingDateWhere(basis, { gte: from, lte: to }), account: { type: 'EXPENSE' } },
+      select: { date: true, amountExGst: true, bankTransaction: { select: { date: true } } },
     }),
     prisma.bankTransaction.findMany({
       where: { date: { gte: from, lte: to }, status: 'MATCHED', matchType: 'MANUAL', account: { type: 'EXPENSE' } },
@@ -281,7 +283,7 @@ export async function GET(request: NextRequest) {
     }),
   ])
 
-  for (const e of opExpenses) addTo(ym(e.date), 'expenseCents', e.amountExGst)
+  for (const e of opExpenses) addTo(ym(expenseReportingDate(e, basis)), 'expenseCents', e.amountExGst)
   for (const t of opBankTxns) addTo(ym(t.date), 'expenseCents', -amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent))
   for (const j of opJournals) addTo(ym(j.date), 'expenseCents', amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent))
   for (const s of opSplits) addTo(ym(s.bankTransaction.date), 'expenseCents', -amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent))

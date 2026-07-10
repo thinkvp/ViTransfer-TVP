@@ -165,8 +165,10 @@ export function buildExpenseUserMessage(ctx: ExpensePromptContext): AiUserConten
   const textParts: string[] = expenseContextParts(ctx)
 
   if (ctx.historicalMappings.length > 0) {
+    // Lead with the account id — models copy these lines verbatim into "accountId",
+    // so a code-only rendering trains them to emit codes the schema rejects
     const mappingLines = ctx.historicalMappings
-      .map((m) => `${m.label} → ${m.accountCode} ${m.accountName} (${m.count}×)`)
+      .map((m) => `${m.label} → ${m.accountId} | ${m.accountCode} ${m.accountName} (${m.count}×)`)
       .join('\n')
     textParts.push(`<historical_mappings>\n${mappingLines}\n</historical_mappings>`)
   }

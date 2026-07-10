@@ -92,8 +92,16 @@ export function applyExpenseGuards(input: ExpenseResult, ctx: ExpenseGuardContex
     }
 
     if (e.accountId && !ctx.accountsById.has(e.accountId)) {
-      note(`Expense "${label}": suggested account id "${e.accountId}" is not a known expense account — cleared. Pick one manually.`)
-      e.accountId = null
+      // Models sometimes emit the account CODE (e.g. "6-9220") instead of the id —
+      // resolve it rather than throwing the correct pick away
+      const value = e.accountId.trim().toLowerCase()
+      const byCode = [...ctx.accountsById.entries()].find(([, a]) => a.code.toLowerCase() === value)
+      if (byCode) {
+        e.accountId = byCode[0]
+      } else {
+        note(`Expense "${label}": suggested account id "${e.accountId}" is not a known expense account — cleared. Pick one manually.`)
+        e.accountId = null
+      }
     }
 
     if (!Number.isFinite(e.attachmentIndex) || e.attachmentIndex < 0 || e.attachmentIndex >= ctx.attachmentCount) {

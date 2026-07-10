@@ -10,6 +10,7 @@ import { calcLineSubtotalCents, sumLineItemsSubtotal, sumLineItemsTax } from '@/
 import type { SalesLineItem } from '@/lib/sales/types'
 import { cashReceiptReportingAmountCents, listSalesCashReceiptsInRange, listSalesCashReceiptsUpTo } from '@/lib/accounting/sales-cash-receipts'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
+import { expenseReportingDateWhere } from '@/lib/accounting/expense-reporting'
 import type {
   ProfitLossReport,
   BalanceSheetReport,
@@ -199,13 +200,15 @@ async function buildDebitNormalProfitLossLines(
   accountType: 'COGS' | 'EXPENSE',
   startDate: string,
   endDate: string,
-  taxRatePercent: number
+  taxRatePercent: number,
+  basis: 'CASH' | 'ACCRUAL'
 ): Promise<ReportLine[]> {
   const [expenses, bankTransactions, journals, splitLines] = await Promise.all([
+    // Expense records are the only leg where incurred vs paid dates differ —
+    // on cash basis they count when paid (see expense-reporting.ts / gst.ts)
     prisma.expense.findMany({
       where: {
-        date: { gte: startDate, lte: endDate },
-        status: { in: ['APPROVED', 'RECONCILED'] },
+        ...expenseReportingDateWhere(basis, { gte: startDate, lte: endDate }),
         account: { type: accountType },
       },
       include: { account: { select: { code: true, name: true, type: true } } },
@@ -508,12 +511,12 @@ export async function buildProfitLossReport(
   totalIncomeCents = incomeLines.reduce((s, l) => s + l.amountCents, 0)
 
   // ── COGS ────────────────────────────────────────────────────────────────────
-  const cogsLines = await buildDebitNormalProfitLossLines('COGS', startDate, endDate, taxRatePercent)
+  const cogsLines = await buildDebitNormalProfitLossLines('COGS', startDate, endDate, taxRatePercent, basis)
   const totalCogsCents = cogsLines.reduce((s, l) => s + l.amountCents, 0)
   const grossProfitCents = totalIncomeCents - totalCogsCents
 
   // ── Expenses ────────────────────────────────────────────────────────────────
-  const expenseLines = await buildDebitNormalProfitLossLines('EXPENSE', startDate, endDate, taxRatePercent)
+  const expenseLines = await buildDebitNormalProfitLossLines('EXPENSE', startDate, endDate, taxRatePercent, basis)
   const totalExpenseCents = expenseLines.reduce((s, l) => s + l.amountCents, 0)
   const netProfitCents = grossProfitCents - totalExpenseCents
 
@@ -689,8 +692,10 @@ export async function buildBalanceSheetReport(
 
   const [allReceipts, gstExpenses, postedLiabilityLines, postedEquityLines] = await Promise.all([
     listSalesCashReceiptsUpTo(asOf),
+    // GST credits follow the reporting basis, matching the BAS engine: on cash
+    // basis credits are claimable only once the expense is paid (by paid date)
     prisma.expense.findMany({
-      where: { date: { lte: asOf }, status: { in: ['APPROVED', 'RECONCILED'] }, taxCode: 'GST' },
+      where: { ...expenseReportingDateWhere(basis, { lte: asOf }), taxCode: 'GST' },
       select: { gstAmount: true },
     }),
     buildPostedBalanceSheetLines(

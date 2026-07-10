@@ -138,6 +138,17 @@ export default function SharePage() {
   const sidebarVideoCacheRef = useRef<Map<string, any>>(new Map())
   const sidebarThumbnailRequestCacheRef = useRef<Map<string, Promise<any>>>(new Map())
   const lastVideoTokenRefreshAtRef = useRef(0)
+  // Rate-limit backoff for the video-token endpoint: when a fetch gets 429'd we
+  // stop issuing token requests until this timestamp. Without it, empty tokens
+  // break playback → the error handler forces a full re-mint → more 429s → a
+  // self-sustaining flood that trips the server-side lockout (seen in prod).
+  const videoTokenBackoffUntilRef = useRef(0)
+  // Set on every full project refetch; lets the SSE handler skip the echo of an
+  // action this page itself just performed (approve → local refetch → own
+  // `approval` event ~0.5s later would otherwise refetch everything again).
+  const lastProjectDataFetchAtRef = useRef(0)
+  // Throttle for error-driven forced token refreshes (video element errors).
+  const lastStreamErrorRefreshAtRef = useRef(0)
   const uploadAccessUrlCacheRef = useRef<Map<string, UploadAccessUrlCacheEntry>>(new Map())
   const uploadAccessUrlRequestCacheRef = useRef<Map<string, Promise<UploadAccessUrlCacheEntry | null>>>(new Map())
   // Pending upload-access requests coalesced into a single batch POST. Keyed by cacheKey;
@@ -558,6 +569,9 @@ export default function SharePage() {
 
   // Fetch project data function (for refresh after approval)
   const fetchProjectData = useCallback(async (tokenOverride?: string | null) => {
+    // Stamped up-front so the SSE handler can recognise (and skip) the echo of
+    // an action this page itself just performed.
+    lastProjectDataFetchAtRef.current = Date.now()
     try {
       const authToken = tokenOverride || shareToken
       const projectResponse = await apiFetch(`/api/share/${token}`, {
@@ -582,12 +596,45 @@ export default function SharePage() {
         }
         setProject(projectData)
 
-        // Clear all video caches to force re-fetch with updated approval status
-        tokenCacheRef.current.clear()
-        sidebarVideoCacheRef.current.clear()
-        sidebarThumbnailRequestCacheRef.current.clear()
-        // Reset so sidebar immediately falls back to the freshly-fetched project.videosByName
-        setAllVideosByName({})
+        // Invalidate video-token caches ONLY for videos whose approval state
+        // changed (approval flips the viewer's entitlements, e.g. unlocks the
+        // original download) or that no longer exist. The previous blanket clear
+        // made every project refetch re-mint tokens for EVERY video version
+        // (4-6 requests each) — doubled by the SSE echo of the viewer's own
+        // approval, that blew through the video-token rate limit on larger
+        // projects and locked the client out. The preload effect skips cached
+        // entries, so unchanged videos now cost zero token requests.
+        const freshVideos: any[] = Array.isArray(projectData.videos) ? projectData.videos : []
+        const freshById = new Map(freshVideos.map((v: any) => [String(v.id), v]))
+        for (const [videoId, cached] of Array.from(tokenCacheRef.current.entries())) {
+          const fresh = freshById.get(String(videoId))
+          if (!fresh || Boolean(cached?.approved) !== Boolean((fresh as any).approved)) {
+            tokenCacheRef.current.delete(videoId)
+            sidebarVideoCacheRef.current.delete(videoId)
+            sidebarThumbnailRequestCacheRef.current.delete(videoId)
+          }
+        }
+
+        // Rebuild the tokenized sidebar state on the fresh payload's group
+        // structure (correct for renames/deletes/new versions), reusing the
+        // tokenized copies of videos whose entitlements didn't change. Videos
+        // invalidated above fall back to the raw payload object and get
+        // re-tokenized by the preload effect.
+        setAllVideosByName((prev) => {
+          if (Object.keys(prev).length === 0) return prev
+          const tokenizedById = new Map<string, any>()
+          for (const versions of Object.values(prev)) {
+            for (const v of versions as any[]) tokenizedById.set(String(v.id), v)
+          }
+          const next: Record<string, any[]> = {}
+          for (const [name, versions] of Object.entries(projectData.videosByName || {})) {
+            next[name] = (versions as any[]).map((v: any) => {
+              const tokenized = tokenizedById.get(String(v.id))
+              return tokenized && tokenCacheRef.current.has(String(v.id)) ? tokenized : v
+            })
+          }
+          return next
+        })
 
         // Fetch comments after project loads (if not hidden)
         if (!projectData.hideFeedback) {
@@ -674,6 +721,12 @@ export default function SharePage() {
     }
     const refetchComments = () => debounce('comments', () => { void fetchComments() })
     const refetchProject = () => debounce('project', () => {
+      // Skip the echo of an action this page performed itself: e.g. approving a
+      // video refetches locally AND publishes an `approval` event that arrives
+      // back here ~0.5s later — without this guard the page paid for two full
+      // refetch passes per approval. A concurrent remote change inside this tiny
+      // window is caught by the focus/visibility refresh safety nets.
+      if (Date.now() - lastProjectDataFetchAtRef.current < 2_500) return
       void fetchProjectData()
       // Approval also changes original-quality download availability, so keep the
       // Files browser in sync too (matches the local approve handler).
@@ -1108,8 +1161,29 @@ export default function SharePage() {
     }
   }, [project, albumsLoading, hasViewContent])
 
+  // Record a video-token rate-limit response: honour Retry-After (clamped to a
+  // sane range) so every token consumer stops hitting the endpoint until the
+  // window resets, instead of feeding the 429 → broken playback → forced
+  // re-mint → 429 loop.
+  const noteVideoTokenRateLimited = useCallback((response: Response) => {
+    const retryAfter = Number(response.headers.get('Retry-After'))
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter, 120) * 1000
+      : 60_000
+    videoTokenBackoffUntilRef.current = Math.max(
+      videoTokenBackoffUntilRef.current,
+      Date.now() + waitMs,
+    )
+  }, [])
+
+  const isVideoTokenBackoffActive = useCallback(
+    () => Date.now() < videoTokenBackoffUntilRef.current,
+    [],
+  )
+
   const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
     if (!shareToken) return ''
+    if (isVideoTokenBackoffActive()) return ''
     const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
       headers: {
         Authorization: `Bearer ${shareToken}`,
@@ -1119,10 +1193,14 @@ export default function SharePage() {
       await handleSessionExpired(response)
       return ''
     }
+    if (response.status === 429) {
+      noteVideoTokenRateLimited(response)
+      return ''
+    }
     if (!response.ok) return ''
     const data = await response.json()
     return data.token || ''
-  }, [token, shareToken, handleSessionExpired])
+  }, [token, shareToken, handleSessionExpired, isVideoTokenBackoffActive, noteVideoTokenRateLimited])
 
   // Like fetchVideoToken but also returns the optional direct-to-R2 stream URL (Option B).
   // In S3 mode the server hands back a presigned URL the player can stream directly,
@@ -1133,6 +1211,7 @@ export default function SharePage() {
     quality: string,
   ): Promise<{ token: string; streamUrl: string; hlsUrl: string; hlsAbr: boolean }> => {
     if (!shareToken) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
+    if (isVideoTokenBackoffActive()) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
     const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
       headers: {
         Authorization: `Bearer ${shareToken}`,
@@ -1140,6 +1219,10 @@ export default function SharePage() {
     })
     if (response.status === 401) {
       await handleSessionExpired(response)
+      return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
+    }
+    if (response.status === 429) {
+      noteVideoTokenRateLimited(response)
       return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
     }
     if (!response.ok) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
@@ -1151,7 +1234,7 @@ export default function SharePage() {
       hlsUrl: typeof data.hlsUrl === 'string' ? data.hlsUrl : '',
       hlsAbr: data.hlsAbr === true,
     }
-  }, [token, shareToken, handleSessionExpired])
+  }, [token, shareToken, handleSessionExpired, isVideoTokenBackoffActive, noteVideoTokenRateLimited])
 
   // Fire the queued upload-access requests as one (chunked) batch POST and fan the
   // results back out to each waiting caller. Replaces the previous one-POST-per-file
@@ -2390,8 +2473,13 @@ export default function SharePage() {
               subtitlesVttUrl,
             }
 
-            tokenCacheRef.current.set(video.id, tokenized)
-            sidebarVideoCacheRef.current.set(video.id, tokenized)
+            // A rate-limited pass produces empty stream URLs — caching those would
+            // poison playback until the next full refresh. Leave the entry uncached
+            // so the next natural trigger (after the backoff lapses) re-mints it.
+            if (!isVideoTokenBackoffActive()) {
+              tokenCacheRef.current.set(video.id, tokenized)
+              sidebarVideoCacheRef.current.set(video.id, tokenized)
+            }
             return tokenized
           } catch (error) {
             return video
@@ -2404,12 +2492,15 @@ export default function SharePage() {
         return request
       })
     )
-  }, [shareToken, project, fetchVideoToken, fetchVideoStream])
+  }, [shareToken, project, fetchVideoToken, fetchVideoStream, isVideoTokenBackoffActive])
 
   const refreshViewVideoTokens = useCallback(async (force = false) => {
     if (project?.enableVideos === false) return
     if (!project?.videosByName) return
     if (!shareToken) return
+    // While rate-limited, a refresh (even a forced one from an error handler)
+    // can only produce more 429s — wait the window out.
+    if (isVideoTokenBackoffActive()) return
 
     const now = Date.now()
     // Prevent rapid duplicate refreshes from focus + visibilitychange firing together.
@@ -2448,7 +2539,7 @@ export default function SharePage() {
       setActiveVideosRaw(refreshedVideosByName[activeVideoName])
       setActiveVideos(refreshedVideosByName[activeVideoName])
     }
-  }, [activeVideoName, fetchTokensForVideos, project?.enableVideos, project?.videosByName, shareToken])
+  }, [activeVideoName, fetchTokensForVideos, project?.enableVideos, project?.videosByName, shareToken, isVideoTokenBackoffActive])
 
   // Safety net: if the <video> element fails to load its stream (e.g. an expired
   // /api/content token after a session hiccup), drop the stale cache entry and re-mint
@@ -2456,6 +2547,12 @@ export default function SharePage() {
   const handleVideoStreamError = useCallback((videoId: string) => {
     if (isAdminSession) return
     if (!shareTokenRef.current) return
+    // Throttle: a persistently failing stream (e.g. while rate-limited) fires
+    // error events on every retry; each forced refresh costs a full token pass,
+    // so repeated errors must not stack into a request flood.
+    const now = Date.now()
+    if (now - lastStreamErrorRefreshAtRef.current < 15_000) return
+    lastStreamErrorRefreshAtRef.current = now
     tokenCacheRef.current.delete(videoId)
     tokenRequestCacheRef.current.delete(videoId)
     sidebarVideoCacheRef.current.delete(videoId)
@@ -3315,8 +3412,11 @@ export default function SharePage() {
         >
           {/* Content Area */}
           {desktopContentTab === 'files' ? (
-            <div className="flex-1 min-h-0 flex flex-col gap-2 lg:flex-row lg:gap-1">
-            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 max-lg:flex-none flex flex-col gap-2 lg:flex-row lg:gap-1">
+            {/* Mobile: natural-height column so the page scrolls through content +
+                activity, instead of cramming both into one viewport (the activity
+                panel's fixed 420px was crushing the files browser to a sliver). */}
+            <div className="flex-1 min-w-0 min-h-0 max-lg:flex-none max-lg:h-[70dvh] flex flex-col">
             <ShareFilesBrowser
               groups={downloadableFilesWithOptimisticUploads}
               selectedFileIds={selectedFileIds}
@@ -3377,8 +3477,11 @@ export default function SharePage() {
             </div>
             </div>
           ) : activeAlbumId ? (
-            <div className="flex-1 min-h-0 flex flex-col gap-2 lg:flex-row lg:gap-1">
-            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            <div className="flex-1 min-h-0 max-lg:flex-none flex flex-col gap-2 lg:flex-row lg:gap-1">
+            {/* Mobile: natural-height column so the page scrolls through content +
+                activity, instead of cramming both into one viewport (the activity
+                panel's fixed 420px was crushing the files browser to a sliver). */}
+            <div className="flex-1 min-w-0 min-h-0 max-lg:flex-none max-lg:h-[70dvh] flex flex-col">
             <ShareAlbumViewer
               shareSlug={token}
               shareToken={shareToken}

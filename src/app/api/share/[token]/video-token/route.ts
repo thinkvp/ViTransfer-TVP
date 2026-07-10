@@ -70,7 +70,11 @@ export async function GET(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const limited = await rateLimit(request, { maxRequests: 120, windowMs: 60_000 }, 'share-video-token')
+  // Sized for shared-IP audiences (e.g. two office viewers behind one NAT, each
+  // costing 4-6 requests per video version on initial load of a large project).
+  // The share page also backs off client-side on 429 (Retry-After) instead of
+  // retrying, so bursts self-limit.
+  const limited = await rateLimit(request, { maxRequests: 240, windowMs: 60_000 }, 'share-video-token')
   if (limited) return limited
 
   let project: { id: string; slug: string; enableVideos: boolean | null } | null
