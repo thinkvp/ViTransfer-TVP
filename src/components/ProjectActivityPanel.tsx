@@ -194,6 +194,9 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
   const [error, setError] = useState<string | null>(null)
   const lastRefreshRef = useRef(0)
   const fetchInFlightRef = useRef(false)
+  // Set when a forced refresh arrives while a fetch is in flight; consumed in
+  // that fetch's finally block to run ONE trailing refresh (coalesced).
+  const pendingRefreshRef = useRef(false)
   // Mirrors of state for use inside stable callbacks without re-creating them.
   const loadedCountRef = useRef(0)
   const hasMoreRef = useRef(false)
@@ -228,7 +231,13 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
   // without collapsing how far the user has scrolled). Throttled unless forced.
   const refresh = useCallback(async (force: boolean) => {
     const now = Date.now()
-    if (fetchInFlightRef.current) return
+    if (fetchInFlightRef.current) {
+      // A forced (SSE-triggered) refresh landing mid-fetch must not be dropped:
+      // the row it announced may have committed after the in-flight query ran.
+      // Queue ONE trailing refresh instead (coalesces bursts of events).
+      if (force) pendingRefreshRef.current = true
+      return
+    }
     if (!force && now - lastRefreshRef.current < MIN_REFRESH_GAP_MS) return
     fetchInFlightRef.current = true
     lastRefreshRef.current = now
@@ -243,6 +252,10 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
       setError((prev) => prev ?? (e instanceof Error ? e.message : 'Failed to load activity'))
     } finally {
       fetchInFlightRef.current = false
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false
+        void refresh(true)
+      }
     }
   }, [fetchPage])
 

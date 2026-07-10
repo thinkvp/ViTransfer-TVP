@@ -68,9 +68,11 @@ export async function GET(
   }
 
   // When feedback is hidden, non-admins see no comments — so don't leak comment
-  // activity timing to them. Approval/status/video events are not sensitive in
-  // that way, so they still flow; comment events are dropped for non-admins.
-  const canSeeComments = !project.hideFeedback || accessCheck.isAdmin
+  // activity timing to them. Guests (guest video links) can never see comments,
+  // so they get no comment events either. Approval/status/video events are not
+  // sensitive in that way, so they still flow. NOTE: evaluated once at connect
+  // time; a mid-stream `hideFeedback` toggle applies from the next reconnect.
+  const canSeeComments = accessCheck.isAdmin || (!project.hideFeedback && !accessCheck.isGuest)
 
   const encoder = new TextEncoder()
   let heartbeat: ReturnType<typeof setInterval> | null = null
@@ -79,15 +81,6 @@ export async function GET(
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (chunk: string) => {
-        if (cleanedUp) return
-        try {
-          controller.enqueue(encoder.encode(chunk))
-        } catch {
-          // Controller already closed (client went away) — ignore.
-        }
-      }
-
       const cleanup = () => {
         if (cleanedUp) return
         cleanedUp = true
@@ -100,8 +93,18 @@ export async function GET(
         }
       }
 
-      // Advise the client's reconnect delay and open the stream.
-      send('retry: 5000\n\n')
+      const send = (chunk: string) => {
+        if (cleanedUp) return
+        try {
+          controller.enqueue(encoder.encode(chunk))
+        } catch {
+          // Controller already closed without the abort signal firing (e.g. the
+          // response was torn down) — release the Redis listener and heartbeat
+          // rather than relying solely on the abort event.
+          cleanup()
+        }
+      }
+
       send(': connected\n\n')
 
       // Client disconnect (tab closed, navigation, network drop).
@@ -111,6 +114,11 @@ export async function GET(
       }
       request.signal.addEventListener('abort', cleanup)
 
+      // Start the heartbeat BEFORE subscribing: if Redis is down, the subscribe
+      // below can stall until it reconnects, and with no bytes flowing a proxy
+      // would kill the "idle" connection in the meantime.
+      heartbeat = setInterval(() => send(': ping\n\n'), 25000)
+
       try {
         unsubscribe = await subscribeToProjectEvents(project.id, (type: ProjectEventType) => {
           // Internal team comments are admin-only — never leak their timing to clients.
@@ -118,12 +126,16 @@ export async function GET(
           if (type === 'comment' && !canSeeComments) return
           send(`event: ${type}\ndata: {}\n\n`)
         })
+        // The client may have disconnected while the subscribe was in flight —
+        // cleanup() already ran with `unsubscribe` still null, so release the
+        // listener now or it (and the project's Redis channel) leaks forever.
+        if (cleanedUp && unsubscribe) {
+          unsubscribe()
+          unsubscribe = null
+        }
       } catch (error) {
         console.error('[events-stream] subscribe failed:', (error as Error)?.message)
       }
-
-      // Heartbeat keeps the connection alive through idle timeouts / proxies.
-      heartbeat = setInterval(() => send(': ping\n\n'), 25000)
     },
 
     cancel() {
@@ -138,7 +150,6 @@ export async function GET(
     headers: {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-store, no-transform',
-      Connection: 'keep-alive',
       // Defeat proxy response buffering (nginx); harmless under Caddy.
       'X-Accel-Buffering': 'no',
     },

@@ -2700,6 +2700,10 @@ model AccountingSettings {
   // the original Stripe invoice amount are auto-posted to this account as a bank charge.
   stripeRoundingAccountId        String?   // Account for rounding differences (e.g. Bank Charges)
 
+  // Freeform accounting knowledge & rules injected into AI assistant expense-mode prompts
+  // (the accounting counterpart of Settings.aiInstructions — studio knowledge never applies here)
+  accountingInstructions String? @db.Text
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

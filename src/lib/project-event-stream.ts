@@ -14,9 +14,9 @@
  * data — `onEvent` is expected to refetch through the authenticated endpoints.
  */
 
-export type ProjectEventType = 'comment' | 'internal' | 'approval' | 'status' | 'video' | 'upload' | 'album'
+import { PROJECT_EVENT_TYPES, type ProjectEventType } from './project-event-types'
 
-const KNOWN_TYPES: ReadonlySet<string> = new Set<ProjectEventType>(['comment', 'internal', 'approval', 'status', 'video', 'upload', 'album'])
+export type { ProjectEventType } from './project-event-types'
 
 export interface ProjectEventStreamHandle {
   close: () => void
@@ -25,10 +25,16 @@ export interface ProjectEventStreamHandle {
 interface OpenProjectEventStreamOptions {
   /** Project slug (share token in the URL sense). */
   token: string
-  /** Share or admin bearer token. Null is allowed for open (authMode NONE) projects. */
-  authToken: string | null
+  /**
+   * Share or admin bearer token, or a getter for it. Prefer the getter: it is
+   * re-read on EVERY (re)connect attempt, so a token that rotates while the
+   * stream is open (admin access tokens refresh every ~15 min) doesn't leave
+   * reconnects stuck sending an expired credential. The server requires a
+   * token — callers should not open the stream without one.
+   */
+  authToken: string | null | (() => string | null)
   onEvent: (type: ProjectEventType) => void
-  /** Called on a 401/403 so the caller can revalidate its session if needed. */
+  /** Called on a 401/403 so the caller can revalidate/refresh its session before the next retry. */
   onAuthError?: () => void
 }
 
@@ -52,7 +58,7 @@ export function openProjectEventStream(options: OpenProjectEventStreamOptions): 
     // data frame (shouldn't happen, but stays backward-tolerant).
     const match = frame.match(/(^|\n)event:\s*([a-z]+)/)
     const name = match?.[2]
-    if (name && KNOWN_TYPES.has(name)) {
+    if (name && PROJECT_EVENT_TYPES.has(name)) {
       try {
         options.onEvent(name as ProjectEventType)
       } catch {
@@ -66,11 +72,13 @@ export function openProjectEventStream(options: OpenProjectEventStreamOptions): 
     if (closed) return
     controller = new AbortController()
     const url = `/api/share/${encodeURIComponent(options.token)}/events/stream`
+    // Resolve the token fresh for THIS attempt so reconnects pick up rotations.
+    const authToken = typeof options.authToken === 'function' ? options.authToken() : options.authToken
 
     try {
       const response = await fetch(url, {
         cache: 'no-store',
-        headers: options.authToken ? { Authorization: `Bearer ${options.authToken}` } : undefined,
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
         signal: controller.signal,
       })
 
@@ -86,16 +94,21 @@ export function openProjectEventStream(options: OpenProjectEventStreamOptions): 
         return
       }
 
-      // Connected successfully — reset backoff.
-      attempt = 0
-
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let receivedData = false
 
       while (!closed) {
         const { value, done } = await reader.read()
         if (done) break
+        // Only reset the backoff once bytes actually arrive: resetting on a bare
+        // 200 would let an accept-then-die server (e.g. mid-deploy) be hammered
+        // on a ~2s loop forever instead of backing off.
+        if (!receivedData) {
+          receivedData = true
+          attempt = 0
+        }
         buffer += decoder.decode(value, { stream: true })
 
         // SSE frames are separated by a blank line.

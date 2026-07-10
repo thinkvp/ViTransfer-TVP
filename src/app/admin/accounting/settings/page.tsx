@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { apiFetch } from '@/lib/api-client'
 import { Save, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -32,6 +33,8 @@ export default function AccountingSettingsPage() {
   const [stripeRoundingOpen, setStripeRoundingOpen] = useState(false)
   // Live tax rate (read-only here — managed in Sales settings)
   const [salesTaxRatePercent, setSalesTaxRatePercent] = useState<number | null>(null)
+  // AI assistant expense-mode knowledge doc
+  const [accountingInstructions, setAccountingInstructions] = useState('')
   interface CoaOption { id: string; code: string; name: string; type: string }
   const [coaAccounts, setCoaAccounts] = useState<CoaOption[]>([])
 
@@ -55,6 +58,7 @@ export default function AccountingSettingsPage() {
           setBasPaygAccountId(data?.basPaygAccountId ?? '')
           setBasPaygInstalmentDefault(data?.basPaygInstalmentDefaultCents != null ? (data.basPaygInstalmentDefaultCents / 100).toFixed(2) : '')
           setStripeRoundingAccountId(data?.stripeRoundingAccountId ?? '')
+          setAccountingInstructions(data?.accountingInstructions ?? '')
         }
       } finally {
         if (!cancelled) setSettingsLoading(false)
@@ -108,6 +112,7 @@ export default function AccountingSettingsPage() {
           basPaygAccountId: basPaygAccountId || null,
           basPaygInstalmentDefaultCents: paygInstalmentDefaultCents,
           stripeRoundingAccountId: stripeRoundingAccountId || null,
+          accountingInstructions: accountingInstructions.trim() || null,
         }),
       })
       if (!res.ok) {
@@ -318,6 +323,27 @@ export default function AccountingSettingsPage() {
               )}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* AI Assistant knowledge */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Accounting Knowledge &amp; Rules</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Freeform rules the AI Assistant follows when reading receipts in Expense mode — categorisation habits, GST quirks, supplier conventions.
+            The Studio knowledge doc from the AI Assistant settings is never used for accounting.
+          </p>
+          <Textarea
+            id="accounting-instructions"
+            value={accountingInstructions}
+            onChange={e => setAccountingInstructions(e.target.value)}
+            disabled={settingsLoading || settingsSaving}
+            rows={8}
+            placeholder={'e.g.\nBunnings purchases are usually Set Construction.\nSoftware subscriptions (Adobe, Frame.io) go to Software & Subscriptions.\nBank fees and international transaction fees are GST-free.'}
+          />
         </CardContent>
       </Card>
 

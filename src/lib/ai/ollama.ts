@@ -1,10 +1,32 @@
-import type { AiDriver, AiGenerateParams, AiTestResult } from './types'
+import type { AiDriver, AiGenerateParams, AiTestResult, AiUserContentPart } from './types'
 
 const DEFAULT_TIMEOUT_MS = 180_000
 
 interface OllamaChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
+  /** Base64 image payloads — only consumed by multimodal (vision) models */
+  images?: string[]
+}
+
+/**
+ * Ollama has no content-part syntax: text parts are concatenated into `content`
+ * and images ride in `message.images`. PDFs are unsupported natively — the
+ * worker text-extracts them first (supportsPdfInput: false), so a document
+ * part reaching this driver is a programming error.
+ */
+function toOllamaMessage(user: string | AiUserContentPart[]): OllamaChatMessage {
+  if (typeof user === 'string') return { role: 'user', content: user }
+  const texts: string[] = []
+  const images: string[] = []
+  for (const part of user) {
+    if (part.type === 'text') texts.push(part.text)
+    else if (part.type === 'image') images.push(part.base64)
+    else throw new Error('Ollama cannot read PDFs natively — extract the text first')
+  }
+  const message: OllamaChatMessage = { role: 'user', content: texts.join('\n\n') }
+  if (images.length > 0) message.images = images
+  return message
 }
 
 async function ollamaChat(
@@ -55,12 +77,14 @@ export function createOllamaDriver(config: { url: string; model: string }): AiDr
   const { url, model } = config
   return {
     label: `OLLAMA:${model}`,
+    supportsPdfInput: false,
 
     async generateStructured(params: AiGenerateParams): Promise<unknown> {
       const timeoutMs = params.timeoutMs ?? DEFAULT_TIMEOUT_MS
+      // The repair round-trip below reuses `messages`, so images survive the retry
       const messages: OllamaChatMessage[] = [
         { role: 'system', content: params.system },
-        { role: 'user', content: params.user },
+        toOllamaMessage(params.user),
       ]
       const first = await ollamaChat(url, model, messages, params.jsonSchema, timeoutMs)
       try {

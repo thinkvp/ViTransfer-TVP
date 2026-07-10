@@ -1,8 +1,30 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod'
-import type { AiDriver, AiGenerateParams, AiTestResult } from './types'
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages'
+import type { AiDriver, AiGenerateParams, AiTestResult, AiUserContentPart } from './types'
 
 const DEFAULT_TIMEOUT_MS = 180_000
+
+function toAnthropicContent(user: string | AiUserContentPart[]): string | ContentBlockParam[] {
+  if (typeof user === 'string') return user
+  return user.map((part): ContentBlockParam => {
+    if (part.type === 'text') return { type: 'text', text: part.text }
+    if (part.type === 'image') {
+      return {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: part.mimeType as 'image/jpeg' | 'image/png' | 'image/webp',
+          data: part.base64,
+        },
+      }
+    }
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: part.base64 },
+    }
+  })
+}
 
 export function createAnthropicDriver(config: { apiKey: string; model: string }): AiDriver {
   const { apiKey, model } = config
@@ -10,6 +32,7 @@ export function createAnthropicDriver(config: { apiKey: string; model: string })
 
   return {
     label: `ANTHROPIC:${model}`,
+    supportsPdfInput: true,
 
     async generateStructured(params: AiGenerateParams): Promise<unknown> {
       const response = await client.messages.parse(
@@ -19,7 +42,7 @@ export function createAnthropicDriver(config: { apiKey: string; model: string })
           thinking: { type: 'adaptive' },
           system: params.system,
           output_config: { format: zodOutputFormat(params.schema) },
-          messages: [{ role: 'user', content: params.user }],
+          messages: [{ role: 'user', content: toAnthropicContent(params.user) }],
         },
         { timeout: params.timeoutMs ?? DEFAULT_TIMEOUT_MS }
       )

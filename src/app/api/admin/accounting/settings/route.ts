@@ -13,6 +13,7 @@ const settingsSchema = z.object({
   basPaygAccountId: z.string().trim().min(1).optional().nullable(),
   basPaygInstalmentDefaultCents: z.number().int().min(0).optional().nullable(),
   stripeRoundingAccountId: z.string().trim().min(1).optional().nullable(),
+  accountingInstructions: z.string().trim().max(20000).optional().nullable(),
 })
 
 export async function GET(request: NextRequest) {

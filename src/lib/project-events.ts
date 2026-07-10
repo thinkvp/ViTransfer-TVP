@@ -27,28 +27,31 @@
  *   event channel free of anything sensitive.
  */
 
+import type IORedis from 'ioredis'
 import { getRedis, getRedisSubscriber, ensureRedisReady } from './redis'
+import { PROJECT_EVENT_TYPES, type ProjectEventType } from './project-event-types'
+
+export type { ProjectEventType } from './project-event-types'
 
 const CHANNEL_PREFIX = 'project-events:'
-
-export type ProjectEventType = 'comment' | 'internal' | 'approval' | 'status' | 'video' | 'upload' | 'album'
-
-const KNOWN_TYPES: ReadonlySet<string> = new Set<ProjectEventType>(['comment', 'internal', 'approval', 'status', 'video', 'upload', 'album'])
 
 type Listener = (type: ProjectEventType) => void
 
 // projectId -> set of local listeners (one per open SSE connection on this process)
 const listeners = new Map<string, Set<Listener>>()
-let handlerBound = false
+// The subscriber client the message handler is currently bound to. Tracked as a
+// reference (not a boolean) so that if the singleton is ever closed and recreated
+// (closeRedisConnection), the next subscribe binds the handler to the NEW client
+// instead of silently fanning out nothing.
+let boundClient: IORedis | null = null
 
-function bindMessageHandler(): void {
-  if (handlerBound) return
-  handlerBound = true
-  const sub = getRedisSubscriber()
+function bindMessageHandler(sub: IORedis): void {
+  if (boundClient === sub) return
+  boundClient = sub
   sub.on('message', (channel: string, message: string) => {
     if (!channel.startsWith(CHANNEL_PREFIX)) return
     const projectId = channel.slice(CHANNEL_PREFIX.length)
-    const type = (KNOWN_TYPES.has(message) ? message : 'comment') as ProjectEventType
+    const type = (PROJECT_EVENT_TYPES.has(message) ? message : 'comment') as ProjectEventType
     const set = listeners.get(projectId)
     if (!set) return
     // Copy before iterating: a listener may unsubscribe itself synchronously.
@@ -87,14 +90,21 @@ export async function subscribeToProjectEvents(
 ): Promise<() => void> {
   const sub = getRedisSubscriber()
   await ensureRedisReady(sub)
-  bindMessageHandler()
+  bindMessageHandler(sub)
 
   let set = listeners.get(projectId)
   if (!set) {
     set = new Set()
     listeners.set(projectId, set)
     // First listener for this project on this process → subscribe the channel.
-    await sub.subscribe(CHANNEL_PREFIX + projectId)
+    try {
+      await sub.subscribe(CHANNEL_PREFIX + projectId)
+    } catch (error) {
+      // Roll back the registry entry: leaving an empty set behind would make the
+      // next subscriber skip the Redis SUBSCRIBE and silently receive nothing.
+      if (set.size === 0) listeners.delete(projectId)
+      throw error
+    }
   }
   set.add(listener)
 

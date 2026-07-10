@@ -1,7 +1,7 @@
 import * as tus from 'tus-js-client'
 import { apiDelete, apiPost } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
-import { attachmentExtension, type AiAttachmentKind } from '@/lib/ai/attachments'
+import { attachmentMimeType, type AiAttachmentKind } from '@/lib/ai/attachments'
 import type { AssistantResult, SalesProposal } from '@/lib/ai/proposal-schemas'
 import type { SalesQuoteWithVersion, SalesInvoiceWithVersion } from '@/lib/sales/db-mappers'
 
@@ -60,22 +60,17 @@ export interface AssistantAttachment {
   base64: string
 }
 
-const ATTACHMENT_MIME: Record<string, string> = {
-  '.eml': 'message/rfc822',
-  '.pdf': 'application/pdf',
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  '.txt': 'text/plain',
-}
-
-function attachmentMimeType(fileName: string): string {
-  return ATTACHMENT_MIME[attachmentExtension(fileName)] ?? 'application/octet-stream'
-}
-
 function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes
+}
+
+/** Rebuild a File from a browser-held attachment (e.g. to upload a receipt to a created expense) */
+export function base64ToFile(att: AssistantAttachment): File {
+  const bytes = base64ToBytes(att.base64)
+  return new File([bytes as BlobPart], att.fileName, { type: attachmentMimeType(att.fileName) })
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

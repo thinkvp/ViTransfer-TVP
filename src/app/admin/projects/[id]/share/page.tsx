@@ -991,8 +991,10 @@ export default function AdminSharePage() {
   const adminShareSlug: string | undefined = project?.slug
   useEffect(() => {
     if (!adminShareSlug) return
-    const authToken = getAccessToken()
-    if (!authToken) return
+    // Read the token per (re)connect attempt: admin access tokens rotate every
+    // ~15 min, so a captured string would leave later reconnects sending an
+    // expired credential and the stream permanently dead.
+    if (!getAccessToken()) return
 
     const timers: Record<string, ReturnType<typeof setTimeout> | undefined> = {}
     const debounce = (key: string, fn: () => void) => {
@@ -1034,8 +1036,12 @@ export default function AdminSharePage() {
 
     const handle = openProjectEventStream({
       token: adminShareSlug,
-      authToken,
+      authToken: () => getAccessToken(),
       onEvent: handleEvent,
+      onAuthError: () => {
+        // Rotate the expired admin access token so the next retry succeeds.
+        void attemptRefresh()
+      },
     })
 
     return () => {

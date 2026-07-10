@@ -5,14 +5,17 @@ import { Card, CardContent } from '@/components/ui/card'
 import {
   Sparkles,
   Loader2,
-  Paperclip,
+  Plus,
   X,
   Info,
   Mail,
   FileText,
+  Image as ImageIcon,
+  Camera,
   Mic,
   FolderKanban,
   Receipt,
+  ReceiptText,
   Lightbulb,
   Check,
   Mail as MailIcon,
@@ -25,14 +28,27 @@ import type { ResolvedReplyDraft } from '@/lib/ai/proposal-schemas'
 import { apiFetch, apiPost } from '@/lib/api-client'
 import { cn, formatFileSize } from '@/lib/utils'
 import type { AssistantResult } from '@/lib/ai/proposal-schemas'
+import type { ResolvedExpenseResult } from '@/lib/ai/expense-schemas'
 import {
   ATTACHMENT_ACCEPT,
+  EXPENSE_ATTACHMENT_ACCEPT,
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   attachmentKindForFileName,
+  isReceiptAttachment,
 } from '@/lib/ai/attachments'
+import { useAuth } from '@/components/AuthProvider'
+import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { CameraCaptureDialog } from '@/components/admin/accounting/CameraCaptureButton'
 import { ProjectProposalCard } from '@/components/admin/assistant/ProjectProposalCard'
 import { SalesProposalCard } from '@/components/admin/assistant/SalesProposalCard'
+import { ExpenseProposalCard } from '@/components/admin/assistant/ExpenseProposalCard'
 import type { AssistantAttachment, ClientOption } from '@/components/admin/assistant/helpers'
 
 type TurnStatus = 'running' | 'done' | 'failed'
@@ -42,8 +58,13 @@ interface SubmittedFlags {
   wantProject: boolean
   wantSales: boolean
   wantReply: boolean
+  /** Expense (receipt extraction) mode — exclusive of the flags above */
+  wantExpense: boolean
   docType: 'QUOTE' | 'INVOICE' | 'BOTH'
 }
+
+/** Proposal-mode turns return AssistantResult; expense-mode turns return ResolvedExpenseResult */
+type TurnResult = AssistantResult | ResolvedExpenseResult
 
 interface Turn {
   id: number
@@ -57,7 +78,7 @@ interface Turn {
   statusText?: string
   showQueuedHint?: boolean
   error?: string
-  result?: AssistantResult
+  result?: TurnResult
   provider?: string
   submitted: SubmittedFlags
 }
@@ -212,11 +233,14 @@ export default function AssistantPage() {
   const [attachError, setAttachError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
 
-  // Intent pills — nothing selected by default; the user picks what to build
+  // Intent pills — nothing selected by default; the user picks what to build.
+  // Expense is exclusive: turning it on clears the others and vice versa.
   const [wantProject, setWantProject] = useState(false)
   const [wantQuote, setWantQuote] = useState(false)
   const [wantInvoice, setWantInvoice] = useState(false)
   const [wantResponse, setWantResponse] = useState(false)
+  const [wantExpense, setWantExpense] = useState(false)
+  const [cameraOpen, setCameraOpen] = useState(false)
 
   // Shared review state across turns
   const [clients, setClients] = useState<ClientOption[]>([])
@@ -272,6 +296,22 @@ export default function AssistantPage() {
   const isRefine = latestResultTurn != null
   const canAttach = !turns.some((t) => t.status === 'done' && t.result)
   const wantSales = wantQuote || wantInvoice
+
+  // Expense mode needs accounting access (the pill is hidden without it; the API re-checks)
+  const { user } = useAuth()
+  const canUseExpense = user
+    ? canSeeMenu(user.permissions ? normalizeRolePermissions(user.permissions) : adminAllPermissions(), 'accounting')
+    : false
+
+  // Mobile detection for the plus-button menu (Add Files / Take Photo)
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const update = () => setIsMobile(mq.matches)
+    update()
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
     setVoiceSupported(getSpeechRecognitionCtor() != null)
@@ -502,10 +542,15 @@ export default function AssistantPage() {
 
     for (const file of Array.from(files)) {
       const kind = attachmentKindForFileName(file.name)
-      if (!kind) {
-        errors.push(`${file.name}: unsupported type (use .eml, .pdf, .docx or .txt)`)
+      if (wantExpense ? !isReceiptAttachment(file.name) : !kind || kind === 'image') {
+        errors.push(
+          wantExpense
+            ? `${file.name}: receipts are photos or PDFs (.pdf, .jpg, .png, .webp — HEIC isn't supported, export as JPEG)`
+            : `${file.name}: unsupported type (use .eml, .pdf, .docx or .txt)`
+        )
         continue
       }
+      if (!kind) continue // unreachable — narrows the type below
       if (file.size === 0) {
         errors.push(`${file.name}: file is empty`)
         continue
@@ -533,6 +578,40 @@ export default function AssistantPage() {
     }
     if (errors.length > 0) setAttachError(errors.join(' · '))
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  /** Expense is exclusive — toggling it clears the other pills and drops now-invalid attachments */
+  function toggleExpenseMode() {
+    const next = !wantExpense
+    setWantExpense(next)
+    if (next) {
+      setWantProject(false)
+      setWantQuote(false)
+      setWantInvoice(false)
+      setWantResponse(false)
+    }
+    const keep = attachments.filter((a) => (next ? isReceiptAttachment(a.fileName) : a.kind !== 'image'))
+    if (keep.length !== attachments.length) {
+      setAttachments(keep)
+      setAttachError(
+        next
+          ? 'Removed attachments that aren’t receipts — Expense mode takes photos or PDFs only.'
+          : 'Removed receipt photos — they’re only supported in Expense mode.'
+      )
+    }
+  }
+
+  /** Any other pill clears Expense (they can't combine) */
+  function pickNonExpensePill(setter: (updater: (v: boolean) => boolean) => void) {
+    setter((v) => !v)
+    if (wantExpense) {
+      setWantExpense(false)
+      const keep = attachments.filter((a) => a.kind !== 'image')
+      if (keep.length !== attachments.length) {
+        setAttachments(keep)
+        setAttachError('Removed receipt photos — they’re only supported in Expense mode.')
+      }
+    }
   }
 
   function patchTurn(id: number, patch: Partial<Turn>) {
@@ -571,7 +650,7 @@ export default function AssistantPage() {
             status: 'done',
             statusText: undefined,
             showQueuedHint: false,
-            result: request.resultJson as AssistantResult,
+            result: request.resultJson as TurnResult,
             provider: request.provider ?? undefined,
           })
           return
@@ -616,6 +695,7 @@ export default function AssistantPage() {
         wantProject: submitted.wantProject,
         wantSales: submitted.wantSales,
         wantReply: submitted.wantReply,
+        wantExpense: submitted.wantExpense,
         docType: submitted.docType,
       })
       return
@@ -623,10 +703,11 @@ export default function AssistantPage() {
 
     // First turn → create from the brief + attachments
     if (!text && attachments.length === 0) return
-    if (!wantProject && !wantSales && !wantResponse) return
+    if (!wantProject && !wantSales && !wantResponse && !wantExpense) return
+    if (wantExpense && attachments.length === 0) return
 
     const docType: SubmittedFlags['docType'] = wantQuote && wantInvoice ? 'BOTH' : wantInvoice ? 'INVOICE' : 'QUOTE'
-    const submitted: SubmittedFlags = { wantProject, wantSales, wantReply: wantResponse, docType }
+    const submitted: SubmittedFlags = { wantProject, wantSales, wantReply: wantResponse, wantExpense, docType }
     const attachSnapshot = attachments
     const turnId = ++turnSeqRef.current
     if (listeningRef.current) stopListening({ discard: true })
@@ -651,35 +732,47 @@ export default function AssistantPage() {
       wantProject,
       wantSales,
       wantReply: wantResponse,
+      wantExpense,
       docType,
     })
   }
 
-  const sendDisabled = running || (isRefine ? !prompt.trim() : (!prompt.trim() && attachments.length === 0) || (!wantProject && !wantSales && !wantResponse))
+  const sendDisabled =
+    running ||
+    (isRefine
+      ? !prompt.trim()
+      : wantExpense
+        ? attachments.length === 0
+        : (!prompt.trim() && attachments.length === 0) || (!wantProject && !wantSales && !wantResponse))
 
   // Chat-append rendering: a create turn shows every section it produced; a refine turn
   // shows ONLY the section(s) it changed (so revising a quote emits just the quote below).
   // A section re-issued by a later turn is shown as a one-line "updated below" marker in the
   // earlier turn, and only the latest instance of each section stays interactive.
   const doneTurns = turns.filter((t) => t.status === 'done' && t.result)
-  const shownByTurn = new Map<number, { reply: boolean; project: boolean; sales: boolean }>()
-  const lastShown = { reply: -1, project: -1, sales: -1 }
+  const shownByTurn = new Map<number, { reply: boolean; project: boolean; sales: boolean; expenses: boolean }>()
+  const lastShown = { reply: -1, project: -1, sales: -1, expenses: -1 }
   doneTurns.forEach((t, idx) => {
-    const r = t.result as AssistantResult
-    const prev = idx > 0 ? (doneTurns[idx - 1].result as AssistantResult) : null
-    const changed = (key: 'reply' | 'project' | 'sales') =>
+    const r = t.result as Partial<AssistantResult> & Partial<ResolvedExpenseResult>
+    const prev = idx > 0 ? (doneTurns[idx - 1].result as Partial<AssistantResult> & Partial<ResolvedExpenseResult>) : null
+    const changed = (key: 'reply' | 'project' | 'sales' | 'expenses') =>
       JSON.stringify(prev?.[key] ?? null) !== JSON.stringify(r[key] ?? null)
     const firstOrCreate = idx === 0 || !t.isRefine
     const shown = {
       reply: !!(r.reply && (r.reply as ResolvedReplyDraft).body) && (firstOrCreate || changed('reply')),
       project: !!r.project && (firstOrCreate || changed('project')),
       sales: !!r.sales && (firstOrCreate || changed('sales')),
+      expenses: !!r.expenses && (firstOrCreate || changed('expenses')),
     }
     shownByTurn.set(t.id, shown)
     if (shown.reply) lastShown.reply = t.id
     if (shown.project) lastShown.project = t.id
     if (shown.sales) lastShown.sales = t.id
+    if (shown.expenses) lastShown.expenses = t.id
   })
+
+  // Expense-mode receipts live only on the create turn — refine turns reuse them
+  const createTurnAttachments = turns.find((t) => !t.isRefine)?.attachments ?? []
 
   return (
     <div
@@ -759,6 +852,8 @@ export default function AssistantPage() {
                             <div key={a.fileName} className="flex items-center gap-2 text-xs border rounded-lg px-2.5 py-1 bg-muted/30">
                               {a.kind === 'email' ? (
                                 <Mail className="w-3.5 h-3.5 shrink-0 text-primary" />
+                              ) : a.kind === 'image' ? (
+                                <ImageIcon className="w-3.5 h-3.5 shrink-0 text-primary" />
                               ) : (
                                 <FileText className="w-3.5 h-3.5 shrink-0 text-primary" />
                               )}
@@ -797,9 +892,9 @@ export default function AssistantPage() {
                 )}
 
                 {turn.status === 'done' && turn.result && (() => {
-                  const result = turn.result
-                  const shown = shownByTurn.get(turn.id) ?? { reply: false, project: false, sales: false }
-                  const anyShown = shown.reply || shown.project || shown.sales
+                  const result = turn.result as Partial<AssistantResult> & Partial<ResolvedExpenseResult> & { assumptions: string[] }
+                  const shown = shownByTurn.get(turn.id) ?? { reply: false, project: false, sales: false, expenses: false }
+                  const anyShown = shown.reply || shown.project || shown.sales || shown.expenses
                   const isLatest = turn.id === latestResultTurnId
                   return (
                     <div className="space-y-4">
@@ -856,6 +951,13 @@ export default function AssistantPage() {
                           <SupersededChip label={salesTypeLabel(result.sales!.docType)} />
                         ))}
 
+                      {shown.expenses &&
+                        (lastShown.expenses === turn.id ? (
+                          <ExpenseProposalCard proposals={result.expenses!} attachments={createTurnAttachments} />
+                        ) : (
+                          <SupersededChip label="Expense proposals" />
+                        ))}
+
                       {turn.isRefine && !anyShown && result.assumptions.length === 0 && (
                         <p className="text-sm text-muted-foreground">No changes were needed.</p>
                       )}
@@ -873,21 +975,35 @@ export default function AssistantPage() {
       {/* Composer — pinned to the bottom of the viewport */}
       <div className="shrink-0 border-t border-border/60 bg-background/80 backdrop-blur">
         <div className="mx-auto max-w-4xl px-4 py-3 space-y-2.5">
-          {/* Intent pills (create only — a continued message refines the result above) */}
+          {/* Intent pills (create only — a continued message refines the result above).
+              Two groups so mobile wraps as "Project Quote Invoice" / "Response | Expense". */}
           {!isRefine && (
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <Pill active={wantProject} disabled={running} onClick={() => setWantProject((v) => !v)} icon={FolderKanban}>
-                Project
-              </Pill>
-              <Pill active={wantQuote} disabled={running} onClick={() => setWantQuote((v) => !v)} icon={Receipt}>
-                Quote
-              </Pill>
-              <Pill active={wantInvoice} disabled={running} onClick={() => setWantInvoice((v) => !v)} icon={Receipt}>
-                Invoice
-              </Pill>
-              <Pill active={wantResponse} disabled={running} onClick={() => setWantResponse((v) => !v)} icon={MailIcon}>
-                Response
-              </Pill>
+            <div className="flex flex-col items-center gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Pill active={wantProject} disabled={running} onClick={() => pickNonExpensePill(setWantProject)} icon={FolderKanban}>
+                  Project
+                </Pill>
+                <Pill active={wantQuote} disabled={running} onClick={() => pickNonExpensePill(setWantQuote)} icon={Receipt}>
+                  Quote
+                </Pill>
+                <Pill active={wantInvoice} disabled={running} onClick={() => pickNonExpensePill(setWantInvoice)} icon={Receipt}>
+                  Invoice
+                </Pill>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Pill active={wantResponse} disabled={running} onClick={() => pickNonExpensePill(setWantResponse)} icon={MailIcon}>
+                  Response
+                </Pill>
+                {canUseExpense && (
+                  <>
+                    {/* Divider marks Expense as the exclusive, on-its-own mode */}
+                    <div className="h-5 w-px bg-border" aria-hidden="true" />
+                    <Pill active={wantExpense} disabled={running} onClick={toggleExpenseMode} icon={ReceiptText}>
+                      Expense
+                    </Pill>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
@@ -898,6 +1014,8 @@ export default function AssistantPage() {
                 <div key={a.fileName} className="flex items-center gap-2 text-xs border rounded-lg px-2.5 py-1 bg-muted/30">
                   {a.kind === 'email' ? (
                     <Mail className="w-3.5 h-3.5 shrink-0 text-primary" />
+                  ) : a.kind === 'image' ? (
+                    <ImageIcon className="w-3.5 h-3.5 shrink-0 text-primary" />
                   ) : (
                     <FileText className="w-3.5 h-3.5 shrink-0 text-primary" />
                   )}
@@ -923,27 +1041,54 @@ export default function AssistantPage() {
               isDragging ? 'border-primary ring-2 ring-primary/30' : 'border-border'
             )}
           >
-            {canAttach && (
-              <button
-                type="button"
-                disabled={running}
-                onClick={() => fileInputRef.current?.click()}
-                aria-label="Attach files"
-                title="Attach .eml, .pdf, .docx or .txt"
-                className="shrink-0 h-9 w-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
-              >
-                <Paperclip className="w-5 h-5" />
-              </button>
-            )}
+            {canAttach &&
+              (wantExpense && isMobile ? (
+                // Expense mode on mobile: choose between the file picker and the camera
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={running}
+                      aria-label="Add receipts"
+                      title="Add receipts"
+                      className="shrink-0 h-9 w-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
+                    >
+                      <Plus className="w-5 h-5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="top">
+                    <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                      <FileText className="w-4 h-4 mr-2" />
+                      Add Files
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setCameraOpen(true)}>
+                      <Camera className="w-4 h-4 mr-2" />
+                      Take Photo
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <button
+                  type="button"
+                  disabled={running}
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Attach files"
+                  title={wantExpense ? 'Attach receipts (.pdf, .jpg, .png, .webp)' : 'Attach .eml, .pdf, .docx or .txt'}
+                  className="shrink-0 h-9 w-9 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              ))}
             <input
               ref={fileInputRef}
               type="file"
-              accept={ATTACHMENT_ACCEPT}
+              accept={wantExpense ? EXPENSE_ATTACHMENT_ACCEPT : ATTACHMENT_ACCEPT}
               multiple
               className="hidden"
               disabled={running}
               onChange={(e) => void addFiles(e.target.files)}
             />
+            <CameraCaptureDialog open={cameraOpen} onOpenChange={setCameraOpen} onCapture={(files) => addFiles(files)} />
 
             <textarea
               ref={textareaRef}
@@ -957,7 +1102,13 @@ export default function AssistantPage() {
                   void handleSend()
                 }
               }}
-              placeholder={isRefine ? 'Ask for a change…' : 'Describe the brief, or paste the client’s email…'}
+              placeholder={
+                isRefine
+                  ? 'Ask for a change…'
+                  : wantExpense
+                    ? 'Optional note about these receipts…'
+                    : 'Describe the brief, or paste the client’s email…'
+              }
               className="flex-1 resize-none bg-transparent px-1.5 py-2 text-sm outline-none placeholder:text-muted-foreground max-h-[200px]"
             />
 

@@ -163,6 +163,8 @@ export interface AccountingSettings {
   basPaygAccountId: string | null
   basPaygInstalmentDefaultCents: number | null
   stripeRoundingAccountId: string | null
+  // Freeform accounting knowledge & rules for the AI assistant's expense mode
+  accountingInstructions: string | null
   updatedAt: string
 }
 

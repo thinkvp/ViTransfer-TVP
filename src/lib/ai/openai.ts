@@ -1,8 +1,23 @@
 import OpenAI from 'openai'
 import { zodResponseFormat } from 'openai/helpers/zod'
-import type { AiDriver, AiGenerateParams, AiTestResult } from './types'
+import type { ChatCompletionContentPart } from 'openai/resources/chat/completions'
+import type { AiDriver, AiGenerateParams, AiTestResult, AiUserContentPart } from './types'
 
 const DEFAULT_TIMEOUT_MS = 180_000
+
+function toOpenAiContent(user: string | AiUserContentPart[]): string | ChatCompletionContentPart[] {
+  if (typeof user === 'string') return user
+  return user.map((part): ChatCompletionContentPart => {
+    if (part.type === 'text') return { type: 'text', text: part.text }
+    if (part.type === 'image') {
+      return { type: 'image_url', image_url: { url: `data:${part.mimeType};base64,${part.base64}` } }
+    }
+    return {
+      type: 'file',
+      file: { filename: part.fileName, file_data: `data:application/pdf;base64,${part.base64}` },
+    }
+  })
+}
 
 export function createOpenAiDriver(config: { apiKey: string; model: string }): AiDriver {
   const { apiKey, model } = config
@@ -10,6 +25,7 @@ export function createOpenAiDriver(config: { apiKey: string; model: string }): A
 
   return {
     label: `OPENAI:${model}`,
+    supportsPdfInput: true,
 
     async generateStructured(params: AiGenerateParams): Promise<unknown> {
       const completion = await client.chat.completions.parse(
@@ -17,7 +33,7 @@ export function createOpenAiDriver(config: { apiKey: string; model: string }): A
           model,
           messages: [
             { role: 'system', content: params.system },
-            { role: 'user', content: params.user },
+            { role: 'user', content: toOpenAiContent(params.user) },
           ],
           // Strict Structured Outputs — the OpenAI equivalent of the Anthropic parse path.
           // The zod helper builds an OpenAI-compatible strict JSON schema from the same schema.

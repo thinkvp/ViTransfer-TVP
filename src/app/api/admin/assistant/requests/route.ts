@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
+import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 import { getAiAssistantQueue } from '@/lib/queue'
 import { isSuspiciousFilename, sanitizeFilename } from '@/lib/file-validation'
@@ -10,8 +11,10 @@ import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BASE64_LENGTH,
   ALLOWED_ATTACHMENT_EXTENSIONS,
+  EXPENSE_ATTACHMENT_EXTENSIONS,
   attachmentKindForFileName,
   attachmentContentLooksValid,
+  isReceiptAttachment,
   type AiRequestAttachment,
 } from '@/lib/ai/attachments'
 
@@ -33,6 +36,8 @@ const createSchema = z.object({
   wantProject: z.boolean().default(true),
   wantSales: z.boolean().default(true),
   wantReply: z.boolean().default(false),
+  // Expense (receipt extraction) mode — exclusive of the flags above
+  wantExpense: z.boolean().default(false),
   docType: z.enum(['QUOTE', 'INVOICE', 'BOTH']).default('QUOTE'),
   // Refine mode: prior proposal JSON + the change request lives in `prompt`
   refineOf: z.unknown().optional(),
@@ -97,7 +102,17 @@ export async function POST(request: NextRequest) {
 
   const input = parsed.data
   const isRefine = input.refineOf != null
-  if (!isRefine && !input.wantProject && !input.wantSales && !input.wantReply) {
+
+  if (input.wantExpense) {
+    // Expense mode is accounting territory — the assistant menu alone isn't enough
+    const forbidden = requireMenuAccess(authResult, 'accounting', request)
+    if (forbidden) return forbidden
+    if (input.wantProject || input.wantSales || input.wantReply) {
+      return NextResponse.json({ error: "Expense mode can't be combined with other drafts." }, { status: 400 })
+    }
+  }
+
+  if (!isRefine && !input.wantExpense && !input.wantProject && !input.wantSales && !input.wantReply) {
     return NextResponse.json({ error: 'Select at least one thing to draft (project, quote, invoice or response).' }, { status: 400 })
   }
   if (isRefine) {
@@ -107,6 +122,8 @@ export async function POST(request: NextRequest) {
     if (JSON.stringify(input.refineOf).length > MAX_REFINE_JSON_LENGTH) {
       return NextResponse.json({ error: 'The proposal being refined is too large.' }, { status: 400 })
     }
+  } else if (input.wantExpense && input.attachments.length === 0) {
+    return NextResponse.json({ error: 'Attach at least one receipt (photo or PDF).' }, { status: 400 })
   } else if (!input.prompt && input.attachments.length === 0) {
     return NextResponse.json({ error: 'Provide a brief or attach at least one file.' }, { status: 400 })
   }
@@ -118,7 +135,16 @@ export async function POST(request: NextRequest) {
     }
     const fileName = sanitizeFilename(raw.fileName)
     const kind = attachmentKindForFileName(fileName)
-    if (!kind) {
+    if (input.wantExpense) {
+      // Receipts only: photos or PDFs
+      if (!kind || !isReceiptAttachment(fileName)) {
+        return NextResponse.json(
+          { error: `"${raw.fileName}": expense mode accepts receipts only. Allowed: ${EXPENSE_ATTACHMENT_EXTENSIONS.join(', ')}` },
+          { status: 400 }
+        )
+      }
+    } else if (!kind || kind === 'image') {
+      // Images are receipt-only — they have no text-extraction path
       return NextResponse.json(
         { error: `"${raw.fileName}": unsupported type. Allowed: ${ALLOWED_ATTACHMENT_EXTENSIONS.join(', ')}` },
         { status: 400 }
@@ -150,6 +176,7 @@ export async function POST(request: NextRequest) {
           wantProject: input.wantProject,
           wantSales: input.wantSales,
           wantReply: input.wantReply,
+          wantExpense: input.wantExpense,
           docType: input.docType,
         },
         ...(isRefine ? { refine: { instruction: input.prompt, of: input.refineOf } } : {}),

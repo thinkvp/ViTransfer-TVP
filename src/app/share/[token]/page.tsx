@@ -21,7 +21,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Lock, Check, Mail, KeyRound } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
-import { apiFetch } from '@/lib/api-client'
+import { apiFetch, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
 import { isS3Mode } from '@/lib/storage-provider-client'
@@ -658,9 +658,14 @@ export default function SharePage() {
   // refetch when the tab regains visibility as a safety net for dropped links.
   useEffect(() => {
     if (!token) return
-    const authToken = isAdminSession ? getAccessToken() : (loadShareToken(storageKey) || shareToken)
+    // Resolved per (re)connect attempt so reconnects pick up rotated tokens —
+    // admin access tokens refresh every ~15 min, and a captured string would
+    // leave every reconnect after that sending an expired credential.
+    const getStreamAuthToken = () => (
+      isAdminSession ? getAccessToken() : (loadShareToken(storageKey) || shareTokenRef.current)
+    )
     // Non-admins need a share token to read the project; without one there's nothing to stream.
-    if (!isAdminSession && !authToken) return
+    if (!isAdminSession && !getStreamAuthToken()) return
 
     const timers: Record<string, ReturnType<typeof setTimeout> | undefined> = {}
     const debounce = (key: string, fn: () => void) => {
@@ -707,11 +712,16 @@ export default function SharePage() {
 
     const handle = openProjectEventStream({
       token,
-      authToken,
+      authToken: getStreamAuthToken,
       onEvent: handleEvent,
       onAuthError: () => {
-        // Session likely expired; let the existing auth flow surface the re-auth UI.
-        if (!isAdminSession) void fetchComments()
+        if (isAdminSession) {
+          // Rotate the expired admin access token so the next retry succeeds.
+          void attemptRefresh()
+        } else {
+          // Session likely expired; let the existing auth flow surface the re-auth UI.
+          void fetchComments()
+        }
       },
     })
 

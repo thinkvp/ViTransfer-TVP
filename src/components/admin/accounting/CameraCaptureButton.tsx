@@ -33,6 +33,12 @@ interface CameraCaptureButtonProps {
   className?: string
 }
 
+interface CameraCaptureDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCapture: (files: File[]) => void | Promise<void>
+}
+
 function getCameraErrorMessage(error: unknown) {
   if (!(error instanceof DOMException)) return 'Unable to access the camera.'
   if (error.name === 'NotAllowedError') return 'Camera permission was denied.'
@@ -41,13 +47,13 @@ function getCameraErrorMessage(error: unknown) {
   return 'Unable to access the camera.'
 }
 
-export function CameraCaptureButton({ onCapture, disabled = false, className }: CameraCaptureButtonProps) {
+/** Controlled take-photo dialog — usable from any trigger (accounting buttons, the assistant's plus menu) */
+export function CameraCaptureDialog({ open, onOpenChange, onCapture }: CameraCaptureDialogProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   // camerasRef holds the sorted device list (populated after permission is granted)
   const camerasRef = useRef<MediaDeviceInfo[]>([])
   const cameraIdxRef = useRef(0)
-  const [open, setOpen] = useState(false)
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(false)
   const [capturing, setCapturing] = useState(false)
@@ -212,7 +218,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
       await onCapture([capturedFile])
       stopStream()
       clearCaptured()
-      setOpen(false)
+      onOpenChange(false)
     } catch (captureError) {
       setError(captureError instanceof Error ? captureError.message : 'Unable to attach the photo.')
     } finally {
@@ -226,7 +232,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
   }
 
   function handleOpenChange(nextOpen: boolean) {
-    setOpen(nextOpen)
+    onOpenChange(nextOpen)
     if (!nextOpen) {
       stopStream()
       clearCaptured()
@@ -242,21 +248,7 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
   }
 
   return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        size="icon"
-        onClick={() => setOpen(true)}
-        disabled={disabled}
-        className={cn('sm:hidden', className)}
-        aria-label="Take photo"
-        title="Take photo"
-      >
-        <Camera className="w-4 h-4" />
-      </Button>
-
-      <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Take Photo</DialogTitle>
@@ -330,6 +322,29 @@ export function CameraCaptureButton({ onCapture, disabled = false, className }: 
           </div>
         </DialogContent>
       </Dialog>
+  )
+}
+
+/** Mobile-only trigger button wrapping the dialog — the original accounting call sites */
+export function CameraCaptureButton({ onCapture, disabled = false, className }: CameraCaptureButtonProps) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        onClick={() => setOpen(true)}
+        disabled={disabled}
+        className={cn('sm:hidden', className)}
+        aria-label="Take photo"
+        title="Take photo"
+      >
+        <Camera className="w-4 h-4" />
+      </Button>
+
+      <CameraCaptureDialog open={open} onOpenChange={setOpen} onCapture={onCapture} />
     </>
   )
 }

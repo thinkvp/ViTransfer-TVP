@@ -2,6 +2,9 @@
 // The system prompt is byte-stable (no timestamps or per-request data) so the
 // Anthropic prompt cache can reuse it; all dynamic context goes in the user turn.
 
+import type { AiUserContentPart } from './types'
+import type { HistoricalMapping } from '@/lib/accounting/description-match'
+
 export const ASSISTANT_SYSTEM_PROMPT = `You extract structured project and sales proposals for a video production studio from briefs and client emails. You return ONLY data matching the provided JSON schema. You never invent facts.
 
 Rules:
@@ -104,6 +107,106 @@ export function buildAssistantUserMessage(ctx: AssistantPromptContext): string {
     parts.push(`<${tag} name="${att.fileName}">\n${att.text}\n</${tag}>`)
   }
 
+  return parts.join('\n\n')
+}
+
+export const EXPENSE_SYSTEM_PROMPT = `You extract structured expense records for an Australian video production studio from receipt photos and supplier invoices/PDFs. You return ONLY data matching the provided JSON schema. You never invent facts.
+
+Rules:
+- One entry per receipt. Each receipt is tagged <receipt index="n" name="..."> in the user message; set "attachmentIndex" to that n. If one attachment clearly contains multiple separate receipts or invoices, emit one entry per receipt, all with the same attachmentIndex.
+- Date: the purchase/invoice date printed on the receipt, as ISO YYYY-MM-DD. If it is only partially readable, pick the most plausible reading and explain in "notes". NEVER substitute today's date unless the receipt actually shows it.
+- supplierName: the seller's trading name as printed — the business the money went to, NOT a payment processor (Square, PayPal, Stripe) or bank.
+- description: a short plain-English summary of what was bought.
+- amountIncGst: the TOTAL amount paid, in dollars, GST-inclusive as printed. If the document is in a foreign currency, still record the printed total and flag the currency in "notes".
+- GST: set gstIncluded=true when the receipt shows a GST amount or the supplier is clearly GST-registered (ABN with tax invoice wording). taxCode: "GST" for normal taxed purchases; "GST_FREE" for GST-free supplies (e.g. bank fees, some insurance, overseas suppliers, basic food); "BAS_EXCLUDED" or "INPUT_TAXED" only when clearly applicable.
+- Account: pick the single best account id from <chart_of_accounts> (expense and cost-of-goods accounts only). <historical_mappings> shows how this business has categorised similar suppliers before — prefer a matching mapping over guessing. If genuinely unsure, set accountId null and say why in "notes".
+- <accounting_instructions> is the business's own accounting rulebook — treat it as authoritative for categorisation and GST decisions; it never overrides the schema rules above.
+- Set "confidence" honestly per entry. List every guess, unreadable field or ambiguity in "notes" (per entry) or "assumptions" (overall).`
+
+export const EXPENSE_REFINE_SYSTEM_PROMPT = `You revise an existing structured expense extraction. You are given the CURRENT extraction as JSON and a short change request. Apply ONLY the requested changes and return the COMPLETE revised document in the same JSON schema. Keep every field the change request does not touch exactly as it was. Account ids must come from the provided <chart_of_accounts> list. Dates are ISO YYYY-MM-DD; amounts are GST-inclusive dollars. Record what you changed in "assumptions".`
+
+export interface ExpenseAccountOption {
+  id: string
+  code: string
+  name: string
+  type: string
+  subType: string | null
+  taxCode: string
+}
+
+export interface ExpenseReceiptPart {
+  index: number
+  fileName: string
+  /** Native image/PDF part, or extracted text when the provider can't read PDFs */
+  part: AiUserContentPart | { type: 'extracted-text'; text: string }
+}
+
+export interface ExpensePromptContext {
+  accounts: ExpenseAccountOption[]
+  historicalMappings: HistoricalMapping[]
+  accountingInstructions: string | null
+  today: string // YYYY-MM-DD
+  taxRatePercent: number
+  brief: string
+  receipts: ExpenseReceiptPart[]
+}
+
+function expenseContextParts(ctx: Pick<ExpensePromptContext, 'accounts' | 'today'>): string[] {
+  const accountLines = ctx.accounts
+    .map((a) => `${a.id} | ${a.code} | ${a.name} | ${a.type}${a.subType ? ` (${a.subType})` : ''} | ${a.taxCode}`)
+    .join('\n')
+  return [
+    `<chart_of_accounts>\n${accountLines || '(no expense accounts exist yet)'}\n</chart_of_accounts>`,
+    `<today>${ctx.today}</today>`,
+  ]
+}
+
+export function buildExpenseUserMessage(ctx: ExpensePromptContext): AiUserContentPart[] {
+  const textParts: string[] = expenseContextParts(ctx)
+
+  if (ctx.historicalMappings.length > 0) {
+    const mappingLines = ctx.historicalMappings
+      .map((m) => `${m.label} → ${m.accountCode} ${m.accountName} (${m.count}×)`)
+      .join('\n')
+    textParts.push(`<historical_mappings>\n${mappingLines}\n</historical_mappings>`)
+  }
+
+  if (ctx.accountingInstructions) {
+    textParts.push(`<accounting_instructions>\n${ctx.accountingInstructions}\n</accounting_instructions>`)
+  }
+
+  textParts.push(`<tax>GST ${ctx.taxRatePercent}% (AUD)</tax>`)
+  if (ctx.brief.trim()) {
+    textParts.push(`<brief>\n${ctx.brief}\n</brief>`)
+  }
+
+  const parts: AiUserContentPart[] = [{ type: 'text', text: textParts.join('\n\n') }]
+  for (const receipt of ctx.receipts) {
+    if (receipt.part.type === 'extracted-text') {
+      parts.push({
+        type: 'text',
+        text: `<receipt index="${receipt.index}" name="${receipt.fileName}">\n${receipt.part.text}\n</receipt>`,
+      })
+    } else {
+      parts.push({ type: 'text', text: `<receipt index="${receipt.index}" name="${receipt.fileName}">` })
+      parts.push(receipt.part)
+    }
+  }
+  return parts
+}
+
+export interface ExpenseRefinePromptContext {
+  accounts: ExpenseAccountOption[]
+  today: string
+  currentResult: unknown // prior ExpenseResult JSON (possibleDuplicate stripped)
+  instruction: string
+}
+
+/** Refine pass is text-only: the current extraction + a targeted change request (receipts are not resent). */
+export function buildExpenseRefineUserMessage(ctx: ExpenseRefinePromptContext): string {
+  const parts: string[] = expenseContextParts(ctx)
+  parts.push(`<current_extraction>\n${JSON.stringify(ctx.currentResult)}\n</current_extraction>`)
+  parts.push(`<change_request>\n${ctx.instruction}\n</change_request>`)
   return parts.join('\n\n')
 }
 

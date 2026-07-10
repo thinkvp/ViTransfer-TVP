@@ -2,102 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
+import { normalizeDescription, scoreDescriptionMatch } from '@/lib/accounting/description-match'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-const GENERIC_DESCRIPTION_TOKENS = new Set([
-  'australia',
-  'sydney',
-  'melbourne',
-  'brisbane',
-  'perth',
-  'adelaide',
-  'card',
-  'cards',
-  'value',
-  'date',
-  'debit',
-  'credit',
-  'purchase',
-  'payment',
-  'merchant',
-  'bank',
-  'transfer',
-  'visa',
-  'mastercard',
-  'eftpos',
-  'pos',
-  'pending',
-])
-
-function normalizeDescription(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function extractMeaningfulTokens(value: string) {
-  const normalized = normalizeDescription(value)
-  if (!normalized) return []
-
-  const uniqueTokens: string[] = []
-  const seen = new Set<string>()
-
-  for (const token of normalized.split(' ')) {
-    if (!token || seen.has(token)) continue
-    if (token.length < 3) continue
-    if (!/[a-z]/.test(token)) continue
-    if (/^x+\d+$/.test(token)) continue
-    if (/^\d+$/.test(token)) continue
-    if (GENERIC_DESCRIPTION_TOKENS.has(token)) continue
-    seen.add(token)
-    uniqueTokens.push(token)
-    if (uniqueTokens.length >= 6) break
-  }
-
-  return uniqueTokens
-}
-
-function scoreDescriptionMatch(targetDescription: string, candidateDescription: string) {
-  const targetNormalized = normalizeDescription(targetDescription)
-  const candidateNormalized = normalizeDescription(candidateDescription)
-
-  if (!targetNormalized || !candidateNormalized) return 0
-  if (targetNormalized === candidateNormalized) return 10_000
-
-  const targetTokens = extractMeaningfulTokens(targetDescription)
-  const candidateTokens = new Set(extractMeaningfulTokens(candidateDescription))
-
-  if (targetTokens.length === 0) {
-    return candidateNormalized.includes(targetNormalized) || targetNormalized.includes(candidateNormalized)
-      ? Math.min(targetNormalized.length, candidateNormalized.length)
-      : 0
-  }
-
-  let score = 0
-  let matchedTokenCount = 0
-
-  for (const [index, token] of targetTokens.entries()) {
-    if (!candidateTokens.has(token)) continue
-    matchedTokenCount += 1
-    score += 12 + Math.min(token.length, 12)
-    if (index === 0) score += 10
-  }
-
-  if (matchedTokenCount === 0) return 0
-  if (matchedTokenCount === targetTokens.length) score += 12
-  else if (matchedTokenCount >= 2) score += 6
-
-  const targetPrefix = targetTokens.slice(0, 2).join(' ')
-  if (targetPrefix && candidateNormalized.includes(targetPrefix)) {
-    score += 10
-  }
-
-  return score
-}
 
 export async function GET(request: NextRequest) {
   const authResult = await requireApiMenu(request, 'accounting')

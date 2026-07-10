@@ -36,6 +36,13 @@
   ],
   "shortcuts": [
     {
+      "name": "AI Assistant",
+      "short_name": "Assistant",
+      "description": "Draft projects, sales docs and expenses with AI",
+      "url": "/admin/assistant",
+      "icons": [{ "src": "/admin/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
       "name": "Add Trip",
       "short_name": "Add Trip",
       "description": "Record a new vehicle trip",

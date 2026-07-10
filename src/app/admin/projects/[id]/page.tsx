@@ -12,7 +12,7 @@ import AdminUploadManager from '@/components/AdminUploadManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
 import { ArrowLeft, Settings, ArrowUpDown, Check, FolderKanban, Pencil, Video, Images, Upload, X } from 'lucide-react'
-import { apiDelete, apiFetch, apiPatch, apiPost } from '@/lib/api-client'
+import { apiDelete, apiFetch, apiPatch, apiPost, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
 import { toast } from 'sonner'
@@ -270,8 +270,10 @@ export default function ProjectPage() {
   const projectSlug: string | undefined = (project as any)?.slug
   useEffect(() => {
     if (!projectSlug) return
-    const authToken = getAccessToken()
-    if (!authToken) return
+    // Read the token per (re)connect attempt: admin access tokens rotate every
+    // ~15 min, so a captured string would leave later reconnects sending an
+    // expired credential and the stream permanently dead.
+    if (!getAccessToken()) return
 
     let projectTimer: ReturnType<typeof setTimeout> | undefined
     const debouncedFetchProject = () => {
@@ -291,8 +293,12 @@ export default function ProjectPage() {
 
     const handle = openProjectEventStream({
       token: projectSlug,
-      authToken,
+      authToken: () => getAccessToken(),
       onEvent: handleEvent,
+      onAuthError: () => {
+        // Rotate the expired admin access token so the next retry succeeds.
+        void attemptRefresh()
+      },
     })
 
     return () => {
