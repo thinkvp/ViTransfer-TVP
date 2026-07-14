@@ -5,52 +5,10 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFileRecords, VIDEO_DELIVERY_ROLES } from '@/lib/stored-file'
 import { getDirectStreamUrl, buildHlsMasterUrl, hlsAbrReady } from '@/lib/video-stream-url'
+import { canIssueShareVideoToken } from '@/lib/share-video-token'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-
-function canIssueShareVideoToken(
-  storedRoles: Set<string>,
-  approved: boolean,
-  quality: string,
-): boolean {
-  const canUseOriginal = approved
-  // Since the direct-to-HLS migration (2.1.0), a video's only preview is its HLS bundle —
-  // no MP4 PREVIEW_* roles are written. The HLS master URL is minted alongside any
-  // streaming-quality token (see below), so a streaming-quality request must be allowed
-  // whenever an HLS bundle exists; otherwise unapproved HLS-only videos can never obtain a
-  // stream and won't play for clients. HLS segments ARE the preview, so this exposes no
-  // more than the old MP4 preview roles did — the original/download cases stay approval-gated.
-  const hasHls = storedRoles.has('HLS_PLAYLIST')
-
-  switch (quality) {
-    case '480p':
-      return hasHls || storedRoles.has('PREVIEW_480') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || canUseOriginal
-    case '720p':
-      return hasHls || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_480') || canUseOriginal
-    case '1080p':
-      return hasHls || storedRoles.has('PREVIEW_1080') || storedRoles.has('PREVIEW_720') || storedRoles.has('PREVIEW_480') || canUseOriginal
-    case 'thumbnail':
-      return storedRoles.has('THUMBNAIL')
-    case 'timeline-vtt':
-      return storedRoles.has('TIMELINE_VTT')
-    case 'timeline-sprite':
-      return storedRoles.has('TIMELINE_SPRITES')
-    // Captions are needed while reviewing, so like timeline previews they are
-    // NOT approval-gated (the SRT asset download stays approval-gated).
-    case 'subtitles-vtt':
-      return storedRoles.has('SUBTITLES_VTT')
-    // Waveform peaks back the subtitle editor's timeline strip — edit-time
-    // artifact, NOT approval-gated (same rationale as subtitles-vtt).
-    case 'waveform-peaks':
-      return storedRoles.has('WAVEFORM_PEAKS')
-    case 'original':
-    case 'download':
-      return canUseOriginal && storedRoles.has('ORIGINAL')
-    default:
-      return false
-  }
-}
 
 export async function GET(
   request: NextRequest,
@@ -70,10 +28,11 @@ export async function GET(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Sized for shared-IP audiences (e.g. two office viewers behind one NAT, each
-  // costing 4-6 requests per video version on initial load of a large project).
-  // The share page also backs off client-side on 429 (Retry-After) instead of
-  // retrying, so bursts self-limit.
+  // The share page's bulk tokenization (initial load / forced refresh passes) goes
+  // through the batch POST sibling (./batch) — this GET now only serves one-off flows
+  // (e.g. click-time original-download token minting), so the limit is pure abuse
+  // headroom rather than a budget page size has to fit inside. The share page backs
+  // off client-side on 429 (Retry-After) instead of retrying.
   const limited = await rateLimit(request, { maxRequests: 240, windowMs: 60_000 }, 'share-video-token')
   if (limited) return limited
 

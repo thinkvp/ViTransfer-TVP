@@ -60,6 +60,16 @@ type UploadAccessUrlCacheEntry = {
   expiresAt: number
 }
 
+// One video-token batch item's result (from POST /api/share/[token]/video-token/batch).
+type VideoTokenResult = {
+  token: string
+  streamUrl: string
+  hlsUrl: string
+  hlsAbr: boolean
+}
+
+const EMPTY_VIDEO_TOKEN_RESULT: VideoTokenResult = { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
+
 const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
 const UPLOAD_ACCESS_URL_CACHE_TTL_MS = 45 * 1000
 
@@ -155,6 +165,12 @@ export default function SharePage() {
   // each entry carries the fileId to request and the resolver for its in-flight promise.
   const uploadAccessBatchRef = useRef<Map<string, { fileId: string; resolve: (value: UploadAccessUrlCacheEntry | null) => void }>>(new Map())
   const uploadAccessBatchTimerRef = useRef<number | null>(null)
+  // Pending video-token requests coalesced into a single batch POST (same pattern as the
+  // upload-access batch above). Keyed by `${videoId}:${quality}`; a full tokenization pass
+  // used to fire 4-6 single GETs per video *version* (~100+ on a large project), which is
+  // what kept tripping the per-IP share-video-token rate limit for legitimate viewers.
+  const videoTokenBatchRef = useRef<Map<string, { videoId: string; quality: string; resolvers: Array<(value: VideoTokenResult) => void> }>>(new Map())
+  const videoTokenBatchTimerRef = useRef<number | null>(null)
   // Single source of truth for the live share token, readable synchronously by async
   // fetchers/retries without capturing a stale value in their closures. Kept in sync
   // with the `shareToken` state below.
@@ -1181,60 +1197,114 @@ export default function SharePage() {
     [],
   )
 
-  const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
-    if (!shareToken) return ''
-    if (isVideoTokenBackoffActive()) return ''
-    const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
-      headers: {
-        Authorization: `Bearer ${shareToken}`,
-      }
-    })
-    if (response.status === 401) {
-      await handleSessionExpired(response)
-      return ''
-    }
-    if (response.status === 429) {
-      noteVideoTokenRateLimited(response)
-      return ''
-    }
-    if (!response.ok) return ''
-    const data = await response.json()
-    return data.token || ''
-  }, [token, shareToken, handleSessionExpired, isVideoTokenBackoffActive, noteVideoTokenRateLimited])
+  // Fire the queued video-token requests as one (chunked) batch POST and fan the results
+  // back out to each waiting caller. Replaces the one-GET-per-(video, quality) pattern
+  // that made a full tokenization pass cost ~100+ requests on a large project — the
+  // per-IP rate limit then measured project size × concurrent viewers instead of abuse.
+  const flushVideoTokenBatch = useCallback(async () => {
+    videoTokenBatchTimerRef.current = null
+    const pending = Array.from(videoTokenBatchRef.current.values())
+    videoTokenBatchRef.current.clear()
+    if (pending.length === 0) return
 
-  // Like fetchVideoToken but also returns the optional direct-to-R2 stream URL (Option B).
-  // In S3 mode the server hands back a presigned URL the player can stream directly,
-  // bypassing the /api/content redirect; `streamUrl` is '' for local mode / non-stream
-  // qualities, in which case callers fall back to the token-gated /api/content URL.
+    const resolveEmpty = (items: typeof pending) => {
+      for (const item of items) {
+        for (const resolve of item.resolvers) resolve(EMPTY_VIDEO_TOKEN_RESULT)
+      }
+    }
+
+    const authToken = shareTokenRef.current
+    if (!authToken || isVideoTokenBackoffActive()) {
+      resolveEmpty(pending)
+      return
+    }
+
+    const CHUNK = 100
+    const chunks: Array<typeof pending> = []
+    for (let i = 0; i < pending.length; i += CHUNK) {
+      chunks.push(pending.slice(i, i + CHUNK))
+    }
+
+    await Promise.all(chunks.map(async (chunk) => {
+      try {
+        const response = await fetch(`/api/share/${token}/video-token/batch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
+          body: JSON.stringify({ items: chunk.map(({ videoId, quality }) => ({ videoId, quality })) }),
+        })
+        if (response.status === 401) {
+          await handleSessionExpired(response)
+          resolveEmpty(chunk)
+          return
+        }
+        if (response.status === 429) {
+          noteVideoTokenRateLimited(response)
+          resolveEmpty(chunk)
+          return
+        }
+        if (!response.ok) {
+          resolveEmpty(chunk)
+          return
+        }
+        const data = await response.json().catch(() => ({}))
+        const results = (data && typeof (data as any).results === 'object' && (data as any).results)
+          ? (data as any).results
+          : {}
+        for (const item of chunk) {
+          const raw = results[`${item.videoId}:${item.quality}`]
+          // A missing key means unavailable/unauthorized for this session (the batch
+          // route's equivalent of the single GET's 403/404) — resolve empty.
+          const value: VideoTokenResult = (raw && typeof raw === 'object') ? {
+            token: typeof raw.token === 'string' ? raw.token : '',
+            streamUrl: typeof raw.streamUrl === 'string' ? raw.streamUrl : '',
+            // Per-video HLS master playlist (same value across quality fetches); '' when unavailable.
+            hlsUrl: typeof raw.hlsUrl === 'string' ? raw.hlsUrl : '',
+            hlsAbr: raw.hlsAbr === true,
+          } : EMPTY_VIDEO_TOKEN_RESULT
+          for (const resolve of item.resolvers) resolve(value)
+        }
+      } catch {
+        resolveEmpty(chunk)
+      }
+    }))
+  }, [token, handleSessionExpired, isVideoTokenBackoffActive, noteVideoTokenRateLimited])
+
+  // Request one (videoId, quality) token via the coalescing batch. Also returns the
+  // optional direct-to-R2 stream URL (Option B): in S3 mode the server hands back a
+  // presigned URL the player can stream directly, bypassing the /api/content redirect;
+  // `streamUrl` is '' for local mode / non-stream qualities, in which case callers fall
+  // back to the token-gated /api/content URL.
   const fetchVideoStream = useCallback(async (
     videoId: string,
     quality: string,
-  ): Promise<{ token: string; streamUrl: string; hlsUrl: string; hlsAbr: boolean }> => {
-    if (!shareToken) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
-    if (isVideoTokenBackoffActive()) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
-    const response = await fetch(`/api/share/${token}/video-token?videoId=${videoId}&quality=${quality}`, {
-      headers: {
-        Authorization: `Bearer ${shareToken}`,
+  ): Promise<VideoTokenResult> => {
+    if (!shareToken) return EMPTY_VIDEO_TOKEN_RESULT
+    if (isVideoTokenBackoffActive()) return EMPTY_VIDEO_TOKEN_RESULT
+    return new Promise<VideoTokenResult>((resolve) => {
+      const key = `${videoId}:${quality}`
+      const existing = videoTokenBatchRef.current.get(key)
+      if (existing) {
+        existing.resolvers.push(resolve)
+      } else {
+        videoTokenBatchRef.current.set(key, { videoId, quality, resolvers: [resolve] })
+      }
+      if (videoTokenBatchTimerRef.current == null) {
+        // Short coalescing window: a tokenization pass enqueues all its pairs
+        // synchronously-ish, so one flush catches the whole pass.
+        videoTokenBatchTimerRef.current = window.setTimeout(() => {
+          void flushVideoTokenBatch()
+        }, 16)
       }
     })
-    if (response.status === 401) {
-      await handleSessionExpired(response)
-      return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
-    }
-    if (response.status === 429) {
-      noteVideoTokenRateLimited(response)
-      return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
-    }
-    if (!response.ok) return { token: '', streamUrl: '', hlsUrl: '', hlsAbr: false }
-    const data = await response.json()
-    return {
-      token: data.token || '',
-      streamUrl: typeof data.streamUrl === 'string' ? data.streamUrl : '',
-      // Per-video HLS master playlist (same value across quality fetches); '' when unavailable.
-      hlsUrl: typeof data.hlsUrl === 'string' ? data.hlsUrl : '',
-      hlsAbr: data.hlsAbr === true,
-    }
-  }, [token, shareToken, handleSessionExpired, isVideoTokenBackoffActive, noteVideoTokenRateLimited])
+  }, [shareToken, isVideoTokenBackoffActive, flushVideoTokenBatch])
+
+  const fetchVideoToken = useCallback(async (videoId: string, quality: string) => {
+    const result = await fetchVideoStream(videoId, quality)
+    return result.token
+  }, [fetchVideoStream])
 
   // Fire the queued upload-access requests as one (chunked) batch POST and fan the
   // results back out to each waiting caller. Replaces the previous one-POST-per-file
@@ -2382,81 +2452,55 @@ export default function SharePage() {
 
         const request = (async () => {
           try {
-            let streamUrl480p = ''
-            let streamUrl720p = ''
-            let streamUrl1080p = ''
-            let streamUrlOriginal = ''
-            let hlsUrl = ''
-            let hlsAbr = false
-            let downloadToken: string | null = null
-
-            if (video.approved) {
-              // Approval unlocks original download, but playback should use preview streams.
-              // Only request tokens for resolutions that have an actual preview file so that
-              // the VideoPlayer's quality selector reflects what is genuinely available.
-              const [orig, s480, s720, s1080] = await Promise.all([
-                fetchVideoStream(video.id, 'original'),
-                video.preview480Path ? fetchVideoStream(video.id, '480p') : emptyStream(),
-                video.preview720Path ? fetchVideoStream(video.id, '720p') : emptyStream(),
-                video.preview1080Path ? fetchVideoStream(video.id, '1080p') : emptyStream(),
-              ])
-              downloadToken = orig.token || null
-              // Do NOT fall back to the original here; streamUrlOriginal covers the no-preview case.
-              streamUrlOriginal = buildStreamUrl(orig)
-              streamUrl480p = buildStreamUrl(s480)
-              streamUrl720p = buildStreamUrl(s720)
-              streamUrl1080p = buildStreamUrl(s1080)
-              hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || orig.hlsUrl || ''
-              hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || orig.hlsAbr || false
-            } else {
-              // Unapproved: only previews are accessible (no original).
-              // Direct-to-HLS videos have no MP4 PREVIEW_* files, so the per-resolution
-              // fetches below are all skipped and we'd never obtain the HLS URL. In that
-              // case fetch one streaming token to mint the HLS master (the token response
-              // carries hlsUrl regardless of which streaming quality is requested).
-              const noMp4Previews = !video.preview480Path && !video.preview720Path && !video.preview1080Path
-              const [s480, s720, s1080, hls] = await Promise.all([
-                video.preview480Path ? fetchVideoStream(video.id, '480p') : emptyStream(),
-                video.preview720Path ? fetchVideoStream(video.id, '720p') : emptyStream(),
-                video.preview1080Path ? fetchVideoStream(video.id, '1080p') : emptyStream(),
-                noMp4Previews ? fetchVideoStream(video.id, '720p') : emptyStream(),
-              ])
-              streamUrl480p = buildStreamUrl(s480)
-              streamUrl720p = buildStreamUrl(s720)
-              streamUrl1080p = buildStreamUrl(s1080)
-              hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || hls.hlsUrl || ''
-              hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || hls.hlsAbr || false
-            }
-
             // Prefer the thumbnail URL minted into the share payload (no extra round-trip).
             // Fall back to the per-session cache, then to an on-demand token fetch (e.g. for
             // videos whose thumbnail finished processing after the payload was built).
             let thumbnailUrl = (typeof video.thumbnailUrl === 'string' && video.thumbnailUrl)
               ? video.thumbnailUrl
               : (sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null)
-            if (!thumbnailUrl && video.hasThumbnail) {
-              const thumbToken = await fetchVideoToken(video.id, 'thumbnail')
-              if (thumbToken) {
-                thumbnailUrl = `/api/content/${thumbToken}`
-              }
+            const needsThumbnailToken = !thumbnailUrl && !!video.hasThumbnail
+
+            // Unapproved direct-to-HLS videos have no MP4 PREVIEW_* files, so the
+            // per-resolution fetches below are all skipped and we'd never obtain the HLS
+            // URL. In that case fetch one streaming token to mint the HLS master (the
+            // token response carries hlsUrl regardless of which streaming quality is
+            // requested). Approved videos get it from the original fetch instead.
+            const noMp4Previews = !video.preview480Path && !video.preview720Path && !video.preview1080Path
+
+            // Everything this video needs is requested concurrently so the batching layer
+            // coalesces the whole pass — across all videos — into one (chunked) POST.
+            // Approval unlocks original download, but playback should use preview streams;
+            // only request tokens for resolutions that have an actual preview file so that
+            // the VideoPlayer's quality selector reflects what is genuinely available.
+            const [orig, s480, s720, s1080, hls, thumbToken, vttToken, spriteToken, subtitlesToken] = await Promise.all([
+              video.approved ? fetchVideoStream(video.id, 'original') : emptyStream(),
+              video.preview480Path ? fetchVideoStream(video.id, '480p') : emptyStream(),
+              video.preview720Path ? fetchVideoStream(video.id, '720p') : emptyStream(),
+              video.preview1080Path ? fetchVideoStream(video.id, '1080p') : emptyStream(),
+              (!video.approved && noMp4Previews) ? fetchVideoStream(video.id, '720p') : emptyStream(),
+              needsThumbnailToken ? fetchVideoToken(video.id, 'thumbnail') : Promise.resolve(''),
+              video.timelinePreviewsReady ? fetchVideoToken(video.id, 'timeline-vtt') : Promise.resolve(''),
+              video.timelinePreviewsReady ? fetchVideoToken(video.id, 'timeline-sprite') : Promise.resolve(''),
+              video.hasSubtitles ? fetchVideoToken(video.id, 'subtitles-vtt') : Promise.resolve(''),
+            ])
+
+            const downloadToken: string | null = video.approved ? (orig.token || null) : null
+            // Do NOT fall back to the original for the preview streams; streamUrlOriginal
+            // covers the no-preview case (unapproved videos never get an original).
+            const streamUrlOriginal = video.approved ? buildStreamUrl(orig) : ''
+            const streamUrl480p = buildStreamUrl(s480)
+            const streamUrl720p = buildStreamUrl(s720)
+            const streamUrl1080p = buildStreamUrl(s1080)
+            const hlsUrl = s720.hlsUrl || s1080.hlsUrl || s480.hlsUrl || orig.hlsUrl || hls.hlsUrl || ''
+            const hlsAbr = s720.hlsAbr || s1080.hlsAbr || s480.hlsAbr || orig.hlsAbr || hls.hlsAbr || false
+
+            if (!thumbnailUrl && thumbToken) {
+              thumbnailUrl = `/api/content/${thumbToken}`
             }
 
-            let timelineVttUrl = null
-            let timelineSpriteUrl = null
-            if (video.timelinePreviewsReady) {
-              const [vttToken, spriteToken] = await Promise.all([
-                fetchVideoToken(video.id, 'timeline-vtt'),
-                fetchVideoToken(video.id, 'timeline-sprite'),
-              ])
-              timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
-              timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
-            }
-
-            let subtitlesVttUrl = null
-            if (video.hasSubtitles) {
-              const subtitlesToken = await fetchVideoToken(video.id, 'subtitles-vtt')
-              subtitlesVttUrl = subtitlesToken ? `/api/content/${subtitlesToken}` : null
-            }
+            const timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
+            const timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
+            const subtitlesVttUrl = subtitlesToken ? `/api/content/${subtitlesToken}` : null
 
             const tokenized = {
               ...video,

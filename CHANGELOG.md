@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-07-14
+
+### Fixed
+
+- **Share-page video tokens are now minted in one batched request, so large projects can't rate-limit legitimate viewers** — a fresh share-page load tokenized every version of every video at 4–6 single `GET /api/share/[token]/video-token` requests each (~100+ requests on a 20-version project), so the per-IP `share-video-token` limit effectively measured *project size × concurrent fresh sessions* rather than abuse. Seen in production 2026-07-14 (after the 2.3.1 fixes were already in place and working): three share-password logins from one office IP inside a minute — each new tab is a fresh login because the share session lives in per-tab `sessionStorage` — cost ~3 full tokenization passes and tripped the 240/min limit at request 241. The share page now coalesces all token fetches (stream qualities, HLS, thumbnails, timeline VTT/sprites, subtitles) through a batching queue — the same pattern as the existing upload-access batch — into a new `POST /api/share/[token]/video-token/batch` endpoint (mirrors the admin batch route; identical authorization semantics via a shared `canIssueShareVideoToken` helper, chunked at 100 items client-side / 300 max server-side, rate-limited at 60 batches/min as `share-video-token-batch`). A full tokenization pass for each video's qualities now also fires concurrently instead of in sequential waves, so an entire pass — any project size — costs 1–2 requests instead of ~100+. The single GET stays for one-off flows (click-time original-download minting) with its 240/min limit now serving as pure abuse headroom. The 429 backoff, non-caching of rate-limited passes, and session-expiry handling from 2.3.1 carry over unchanged into the batch path. Touches `src/app/share/[token]/page.tsx`, new `src/app/api/share/[token]/video-token/batch/route.ts` + `src/lib/share-video-token.ts`, `src/app/api/share/[token]/video-token/route.ts` (extracted shared helper). No schema migration.
+
 ## [2.3.1] - 2026-07-10
 
 ### Fixed
