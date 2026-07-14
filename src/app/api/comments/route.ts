@@ -5,7 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest, createCommentSchema } from '@/lib/validation'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { sanitizeComment } from '@/lib/comment-sanitization'
+import { filterInternalComments, sanitizeComment } from '@/lib/comment-sanitization'
 import { batchResolveFileSizes, getUserIdsWithAvatar } from '@/lib/stored-file'
 import { getSafeguardLimits } from '@/lib/settings'
 import { checkBodySize } from '@/lib/api-guard'
@@ -157,9 +157,13 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: 'asc' }
     })
 
+    // Internal (studio-only) comments must never reach non-admin responses — the share
+    // UI hiding them is not enough (content would still be readable in the network tab).
+    const visibleComments = filterInternalComments(allComments as any[], isAdmin)
+
     // Resolve comment file sizes from StoredFile (CommentFile model has no fileSize column)
     const allFileIds: string[] = []
-    for (const comment of allComments as any[]) {
+    for (const comment of visibleComments as any[]) {
       for (const f of (comment.files || [])) allFileIds.push(f.id)
       for (const reply of (comment.replies || [])) {
         for (const f of (reply.files || [])) allFileIds.push(f.id)
@@ -168,7 +172,7 @@ export async function GET(request: NextRequest) {
     const commentFileSizeMap = await batchResolveFileSizes('COMMENT_FILE', allFileIds)
 
     // Attach resolved sizes to each file object
-    for (const comment of allComments as any[]) {
+    for (const comment of visibleComments as any[]) {
       for (const f of (comment.files || [])) {
         f.fileSize = commentFileSizeMap.get(f.id) ?? 0
       }
@@ -182,12 +186,12 @@ export async function GET(request: NextRequest) {
     // Resolve which authors have an avatar so we don't emit 404-ing avatar URLs for users
     // on default initials.
     const usersWithAvatar = await getUserIdsWithAvatar([...new Set(
-      allComments
+      visibleComments
         .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
         .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
     )])
     // Sanitize the response data
-    const sanitizedComments = allComments.map((comment: any) =>
+    const sanitizedComments = visibleComments.map((comment: any) =>
       sanitizeComment(
         comment,
         isAdmin,
@@ -495,9 +499,13 @@ export async function POST(request: NextRequest) {
     // Fetch all comments for the project (to keep UI in sync)
     const allComments = await fetchProjectComments(projectId)
 
+    // Internal (studio-only) comments must never reach non-admin responses — the share
+    // UI hiding them is not enough (content would still be readable in the network tab).
+    const visibleComments = filterInternalComments(allComments as any[], isAdmin)
+
     // Resolve comment file sizes from StoredFile (CommentFile model has no fileSize column)
     const allFileIds: string[] = []
-    for (const comment of allComments as any[]) {
+    for (const comment of visibleComments as any[]) {
       for (const f of (comment.files || [])) allFileIds.push(f.id)
       for (const reply of (comment.replies || [])) {
         for (const f of (reply.files || [])) allFileIds.push(f.id)
@@ -506,7 +514,7 @@ export async function POST(request: NextRequest) {
     const commentFileSizeMap = await batchResolveFileSizes('COMMENT_FILE', allFileIds)
 
     // Attach resolved sizes to each file object
-    for (const comment of allComments as any[]) {
+    for (const comment of visibleComments as any[]) {
       for (const f of (comment.files || [])) {
         f.fileSize = commentFileSizeMap.get(f.id) ?? 0
       }
@@ -520,12 +528,12 @@ export async function POST(request: NextRequest) {
     // Resolve which authors have an avatar so we don't emit 404-ing avatar URLs for users
     // on default initials.
     const usersWithAvatar = await getUserIdsWithAvatar([...new Set(
-      allComments
+      visibleComments
         .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
         .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
     )])
     // Sanitize the response data
-    const sanitizedComments = allComments.map((comment: any) =>
+    const sanitizedComments = visibleComments.map((comment: any) =>
       sanitizeComment(comment, isAdmin, isAuthenticated, fallbackName, usersWithAvatar)
     )
 

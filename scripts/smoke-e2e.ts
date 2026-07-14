@@ -39,7 +39,12 @@ import fs from 'fs'
 import path from 'path'
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
-import { encrypt } from '@/lib/encryption'
+// NOTE: '@/lib/encryption' must NOT be imported statically here. It captures
+// ENCRYPTION_KEY from process.env at module-init time, and static imports evaluate
+// before this script's loadEnvVar() .env fallback runs — so it would silently
+// initialize with the DEV_ONLY fallback key, seed a password the server (using the
+// real key) can't decrypt, and fail the password-share checks with a 403. It is
+// dynamically imported after loadEnvVar('ENCRYPTION_KEY') below.
 
 // loadEnvVar is hoisted (function declaration), so the .env fallback works here too.
 const prisma = new PrismaClient({ adapter: new PrismaPg(loadEnvVar('DATABASE_URL') || '') })
@@ -197,6 +202,10 @@ async function main() {
   let passwordProject: { id: string; slug: string } | null = null
   if (loadEnvVar('ENCRYPTION_KEY')) {
     try {
+      // Import only now — after loadEnvVar has populated process.env.ENCRYPTION_KEY —
+      // so the encryption module initializes with the same key the server uses
+      // (see the note at the top of this file).
+      const { encrypt } = await import('@/lib/encryption')
       const created = await prisma.project.create({
         data: {
           title: `Smoke E2E PW ${runId}`,

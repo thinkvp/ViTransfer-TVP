@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { getPrimaryRecipient } from '@/lib/recipients'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { sanitizeComment } from '@/lib/comment-sanitization'
+import { filterInternalComments, sanitizeComment } from '@/lib/comment-sanitization'
 import { batchResolveFileSizes, getUserIdsWithAvatar } from '@/lib/stored-file'
 import { getRateLimitSettings } from '@/lib/settings'
 export const runtime = 'nodejs'
@@ -136,9 +136,13 @@ export async function GET(
       orderBy: { createdAt: 'asc' }
     })
 
+    // Internal (studio-only) comments must never reach non-admin responses — the share
+    // UI hiding them is not enough (content would still be readable in the network tab).
+    const visibleComments = filterInternalComments(comments as any[], isAdmin)
+
     // Resolve comment file sizes from StoredFile (CommentFile model has no fileSize column)
     const allFileIds: string[] = []
-    for (const comment of comments as any[]) {
+    for (const comment of visibleComments as any[]) {
       for (const f of (comment.files || [])) allFileIds.push(f.id)
       for (const reply of (comment.replies || [])) {
         for (const f of (reply.files || [])) allFileIds.push(f.id)
@@ -147,7 +151,7 @@ export async function GET(
     const commentFileSizeMap = await batchResolveFileSizes('COMMENT_FILE', allFileIds)
 
     // Attach resolved sizes to each file object
-    for (const comment of comments as any[]) {
+    for (const comment of visibleComments as any[]) {
       for (const f of (comment.files || [])) {
         f.fileSize = commentFileSizeMap.get(f.id) ?? 0
       }
@@ -161,14 +165,14 @@ export async function GET(
     // Resolve which comment authors actually have an avatar, so we don't emit avatar URLs
     // (and 404s) for users on default initials.
     const authorUserIds = [...new Set(
-      comments
+      visibleComments
         .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
         .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
     )]
     const usersWithAvatar = await getUserIdsWithAvatar(authorUserIds)
 
     // Sanitize comments - never expose PII to non-admins
-    const sanitizedComments = comments.map((comment: any) => sanitizeComment(
+    const sanitizedComments = visibleComments.map((comment: any) => sanitizeComment(
       comment,
       isAdmin,
       isAuthenticated,

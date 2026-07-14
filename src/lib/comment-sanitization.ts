@@ -42,6 +42,31 @@ const normalizeTimecode = (comment: any): string => {
   return '00:00:00:00'
 }
 
+/**
+ * Server-side visibility filter for internal (studio-only) comments.
+ *
+ * Non-admin viewers must never RECEIVE internal comments at all — sanitizing is not
+ * enough, because a sanitized internal comment still carries its full content into the
+ * client's network tab even though the share UI hides it. Drops internal top-level
+ * comments (with their entire thread) and internal replies under client-visible
+ * comments. Admins get the list unchanged.
+ *
+ * Apply this to every comment list that can be served to a share session, BEFORE
+ * sanitizeComment (all four list-returning sites: share comments GET, comments GET,
+ * comments POST response, comment PATCH response).
+ */
+export function filterInternalComments<T extends { isInternal?: boolean; replies?: any[] }>(
+  comments: T[],
+  isAdmin: boolean,
+): T[] {
+  if (isAdmin) return comments
+  return comments
+    .filter((comment) => !comment?.isInternal)
+    .map((comment) => (Array.isArray(comment.replies)
+      ? { ...comment, replies: comment.replies.filter((reply: any) => !reply?.isInternal) }
+      : comment))
+}
+
 export function sanitizeComment(
   comment: any,
   isAdmin: boolean,

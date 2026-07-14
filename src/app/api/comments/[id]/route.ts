@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateRequest, updateCommentSchema } from '@/lib/validation'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { sanitizeComment } from '@/lib/comment-sanitization'
+import { filterInternalComments, sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml } from '@/lib/security/html-sanitization'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
@@ -198,15 +198,19 @@ export async function PATCH(
       orderBy: { createdAt: 'asc' }
     })
 
+    // Internal (studio-only) comments must never reach non-admin responses — the share
+    // UI hiding them is not enough (content would still be readable in the network tab).
+    const visibleComments = filterInternalComments(allComments as any[], isAdmin)
+
     // Sanitize response - never expose PII
     // Priority: companyName → primary recipient → undefined
     const primaryRecipientName = existingComment.project.companyName || existingComment.project.recipients[0]?.name || undefined
     const usersWithAvatar = await getUserIdsWithAvatar([...new Set(
-      allComments
+      visibleComments
         .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
         .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
     )])
-    const sanitizedComments = allComments.map((comment: any) => sanitizeComment(
+    const sanitizedComments = visibleComments.map((comment: any) => sanitizeComment(
       comment,
       isAdmin,
       isAuthenticated,
