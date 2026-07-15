@@ -79,16 +79,27 @@ export function CommentFileDisplay({
     }
   }
 
+  // Shared layout: left-aligned, icon pinned to the first line, filename free to
+  // wrap (break-all handles long unbroken names), size on its own muted line.
+  const fileInfo = (
+    <>
+      <Download className="w-4 h-4 shrink-0 mt-0.5" />
+      <span className="min-w-0 flex-1">
+        <span className="block break-all">{fileName}</span>
+        <span className="block text-xs font-normal text-muted-foreground">{formatFileSize(fileSize)}</span>
+      </span>
+    </>
+  )
+
   if (onDownload) {
     return (
       <button
         type="button"
         onClick={handleDownload}
         disabled={isLoading}
-        className="inline-flex items-center gap-2 px-3 py-2 bg-muted/30 border border-border text-foreground rounded-lg hover:bg-muted/50 transition-colors text-sm font-medium disabled:opacity-50"
+        className="flex w-full items-start gap-2 px-3 py-2 bg-muted/30 border border-border text-foreground rounded-lg hover:bg-muted/50 transition-colors text-sm font-medium text-left disabled:opacity-50"
       >
-        <Download className="w-4 h-4" />
-        {fileName} ({formatFileSize(fileSize)})
+        {fileInfo}
       </button>
     )
   }
@@ -96,11 +107,10 @@ export function CommentFileDisplay({
   return (
     <a
       href={`/api/comments/${commentId}/files/${fileId}`}
-      className="inline-flex items-center gap-2 px-3 py-2 bg-muted/30 border border-border text-foreground rounded-lg hover:bg-muted/50 transition-colors text-sm font-medium"
+      className="flex w-full items-start gap-2 px-3 py-2 bg-muted/30 border border-border text-foreground rounded-lg hover:bg-muted/50 transition-colors text-sm font-medium text-left"
       download
     >
-      <Download className="w-4 h-4" />
-      {fileName} ({formatFileSize(fileSize)})
+      {fileInfo}
     </a>
   )
 }

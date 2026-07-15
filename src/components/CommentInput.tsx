@@ -11,7 +11,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } fr
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
 import VoiceNotePlayer from './VoiceNotePlayer'
-import { secondsToTimecode, timecodeToSeconds } from '@/lib/timecode'
+import { secondsToTimecode, timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import { useTimeDisplayMode, type TimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { cn, formatTimestamp } from '@/lib/utils'
@@ -844,8 +844,27 @@ export default function CommentInput({
       {replyingToComment && (
         <div className="mb-3 p-3 bg-gray-800 border-l-2 border-primary rounded-lg flex items-start justify-between gap-3">
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-300 font-semibold mb-1">
-              Replying to {replyingToComment.authorName || 'Anonymous'}
+            <p className="text-xs text-gray-300 font-semibold mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+              <span className="truncate max-w-full">
+                Replying to {replyingToComment.authorName || 'Anonymous'}
+              </span>
+              {replyingToComment.timecode ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap shrink-0 bg-amber-500/20 text-amber-400 border border-amber-400/50">
+                  <Clock className="w-3 h-3 shrink-0" />
+                  <span className="tabular-nums">
+                    {formatTimecodeDisplay(replyingToComment.timecode, {
+                      showFrames: isTimecodeMode,
+                      durationSeconds: effectiveDuration ?? undefined,
+                    })}
+                    {replyingToComment.timecodeEnd ? (
+                      <> &ndash; {formatTimecodeDisplay(replyingToComment.timecodeEnd, {
+                        showFrames: isTimecodeMode,
+                        durationSeconds: effectiveDuration ?? undefined,
+                      })}</>
+                    ) : null}
+                  </span>
+                </span>
+              ) : null}
             </p>
             <p className="text-xs text-gray-400 line-clamp-2 leading-snug">
               {replyingToComment.content}

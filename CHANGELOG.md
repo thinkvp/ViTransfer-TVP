@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-07-15
+
+### Added
+
+- **"Replying to …" header now shows the parent comment's time pill** — when replying to a comment on the share page (client or admin view), the indicator above the input box shows the parent comment's timecode/time — including ranges (`0:30 – 0:45`) — in the same amber pill style as the comment bubbles, to the right of the author's name. Respects the shared Duration/Timecode display-mode toggle (frames shown in timecode mode). On narrow layouts the pill wraps below the name instead of truncating it. Touches `src/components/CommentInput.tsx` only (both share pages use this component). No schema migration.
+
+### Fixed
+
+- **Comment attachment tiles: long filenames no longer overflow the tile** — attachment download buttons in comment bubbles were centered `inline-flex` buttons with the name and size run together as one line of text, so a long unbroken filename (e.g. `13Feb26_MobileAdjustingClarityBoost_289_RGB.jpg`) got clipped at the tile edge and the wrapped text sat centered. Tiles are now left-aligned with the download icon pinned to the first line, the filename free to wrap (`break-all`, always fully visible), and the file size on its own muted line underneath. Applies to both top-level comment and reply attachments on the share pages. Touches `src/components/FileDisplay.tsx` (`CommentFileDisplay`) only. No schema migration.
+
+- **Comment attachments now appear live on other open share pages / admin dashboards (no refresh needed)** — posting a comment publishes the `comment` SSE event immediately, but attachments upload *after* the comment is created (`POST /api/comments/[id]/files` locally, or the S3 presign→complete flow), and neither upload-completion endpoint published an event. So every other open page refetched on the comment event, got the comment *without* its files, and never heard about the attachment — it only showed up after a manual refresh (the submitting page was unaffected because it refetches locally after its uploads finish). Both attachment-completion endpoints (and the bulk attachment-delete) now publish a `comment` project event once the file is registered; the share page's existing 200ms per-type debounce coalesces multi-file uploads into a single refetch. Verified end-to-end against a live dev server: an SSE subscriber receives a second `comment` event after the upload completes and the refetched list includes the file. Touches `src/app/api/comments/[id]/files/route.ts`, `src/app/api/comments/[id]/files/s3/complete/route.ts`. No schema migration.
+
 ## [2.3.2] - 2026-07-14
 
 ### Fixed

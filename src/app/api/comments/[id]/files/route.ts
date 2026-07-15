@@ -8,6 +8,7 @@ import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { uploadFile, deleteFile } from '@/lib/storage'
 import { registerStoredFile, getStoredFileRecords } from '@/lib/stored-file'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -184,6 +185,10 @@ export async function POST(
 
     await recalculateAndStoreProjectTotalBytes(comment.projectId)
 
+    // The comment itself was published (and refetched by listeners) before this
+    // attachment existed — announce again so open pages pick up the new file.
+    await publishProjectEvent(comment.projectId, 'comment')
+
     return NextResponse.json({
       success: true,
       file: {
@@ -294,6 +299,8 @@ export async function DELETE(
     ])
 
     await recalculateAndStoreProjectTotalBytes(comment.projectId)
+
+    await publishProjectEvent(comment.projectId, 'comment')
 
     return NextResponse.json({
       success: true,

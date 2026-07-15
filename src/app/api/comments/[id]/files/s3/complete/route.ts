@@ -14,6 +14,7 @@ import { prisma } from '@/lib/db'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { rateLimit } from '@/lib/rate-limit'
 import { registerStoredFile } from '@/lib/stored-file'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 
@@ -154,6 +155,10 @@ export async function POST(
     })
 
     await recalculateAndStoreProjectTotalBytes(comment.projectId)
+
+    // The comment itself was published (and refetched by listeners) before this
+    // attachment existed — announce again so open pages pick up the new file.
+    await publishProjectEvent(comment.projectId, 'comment')
 
     console.log(`[COMMENT S3 COMPLETE] Comment file ${commentFile.id} upload complete`)
     return NextResponse.json({
