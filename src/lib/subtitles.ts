@@ -127,8 +127,12 @@ export function srtToVtt(srt: string): string {
  * `maxCharsPerLine` characters per line and `maxLines` lines. When a cue's text
  * needs more lines than allowed, it is split into multiple cues whose durations
  * are apportioned across the cue's original time range by character count (so
- * nothing is dropped and timing stays roughly in sync). `maxCharsPerLine <= 0`
- * disables wrapping (returns the cues re-indexed but otherwise untouched).
+ * nothing is dropped and timing stays roughly in sync). A split that would
+ * leave a single orphaned word as the final cue instead folds that word back
+ * into the previous cue, letting that line exceed `maxCharsPerLine` — a lone
+ * word flashing as its own subtitle reads worse than a slightly long line.
+ * `maxCharsPerLine <= 0` disables wrapping (returns the cues re-indexed but
+ * otherwise untouched).
  * Applied at generation time only — manual edits are left as the user typed them.
  */
 export function reflowCues(
@@ -164,6 +168,14 @@ export function reflowCues(
     // Overflow: split into groups of `maxLines` lines, time-proportional by char count.
     const groups: string[][] = []
     for (let i = 0; i < lines.length; i += maxLines) groups.push(lines.slice(i, i + maxLines))
+    // Orphan guard: a final group that is just one word folds into the previous
+    // group (its last line may exceed maxChars — the lesser evil).
+    const last = groups[groups.length - 1]
+    if (groups.length > 1 && last.length === 1 && !last[0].includes(' ')) {
+      const prev = groups[groups.length - 2]
+      prev[prev.length - 1] += ' ' + last[0]
+      groups.pop()
+    }
     const totalChars = groups.reduce((s, g) => s + g.join(' ').length, 0) || 1
     const dur = Math.max(0, cue.endMs - cue.startMs)
     let t = cue.startMs
@@ -213,6 +225,41 @@ export function collapseRepeatedCues(
       cue.startMs - prev.endMs <= maxGapMs
     ) {
       // Absorb this duplicate into the previous cue's time span.
+      prev.endMs = Math.max(prev.endMs, cue.endMs)
+      continue
+    }
+    out.push({ ...cue })
+  }
+  out.forEach((c, i) => { c.index = i + 1 })
+  return out
+}
+
+/**
+ * Merge a cue whose entire text is a single word into the previous cue, so a
+ * word Whisper segmented off on its own doesn't flash as its own subtitle.
+ * Only merges when the gap to the previous cue is small (`maxGapMs`) — a lone
+ * word spoken after a real pause ("...Perfect.") keeps its own cue. Skipped
+ * when the merge would exceed MAX_CUE_TEXT_LENGTH. Run BEFORE `reflowCues`
+ * (which has its own orphan guard for the splits it creates). Applied at
+ * generation time only — manual edits are untouched.
+ */
+export function mergeOrphanWordCues(
+  cues: SubtitleCue[],
+  opts: { maxGapMs?: number } = {},
+): SubtitleCue[] {
+  const maxGapMs = opts.maxGapMs ?? 1200
+  const out: SubtitleCue[] = []
+  for (const cue of cues) {
+    const prev = out[out.length - 1]
+    const text = cue.text.trim()
+    if (
+      prev &&
+      text !== '' &&
+      !/\s/.test(text) &&
+      cue.startMs - prev.endMs <= maxGapMs &&
+      prev.text.length + 1 + text.length <= MAX_CUE_TEXT_LENGTH
+    ) {
+      prev.text = `${prev.text} ${text}`
       prev.endMs = Math.max(prev.endMs, cue.endMs)
       continue
     }

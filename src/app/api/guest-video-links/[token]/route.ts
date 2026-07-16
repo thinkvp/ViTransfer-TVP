@@ -88,6 +88,18 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const sessionId = `guest-video-link:${link.token}`
 
+  // Whether a newer READY version of the same video (same name group) exists —
+  // the viewer shows a warning banner when the link points at an older version.
+  const newerVersionCount = await prisma.video.count({
+    where: {
+      projectId: link.project.id,
+      name: link.video.name,
+      status: 'READY',
+      version: { gt: link.video.version },
+    },
+  }).catch(() => 0)
+  const isLatestVersion = newerVersionCount === 0
+
   // Resolve preview existence from StoredFile (legacy path columns have been dropped)
   const thumbnailPath = await getStoredFilePathForProject('VIDEO', link.video.id, 'THUMBNAIL', link.project.id).catch(() => null)
   const hasThumbnail = !!thumbnailPath
@@ -218,6 +230,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       version: link.video.version,
       versionLabel: link.video.versionLabel,
       approved: link.video.approved,
+      isLatestVersion,
       hasThumbnail,
       timelinePreviewsReady: link.video.timelinePreviewsReady,
       // Prefer the direct-to-R2 URL (Option B); fall back to the token-gated redirect.

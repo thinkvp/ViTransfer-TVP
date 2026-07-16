@@ -11,6 +11,7 @@ import {
   FolderPlus,
   CheckCircle2,
   XCircle,
+  Captions,
   Activity,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
@@ -23,6 +24,7 @@ type ActivityEventType =
   | 'VIDEO_VERSION_ADDED'
   | 'VIDEO_APPROVED'
   | 'VIDEO_UNAPPROVED'
+  | 'SUBTITLES_EDITED'
   | 'COMMENT_ADDED'
   | 'ALBUM_ADDED'
   | 'PHOTOS_ADDED'
@@ -75,6 +77,7 @@ const EVENT_ICONS: Record<ActivityEventType, typeof Video> = {
   VIDEO_VERSION_ADDED: FilePlus2,
   VIDEO_APPROVED: CheckCircle2,
   VIDEO_UNAPPROVED: XCircle,
+  SUBTITLES_EDITED: Captions,
   COMMENT_ADDED: MessageSquare,
   ALBUM_ADDED: ImageIcon,
   PHOTOS_ADDED: Images,
@@ -139,6 +142,8 @@ function eventDescription(event: ActivityEvent): ReactNode {
       return <>approved {videoTarget(event)}</>
     case 'VIDEO_UNAPPROVED':
       return <>removed approval from {videoTarget(event)}</>
+    case 'SUBTITLES_EDITED':
+      return <>edited subtitles on {videoTarget(event)}</>
     case 'COMMENT_ADDED':
       return <>commented on {videoTarget(event)}</>
     case 'ALBUM_ADDED':

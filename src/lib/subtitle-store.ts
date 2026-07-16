@@ -67,11 +67,23 @@ export async function readCuesForVideo(videoId: string): Promise<{
  * version that was never auto-transcribed. `opts.uploadedByName` labels the
  * source (e.g. "Uploaded (SRT)", "Copied subtitles"); defaults to Whisper's when
  * an asset already exists (untouched) or "Uploaded (SRT)" for a fresh one.
+ *
+ * `opts.editedBy` is the actor of a manual cue edit — stamped on the video's
+ * `subtitlesEdited*` columns ("Last edited by" header + SUBTITLES_EDITED
+ * activity event). When omitted the attribution is CLEARED: every call replaces
+ * the cue content wholesale, so a previous "last edited by" is no longer true
+ * after an SRT upload or a copy from another version.
  */
+export interface SubtitleEditedBy {
+  userId: string | null
+  recipientId: string | null
+  name: string
+}
+
 export async function writeCuesForVideo(
   videoId: string,
   cues: SubtitleCue[],
-  opts?: { uploadedByName?: string },
+  opts?: { uploadedByName?: string; editedBy?: SubtitleEditedBy },
 ): Promise<{ cueCount: number }> {
   let asset = await findSubtitleAsset(videoId)
   if (!asset) {
@@ -141,6 +153,23 @@ export async function writeCuesForVideo(
   await prisma.videoAsset.update({
     where: { id: asset.id },
     data: { updatedAt: new Date() },
+  }).catch(() => {})
+
+  await prisma.video.update({
+    where: { id: videoId },
+    data: opts?.editedBy
+      ? {
+          subtitlesEditedAt: new Date(),
+          subtitlesEditedById: opts.editedBy.userId,
+          subtitlesEditedByRecipientId: opts.editedBy.recipientId,
+          subtitlesEditedByName: opts.editedBy.name,
+        }
+      : {
+          subtitlesEditedAt: null,
+          subtitlesEditedById: null,
+          subtitlesEditedByRecipientId: null,
+          subtitlesEditedByName: null,
+        },
   }).catch(() => {})
 
   return { cueCount: cues.length }

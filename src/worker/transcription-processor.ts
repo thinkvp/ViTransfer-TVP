@@ -5,7 +5,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import type { TranscriptionJob } from '../lib/queue'
 import { whisperTranscribe, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
-import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues } from '../lib/subtitles'
+import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues } from '../lib/subtitles'
 import { usesBritishSpelling, convertToBritishEnglish } from '../lib/american-to-british'
 import { extractAudioForTranscription } from '../lib/ffmpeg'
 import { computeWaveformPeaksFromWav } from '../lib/waveform-peaks'
@@ -326,7 +326,15 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       console.log(`[transcription] Video ${videoId}: no speech detected — no subtitles generated`)
       await prisma.video.update({
         where: { id: videoId },
-        data: { transcriptionStatus: 'READY', transcriptionError: null },
+        data: {
+          transcriptionStatus: 'READY',
+          transcriptionError: null,
+          // Freshly (re)generated — any previous manual-edit attribution is stale
+          subtitlesEditedAt: null,
+          subtitlesEditedById: null,
+          subtitlesEditedByRecipientId: null,
+          subtitlesEditedByName: null,
+        },
       })
       return
     }
@@ -339,10 +347,12 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
     }
 
     // Collapse Whisper's end-of-audio hallucination loops (runs of adjacent
-    // identical short cues over trailing silence), then re-flow for on-screen
-    // readability (max chars/line + max lines), then canonically re-serialize so
-    // the stored SRT matches what parseSrt returns to the edit API.
+    // identical short cues over trailing silence), fold lone-word cues into
+    // their predecessor (unless separated by a real pause), then re-flow for
+    // on-screen readability (max chars/line + max lines), then canonically
+    // re-serialize so the stored SRT matches what parseSrt returns to the edit API.
     cues = collapseRepeatedCues(cues)
+    cues = mergeOrphanWordCues(cues)
     cues = reflowCues(cues, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
     const srtText = serializeSrt(cues)
     const vttText = serializeVtt(cues)
@@ -406,7 +416,15 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
 
     await prisma.video.update({
       where: { id: videoId },
-      data: { transcriptionStatus: 'READY', transcriptionError: null },
+      data: {
+        transcriptionStatus: 'READY',
+        transcriptionError: null,
+        // Freshly (re)generated — any previous manual-edit attribution is stale
+        subtitlesEditedAt: null,
+        subtitlesEditedById: null,
+        subtitlesEditedByRecipientId: null,
+        subtitlesEditedByName: null,
+      },
     })
 
     await Promise.all([

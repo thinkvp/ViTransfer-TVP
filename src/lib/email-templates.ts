@@ -21,6 +21,7 @@ interface NotificationData {
   parentComment?: {
     authorName: string
     content: string
+    timecode?: string | null
   }
   createdAt: string
 }
@@ -84,6 +85,33 @@ function formatTimecodeForEmail(
   return start
 }
 
+// Cap quoted parent-comment text so a long original can't dominate the digest.
+const PARENT_QUOTE_MAX_CHARS = 280
+
+function truncateAtWordBoundary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  const cut = text.slice(0, maxChars)
+  const lastSpace = cut.lastIndexOf(' ')
+  return `${(lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
+}
+
+/**
+ * Quoted parent-comment block shown above a reply in summary emails.
+ * Returns '' when the notification isn't a reply or the parent is gone (e.g. deleted).
+ */
+function renderParentCommentQuote(n: NotificationData, useFullTimecode: boolean): string {
+  if (!n.isReply || !n.parentComment) return ''
+  const parentTimecode = n.parentComment.timecode
+    ? formatTimecodeForEmail(n.parentComment.timecode, useFullTimecode)
+    : ''
+  return `
+    <div style="margin:0 0 8px; padding:8px 12px; background:#f3f4f6; border-left:3px solid #9ca3af; border-radius:0 6px 6px 0;">
+      <div style="font-size:12px; color:#6b7280; margin-bottom:3px;">In reply to <span style="font-weight:700; color:#4b5563;">${escapeHtml(n.parentComment.authorName)}</span>${parentTimecode ? ` &bull; ${escapeHtml(parentTimecode)}` : ''}</div>
+      <div style="font-size:13px; color:#4b5563; line-height:1.5; white-space:pre-wrap;">${escapeHtml(truncateAtWordBoundary(n.parentComment.content, PARENT_QUOTE_MAX_CHARS))}</div>
+    </div>
+  `
+}
+
 /**
  * Client notification summary
  */
@@ -124,14 +152,14 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       `
     }
 
-    const isReply = n.isReply && n.parentComment
+    const parentQuote = renderParentCommentQuote(n, data.useFullTimecode)
     return `
       <div style="padding:10px 0;">
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
           ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, data.useFullTimecode, n.timecodeEnd)}` : ''}
         </div>
-        <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:2px;">${escapeHtml(n.authorName)}</div>
-        ${isReply ? `<div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Replying to ${escapeHtml(n.parentComment!.authorName)} — "${escapeHtml(n.parentComment!.content.substring(0, 60))}${n.parentComment!.content.length > 60 ? '...' : ''}"</div>` : ''}
+        <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:${parentQuote ? '6px' : '2px'};">${escapeHtml(n.authorName)}</div>
+        ${parentQuote}
         <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
       </div>
     `
@@ -188,18 +216,21 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
   const projectCount = data.projects.length
 
   const projectsHtml = data.projects.map((project) => {
-    const items = project.notifications.map((n, index) => `
+    const items = project.notifications.map((n, index) => {
+      const parentQuote = renderParentCommentQuote(n, project.useFullTimecode)
+      return `
       <div style="padding:10px 0;${index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''}">
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
           ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, project.useFullTimecode, n.timecodeEnd)}` : ''}
         </div>
-        <div style="margin-bottom:4px;">
+        <div style="margin-bottom:${parentQuote ? '6px' : '4px'};">
           <span style="font-size:14px; font-weight:700; color:#111827;">${escapeHtml(n.authorName)}</span>
           ${n.authorEmail ? `<span style="font-size:12px; color:#6b7280; margin-left:6px;">${escapeHtml(n.authorEmail)}</span>` : ''}
         </div>
+        ${parentQuote}
         <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
       </div>
-    `).join('')
+    `}).join('')
 
     return `
       <div style="${emailCardStyle({ paddingPx: 16, borderRadiusPx: 12, marginBottomPx: 16 })}">

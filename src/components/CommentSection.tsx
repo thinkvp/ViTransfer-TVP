@@ -6,7 +6,7 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { CheckCircle2, Info, Lock, Share2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Info, Lock, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -281,6 +281,15 @@ export function CommentSectionView({
   const [guestLinkUrl, setGuestLinkUrl] = useState<string | null>(null)
   const [guestLinkExpiresAt, setGuestLinkExpiresAt] = useState<string | null>(null)
   const [guestLinkCopied, setGuestLinkCopied] = useState(false)
+  const [guestLinkExpired, setGuestLinkExpired] = useState(false)
+  useEffect(() => {
+    if (!guestLinkExpiresAt) {
+      setGuestLinkExpired(false)
+      return
+    }
+    const expiresAtMs = new Date(guestLinkExpiresAt).getTime()
+    setGuestLinkExpired(Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now())
+  }, [guestLinkExpiresAt])
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
   const approvingRef = useRef(false)
@@ -1136,8 +1145,21 @@ export function CommentSectionView({
                   </DialogHeader>
 
                   <div className="mt-2 space-y-4">
-                    <div className="rounded-md border border-border bg-muted/30 p-3">
+                    <div className={cn(
+                      "rounded-md border p-3",
+                      guestLinkExpired ? "border-destructive/60 bg-destructive/5" : "border-border bg-muted/30"
+                    )}>
                       <div className="text-sm font-medium text-foreground">Video-only link (expires in 14 days)</div>
+
+                      {guestLinkExpired ? (
+                        <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-destructive">
+                          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                          <div className="text-sm">
+                            <div className="font-semibold">This link has expired</div>
+                            <div className="mt-0.5">Viewers can no longer open it. Use Refresh Expiry to reactivate it for another 14 days.</div>
+                          </div>
+                        </div>
+                      ) : null}
 
                       <div className="mt-3 flex items-center gap-2">
                         {!guestLinkUrl && guestLinkCheckedExisting && guestLinkMissing ? (
@@ -1158,7 +1180,7 @@ export function CommentSectionView({
                             </Button>
                             <Button
                               type="button"
-                              variant="outline"
+                              variant={guestLinkExpired ? 'default' : 'outline'}
                               onClick={refreshGuestVideoLinkExpiry}
                               disabled={guestLinkRefreshing}
                             >
@@ -1177,9 +1199,15 @@ export function CommentSectionView({
                           <div className="text-xs text-muted-foreground mb-1">Share URL</div>
                           <div className="text-sm break-all font-mono">{guestLinkUrl}</div>
                           {guestLinkExpiresAt ? (
-                            <div className="mt-2 text-xs text-muted-foreground">
-                              Expires: {formatDateTime(guestLinkExpiresAt)}
-                            </div>
+                            guestLinkExpired ? (
+                              <div className="mt-2 text-xs font-semibold text-destructive">
+                                Expired: {formatDateTime(guestLinkExpiresAt)}
+                              </div>
+                            ) : (
+                              <div className="mt-2 text-xs text-muted-foreground">
+                                Expires: {formatDateTime(guestLinkExpiresAt)}
+                              </div>
+                            )
                           ) : null}
                         </div>
                       ) : null}

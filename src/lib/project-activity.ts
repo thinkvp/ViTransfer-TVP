@@ -18,6 +18,7 @@ export type ProjectActivityEventType =
   | 'VIDEO_VERSION_ADDED'
   | 'VIDEO_APPROVED'
   | 'VIDEO_UNAPPROVED'
+  | 'SUBTITLES_EDITED'
   | 'COMMENT_ADDED'
   | 'ALBUM_ADDED'
   | 'PHOTOS_ADDED'
@@ -195,6 +196,10 @@ export async function buildProjectActivity(
         unapprovedById: true,
         unapprovedByRecipientId: true,
         unapprovedByName: true,
+        subtitlesEditedAt: true,
+        subtitlesEditedById: true,
+        subtitlesEditedByRecipientId: true,
+        subtitlesEditedByName: true,
       },
     }),
     includeComments
@@ -295,6 +300,25 @@ export async function buildProjectActivity(
         { userId: video.uploadedById, recipientId: null, name: video.uploadedByName },
         audience,
         'USER', // videos are admin-only; old rows with no attribution → 'Admin'
+      ),
+      target: { videoId: video.id, videoName: video.name, versionLabel: video.versionLabel },
+    })
+  }
+
+  // --- Subtitle edits (latest manual cue edit per video; cleared on regenerate) -----
+  for (const video of videos) {
+    if (!video.subtitlesEditedAt) continue
+    events.push({
+      id: `subtitles-edited:${video.id}`,
+      type: 'SUBTITLES_EDITED',
+      timestamp: video.subtitlesEditedAt.toISOString(),
+      actor: resolveActor(
+        {
+          userId: video.subtitlesEditedById,
+          recipientId: video.subtitlesEditedByRecipientId,
+          name: video.subtitlesEditedByName,
+        },
+        audience,
       ),
       target: { videoId: video.id, videoName: video.name, versionLabel: video.versionLabel },
     })

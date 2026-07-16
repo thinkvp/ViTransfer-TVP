@@ -33,6 +33,8 @@ const SEEK_INTO_CUE_MS = 20
 
 export interface UseSubtitleEditorArgs {
   videoId: string | null
+  /** For share sessions: reads the comment-name-picker identity slot for edit attribution. */
+  projectId: string | null
   videoName: string
   versionLabel: string
   videoDurationSec: number
@@ -62,6 +64,8 @@ export interface SubtitleEditorApi {
   videoName: string
   versionLabel: string
   canSave: boolean
+  /** Latest manual cue edit (null = never edited since generation → "(auto-generated)"). */
+  lastEditedBy: { name: string; at: string } | null
   selectCue: (id: string | null, opts?: { seek?: boolean }) => void
   updateCueText: (id: string, text: string) => void
   /** Snapshot for undo at the START of a text-edit session (textarea focus). */
@@ -106,7 +110,7 @@ function downloadBlob(content: string, mimeType: string, fileName: string) {
 
 export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorApi {
   const {
-    videoId, videoName, versionLabel, videoDurationSec,
+    videoId, projectId, videoName, versionLabel, videoDurationSec,
     shareToken, isAdmin, active, hasWaveform, fetchContentToken, onExit,
   } = args
 
@@ -117,6 +121,7 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
   const [notice, setNotice] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [selectedCueId, setSelectedCueId] = useState<string | null>(null)
+  const [lastEditedBy, setLastEditedBy] = useState<{ name: string; at: string } | null>(null)
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
   const [peaks, setPeaks] = useState<WaveformPeaks | null>(null)
   const [undoStack, setUndoStack] = useState<EditorCue[][]>([])
@@ -159,6 +164,11 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
       const data = await response.json()
       const serverCues: SubtitleCue[] = Array.isArray(data.cues) ? data.cues : []
       setCues(toEditorCues(serverCues))
+      setLastEditedBy(
+        data.lastEditedBy && typeof data.lastEditedBy.name === 'string' && typeof data.lastEditedBy.at === 'string'
+          ? { name: data.lastEditedBy.name, at: data.lastEditedBy.at }
+          : null,
+      )
       setDirty(false)
       setUndoStack([])
       setSelectedCueId(null)
@@ -386,6 +396,20 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
       setError('Subtitles must contain at least one cue — deleting all cues is not supported.')
       return false
     }
+    // Share sessions: attribute the edit to the identity picked in the comment
+    // name picker (same sessionStorage slot comments/approvals/uploads read).
+    let identity: { recipientId: string | null; authorName: string | null } = { recipientId: null, authorName: null }
+    if (!isAdmin && projectId && typeof window !== 'undefined') {
+      try {
+        const parsed = JSON.parse(sessionStorage.getItem(`comment-name-${projectId}`) || 'null')
+        identity = {
+          recipientId: typeof parsed?.recipientId === 'string' && parsed.recipientId ? parsed.recipientId : null,
+          authorName: typeof parsed?.authorName === 'string' && parsed.authorName.trim() ? parsed.authorName : null,
+        }
+      } catch {
+        // sessionStorage unavailable — attribution falls back to generic labels.
+      }
+    }
     setSaving(true)
     setError(null)
     setNotice(null)
@@ -393,7 +417,7 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
       const response = await fetch(`/api/videos/${videoId}/subtitles`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...buildAuthHeaders(shareToken, isAdmin) },
-        body: JSON.stringify({ cues: payload }),
+        body: JSON.stringify({ cues: payload, recipientId: identity.recipientId, authorName: identity.authorName }),
       })
       if (!response.ok) {
         const body = await response.json().catch(() => null)
@@ -410,7 +434,7 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
     } finally {
       setSaving(false)
     }
-  }, [videoId, shareToken, isAdmin, loadCues])
+  }, [videoId, projectId, shareToken, isAdmin, loadCues])
 
   const discard = useCallback(() => {
     if (!videoId) return
@@ -514,7 +538,7 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
   return {
     cues, loading, saving, error, notice, dirty,
     selectedCueId, activeCueId, currentTimeMs, durationMs, peaks,
-    isAdmin, videoName, versionLabel, canSave,
+    isAdmin, videoName, versionLabel, canSave, lastEditedBy,
     selectCue, updateCueText, beginTextEdit, retimeCue, clampPreview,
     splitAt, mergeNext, remove, insertAtPlayhead,
     undo, canUndo: undoStack.length > 0,

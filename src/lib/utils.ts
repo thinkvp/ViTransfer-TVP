@@ -55,10 +55,10 @@ export function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
 
   // Client-side: use browser timezone
-  // Server-side: use TZ environment variable
+  // Server-side: use TZ environment variable, falling back to the system timezone when unset
   const timezone = typeof window !== 'undefined'
     ? Intl.DateTimeFormat().resolvedOptions().timeZone
-    : process.env.TZ!
+    : (process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone)
 
   // Format date parts using Intl.DateTimeFormat with timezone
   const formatter = new Intl.DateTimeFormat('en-US', {
@@ -109,10 +109,10 @@ export function formatDateTime(date: Date | string): string {
   const d = typeof date === 'string' ? new Date(date) : date
 
   // Client-side: use browser timezone
-  // Server-side: use TZ environment variable
+  // Server-side: use TZ environment variable, falling back to the system timezone when unset
   const timezone = typeof window !== 'undefined'
     ? Intl.DateTimeFormat().resolvedOptions().timeZone
-    : process.env.TZ!
+    : (process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone)
 
   const dateStr = formatDate(d)
 

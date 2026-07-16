@@ -9,7 +9,7 @@ ViTransfer-TVP is a self-hosted web application for video production teams to sh
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![GitHub](https://img.shields.io/badge/github-thinkvp%2FViTransfer--TVP-blue)](https://github.com/thinkvp/ViTransfer-TVP)
 
-> **Fork Notice:** ViTransfer-TVP forked from [ViTransfer v0.8.2](https://github.com/MansiVisuals/ViTransfer/releases/tag/v0.8.2) and has since diverged significantly (170+ commits). The upstream project continues independently at [MansiVisuals/ViTransfer](https://github.com/MansiVisuals/ViTransfer). We gratefully credit them for the original concept and foundation.
+> **Fork Notice:** ViTransfer-TVP forked from [ViTransfer v0.8.2](https://github.com/MansiVisuals/ViTransfer/releases/tag/v0.8.2) and has since diverged significantly (700+ commits). The upstream project continues independently at [MansiVisuals/ViTransfer](https://github.com/MansiVisuals/ViTransfer). We gratefully credit them for the original concept and foundation.
 
 
 ---
@@ -22,6 +22,7 @@ ViTransfer-TVP is designed for video production companies, freelance filmmakers,
 - **Collect timestamped feedback** with threaded, version-aware comments
 - **Manage approval workflows** with per-video approval tracking
 - **Send professional invoices** with Stripe payment integration
+- **Run the business back office** with built-in accounting — expenses, bank reconciliation, GST/BAS, and financial reports
 - **Track project analytics** including page visits, downloads, and engagement
 - **Maintain full control** over your data with self-hosted deployment
 
@@ -137,6 +138,8 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 - **Comment Attachments** — Multi-file uploads (up to 5 files per comment) supporting images, PSD/AI, and common video formats
 - **Approval Workflow** — Per-video approval system with automatic project approval when all videos are approved
 - **Version Control** — Multiple video versions per project with revision tracking and optional max revision limits
+- **Auto-Generated Subtitles** — Whisper-powered captions per video version with an in-browser subtitle editor (see below)
+- **Live Updates** — Share pages and admin dashboards update in real time via Server-Sent Events — no manual refresh for new comments, approvals, status changes, or freshly processed videos
 - **Custom Thumbnails** — Set per-version thumbnails from uploaded image assets
 - **Dark Theme** — Polished dark-only interface with semantic colour tokens for a consistent experience across devices
 - **Responsive Design** — Optimized for desktop, tablet, and mobile devices
@@ -152,6 +155,7 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 - **Quotes & Invoices** — Create, send, and track quotes and invoices with branded PDFs and payment reminders
 - **Partial Payment Tracking** — Invoice totals show amount paid and remaining balance across the admin page, public web view, and emailed PDF
 - **Sales Dashboard** — Overview of outstanding invoices, payment status, and revenue
+- **Accounting Module** — Chart of accounts, expenses, bank reconciliation, GST/BAS, and financial reports (see below)
 
 ### Notifications
 - **Smart Email Notifications** — Scheduling options: immediate, hourly, daily, or weekly digests
@@ -172,7 +176,9 @@ Think of it as a self-hosted alternative to Frame.io or Wipster, with added CRM 
 - **High Performance** — Built with Next.js 16 and React 19 with CPU-aware FFmpeg presets
 - **Background Processing** — Redis 8 queue with BullMQ for video transcoding, notifications, and sales reminders
 - **Professional Video** — FFmpeg-powered transcoding supporting MP4, MOV, AVI, MKV, MXF, and ProRes formats
-- **Reliable Database** — PostgreSQL 17 with Prisma 6 ORM for type-safe data access
+- **HLS Streaming** — Segmented HLS playback for previews, resilient to proxies and CDNs that mishandle HTTP Range requests
+- **Flexible Storage** — Local disk or S3-compatible object storage (e.g. Cloudflare R2) via a single storage abstraction, plus optional scheduled S3 backups
+- **Reliable Database** — PostgreSQL 18 with Prisma 7 ORM for type-safe data access
 - **Secure Authentication** — JWT tokens with refresh rotation, WebAuthn passkeys, and bearer-only auth
 - **Resumable Uploads** — TUS protocol for large file uploads with progress tracking
 - **Progressive Web App (PWA)** — Installable admin interface with Web App Manifest and Service Worker for mobile app-like experience. Supports browser Web Push notifications (admin-scoped, /admin/ only) with VAPID authentication for real-time alerts on mobile/desktop devices.
@@ -193,6 +199,54 @@ Built-in customer relationship management and invoicing capabilities:
 - **Quote System** — Manage quotes with expiry dates and conversion to projects
 - **Calendar Integration** — Quote expiry and invoice due dates automatically appear on the calendar view
 - **Project Linking** — Link invoices directly to projects for seamless workflow from quote to delivery
+
+### Accounting Module
+Full small-business bookkeeping built into the platform:
+- **Chart of Accounts & Journals** — Double-entry accounts with journal entries backing every report
+- **Expense Management** — Record expenses with receipt attachments, automatic GST splitting, and draft → approved → reconciled workflow
+- **Bank Reconciliation** — Import bank transactions, match them against invoices and expenses with quick-match suggestions
+- **BAS Reporting** — Australian GST/BAS reporting with cash or accrual basis support
+- **Financial Reports** — Profit & loss, balance sheet, and monthly trend reports, all basis-aware
+- **Vehicle Logbook** — Track business trips per vehicle for tax purposes
+- **Separate Storage** — Accounting documents live under their own storage root, isolated from project media
+
+### AI Assistant
+Optional AI-powered drafting with a strict review-before-commit workflow:
+- **Multiple Providers** — Bring your own backend: OpenAI, Anthropic, or self-hosted Ollama
+- **Draft from Briefs** — Turn client briefs, emails, or attachments into draft projects, quotes, and invoices
+- **Client Response Drafting** — Compose replies to client feedback in your studio's voice, guided by an editable "studio knowledge & house style" document
+- **Expense Mode** — Drop in receipt photos or PDF invoices and get reviewable draft expenses with suggested accounts and GST treatment, informed by how past expenses were categorised and your own "accounting knowledge & rules" document
+- **Nothing Auto-Commits** — Every proposal renders in an editable review card; records are only created when you confirm
+- **Refinement Turns** — Follow-up instructions ("make the second line item $500") revise the current proposal
+
+### Auto-Generated Subtitles & Transcription
+Whisper-powered captions for every video version:
+- **Automatic Generation** — Per-version SRT + WebVTT captions generated on upload (toggleable per video), using either the OpenAI API or a self-hosted OpenAI-compatible Whisper server
+- **Subtitle Editor** — In-browser editor with waveform timeline for correcting cues, with edit attribution shown in the panel and the Project Activity feed
+- **Manual Workflows** — Upload your own SRT, copy captions from another version, or regenerate from audio at any time
+- **Client Playback** — Captions are available to clients on share pages via the player's CC menu
+
+### Live Project Updates
+Real-time collaboration without manual refreshes:
+- **Server-Sent Events** — Each open share page or admin project page holds one authenticated event stream (Redis pub/sub fan-out keeps connection counts flat)
+- **Live Everything** — New comments (with attachments), approvals, status changes, internal team notes, freshly processed video versions, uploads, and album changes appear for every viewer as they happen
+- **Project Activity Feed** — A live activity timeline on share pages and admin views showing who did what and when, with audience-aware attribution
+
+### Kanban Board & Project Tasks
+Lightweight production task tracking:
+- **Kanban Board** — Columns and cards with client association, member assignment, card comments, and change history
+- **Project Tasks Panel** — Per-project task lists surfaced directly on the project dashboard
+- **Task Notifications** — Card comments trigger notifications to relevant team members
+
+### Production Schedule (Gantt)
+- **Per-Project Gantt View** — Visual schedule built from project key dates rendered as SVG
+- **PDF Export** — Export the schedule as a shareable PDF
+
+### Client Uploads on Share Pages
+Two-way file exchange with clients:
+- **Additional Files Area** — Clients can upload files (references, scripts, media) directly on the share page into organized folders
+- **Admin-Managed Folders** — Admins create, rename, and organize upload folders from the admin side
+- **Background Previews** — Uploaded files get server-side preview processing where applicable
 
 ### Export Feedback and Import in NLE
 - **SRT Comment Export** — Export timestamped comments and feedback as standard .SRT subtitle files for import into any NLE (Premiere Pro, DaVinci Resolve, Final Cut Pro, etc.). Unlike timeline markers, SRT subtitles remain synchronised with your edit — when clips are moved, trimmed, or deleted, the feedback stays anchored to the correct timecode rather than becoming orphaned markers on a static timeline
@@ -305,7 +359,7 @@ Fine-tuned control over which video versions can be approved:
 Granular role-based access control beyond simple admin/client:
 - **Custom Roles** — Create unlimited roles with custom names (e.g., "Project Manager", "Editor", "Accountant")
 - **System Admin** — Dedicated system admin role with unrestricted access to all features
-- **Menu Visibility** — Control access to Projects, Clients, Sales, Settings, Users, Security, Analytics, Share Page
+- **Menu Visibility** — Control access to Projects, Clients, Sales, Accounting, AI Assistant, Settings, Users, Security, Analytics, Share Page
 - **Project Status Filtering** — Limit visible project statuses per role (e.g., editors only see IN_PROGRESS)
 - **Granular Actions** — Per-area permissions like "Photo & Video Uploads", "Full Control", "Manage Comments"
 - **Share Page Access** — Control whether users can access client share pages to leave internal comments
@@ -438,7 +492,7 @@ docker compose up -d
 1. **Clone the repository**
 ```bash
 git clone https://github.com/thinkvp/ViTransfer-TVP.git
-cd ViTransfer
+cd ViTransfer-TVP
 git checkout main
 ```
 
@@ -516,6 +570,14 @@ The app and worker containers run as non-root user `911:911` by default. If you 
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook endpoint secret |
 | `SMTP_POOL_MAX_CONNECTIONS` | Max pooled SMTP connections (default `5`) |
 | `SMTP_POOL_MAX_MESSAGES` | Max messages per pooled SMTP connection (default `100`) |
+| `STORAGE_PROVIDER` | `local` (default) or `s3` for S3-compatible object storage (e.g. Cloudflare R2) |
+| `S3_ENDPOINT` / `S3_BUCKET` / `S3_REGION` | S3 endpoint URL, bucket name, and region (region default `auto`) |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | S3 credentials |
+| `S3_FORCE_PATH_STYLE` | Use path-style S3 URLs (default `true`) |
+| `CPU_THREADS` | Worker: CPU threads available to the worker container (containers may report host CPU counts) |
+| `VIDEO_WORKER_CONCURRENCY` | Worker: force number of concurrent video jobs (default computed from CPU threads) |
+| `FFMPEG_THREADS_PER_JOB` | Worker: force FFmpeg threads per job (default computed) |
+| `VITRANSFER_IMAGE_TAG` | Docker image tag to pull (default `latest`) |
 
 **Important Notes:**
 - Use `openssl rand -hex 32` for database passwords (no special characters that break URLs)
@@ -644,7 +706,7 @@ If `TRUSTED_PROXIES` is not set, the app falls back to the left-most `X-Forwarde
 
 ### Security Notice
 
-ViTransfer-TVP uses Alpine Linux and FFmpeg which may show CVEs in vulnerability scanners. **These are indirect dependencies with minimal risk.** See [SECURITY.md](SECURITY.md) for detailed CVE analysis and risk assessment. All packages are kept at their latest available versions.
+ViTransfer-TVP uses Alpine Linux and FFmpeg which may show CVEs in vulnerability scanners. **These are indirect dependencies with minimal risk.** See [SECURITY.md](SECURITY.md) for the security policy, vulnerability reporting process, and image-scanning guidance. All packages are kept at their latest available versions.
 
 ---
 

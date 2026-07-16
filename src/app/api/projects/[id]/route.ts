@@ -313,9 +313,10 @@ export async function GET(
       videos: await Promise.all(project.videos.map(async (video: any) => {
         const [origFile, previews] = await Promise.all([
           getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['ORIGINAL'], select: { fileSize: true, fileName: true } }).then(r => r[0] ?? null),
-          getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL', 'SUBTITLES_VTT', 'WAVEFORM_PEAKS'], select: { fileRole: true } }),
+          getStoredFileRecords('VIDEO', [video.id], { fileRoles: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'ORIGINAL', 'SUBTITLES_VTT', 'WAVEFORM_PEAKS'], select: { fileRole: true, updatedAt: true } }),
         ])
         const previewSet = new Set(previews.map(p => p.fileRole))
+        const thumbnailRow = previews.find(p => p.fileRole === 'THUMBNAIL')
         return {
           ...video,
           originalFileSize: (origFile?.fileSize ?? BigInt(0)).toString(),
@@ -324,6 +325,9 @@ export async function GET(
           downloadCount: downloadCountsByVideoId.get(video.id) ?? 0,
           hasThumbnail: previewSet.has('THUMBNAIL'),
           thumbnailPath: previewSet.has('THUMBNAIL'),      // boolean for admin share page
+          // Freshness signal so admin poster caches re-mint when the thumbnail is
+          // swapped (custom set/unset) — the booleans above don't change then.
+          thumbnailUpdatedAt: thumbnailRow?.updatedAt?.toISOString?.() ?? null,
           preview480Path: previewSet.has('PREVIEW_480'),     // boolean for admin share page
           preview720Path: previewSet.has('PREVIEW_720'),
           preview1080Path: previewSet.has('PREVIEW_1080'),

@@ -11,7 +11,7 @@ import AdminAlbumManager from '@/components/AdminAlbumManager'
 import AdminUploadManager from '@/components/AdminUploadManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
-import { ArrowLeft, Settings, ArrowUpDown, Check, FolderKanban, Pencil, Video, Images, Upload, X } from 'lucide-react'
+import { ArrowLeft, Settings, Check, FolderKanban, Pencil, Video, Images, Upload, X } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
@@ -60,7 +60,6 @@ export default function ProjectPage() {
   const [shareUrl, setShareUrl] = useState('')
   const [companyName, setCompanyName] = useState('Studio')
   const [transcriptionEnabled, setTranscriptionEnabled] = useState(false)
-  const [sortMode, setSortMode] = useState<'status' | 'alphabetical'>('alphabetical')
   const [albumSummary, setAlbumSummary] = useState<{ albumCount: number; photoCount: number }>({ albumCount: 0, photoCount: 0 })
   const [uploadsSummary, setUploadsSummary] = useState<{ folderCount: number; fileCount: number }>({ folderCount: 0, fileCount: 0 })
   const [adminUser, setAdminUser] = useState<any>(null)
@@ -904,18 +903,6 @@ export default function ProjectPage() {
                       ) : null
                     })()}
                   </h2>
-                  {videos.length > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSortMode(current => current === 'status' ? 'alphabetical' : 'status')}
-                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 shrink-0"
-                      title={sortMode === 'status' ? 'Sort alphabetically' : 'Sort by status'}
-                    >
-                      <span>{sortMode === 'status' ? 'Status' : 'Alphabetical'}</span>
-                      <ArrowUpDown className="w-4 h-4" />
-                    </Button>
-                  )}
                 </div>
                 <AdminVideoManager
                   projectId={project.id}
@@ -930,7 +917,6 @@ export default function ProjectPage() {
                     bumpProjectStorageRefresh()
                     fetchProject()
                   }}
-                  sortMode={sortMode}
                   s3Mode={project.s3Mode}
                 />
               </div>

@@ -96,7 +96,7 @@ curl -O https://raw.githubusercontent.com/thinkvp/ViTransfer-TVP/main/.env.examp
 **Option B: Git Clone (for contributors/developers)**
 ```bash
 git clone https://github.com/thinkvp/ViTransfer-TVP.git
-cd ViTransfer
+cd ViTransfer-TVP
 git checkout main
 ```
 

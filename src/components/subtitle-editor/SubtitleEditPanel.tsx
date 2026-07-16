@@ -12,7 +12,7 @@ import {
   Loader2, Search, X, Download, FileText, RefreshCw, Undo2,
   Scissors, ArrowDownToLine, Trash2, Plus,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { cn, formatDateTime } from '@/lib/utils'
 import { MAX_CUE_TEXT_LENGTH } from '@/lib/subtitles'
 import { formatCueTimestamp } from '@/lib/subtitles'
 import { parseFlexibleTimestampMs, type EditorCue } from '@/lib/subtitle-edit'
@@ -194,8 +194,13 @@ export function SubtitleEditPanel({ editor }: { editor: SubtitleEditorApi }) {
         <div className="min-w-0">
           <p className="text-sm font-medium truncate">Edit subtitles</p>
           <p className="text-xs text-muted-foreground truncate">
-            English (auto-generated) — {editor.videoName} {editor.versionLabel}
+            English{editor.lastEditedBy ? '' : ' (auto-generated)'} — {editor.videoName} {editor.versionLabel}
           </p>
+          {editor.lastEditedBy && (
+            <p className="text-xs text-muted-foreground truncate">
+              Last edited by {editor.lastEditedBy.name} <span className="italic">{formatDateTime(editor.lastEditedBy.at)}</span>
+            </p>
+          )}
         </div>
         <Button
           type="button"

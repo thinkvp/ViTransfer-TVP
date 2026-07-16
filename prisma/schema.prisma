@@ -830,6 +830,14 @@ model Video {
   // manually (upload SRT / copy from another version). A forced Regenerate overrides.
   autoGenerateSubtitles Boolean @default(true)
 
+  // Manual subtitle-edit attribution (latest cue edit only) — drives the editor's
+  // "Last edited by" header and the SUBTITLES_EDITED activity event. Cleared when
+  // the subtitles are regenerated from audio or replaced wholesale (SRT upload/copy).
+  subtitlesEditedAt            DateTime?
+  subtitlesEditedById          String?
+  subtitlesEditedByRecipientId String?
+  subtitlesEditedByName        String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

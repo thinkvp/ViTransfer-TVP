@@ -17,6 +17,7 @@ type ResolvePayload = {
     version?: number | null
     versionLabel?: string | null
     approved?: boolean
+    isLatestVersion?: boolean
     streamUrl720p?: string
     streamUrl1080p?: string
     hlsUrl?: string
@@ -195,6 +196,14 @@ export function GuestVideoViewer({ token }: { token: string }) {
             </div>
           )}
         </div>
+
+        {data.video.isLatestVersion === false && (
+          <div className="mx-auto w-full max-w-6xl px-4 pb-3">
+            <div className="rounded-md bg-warning px-3 py-2 text-sm font-medium text-warning-foreground">
+              Note: This is not the most recent version of this video.
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 min-h-0 px-4 py-4 flex flex-col">

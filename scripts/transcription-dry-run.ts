@@ -23,6 +23,7 @@ import {
   formatCueTimestamp,
   reflowCues,
   collapseRepeatedCues,
+  mergeOrphanWordCues,
 } from '../src/lib/subtitles'
 import {
   splitCueAt,
@@ -145,6 +146,62 @@ const MESSY_SRT =
 
   const disabled = reflowCues(cue, { maxCharsPerLine: 0, maxLines: 2 })
   check('reflow: maxCharsPerLine=0 leaves text untouched', disabled.length === 1 && disabled[0].text === cue[0].text)
+
+  // Orphan guard: a split that would strand one word as the final cue folds it
+  // back into the previous cue (that line may exceed maxCharsPerLine).
+  const orphan = reflowCues(
+    [{ index: 1, startMs: 0, endMs: 3000, text: 'the quick brown fox jumps' }],
+    { maxCharsPerLine: 20, maxLines: 1 },
+  )
+  check('reflow: lone-word remainder folds into previous cue', orphan.length === 1 && orphan[0].text === 'the quick brown fox jumps')
+  const twoWords = reflowCues(
+    [{ index: 1, startMs: 0, endMs: 3000, text: 'the quick brown fox jumps high' }],
+    { maxCharsPerLine: 20, maxLines: 1 },
+  )
+  check('reflow: two-word remainder keeps its own cue', twoWords.length === 2 && twoWords[1].text === 'jumps high')
+  check('reflow: orphan fold also applies with maxLines=2', (() => {
+    // Wraps to 5 lines: alpha / bravo / charlie / delta echo / golf →
+    // the lone "golf" group folds into the previous group's last line.
+    const multi = reflowCues(
+      [{ index: 1, startMs: 0, endMs: 5000, text: 'alpha bravo charlie delta echo golf' }],
+      { maxCharsPerLine: 10, maxLines: 2 },
+    )
+    return multi.length === 2 && multi[1].text === 'charlie\ndelta echo golf'
+  })())
+}
+
+// ---------------------------------------------------------------------------
+// 6b2. Lone-word cue merging (mergeOrphanWordCues)
+// ---------------------------------------------------------------------------
+{
+  // Whisper segmented a trailing word off on its own with a tiny gap → merge.
+  const merged = mergeOrphanWordCues([
+    { index: 1, startMs: 0, endMs: 2000, text: 'and that wraps up the' },
+    { index: 2, startMs: 2100, endMs: 2400, text: 'edit.' },
+  ])
+  check('orphan merge: small-gap lone word joins previous cue', merged.length === 1 && merged[0].text === 'and that wraps up the edit.' && merged[0].endMs === 2400)
+
+  // A lone word after a real pause is a deliberate utterance → keep it.
+  const paused = mergeOrphanWordCues([
+    { index: 1, startMs: 0, endMs: 2000, text: 'take a look at this' },
+    { index: 2, startMs: 5000, endMs: 5600, text: 'Perfect.' },
+  ])
+  check('orphan merge: lone word after a large gap keeps its own cue', paused.length === 2)
+
+  // Two-word cues are fine as-is; first cue has no predecessor.
+  const untouched = mergeOrphanWordCues([
+    { index: 1, startMs: 0, endMs: 500, text: 'Okay.' },
+    { index: 2, startMs: 600, endMs: 2000, text: 'sounds good' },
+  ])
+  check('orphan merge: two-word cue and first cue untouched', untouched.length === 2)
+
+  // Chained lone words all fold into the same predecessor.
+  const chain = mergeOrphanWordCues([
+    { index: 1, startMs: 0, endMs: 1000, text: 'one two three' },
+    { index: 2, startMs: 1100, endMs: 1300, text: 'four' },
+    { index: 3, startMs: 1400, endMs: 1600, text: 'five' },
+  ])
+  check('orphan merge: consecutive lone words chain into one cue', chain.length === 1 && chain[0].text === 'one two three four five' && chain[0].endMs === 1600)
 }
 
 // ---------------------------------------------------------------------------

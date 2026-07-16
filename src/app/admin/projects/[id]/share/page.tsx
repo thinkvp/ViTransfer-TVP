@@ -2859,6 +2859,7 @@ function AdminShareFeedbackGrid({
   const [isEditingSubtitles, setIsEditingSubtitles] = useState(false)
   const subtitleEditor = useSubtitleEditor({
     videoId: selectedVideo?.id ?? null,
+    projectId: project?.id ?? null,
     videoName: String(selectedVideo?.name ?? 'Video'),
     versionLabel: String(selectedVideo?.versionLabel ?? ''),
     videoDurationSec: typeof selectedVideo?.duration === 'number' ? selectedVideo.duration : 0,

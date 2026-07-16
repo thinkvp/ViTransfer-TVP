@@ -3,8 +3,9 @@ import { z } from 'zod'
 import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
-import { readCuesForVideo, writeCuesForVideo, SubtitlesNotFoundError } from '@/lib/subtitle-store'
+import { readCuesForVideo, writeCuesForVideo, SubtitlesNotFoundError, type SubtitleEditedBy } from '@/lib/subtitle-store'
 import { MAX_CUES, MAX_CUE_TEXT_LENGTH, type SubtitleCue } from '@/lib/subtitles'
+import { publishProjectEvent } from '@/lib/project-events'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,9 @@ async function resolveVideoWithAccess(request: NextRequest, videoId: string) {
       id: true,
       projectId: true,
       transcriptionStatus: true,
+      subtitlesEditedAt: true,
+      subtitlesEditedById: true,
+      subtitlesEditedByName: true,
       project: { select: { id: true, sharePassword: true, authMode: true } },
     },
   })
@@ -56,11 +60,23 @@ export async function GET(
     if ('error' in resolved) return resolved.error
 
     const { cues, fileName, updatedAt } = await readCuesForVideo(videoId)
+    const { video, accessCheck } = resolved
+    // "Last edited by" attribution for the editor header. Guests never learn
+    // real names (same rule as the activity feed) — generic Admin/Client only.
+    const lastEditedBy = video.subtitlesEditedAt
+      ? {
+          name: accessCheck.isGuest
+            ? (video.subtitlesEditedById ? 'Admin' : 'Client')
+            : (video.subtitlesEditedByName || (video.subtitlesEditedById ? 'Admin' : 'Client')),
+          at: video.subtitlesEditedAt.toISOString(),
+        }
+      : null
     const response = NextResponse.json({
       cues,
       fileName,
       updatedAt,
-      transcriptionStatus: resolved.video.transcriptionStatus,
+      transcriptionStatus: video.transcriptionStatus,
+      lastEditedBy,
     })
     response.headers.set('Cache-Control', 'no-store')
     return response
@@ -83,6 +99,10 @@ const PutBodySchema = z.object({
       })
     )
     .max(MAX_CUES),
+  // Client identity picked on the share page (same slot comments/approvals use),
+  // for "Last edited by" attribution. Ignored for admin sessions.
+  recipientId: z.string().trim().max(100).nullish(),
+  authorName: z.string().trim().max(120).nullish(),
 })
 
 export async function PUT(
@@ -114,7 +134,43 @@ export async function PUT(
       return NextResponse.json({ error: 'Subtitles must contain at least one cue' }, { status: 400 })
     }
 
-    const { cueCount } = await writeCuesForVideo(videoId, cues)
+    // Resolve who is editing, for the "Last edited by" header + activity feed.
+    // Mirrors the approve route: admin identity, else the recipient picked on
+    // the share page (validated against this project) or the one embedded in
+    // the OTP share token, falling back to the free-text authorName.
+    const { video, accessCheck } = resolved
+    let editedBy: SubtitleEditedBy
+    if (accessCheck.isAdmin) {
+      editedBy = {
+        userId: accessCheck.adminUserId || null,
+        recipientId: null,
+        name: accessCheck.adminUserName || 'Admin',
+      }
+    } else {
+      const candidateRecipientId =
+        (parsed.data.recipientId && parsed.data.recipientId.trim()) || accessCheck.shareRecipientId || null
+      let recipientId: string | null = null
+      let name: string | null = null
+      if (candidateRecipientId) {
+        const recipient = await prisma.projectRecipient.findFirst({
+          where: { id: candidateRecipientId, projectId: video.projectId },
+          select: { id: true, name: true },
+        })
+        if (recipient) {
+          recipientId = recipient.id
+          name = recipient.name || null
+        }
+      }
+      editedBy = {
+        userId: null,
+        recipientId,
+        name: name || (parsed.data.authorName && parsed.data.authorName.trim()) || 'Client',
+      }
+    }
+
+    const { cueCount } = await writeCuesForVideo(videoId, cues, { editedBy })
+    // Live activity-feed refresh on open share pages / admin dashboards.
+    await publishProjectEvent(video.projectId, 'video')
     const response = NextResponse.json({ ok: true, cueCount })
     response.headers.set('Cache-Control', 'no-store')
     return response

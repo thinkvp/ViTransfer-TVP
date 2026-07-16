@@ -29,7 +29,6 @@ interface AdminVideoManagerProps {
   canFullControl?: boolean
   onVideoSelect?: (videoName: string, videos: any[]) => void
   onRefresh?: () => void
-  sortMode?: 'status' | 'alphabetical'
   s3Mode?: boolean
   /** Whisper enabled globally — shows the per-version "Auto-generate subtitles" tickbox on upload. */
   transcriptionEnabled?: boolean
@@ -45,7 +44,6 @@ export default function AdminVideoManager({
   canFullControl = true,
   onVideoSelect,
   onRefresh,
-  sortMode = 'alphabetical',
   transcriptionEnabled = false,
   s3Mode = false,
 }: AdminVideoManagerProps) {
@@ -99,10 +97,13 @@ export default function AdminVideoManager({
   // Poster thumbnails for the latest version of each group. Tokens are minted in one
   // batch request and served via /api/content/<token>; we cache per-video so list
   // refreshes don't re-request, and re-request on image error (token expiry).
+  // The cache is keyed by videoId → thumbnailUpdatedAt so swapping the thumbnail
+  // (custom set/unset) re-mints and the poster updates live.
   // Lazily initialised on first token mint (render must stay pure).
   const sessionIdRef = useRef<string | null>(null)
   const [thumbUrlByVideoId, setThumbUrlByVideoId] = useState<Record<string, string>>({})
-  const thumbRequestedRef = useRef<Set<string>>(new Set())
+  const thumbRequestedRef = useRef<Map<string, string>>(new Map())
+  const thumbFreshnessKey = (v: any) => String(v.thumbnailUpdatedAt ?? '')
 
   // Notify parent when component mounts with first video
   useEffect(() => {
@@ -113,12 +114,12 @@ export default function AdminVideoManager({
   useEffect(() => {
     const latestPerGroup = Object.values(videoGroups)
       .map((vs) => vs.slice().sort((a, b) => b.version - a.version)[0])
-      .filter((v) => v && v.status === 'READY' && v.thumbnailPath && !thumbRequestedRef.current.has(v.id))
+      .filter((v) => v && v.status === 'READY' && v.thumbnailPath && thumbRequestedRef.current.get(v.id) !== thumbFreshnessKey(v))
 
     if (latestPerGroup.length === 0) return
 
     const items = latestPerGroup.map((v) => ({ videoId: v.id, quality: 'thumbnail' }))
-    items.forEach((it) => thumbRequestedRef.current.add(it.videoId))
+    latestPerGroup.forEach((v) => thumbRequestedRef.current.set(v.id, thumbFreshnessKey(v)))
 
     if (sessionIdRef.current == null) sessionIdRef.current = `admin:${Date.now()}`
     const sessionId = sessionIdRef.current
@@ -230,21 +231,14 @@ export default function AdminVideoManager({
   }
 
   const sortedGroupNames = Object.keys(videoGroups).sort((nameA, nameB) => {
-    if (sortMode === 'alphabetical') {
-      return nameA.localeCompare(nameB)
-    } else {
-      // Status sorting
-      // Check if ANY version is approved in each group
-      const hasApprovedA = videoGroups[nameA].some(v => v.approved)
-      const hasApprovedB = videoGroups[nameB].some(v => v.approved)
-
-      // Groups with no approved versions come first, groups with any approved versions come last
-      if (hasApprovedA !== hasApprovedB) {
-        return hasApprovedA ? 1 : -1
-      }
-      // If both have same approval status, sort alphabetically
-      return nameA.localeCompare(nameB)
+    // Groups with no approved versions come first, groups with any approved versions come last
+    const hasApprovedA = videoGroups[nameA].some(v => v.approved)
+    const hasApprovedB = videoGroups[nameB].some(v => v.approved)
+    if (hasApprovedA !== hasApprovedB) {
+      return hasApprovedA ? 1 : -1
     }
+    // Within each approval bucket, sort alphabetically
+    return nameA.localeCompare(nameB)
   })
 
   return (
