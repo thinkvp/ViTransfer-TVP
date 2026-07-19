@@ -4,14 +4,25 @@ import { requireApiAuth } from '@/lib/auth'
 import { deleteFile } from '@/lib/storage'
 import { deleteStoredFilesByCriteria, getStoredFileRecords, RESOLUTION_TO_FILE_ROLE, type FileRole } from '@/lib/stored-file'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
+import { deleteProjectPreviews } from '@/lib/delete-project-previews'
 import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
-const deletePreviewsSchema = z.object({
-  resolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1),
-})
+const deletePreviewsSchema = z.union([
+  // Delete the MP4 previews for specific resolutions (used when a resolution is
+  // removed from the project's preview settings).
+  z.object({
+    resolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1),
+  }),
+  // Delete every playable rendition (MP4 previews + asset playback MP4s + HLS
+  // bundles) to free storage — same set the auto-delete-on-close path sheds.
+  // Only allowed on CLOSED projects; reopening regenerates playback.
+  z.object({
+    scope: z.literal('all'),
+  }),
+])
 
 export async function POST(
   request: NextRequest,
@@ -40,7 +51,6 @@ export async function POST(
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
     }
-    const { resolutions } = parsed.data
 
     const project = await prisma.project.findUnique({
       where: { id: projectId },
@@ -54,6 +64,19 @@ export async function POST(
     if (!isVisibleProjectStatusForUser(authResult, project.status)) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
+
+    if ('scope' in parsed.data) {
+      if (project.status !== 'CLOSED') {
+        return NextResponse.json(
+          { error: 'Previews can only be deleted for closed projects' },
+          { status: 409 }
+        )
+      }
+      const result = await deleteProjectPreviews(projectId, { logPrefix: 'DELETE-PREVIEWS' })
+      return NextResponse.json({ success: true, ...result })
+    }
+
+    const { resolutions } = parsed.data
 
     let deletedCount = 0
     const videoIdsToCleanup: string[] = []

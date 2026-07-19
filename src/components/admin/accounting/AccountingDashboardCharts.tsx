@@ -39,6 +39,13 @@ function toIso(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+function shiftIsoDateYearBack(iso: string): string {
+  const [y, m, d] = iso.split('-')
+  // 29 Feb has no counterpart in the prior (non-leap) year.
+  const day = m === '02' && d === '29' ? '28' : d
+  return `${Number(y) - 1}-${m}-${day}`
+}
+
 function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodRange {
   if (key === 'all-time') {
     return { from: 'all-time', to: toIso(now), months: [] }
@@ -205,7 +212,7 @@ function ChartTooltip({
   return (
     <div className="rounded-xl border border-border bg-popover px-3 py-2.5 shadow-xl text-sm">
       <p className="font-semibold text-foreground mb-1.5">{label}</p>
-      {payload.map((entry) => (
+      {payload.filter((entry) => entry.value != null).map((entry) => (
         <div key={entry.name} className="flex items-center gap-2">
           <span
             className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
@@ -251,7 +258,10 @@ export function AccountingTrendChart({
   )
 
   const [monthlyData, setMonthlyData] = useState<MonthlyPLPoint[]>([])
+  const [prevMonthlyData, setPrevMonthlyData] = useState<MonthlyPLPoint[]>([])
   const [loading, setLoading] = useState(false)
+  const [compareLastFy, setCompareLastFy] = useState(false)
+  const canCompare = period !== 'all-time'
   const [visibleSeries, setVisibleSeries] = useState<Record<TrendSeriesKey, boolean>>({
     income: true,
     totalCosts: true,
@@ -283,21 +293,55 @@ export function AccountingTrendChart({
     }
   }, [periodRange.from, periodRange.to, reportingBasis])
 
+  useEffect(() => {
+    if (!compareLastFy || !canCompare) {
+      setPrevMonthlyData([])
+      return
+    }
+    let cancelled = false
+    const params = new URLSearchParams({
+      from: shiftIsoDateYearBack(periodRange.from),
+      to: shiftIsoDateYearBack(periodRange.to),
+      basis: reportingBasis,
+    })
+    apiFetch(`/api/admin/accounting/reports/profit-loss-monthly?${params}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!cancelled) setPrevMonthlyData(Array.isArray(json.months) ? json.months : [])
+      })
+      .catch(() => {
+        if (!cancelled) setPrevMonthlyData([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [compareLastFy, canCompare, periodRange.from, periodRange.to, reportingBasis])
+
   const data = useMemo(() => {
     const labelMap = new Map(periodRange.months.map((m) => [m.key, m.label]))
-    return monthlyData.map((m) => ({
-      label: labelMap.get(m.yearMonth)
-        ?? (() => {
-          const [yy, mm] = m.yearMonth.split('-').map(Number)
-          if (!yy || !mm) return m.yearMonth
-          return new Date(yy, mm - 1, 1).toLocaleString('en-AU', { month: 'short', year: '2-digit' })
-        })(),
-      income: m.incomeCents / 100,
-      totalCosts: (m.cogsCents + m.expenseCents) / 100,
-      cogs: m.cogsCents / 100,
-      netProfit: m.netProfitCents / 100,
-    }))
-  }, [monthlyData, periodRange.months])
+    // Prior-year points align by fiscal month: Jul '25 pairs with Jul '24.
+    const prevByYm = new Map(prevMonthlyData.map((m) => [m.yearMonth, m]))
+    return monthlyData.map((m) => {
+      const [yy, mm] = m.yearMonth.split('-')
+      const prev = prevByYm.get(`${Number(yy) - 1}-${mm}`)
+      return {
+        label: labelMap.get(m.yearMonth)
+          ?? (() => {
+            const [ly, lm] = m.yearMonth.split('-').map(Number)
+            if (!ly || !lm) return m.yearMonth
+            return new Date(ly, lm - 1, 1).toLocaleString('en-AU', { month: 'short', year: '2-digit' })
+          })(),
+        income: m.incomeCents / 100,
+        totalCosts: (m.cogsCents + m.expenseCents) / 100,
+        cogs: m.cogsCents / 100,
+        netProfit: m.netProfitCents / 100,
+        prevIncome: prev ? prev.incomeCents / 100 : null,
+        prevTotalCosts: prev ? (prev.cogsCents + prev.expenseCents) / 100 : null,
+        prevCogs: prev ? prev.cogsCents / 100 : null,
+        prevNetProfit: prev ? prev.netProfitCents / 100 : null,
+      }
+    })
+  }, [monthlyData, prevMonthlyData, periodRange.months])
 
   const totalIncomeCents = useMemo(
     () => monthlyData.reduce((s, m) => s + m.incomeCents, 0),
@@ -333,7 +377,21 @@ export function AccountingTrendChart({
             {reportingBasis === 'CASH' ? 'Cash basis' : 'Accrual basis'} · ex GST
           </p>
         </div>
-        <PeriodSelect value={period} onChange={setPeriod} />
+        <div className="flex flex-col items-end gap-1.5">
+          <PeriodSelect value={period} onChange={setPeriod} />
+          {canCompare && (
+            <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5 rounded border-border"
+                checked={compareLastFy}
+                onChange={() => setCompareLastFy((v) => !v)}
+                aria-label="Compare to last financial year"
+              />
+              vs last FY
+            </label>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="pb-4 pt-0">
         {loading ? (
@@ -426,6 +484,22 @@ export function AccountingTrendChart({
                   strokeDasharray={series.dashed ? '6 3' : undefined}
                   dot={{ r: 3, fill: series.color, strokeWidth: 0 }}
                   activeDot={{ r: 5, fill: series.color, strokeWidth: 0 }}
+                  connectNulls
+                  hide={!visibleSeries[series.key]}
+                />
+              ))}
+              {compareLastFy && canCompare && TREND_SERIES_CONFIG.map((series) => (
+                <Line
+                  key={`prev-${series.key}`}
+                  type="monotone"
+                  dataKey={`prev${series.key.charAt(0).toUpperCase()}${series.key.slice(1)}`}
+                  name={`${series.name} (last FY)`}
+                  stroke={series.color}
+                  strokeOpacity={0.35}
+                  strokeWidth={2}
+                  strokeDasharray="3 3"
+                  dot={false}
+                  activeDot={{ r: 4, fill: series.color, fillOpacity: 0.5, strokeWidth: 0 }}
                   connectNulls
                   hide={!visibleSeries[series.key]}
                 />

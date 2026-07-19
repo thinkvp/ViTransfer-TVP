@@ -49,6 +49,9 @@ interface MessageBubbleProps {
   // Applies per-comment (parent and each reply carry their own state).
   showResolveControl?: boolean
   onToggleResolved?: (commentId: string, currentlyResolved: boolean) => void
+
+  // True while the video playhead sits at this comment's timecode (or inside its range).
+  isPlayheadActive?: boolean
 }
 
 // Green circular "mark done" tick placed in the lower-left corner of a comment.
@@ -167,6 +170,7 @@ export default function MessageBubble({
   avatarClassName,
   showResolveControl = false,
   onToggleResolved,
+  isPlayheadActive = false,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
 
@@ -207,9 +211,11 @@ export default function MessageBubble({
         <div
           data-comment-block
           className={
-            showColorEdge
+            (showColorEdge
               ? `bg-card border border-border ${displayColor ? '' : fallbackBorderColorClass} border-l-4 rounded-lg p-3`
-              : 'bg-card border border-border rounded-lg p-3'
+              : 'bg-card border border-border rounded-lg p-3') +
+            // Ring (not border/bg swaps) so the highlight can't fight the base classes.
+            ` transition-shadow duration-200${isPlayheadActive ? ' ring-2 ring-primary/40' : ''}`
           }
           style={showColorEdge && displayColor ? { borderLeftColor: displayColor } : undefined}
         >

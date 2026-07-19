@@ -157,28 +157,40 @@ export default function SalesDashboardPage() {
       return acc + getPaymentDashboardAmountCents(p, p.invoiceId ? invoiceById[p.invoiceId] : null, settings.taxRatePercent, includeGst)
     }, 0)
 
-    const totalSalesCents = dashboardBasis === 'CASH'
+    const sumSalesCents = (startMs: number, endMs: number) => dashboardBasis === 'CASH'
       ? payments.reduce((acc, payment) => {
           if (payment.excludeFromInvoiceBalance) return acc
           const paymentDate = parseDateOnlyLocal(payment.paymentDate)
           if (!paymentDate) return acc
           const paidAt = (paymentDate as Date).getTime()
-          if (paidAt < fyStart.getTime() || paidAt > fyEnd.getTime()) return acc
+          if (paidAt < startMs || paidAt > endMs) return acc
           return acc + getPaymentDashboardAmountCents(payment, payment.invoiceId ? invoiceById[payment.invoiceId] : null, settings.taxRatePercent, includeGst)
         }, 0)
       : invoices.reduce((acc, inv) => {
           const issueDate = parseDateOnlyLocal(inv.issueDate)
           if (!issueDate) return acc
           const issuedAt = (issueDate as Date).getTime()
-          if (issuedAt < fyStart.getTime() || issuedAt > fyEnd.getTime()) return acc
+          if (issuedAt < startMs || issuedAt > endMs) return acc
           return acc + getInvoiceDashboardAmountCents(inv, settings.taxRatePercent, includeGst, invoiceRollupById[inv.id])
         }, 0)
+
+    const totalSalesCents = sumSalesCents(fyStart.getTime(), fyEnd.getTime())
+
+    // Same-elapsed-point comparison: last FY start through this date one year ago,
+    // so the delta is meaningful mid-year rather than against a full prior FY.
+    const prevFyStart = new Date(fyStartYear - 1, fyStartMonthZeroIndexed, 1)
+    const prevFyPoint = new Date(now)
+    prevFyPoint.setFullYear(prevFyPoint.getFullYear() - 1)
+    const prevTotalSalesCents = sumSalesCents(prevFyStart.getTime(), prevFyPoint.getTime())
+    const previousFinancialYearLabel = `${String(fyStartYear - 1).slice(-2)}-${String(fyStartYear).slice(-2)}`
 
     return {
       overdueBalanceCents,
       recentPaymentsTotalCents,
       totalSalesCents,
+      prevTotalSalesCents,
       financialYearLabel,
+      previousFinancialYearLabel,
       dashboardModeLabel,
     }
   }, [nowIso, rollup, settings])
@@ -302,6 +314,18 @@ export default function SalesDashboardPage() {
                 <p className="text-xs text-muted-foreground">Sales FY{salesOverview.financialYearLabel}</p>
                 <p className="text-[10px] text-muted-foreground">{salesOverview.dashboardModeLabel}</p>
                 <p className="text-base font-semibold tabular-nums truncate">{formatMoney(salesOverview.totalSalesCents, getCurrencySymbol(settings.currencyCode))}</p>
+                {salesOverview.prevTotalSalesCents > 0 && (() => {
+                  const diff = salesOverview.totalSalesCents - salesOverview.prevTotalSalesCents
+                  const pct = Math.round((diff / salesOverview.prevTotalSalesCents) * 100)
+                  return (
+                    <p className="text-[10px] tabular-nums truncate">
+                      <span className={diff >= 0 ? 'text-emerald-400' : 'text-destructive'}>
+                        {diff >= 0 ? '▲' : '▼'} {Math.abs(pct)}%
+                      </span>
+                      <span className="text-muted-foreground"> vs FY{salesOverview.previousFinancialYearLabel} same point</span>
+                    </p>
+                  )
+                })()}
               </div>
             </div>
           </div>

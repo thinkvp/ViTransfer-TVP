@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Project } from '@prisma/client'
 import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
-import { Trash2, ExternalLink, RotateCcw, Send, Loader2, CalendarRange } from 'lucide-react'
+import { Trash2, ExternalLink, RotateCcw, Send, Loader2, CalendarRange, HardDrive } from 'lucide-react'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import {
@@ -54,8 +54,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const [isDeleting, setIsDeleting] = useState(false)
   const [isReprocessingPreviews, setIsReprocessingPreviews] = useState(false)
   const [isMonitoringReprocessPreviews, setIsMonitoringReprocessPreviews] = useState(false)
+  const [isDeletingPreviews, setIsDeletingPreviews] = useState(false)
 
   const [showReprocessConfirm, setShowReprocessConfirm] = useState(false)
+  const [showDeletePreviewsConfirm, setShowDeletePreviewsConfirm] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showDeleteConfirm2, setShowDeleteConfirm2] = useState(false)
 
@@ -127,6 +129,10 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const canDeleteProjects = canDoAction(permissions, 'deleteProjects')
   const canViewSharePage = canDoAction(permissions, 'accessSharePage')
   const canReprocessPreviews = canDoAction(permissions, 'changeProjectSettings')
+  // Mirrors the API gate on /delete-previews; only offered on closed projects
+  // (reopening regenerates playback, so nothing client-facing breaks).
+  const canDeletePreviews = canDoAction(permissions, 'changeProjectStatuses')
+  const isProjectClosed = project.status === 'CLOSED'
 
   // Group videos by name
   const videosByName = readyVideos.reduce((acc, video) => {
@@ -494,6 +500,31 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       })
   }
 
+  const handleDeletePreviews = () => {
+    if (!canDeletePreviews || isDeletingPreviews) return
+    setShowDeletePreviewsConfirm(true)
+  }
+
+  const confirmDeletePreviews = async () => {
+    setIsDeletingPreviews(true)
+    apiPost(`/api/projects/${project.id}/delete-previews`, { scope: 'all' })
+      .then((data: any) => {
+        const bundles = Number(data?.deletedVideoHlsBundles || 0) + Number(data?.deletedAssetHlsBundles || 0)
+        toast.success(
+          `Video previews deleted. HLS bundles: ${bundles}, preview files: ${Number(data?.deletedPreviewFiles || 0)}. ` +
+          'Reopening the project will regenerate playback.'
+        )
+        onRefresh?.()
+        router.refresh()
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : 'Failed to delete previews')
+      })
+      .finally(() => {
+        setIsDeletingPreviews(false)
+      })
+  }
+
   const handleDelete = () => {
     if (!canDeleteProjects || isDeleting) return
     setShowDeleteConfirm(true)
@@ -526,6 +557,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
           canViewSharePage ||
           canViewAnalytics ||
           canReprocessPreviews ||
+          (canDeletePreviews && isProjectClosed) ||
           canDeleteProjects
 
         if (!hasAnyActions) return null
@@ -576,6 +608,28 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 <>
                   <RotateCcw className="w-4 h-4 mr-2" />
                   Reprocess Previews
+                </>
+              )}
+            </Button>
+          )}
+
+          {canDeletePreviews && isProjectClosed && (
+            <Button
+              variant="outline"
+              size="default"
+              className="w-full"
+              onClick={handleDeletePreviews}
+              disabled={isDeletingPreviews}
+            >
+              {isDeletingPreviews ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Deleting Previews...
+                </>
+              ) : (
+                <>
+                  <HardDrive className="w-4 h-4 mr-2" />
+                  Delete Video Previews
                 </>
               )}
             </Button>
@@ -1111,6 +1165,14 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
         description="This will delete stored preview files, clear preview references in the database, and queue regeneration for videos, video assets, uploads, album thumbnails, and album photo preview derivatives."
         confirmLabel="Reprocess"
         onConfirm={confirmReprocessPreviews}
+      />
+      <ConfirmDialog
+        open={showDeletePreviewsConfirm}
+        onOpenChange={setShowDeletePreviewsConfirm}
+        title="Delete Video Previews?"
+        description="This frees storage by deleting the streaming copies (HLS bundles and preview MP4s) for every video in this closed project. Original files, thumbnails and timeline previews are kept, and reopening the project regenerates playback automatically."
+        confirmLabel="Delete Previews"
+        onConfirm={confirmDeletePreviews}
       />
       <ConfirmDialog
         open={showDeleteConfirm}

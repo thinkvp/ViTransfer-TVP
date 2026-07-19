@@ -6,22 +6,16 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { AlertTriangle, CheckCircle2, Info, Lock, Share2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock, History, Info, Lock, MessageCircle, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { formatDate, formatTimestamp, formatDateTime, formatFileSize } from '@/lib/utils'
+import { timecodeToSeconds } from '@/lib/timecode'
 import { apiFetch } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import {
   Dialog,
   DialogContent,
@@ -665,6 +659,45 @@ export function CommentSectionView({
     }
     return map
   }, [videos])
+
+  // Track the player's playhead (throttled videoTimeUpdated events, ~200ms during
+  // playback) so comments at/within the current position can highlight.
+  const [playhead, setPlayhead] = useState<{ time: number; videoId: string } | null>(null)
+  useEffect(() => {
+    const handlePlayheadTime = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (typeof detail?.time !== 'number' || !detail?.videoId) return
+      setPlayhead({ time: detail.time, videoId: detail.videoId })
+    }
+    window.addEventListener('videoTimeUpdated', handlePlayheadTime as EventListener)
+    return () => window.removeEventListener('videoTimeUpdated', handlePlayheadTime as EventListener)
+  }, [])
+
+  const videoFpsById = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const v of videos || []) {
+      if (v?.id) map.set(v.id, Number((v as any).fps) || 24)
+    }
+    return map
+  }, [videos])
+
+  // A comment is "at the playhead" when the playhead sits inside its range, or
+  // within half a second of a point comment's timecode.
+  const isCommentAtPlayhead = useCallback((comment: any): boolean => {
+    if (!playhead || !comment?.timecode || comment.videoId !== playhead.videoId) return false
+    const fps = videoFpsById.get(comment.videoId) || 24
+    try {
+      const start = timecodeToSeconds(String(comment.timecode), fps)
+      if (!Number.isFinite(start)) return false
+      const end = comment.timecodeEnd ? timecodeToSeconds(String(comment.timecodeEnd), fps) : null
+      if (end !== null && Number.isFinite(end) && end > start) {
+        return playhead.time >= start && playhead.time <= end
+      }
+      return Math.abs(playhead.time - start) <= 0.5
+    } catch {
+      return false
+    }
+  }, [playhead, videoFpsById])
 
   // Filter comments based on currently selected video
   const displayComments = (() => {
@@ -1431,18 +1464,16 @@ export function CommentSectionView({
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <div className="shrink-0">
-                <Select
-                  value={commentSortMode}
-                  onValueChange={(v) => setCommentSortMode(v as 'timecode' | 'date')}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={commentSortMode === 'timecode' ? 'Sorted by timecode — switch to newest first' : 'Sorted by newest — switch to timecode'}
+                  title={commentSortMode === 'timecode' ? 'Sorted by timecode — switch to newest first' : 'Sorted by newest — switch to timecode'}
+                  className="h-8 w-8 p-0"
+                  onClick={() => setCommentSortMode(commentSortMode === 'timecode' ? 'date' : 'timecode')}
                 >
-                  <SelectTrigger className="h-8 w-auto px-2 pr-2">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="timecode">Timecode</SelectItem>
-                    <SelectItem value="date">Newest</SelectItem>
-                  </SelectContent>
-                </Select>
+                  {commentSortMode === 'timecode' ? <Clock className="h-4 w-4" /> : <History className="h-4 w-4" />}
+                </Button>
               </div>
             </div>
           </div>
@@ -1457,7 +1488,9 @@ export function CommentSectionView({
                   <Lock className="w-5 h-5 text-muted-foreground" />
                 </div>
               ) : (
-                <div className="w-12 h-12 bg-muted rounded-full mx-auto mb-3" />
+                <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-3 flex items-center justify-center">
+                  <MessageCircle className="w-5 h-5 text-muted-foreground" />
+                </div>
               )}
               <p className="text-muted-foreground">
                 {commentsDisabled && isProjectApprovedOnly
@@ -1534,6 +1567,7 @@ export function CommentSectionView({
                         avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}
                         showResolveControl={isAdminView}
                         onToggleResolved={handleToggleResolved}
+                        isPlayheadActive={isCommentAtPlayhead(comment)}
                       />
                     ) : (
                       // Has replies - render extended bubble
@@ -1568,6 +1602,7 @@ export function CommentSectionView({
                         avatarClassName={largeAvatars ? 'h-[30px] w-[30px] text-[12px] ring-2' : undefined}
                         showResolveControl={isAdminView}
                         onToggleResolved={handleToggleResolved}
+                        isPlayheadActive={isCommentAtPlayhead(comment)}
                       />
                     )}
                   </div>

@@ -460,6 +460,9 @@ export default function VideoPlayer({
     leftPx: 0,
     commentId: null,
   })
+  // Comment marker (avatar dot) currently under the pointer. When that comment
+  // has a range, its span bar is emphasised and the other span bars are muted.
+  const [hoveredMarkerCommentId, setHoveredMarkerCommentId] = useState<string | null>(null)
   const isScrubbingRef = useRef(false)
   // Whether the playhead is actively being dragged on the scrub bar. State (not
   // just the ref) so the scrub preview can render a primary-coloured frame +
@@ -1053,6 +1056,7 @@ export default function VideoPlayer({
       commentPointFollowsPlayheadRef.current = false
       draggingRangeHandle.current = null
       setActiveRangeDragHandle(null)
+      setHoveredMarkerCommentId(null)
     }
   }, [selectedVideo?.id])
 
@@ -3909,30 +3913,43 @@ export default function VideoPlayer({
                 )}
 
                 {/* Range spans for comments that have a timecodeEnd — rendered below avatar dots */}
-                {timelineCommentMarkers.some(m => m.timecodeEndSeconds !== null) && effectiveDurationSeconds > 0 && (
+                {timelineCommentMarkers.some(m => m.timecodeEndSeconds !== null) && effectiveDurationSeconds > 0 && (() => {
+                  const rangeMarkers = timelineCommentMarkers.filter(m => m.timecodeEndSeconds !== null)
+                  // Only shift emphasis when the hovered avatar belongs to a range comment.
+                  const hoveredRangeId = rangeMarkers.some(m => m.id === hoveredMarkerCommentId)
+                    ? hoveredMarkerCommentId
+                    : null
+                  return (
                   <div className="absolute inset-0 z-8 pointer-events-none">
-                    {timelineCommentMarkers.filter(m => m.timecodeEndSeconds !== null).map((m) => {
+                    {rangeMarkers.map((m) => {
                       const leftPct = Math.min(100, Math.max(0, (m.seconds / effectiveDurationSeconds) * 100))
                       const widthPct = Math.min(100 - leftPct, Math.max(0, ((m.timecodeEndSeconds! - m.seconds) / effectiveDurationSeconds) * 100))
+                      const isHovered = hoveredRangeId === m.id
+                      const isMuted = hoveredRangeId !== null && !isHovered
                       return (
                         <div
                           key={`range-bar-${m.id}`}
-                          className="absolute top-1/4 h-1/2 rounded-sm"
+                          className={cn(
+                            'absolute rounded-sm transition-all duration-150',
+                            isHovered ? 'top-[12.5%] h-3/4' : 'top-1/4 h-1/2',
+                          )}
                           style={{
                             left: `${leftPct}%`,
                             width: `${widthPct}%`,
+                            opacity: isMuted ? 0.25 : 1,
                             background: m.isInternal
-                              ? 'rgba(100,116,139,0.45)'
-                              : 'rgba(251,191,36,0.45)',
+                              ? `rgba(100,116,139,${isHovered ? 0.7 : 0.45})`
+                              : `rgba(251,191,36,${isHovered ? 0.7 : 0.45})`,
                             border: m.isInternal
-                              ? '2px solid rgba(100,116,139,0.9)'
-                              : '2px solid rgba(251,191,36,0.9)',
+                              ? `2px solid rgba(100,116,139,${isHovered ? 1 : 0.9})`
+                              : `2px solid rgba(251,191,36,${isHovered ? 1 : 0.9})`,
                           }}
                         />
                       )
                     })}
                   </div>
-                )}
+                  )
+                })()}
 
                 {/* Comment markers */}
                 {timelineCommentMarkers.length > 0 && effectiveDurationSeconds > 0 && (
@@ -3962,6 +3979,7 @@ export default function VideoPlayer({
                           title="Jump to comment"
                           aria-label="Jump to comment"
                           onPointerEnter={(e) => {
+                            setHoveredMarkerCommentId(m.id)
                             if (!canShowTimelineHover) return
                             e.stopPropagation()
 
@@ -3976,6 +3994,7 @@ export default function VideoPlayer({
                             })
                           }}
                           onPointerLeave={(e) => {
+                            setHoveredMarkerCommentId((prev) => (prev === m.id ? null : prev))
                             if (!canShowTimelineHover) return
                             e.stopPropagation()
                             setTimelineCommentHover((prev) => ({ ...prev, visible: false, commentId: null }))

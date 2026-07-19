@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Bar,
-  BarChart,
   CartesianGrid,
   ComposedChart,
   Legend,
@@ -127,6 +126,10 @@ function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodR
     end = now
   }
 
+  return { start, end, months: buildMonths(start, end) }
+}
+
+function buildMonths(start: Date, end: Date): PeriodMonth[] {
   const months: PeriodMonth[] = []
   const cursor = new Date(start.getFullYear(), start.getMonth(), 1)
   const endBoundary = new Date(end.getFullYear(), end.getMonth(), 1)
@@ -140,8 +143,19 @@ function computePeriod(key: PeriodKey, fyStartMonth: number, now: Date): PeriodR
     cursor.setMonth(cursor.getMonth() + 1)
   }
 
-  return { start, end, months }
+  return months
 }
+
+// Same window one year earlier, aligned by fiscal month (Jul '25 pairs with Jul '24).
+function shiftPeriodOneYearBack(period: PeriodRange): PeriodRange {
+  const start = new Date(period.start)
+  start.setFullYear(start.getFullYear() - 1)
+  const end = new Date(period.end)
+  end.setFullYear(end.getFullYear() - 1)
+  return { start, end, months: buildMonths(start, end) }
+}
+
+const EMPTY_PERIOD: PeriodRange = { start: new Date(0), end: new Date(0), months: [] }
 
 function isoToYearMonth(iso: string): string {
   // Accepts YYYY-MM-DD or full ISO timestamp
@@ -296,18 +310,33 @@ interface SalesOverviewChartProps {
 
 export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewChartProps) {
   const [period, setPeriod] = useState<PeriodKey>('fy-to-date')
+  const [compareLastFy, setCompareLastFy] = useState(false)
   const now = useMemo(() => (nowIso ? new Date(nowIso) : new Date()), [nowIso])
   const periodRange = useMemo(
     () => computePeriod(period, settings.fiscalYearStartMonth ?? 7, now),
     [period, settings.fiscalYearStartMonth, now],
   )
+  const comparePeriodRange = useMemo(
+    () => (compareLastFy ? shiftPeriodOneYearBack(periodRange) : EMPTY_PERIOD),
+    [compareLastFy, periodRange],
+  )
   const data = useSalesChartData(rollup, periodRange, settings)
+  const prevData = useSalesChartData(rollup, comparePeriodRange, settings)
   const sym = getCurrencySymbol(settings.currencyCode)
   const reportingBasis = getSalesDashboardReportingBasis(settings)
   const includeGst = salesDashboardIncludesGst(settings)
 
+  const chartData = useMemo(
+    () => data.map((row, i) => ({
+      ...row,
+      prevRevenue: compareLastFy ? (prevData[i]?.revenue ?? 0) : undefined,
+    })),
+    [data, prevData, compareLastFy],
+  )
+
   const totalCents = data.reduce((sum, row) => sum + row.revenueCents, 0)
-  const hasData = data.some((row) => row.revenueCents > 0)
+  const prevTotalCents = prevData.reduce((sum, row) => sum + row.revenueCents, 0)
+  const hasData = data.some((row) => row.revenueCents > 0) || (compareLastFy && prevTotalCents > 0)
 
   const monthCount = periodRange.months.length
 
@@ -336,9 +365,30 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
             {avgPerMonthCents > 0 && ` · avg ${formatCurrencyCents(avgPerMonthCents, sym)} / mo`}
             {projectedCents !== null && ` · Projected: ${formatCurrencyCents(projectedCents, sym)}`}
           </p>
+          {compareLastFy && prevTotalCents > 0 && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Last FY: {formatCurrencyCents(prevTotalCents, sym)}
+              {' · '}
+              <span className={totalCents >= prevTotalCents ? 'text-emerald-400' : 'text-destructive'}>
+                {totalCents >= prevTotalCents ? '▲' : '▼'} {Math.abs(Math.round(((totalCents - prevTotalCents) / prevTotalCents) * 100))}%
+              </span>
+            </p>
+          )}
           <p className="text-xs text-muted-foreground mt-0.5">{reportingBasis === 'CASH' ? 'Cash basis' : 'Accrual basis'} · {includeGst ? 'Including GST' : 'Excluding GST'}</p>
         </div>
-        <PeriodSelect value={period} onChange={setPeriod} />
+        <div className="flex flex-col items-end gap-1.5">
+          <PeriodSelect value={period} onChange={setPeriod} />
+          <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none whitespace-nowrap">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-border"
+              checked={compareLastFy}
+              onChange={() => setCompareLastFy((v) => !v)}
+              aria-label="Compare to last financial year"
+            />
+            vs last FY
+          </label>
+        </div>
       </CardHeader>
       <CardContent className="pb-4 pt-0">
         {!hasData ? (
@@ -347,7 +397,7 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }} barCategoryGap="30%">
+            <ComposedChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }} barCategoryGap="30%">
               <defs>
                 <linearGradient id="salesBarGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#818cf8" stopOpacity={1} />
@@ -384,7 +434,20 @@ export function SalesOverviewChart({ rollup, settings, nowIso }: SalesOverviewCh
                 fill="url(#salesBarGradient)"
                 radius={[5, 5, 0, 0]}
               />
-            </BarChart>
+              {compareLastFy && (
+                <Line
+                  type="monotone"
+                  dataKey="prevRevenue"
+                  name="Last FY"
+                  stroke="#94a3b8"
+                  strokeWidth={2}
+                  strokeDasharray="6 3"
+                  dot={{ r: 2.5, fill: '#94a3b8', strokeWidth: 0 }}
+                  activeDot={{ r: 4.5, fill: '#94a3b8', strokeWidth: 0 }}
+                  connectNulls
+                />
+              )}
+            </ComposedChart>
           </ResponsiveContainer>
         )}
       </CardContent>

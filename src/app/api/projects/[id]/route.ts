@@ -22,6 +22,7 @@ import {
 } from '@/lib/project-storage-paths'
 import { HLS_PACKAGE_VERSION } from '@/lib/video-stream-url'
 import { cancelProjectJobs, cancelProjectPreviewResolutionJobs } from '@/lib/cancel-project-jobs'
+import { deleteProjectPreviews } from '@/lib/delete-project-previews'
 import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { asNumberBigInt } from '@/lib/utils'
 import { generateShareUrl } from '@/lib/url'
@@ -1170,7 +1171,7 @@ export async function PATCH(
       })
     }
 
-    // Auto-delete previews and timeline sprites when project is closed (if setting enabled)
+    // Auto-delete previews when project is closed (if setting enabled)
     if (validatedBody.status === 'CLOSED' && previousStatus !== 'CLOSED') {
       try {
         const globalSettings = await prisma.settings.findUnique({
@@ -1178,71 +1179,14 @@ export async function PATCH(
           select: { autoDeletePreviewsOnClose: true },
         })
         if (globalSettings?.autoDeletePreviewsOnClose) {
-          // Get all video IDs and video asset IDs for this project
-          const [videoIds, videoAssetIds] = await Promise.all([
-            prisma.video.findMany({
-              where: { projectId: project.id },
-              select: { id: true },
-            }).then(rows => rows.map(r => r.id)),
-            prisma.videoAsset.findMany({
-              where: { video: { projectId: project.id } },
-              select: { id: true },
-            }).then(rows => rows.map(r => r.id)),
-          ])
-
-          // Collect StoredFile records to delete. We only shed the heavy playable
-          // renditions (video 480/720/1080 + asset playback MP4) and keep everything
-          // needed to still browse the FILES area after close: video THUMBNAIL,
-          // timeline sprites/VTT, and the video-asset still image (PREVIEW_IMAGE).
-          const videoPreviewRoles: FileRole[] = ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080']
-          const assetPreviewRoles: FileRole[] = ['PREVIEW_MP4']
-          // HLS bundles are heavy playable renditions too — shed them on close (the hls/ dir
-          // per video + per asset). Reopen re-enqueues preview generation, which repackages HLS.
-          const hlsDirRole: FileRole = 'HLS_SEGMENTS'
-
-          // Get paths to delete from storage
-          const [videoStored, assetStored, videoHlsDirs, assetHlsDirs] = await Promise.all([
-            videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: videoPreviewRoles, select: { storagePath: true } }) : [],
-            videoAssetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', videoAssetIds, { fileRoles: assetPreviewRoles, select: { storagePath: true } }) : [],
-            videoIds.length > 0 ? getStoredFileRecords('VIDEO', videoIds, { fileRoles: [hlsDirRole], select: { storagePath: true } }) : [],
-            videoAssetIds.length > 0 ? getStoredFileRecords('VIDEO_ASSET', videoAssetIds, { fileRoles: [hlsDirRole], select: { storagePath: true } }) : [],
-          ])
-          const allStoredFiles = [...videoStored, ...assetStored]
-
-          // Delete files from storage (HLS bundles are whole directories).
-          await Promise.allSettled(
-            allStoredFiles.map(f => deleteFile(f.storagePath).catch(() => {}))
-          )
-          await Promise.allSettled(
-            [...videoHlsDirs, ...assetHlsDirs].map(f => deleteDirectory(f.storagePath).catch(() => {}))
-          )
-
-          // Delete StoredFile records (no updatedAt bump on Video — raw deletion)
-          if (videoIds.length > 0) {
-            await deleteStoredFilesByCriteria({
-              entityType: 'VIDEO',
-              entityIds: videoIds,
-              fileRoles: [...videoPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
-            })
-          }
-          if (videoAssetIds.length > 0) {
-            await deleteStoredFilesByCriteria({
-              entityType: 'VIDEO_ASSET',
-              entityIds: videoAssetIds,
-              fileRoles: [...assetPreviewRoles, 'HLS_PLAYLIST', 'HLS_SEGMENTS'],
-            })
-          }
-
-          // Refresh precomputed storage totals so the dashboard reflects the freed
-          // space immediately instead of waiting for the daily reconcile job.
-          await Promise.allSettled([
-            recalculateAndStoreProjectTotalBytes(project.id),
-            recalculateAndStoreProjectPreviewBytes(project.id),
-            recalculateAndStoreProjectDiskBytes(project.id),
-          ])
+          // Shared close-path deletion (HLS bundles + MP4 previews + asset playback MP4s,
+          // keeping thumbnails/sprites/still images) — same logic as the auto-close worker,
+          // including retry-safe StoredFile row removal and clearing hlsReady so the reopen
+          // path knows to rebuild playback.
+          await deleteProjectPreviews(project.id, { logPrefix: 'PROJECT UPDATE' })
         }
       } catch (err) {
-        console.error('[PROJECT UPDATE] Error auto-deleting previews/zips on close:', err)
+        console.error('[PROJECT UPDATE] Error auto-deleting previews on close:', err)
       }
     }
 

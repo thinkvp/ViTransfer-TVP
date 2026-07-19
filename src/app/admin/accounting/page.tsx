@@ -24,6 +24,38 @@ function getCurrentFY(): { from: string; to: string; label: string } {
   }
 }
 
+// Same-elapsed-point window in the previous FY (1 Jul last year → this date one year
+// ago), so mid-year deltas compare like-for-like rather than against a full prior FY.
+function getPriorFYToDate(): { from: string; to: string; label: string } {
+  const now = new Date()
+  const year = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1
+  const prevPoint = new Date(now)
+  prevPoint.setFullYear(prevPoint.getFullYear() - 1)
+  const to = `${prevPoint.getFullYear()}-${String(prevPoint.getMonth() + 1).padStart(2, '0')}-${String(prevPoint.getDate()).padStart(2, '0')}`
+  return {
+    from: `${year - 1}-07-01`,
+    to,
+    label: `FY${String(year - 1).slice(2)}/${String(year).slice(2)}`,
+  }
+}
+
+function DeltaLine({ currentCents, priorCents, priorLabel }: { currentCents: number; priorCents: number | null; priorLabel: string }) {
+  if (priorCents === null || (priorCents === 0 && currentCents === 0)) return null
+  const diff = currentCents - priorCents
+  const up = diff >= 0
+  // Percent change is only meaningful against a positive prior figure (e.g. a
+  // prior-year net loss); otherwise fall back to the absolute movement.
+  const usePct = priorCents > 0
+  return (
+    <p className="text-xs text-muted-foreground mt-1">
+      <span className={up ? 'text-emerald-400' : 'text-destructive'}>
+        {up ? '▲' : '▼'} {usePct ? `${Math.abs(Math.round((diff / priorCents) * 100))}%` : fmtAud(Math.abs(diff))}
+      </span>{' '}
+      vs {priorLabel} same point
+    </p>
+  )
+}
+
 function computeProjectedNetProfit(netProfitCents: number, fyStartMonth: number): number | null {
   const now = new Date()
   const fyStartM = Math.max(1, Math.min(12, fyStartMonth)) - 1 // 0-indexed
@@ -44,6 +76,7 @@ interface DashboardStats {
   draftExpenseCount: number
   bankAccounts: { id: string; name: string; currentBalance: number; pendingTransactionAmount: number }[]
   pl: { totalIncomeCents: number; totalExpenseCents: number; netProfitCents: number } | null
+  priorPl: { totalIncomeCents: number; netProfitCents: number } | null
   reportingBasis: 'CASH' | 'ACCRUAL'
 }
 
@@ -57,6 +90,7 @@ export default function AccountingDashboardPage() {
   const [chartSettings, setChartSettings] = useState<ChartSettings>({ fyStartMonth: 7, currencyCode: 'AUD' })
   const [loading, setLoading] = useState(true)
   const fy = getCurrentFY()
+  const priorFyLabel = getPriorFYToDate().label
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -74,8 +108,13 @@ export default function AccountingDashboardPage() {
       const settingsData: AccountingSettings | null = plRes.ok ? await plRes.json() : null
       const salesSettings = salesSettingsRes.ok ? await salesSettingsRes.json() : null
       const reportingBasis = settingsData?.reportingBasis === 'CASH' ? 'CASH' : 'ACCRUAL'
-      const reportRes = await apiFetch(`/api/admin/accounting/reports/profit-loss?from=${fy.from}&to=${fy.to}&basis=${reportingBasis}`)
+      const priorFy = getPriorFYToDate()
+      const [reportRes, priorReportRes] = await Promise.all([
+        apiFetch(`/api/admin/accounting/reports/profit-loss?from=${fy.from}&to=${fy.to}&basis=${reportingBasis}`),
+        apiFetch(`/api/admin/accounting/reports/profit-loss?from=${priorFy.from}&to=${priorFy.to}&basis=${reportingBasis}`),
+      ])
       const plData = reportRes.ok ? await reportRes.json() : null
+      const priorPlData = priorReportRes.ok ? await priorReportRes.json() : null
 
       setChartSettings({
         fyStartMonth: salesSettings?.fiscalYearStartMonth ?? 7,
@@ -91,6 +130,12 @@ export default function AccountingDashboardPage() {
               totalIncomeCents: plData.report.totalIncomeCents ?? 0,
               totalExpenseCents: plData.report.totalExpenseCents ?? 0,
               netProfitCents: plData.report.netProfitCents ?? 0,
+            }
+          : null,
+        priorPl: priorPlData?.report
+          ? {
+              totalIncomeCents: priorPlData.report.totalIncomeCents ?? 0,
+              netProfitCents: priorPlData.report.netProfitCents ?? 0,
             }
           : null,
       })
@@ -148,6 +193,11 @@ export default function AccountingDashboardPage() {
               <CardContent>
                 <p className="text-3xl font-bold text-emerald-400">{fmtAud(stats.pl.totalIncomeCents)}</p>
                 <p className="text-xs text-muted-foreground mt-1">{stats.reportingBasis === 'CASH' ? 'cash basis, ex GST' : 'accrual basis, ex GST'}</p>
+                <DeltaLine
+                  currentCents={stats.pl.totalIncomeCents}
+                  priorCents={stats.priorPl?.totalIncomeCents ?? null}
+                  priorLabel={priorFyLabel}
+                />
               </CardContent>
             </Card>
 
@@ -178,6 +228,11 @@ export default function AccountingDashboardPage() {
                       <p className="text-xs text-muted-foreground mt-1">income minus expenses</p>
                     )
                   })()}
+                  <DeltaLine
+                    currentCents={stats.pl.netProfitCents}
+                    priorCents={stats.priorPl?.netProfitCents ?? null}
+                    priorLabel={priorFyLabel}
+                  />
                 </CardContent>
               </Card>
             </Link>
