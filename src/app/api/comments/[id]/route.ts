@@ -53,6 +53,7 @@ export async function PATCH(
       where: { id },
       select: {
         isInternal: true,
+        lockedAt: true,
         projectId: true,
         project: {
           select: {
@@ -130,6 +131,14 @@ export async function PATCH(
           return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
       }
+    }
+
+    // Locked comments (next version requested) can no longer be edited by share sessions.
+    if (!isAdmin && existingComment.lockedAt) {
+      return NextResponse.json(
+        { error: 'This comment is locked because the next version was requested' },
+        { status: 403 }
+      )
     }
 
     // Prepare update data
@@ -249,6 +258,7 @@ export async function DELETE(
       select: {
         id: true,
         isInternal: true,
+        lockedAt: true,
         userId: true,
         recipientId: true,
         projectId: true,
@@ -356,6 +366,15 @@ export async function DELETE(
       if (existingComment.isInternal) {
         return NextResponse.json(
           { error: 'Only recipient comments can be deleted by clients' },
+          { status: 403 }
+        )
+      }
+
+      // Locked comments (next version requested) can no longer be deleted by clients,
+      // even when allowClientDeleteComments is enabled.
+      if (existingComment.lockedAt) {
+        return NextResponse.json(
+          { error: 'This comment is locked because the next version was requested' },
           { status: 403 }
         )
       }

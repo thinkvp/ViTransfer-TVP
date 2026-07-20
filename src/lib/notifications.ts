@@ -1,6 +1,6 @@
 import { Comment } from '@prisma/client'
 import { prisma } from './db'
-import { getEmailSettings, sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendProjectApprovedEmail, sendAdminProjectApprovedEmail } from './email'
+import { getEmailSettings, isSmtpConfigured, sendCommentNotificationEmail, sendAdminCommentNotificationEmail, sendProjectApprovedEmail, sendAdminProjectApprovedEmail, sendAdminRevisionRequestedEmail } from './email'
 import { getProjectRecipients } from './recipients'
 import { buildUnsubscribeUrl } from './unsubscribe'
 import { generateShareUrl } from './url'
@@ -307,6 +307,133 @@ export async function handleApprovalNotification(context: ApprovalNotificationCo
   // ALWAYS send approval notifications immediately, regardless of schedule
   console.log(`[APPROVAL]   Sending immediately (approvals always bypass schedule)...`)
   await sendApprovalImmediately(context)
+}
+
+interface RevisionRequestNotificationContext {
+  project: { id: string; title: string }
+  video: { id: string; name: string; version?: number | null; versionLabel?: string | null }
+  authorName?: string | null
+  performedByAdmin?: boolean
+}
+
+/**
+ * Handle "Request Next Version" notification (client finished reviewing a video version).
+ * Reuses the VIDEO_APPROVAL push type and the adminEmailProjectApproved email toggle so the
+ * existing approval notification settings/permissions govern who hears about it.
+ * Push/bell fires even when SMTP is unconfigured; only the email leg is SMTP-gated.
+ */
+export async function handleRevisionRequestNotification(context: RevisionRequestNotificationContext) {
+  const { project, video, authorName, performedByAdmin = false } = context
+  const displayAuthor = (authorName && authorName.trim()) || 'Client'
+  const versionSuffix = (video.versionLabel && video.versionLabel.trim()) ? ` (${video.versionLabel.trim()})` : ''
+
+  console.log(`[REVISION-REQUEST] Handling next-version request for "${project.title}" / ${video.name}`)
+
+  // Deep link: clicking the bell entry opens the requested video version on the admin
+  // share page (same URL shape the comment notifications use).
+  const adminShareHref = Number.isFinite(video.version ?? NaN)
+    ? `/admin/projects/${encodeURIComponent(project.id)}/share?video=${encodeURIComponent(video.name)}&version=${encodeURIComponent(String(video.version))}`
+    : `/admin/projects/${encodeURIComponent(project.id)}`
+
+  // In-app bell + web push (assigned admins with Share Page access, notifyVideoApproval toggle)
+  await sendPushNotification({
+    type: 'VIDEO_APPROVAL',
+    projectId: project.id,
+    projectName: project.title,
+    title: 'Next Version Requested',
+    message: `${displayAuthor} requested the next version of ${video.name}${versionSuffix}`,
+    details: {
+      __meta: {
+        videoId: video.id,
+        videoVersion: video.version ?? null,
+        videoName: video.name,
+      },
+      __link: {
+        href: adminShareHref,
+      },
+      'Project': project.title,
+      'Video': `${video.name}${versionSuffix}`,
+      'Author': displayAuthor,
+      'Status': 'Next version requested',
+    },
+  })
+
+  if (performedByAdmin) {
+    console.log('[REVISION-REQUEST] Skipping admin email - action performed by internal admin')
+    return
+  }
+
+  if (!(await isSmtpConfigured())) {
+    console.log('[REVISION-REQUEST] SMTP not configured, skipping admin email')
+    return
+  }
+
+  const globalSettings = await prisma.settings.findUnique({
+    where: { id: 'default' },
+    select: { adminEmailProjectApproved: true },
+  })
+  if (globalSettings?.adminEmailProjectApproved === false) {
+    console.log('[REVISION-REQUEST] Skipping admin email - adminEmailProjectApproved is disabled')
+    return
+  }
+
+  // Internal recipients: assigned to the project, notifications on, admin role or Share Page access.
+  const internalUsers = await prisma.projectUser.findMany({
+    where: { projectId: project.id, receiveNotifications: true },
+    select: {
+      user: {
+        select: {
+          email: true,
+          appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
+        },
+      },
+    },
+  })
+  const internalEmails = internalUsers
+    .filter((r) => {
+      const role = r.user.appRole
+      const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
+      if (isAdminRole) return true
+      const permissions = normalizeRolePermissions(role?.permissions)
+      return canDoAction(permissions, 'accessSharePage')
+    })
+    .map((r) => r.user.email)
+    .filter(Boolean)
+
+  if (internalEmails.length === 0) {
+    console.log('[REVISION-REQUEST] No eligible internal recipients for admin email')
+    return
+  }
+
+  const projectMeta = await prisma.project.findUnique({
+    where: { id: project.id },
+    select: { companyName: true },
+  })
+  const allRecipients = await getProjectRecipients(project.id)
+  const primaryRecipientName =
+    allRecipients.find((r) => r.isPrimary)?.name ||
+    allRecipients[0]?.name ||
+    null
+  const clientDisplayName =
+    (typeof projectMeta?.companyName === 'string' && projectMeta.companyName.trim())
+      ? projectMeta.companyName.trim()
+      : (typeof primaryRecipientName === 'string' && primaryRecipientName.trim())
+        ? primaryRecipientName.trim()
+        : displayAuthor
+
+  const result = await sendAdminRevisionRequestedEmail({
+    adminEmails: internalEmails,
+    clientName: clientDisplayName,
+    projectTitle: project.title,
+    videoName: video.name,
+    versionLabel: video.versionLabel ?? null,
+  })
+
+  if (result.success) {
+    console.log(`[REVISION-REQUEST]   ${result.message}`)
+  } else {
+    console.error(`[REVISION-REQUEST]   Failed: ${result.message}`)
+  }
 }
 
 /**

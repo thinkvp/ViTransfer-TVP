@@ -641,6 +641,7 @@ export function useCommentManagement({
       timecodeEnd: null,
       resolvedAt: null,
       resolvedById: null,
+      lockedAt: null,
       replies: [],
     }
 

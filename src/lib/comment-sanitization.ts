@@ -107,6 +107,9 @@ export function sanitizeComment(
     // Feedback resolution state (non-PII). Drives the admin share-page "mark done" tick;
     // the control itself is admin-gated in the UI.
     resolvedAt: comment.resolvedAt ?? null,
+    // Set when the next version was requested for the comment's video: hides the client
+    // delete control and shows the lock indicator. Enforced server-side in /api/comments/[id].
+    lockedAt: comment.lockedAt ?? null,
   }
 
   // Non-PII: expose display color for UI highlights.

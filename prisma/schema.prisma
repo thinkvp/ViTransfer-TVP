@@ -809,6 +809,14 @@ model Video {
   unapprovedByRecipientId String?
   unapprovedByName      String?
 
+  // Client "Request Next Version" (share-page "Reviewed" state, one-shot per version).
+  // Unrelated to ProjectStatus.REVIEWED. A new version is a fresh row, so the video
+  // group naturally returns to "For Review" when the next version is uploaded.
+  revisionRequestedAt            DateTime?
+  revisionRequestedById          String?
+  revisionRequestedByRecipientId String?
+  revisionRequestedByName        String?
+
   // Upload attribution
   uploadedById   String?
   uploadedByName String?
@@ -948,6 +956,11 @@ model Comment {
   resolvedAt   DateTime?
   resolvedById String? // admin User who marked it done (nullable, history-safe)
   resolvedBy   User?     @relation("CommentResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  // Set when the client requests the next version of the comment's video: locked
+  // comments can no longer be deleted/edited by share sessions (even with
+  // allowClientDeleteComments on). Admins are unaffected.
+  lockedAt DateTime?
 
   project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
   files   CommentFile[] // Files uploaded with this comment

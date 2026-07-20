@@ -879,8 +879,11 @@ export default function CommentInput({
         </div>
       )}
 
-      {/* Name row */}
-      {!currentVideoRestricted && (
+      {/* Name row — fallback only. The share page's welcome prompt captures the name up
+          front (and registers typed names as recipients), so this normally never renders;
+          it appears only when attribution is somehow missing (e.g. cleared
+          sessionStorage) so the user isn't dead-ended with no way to set a name. */}
+      {!currentVideoRestricted && showAuthorInput && !authorName.trim() && (
         <div className="mb-3 flex items-center gap-3 min-w-0">
           {showAuthorInput ? (
             <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">

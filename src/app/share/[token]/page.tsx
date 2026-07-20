@@ -646,7 +646,12 @@ export default function SharePage() {
           for (const [name, versions] of Object.entries(projectData.videosByName || {})) {
             next[name] = (versions as any[]).map((v: any) => {
               const tokenized = tokenizedById.get(String(v.id))
-              return tokenized && tokenCacheRef.current.has(String(v.id)) ? tokenized : v
+              // Reuse the tokenized copy, but carry over fields that change without
+              // flipping approval (which is what invalidates the token cache) — the
+              // "Reviewed" state must reflect live for other viewers of this page.
+              return tokenized && tokenCacheRef.current.has(String(v.id))
+                ? { ...tokenized, revisionRequestedAt: (v as any).revisionRequestedAt ?? null }
+                : v
             })
           }
           return next
@@ -1087,15 +1092,23 @@ export default function SharePage() {
     if (activeAlbumId) return
     if (project?.enableVideos === false) return
     if (project?.videosByName) {
-      // Sort video names: prioritize the sidebar "For Review" group (no approved versions), then "Approved", then alphabetically.
-      // Keep this in sync with the grouping logic in VideoSidebar.
+      // Sort video names: prioritize the sidebar "For Review" group (no approved versions),
+      // then "Reviewed" (latest version has the next version requested), then "Approved",
+      // then alphabetically. Keep this in sync with the grouping logic in VideoSidebar.
       const names = Object.keys(project.videosByName)
       const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
       const isApprovedGroup = (videoName: string) => (project.videosByName[videoName] || []).some((v: any) => v?.approved === true)
+      const isReviewedGroup = (videoName: string) => {
+        if (isApprovedGroup(videoName)) return false
+        const groupVideos = project.videosByName[videoName] || []
+        const latest = [...groupVideos].sort((a: any, b: any) => ((b as any)?.version ?? 0) - ((a as any)?.version ?? 0))[0]
+        return Boolean((latest as any)?.revisionRequestedAt)
+      }
 
-      const forReview = names.filter((n) => !isApprovedGroup(n)).sort(byName)
+      const forReview = names.filter((n) => !isApprovedGroup(n) && !isReviewedGroup(n)).sort(byName)
+      const reviewed = names.filter((n) => isReviewedGroup(n)).sort(byName)
       const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
-      const videoNames = [...forReview, ...approved]
+      const videoNames = [...forReview, ...reviewed, ...approved]
       if (videoNames.length === 0) return
 
       // Determine which video should be active
@@ -1538,10 +1551,49 @@ export default function SharePage() {
     setNameCaptureState('needed')
   }, [isAdminSession, isAuthenticated, project, otpSessionEmail, loadCommentIdentity, persistCommentIdentity])
 
-  const handleNameChosen = useCallback((name: string, recipientId: string | null) => {
-    persistCommentIdentity(name, recipientId)
+  // A typed (non-recipient) name is registered as a project recipient — same endpoint
+  // the comment name picker uses — so attribution gets a real recipientId and the name
+  // shows up for admins/other clients. Best-effort: on failure we keep the name-only
+  // identity rather than blocking entry to the page.
+  const handleNameChosen = useCallback(async (name: string, recipientId: string | null) => {
+    let trimmed = name.trim()
+    let resolvedId = recipientId
+
+    if (!resolvedId && trimmed) {
+      const match = ((project?.recipients as any[]) || []).find(
+        (r) => String(r?.name || '').trim().toLowerCase() === trimmed.toLowerCase(),
+      )
+      if (match?.id) {
+        resolvedId = String(match.id)
+        trimmed = String(match.name).trim()
+      }
+    }
+
+    if (!resolvedId && trimmed && !isAdminSession && shareToken) {
+      try {
+        const response = await apiFetch(`/api/share/${token}/recipients`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${shareToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmed }),
+        })
+        const data = await response.json().catch(() => null)
+        const id = response.ok ? String(data?.recipient?.id || '') : ''
+        if (id) {
+          resolvedId = id
+          window.dispatchEvent(
+            new CustomEvent('shareRecipientsChanged', {
+              detail: { action: 'add', recipient: { id, name: String(data?.recipient?.name || trimmed) } },
+            })
+          )
+        }
+      } catch {
+        // Network failure — proceed with a name-only identity.
+      }
+    }
+
+    persistCommentIdentity(trimmed, resolvedId)
     setNameCaptureState('done')
-  }, [persistCommentIdentity])
+  }, [project, isAdminSession, shareToken, token, persistCommentIdentity])
 
   const handleCreateUploadFolder = useCallback(async (parentPath: string, folderName: string) => {
     const authHeader: Record<string, string> = !isAdminSession && shareToken ? { Authorization: `Bearer ${shareToken}` } : {}
@@ -4186,14 +4238,20 @@ function ShareNameCaptureModal({
   const namedRecipients = recipients.filter((r) => String(r?.name || '').trim())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [customName, setCustomName] = useState('')
+  // Confirm may register the typed name as a recipient (async) — block re-clicks
+  // while that's in flight; the modal unmounts once the caller flips the state.
+  const [submitting, setSubmitting] = useState(false)
 
-  const canConfirm = selectedId ? true : customName.trim().length > 0
+  const canConfirm = !submitting && (selectedId ? true : customName.trim().length > 0)
 
   const handleConfirm = () => {
+    if (submitting) return
     if (selectedId) {
       const recipient = namedRecipients.find((r) => r.id === selectedId)
+      setSubmitting(true)
       onConfirm(String(recipient?.name || '').trim(), selectedId)
     } else if (customName.trim()) {
+      setSubmitting(true)
       onConfirm(customName.trim(), null)
     }
   }
@@ -4240,7 +4298,7 @@ function ShareNameCaptureModal({
               setSelectedId(null)
             }}
             placeholder="Your name"
-            maxLength={100}
+            maxLength={30}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && canConfirm) handleConfirm()
             }}

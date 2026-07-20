@@ -10,6 +10,7 @@ import {
 	renderAdminInvoicePaidEmail,
 	renderAdminProjectApprovedEmail,
 	renderAdminQuoteAcceptedEmail,
+	renderAdminRevisionRequestedEmail,
 	renderCommentNotificationEmail,
 	renderProjectKeyDateReminderEmail,
 	renderSalesInvoiceOverdueReminderEmail,
@@ -119,6 +120,19 @@ async function main() {
 			approvedVideos: [{ id: 'vid1', name: 'Cut A' }],
 			isComplete: false,
 			isApproval: true,
+			branding,
+		})).html
+	)
+
+	await writeHtml(
+		outDir,
+		'05b-admin-revision-requested.html',
+		(await renderAdminRevisionRequestedEmail({
+			greetingName: 'Morgan',
+			clientName: 'Alex',
+			projectTitle: 'Winter Campaign',
+			videoName: 'Cut A',
+			versionLabel: 'v3',
 			branding,
 		})).html
 	)

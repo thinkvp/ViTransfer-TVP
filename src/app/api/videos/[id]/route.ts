@@ -200,12 +200,19 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, name, versionLabel, videoNotes, allowApproval, autoGenerateSubtitles, confirmed } = body
+    const { approved, revisionRequested, name, versionLabel, videoNotes, allowApproval, autoGenerateSubtitles, confirmed } = body
 
     // Validate inputs
     if (approved !== undefined && typeof approved !== 'boolean') {
       return NextResponse.json(
         { error: 'Invalid request: approved must be a boolean' },
+        { status: 400 }
+      )
+    }
+
+    if (revisionRequested !== undefined && typeof revisionRequested !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid request: revisionRequested must be a boolean' },
         { status: 400 }
       )
     }
@@ -253,7 +260,7 @@ export async function PATCH(
     }
 
     // At least one field must be provided
-    if (approved === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined && autoGenerateSubtitles === undefined) {
+    if (approved === undefined && revisionRequested === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined && autoGenerateSubtitles === undefined) {
       return NextResponse.json(
         { error: 'Invalid request: at least one field must be provided' },
         { status: 400 }
@@ -287,7 +294,7 @@ export async function PATCH(
     }
 
     // RBAC: conservative - any admin-side mutation requires Projects Full Control.
-    if (approved !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined || autoGenerateSubtitles !== undefined) {
+    if (approved !== undefined || revisionRequested !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined || autoGenerateSubtitles !== undefined) {
       const forbidden = requireActionAccess(authResult, 'projectsFullControl')
       if (forbidden) return forbidden
     }
@@ -351,6 +358,15 @@ export async function PATCH(
         updateData.unapprovedByRecipientId = null
         updateData.unapprovedByName = admin.name || admin.email
       }
+    }
+
+    // Manual "Reviewed" (next version requested) toggle. Unlike the client flow this
+    // does not lock/unlock comments — locking is the client request's semantic.
+    if (revisionRequested !== undefined) {
+      updateData.revisionRequestedAt = revisionRequested ? new Date() : null
+      updateData.revisionRequestedById = revisionRequested ? admin.id : null
+      updateData.revisionRequestedByRecipientId = null
+      updateData.revisionRequestedByName = revisionRequested ? (admin.name || admin.email) : null
     }
 
     // Attribution stamped onto sibling versions that get auto-unapproved when this one is approved.

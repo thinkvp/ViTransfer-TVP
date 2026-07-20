@@ -6,7 +6,7 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { AlertTriangle, CheckCircle2, Clock, History, Info, Lock, MessageCircle, Share2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock, FileClock, History, Info, Lock, MessageCircle, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -287,10 +287,16 @@ export function CommentSectionView({
   const [showApproveConfirm, setShowApproveConfirm] = useState(false)
   const [approving, setApproving] = useState(false)
   const approvingRef = useRef(false)
-  
+  const [showRequestNextConfirm, setShowRequestNextConfirm] = useState(false)
+  const [requestingNext, setRequestingNext] = useState(false)
+  const requestingNextRef = useRef(false)
+
   const [exportingSrt, setExportingSrt] = useState(false)
   // Optimistic local flag: remember which video was just approved until server data propagates.
   const [localApprovedVideoId, setLocalApprovedVideoId] = useState<string | null>(null)
+  // Optimistic local flag: remember which video just had its next version requested
+  // (the SSE echo guard suppresses the requester's own refetch for a moment).
+  const [localRevisionRequestedVideoId, setLocalRevisionRequestedVideoId] = useState<string | null>(null)
   const pendingScrollRef = useRef<{ commentId: string; parentId: string | null } | null>(null)
   const pendingScrollAttemptsRef = useRef(0)
   const commentPlaybackUrlCacheRef = useRef<Map<string, string>>(new Map())
@@ -803,16 +809,6 @@ export function CommentSectionView({
     ? `You can only leave feedback on the latest version. Please switch to version ${latestVideoVersion} to comment.`
     : undefined
 
-  // Track which comments have expanded replies (default: all expanded)
-  const [expandedReplies, setExpandedReplies] = useState<Record<string, boolean>>({})
-
-  const toggleReplies = (commentId: string) => {
-    setExpandedReplies(prev => ({
-      ...prev,
-      [commentId]: !prev[commentId]
-    }))
-  }
-
   // Format message time
   const formatMessageTime = (date: Date) => {
     const now = new Date()
@@ -929,6 +925,48 @@ export function CommentSectionView({
   const approvalEnabledForHeaderVideo = Boolean(headerVideo?.allowApproval)
   const headerVideoFileSizeBytes = parseVideoFileSize(headerVideo?.originalFileSize)
 
+  // "Request Next Version" (client share page only, one-shot per version).
+  const isHeaderVideoRevisionRequested = Boolean(
+    headerVideo?.id && ((headerVideo as any).revisionRequestedAt || localRevisionRequestedVideoId === headerVideo.id)
+  )
+  const headerVideoHasClientComment = Boolean(
+    headerVideo?.id && comments.some((c: any) =>
+      (!c.isInternal && c.videoId === headerVideo.id) ||
+      (c.replies || []).some((r: any) => !r.isInternal && r.videoId === headerVideo.id)
+    )
+  )
+  const showRequestNextVersion = Boolean(
+    !isAdminView &&
+    showVideoActions &&
+    showApproveButton &&
+    headerVideo &&
+    // Only the latest version can lodge the request — on older versions the header
+    // already points at the newer version.
+    latestSelectableVideo &&
+    headerVideo.id === latestSelectableVideo.id &&
+    headerVideoHasClientComment &&
+    !isHeaderVideoRevisionRequested &&
+    !isApproved &&
+    !headerVideo?.approved &&
+    !hasAnyApprovedVideoInGroup &&
+    !hasLocallyApprovedVideoInGroup
+  )
+
+  const showApproveVideoButton = Boolean(
+    showVideoActions &&
+    showApproveButton &&
+    approvalEnabledForHeaderVideo &&
+    !isApproved &&
+    !headerVideo?.approved &&
+    !hasAnyApprovedVideoInGroup &&
+    !hasLocallyApprovedVideoInGroup &&
+    !isHeaderVideoRevisionRequested
+  )
+
+  // The List Controls row only renders when it has real actions; otherwise the sort
+  // toggle floats over the message list so the row's vertical space is reclaimed.
+  const showListActionsRow = isAdminView || showApproveVideoButton || showRequestNextVersion
+
   const showOlderVersionNote = Boolean(
     !restrictToLatestVersion &&
       sortedVideoVersions.length > 1 &&
@@ -936,6 +974,12 @@ export function CommentSectionView({
       latestSelectableVideo &&
       selectedVideoId !== latestSelectableVideo.id
   )
+
+  // When the requested next version has since been uploaded, the "requested" banner
+  // flips to "available" with a jump-to-it button (sortedVideoVersions is newest-first).
+  const newerVersionThanHeader = headerVideo
+    ? sortedVideoVersions.find(v => ((v as any).version ?? 0) > ((headerVideo as any).version ?? 0)) || null
+    : null
 
   const handleSelectVideoVersion = (videoId: string) => {
     // Update comments immediately
@@ -1028,6 +1072,57 @@ export function CommentSectionView({
     } finally {
       approvingRef.current = false
       setApproving(false)
+    }
+  }
+
+  const handleRequestNextVersion = async () => {
+    const video = headerVideo
+    if (!video) return
+    if (requestingNextRef.current) return
+    requestingNextRef.current = true
+
+    setRequestingNext(true)
+    try {
+      const url = `/api/projects/${projectId}/request-next-version`
+      const requestBody = JSON.stringify({
+        selectedVideoId: video.id,
+        recipientId: management.recipientId || null,
+        authorName: management.authorName || null,
+      })
+      const response = shareToken
+        ? await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${shareToken}`,
+            },
+            body: requestBody,
+          })
+        : await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: requestBody,
+          })
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err.error || 'Failed to request next version')
+      }
+
+      // Optimistically flip the local state so the banner and Reviewed badge appear
+      // without waiting for the async prop-refresh chain.
+      setLocalRevisionRequestedVideoId(video.id)
+      setShowRequestNextConfirm(false)
+      toast.success('Next version requested')
+      // Trigger the share page's project + files refetch (the SSE echo guard suppresses
+      // our own event). No videoId in the detail — that would mark it locally APPROVED.
+      window.dispatchEvent(new CustomEvent('videoApprovalChanged', { detail: {} }))
+      router.refresh()
+    } catch (error) {
+      toast.error(`Request failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      requestingNextRef.current = false
+      setRequestingNext(false)
     }
   }
 
@@ -1340,6 +1435,37 @@ export function CommentSectionView({
           </DialogContent>
         </Dialog>
 
+        <Dialog open={showRequestNextConfirm} onOpenChange={setShowRequestNextConfirm}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Request Next Version</DialogTitle>
+              <DialogDescription>
+                {headerVideo
+                  ? `Request the next version of ${headerVideoName}? Your feedback on ${headerVideo.versionLabel || 'this version'} will be locked in, but you can still add comments.`
+                  : 'Request the next version? Your feedback on this version will be locked in, but you can still add comments.'}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowRequestNextConfirm(false)}
+                disabled={requestingNext}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => void handleRequestNextVersion()}
+                disabled={requestingNext}
+              >
+                {requestingNext ? 'Requesting...' : 'Request Next Version'}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
                 {/* Approval Status Banner */}
         {commentsDisabled && isProjectApprovedOnly && (
                     <div className="bg-primary p-4 shrink-0">
@@ -1382,6 +1508,40 @@ export function CommentSectionView({
                     onClick={handleDownloadSelected}
                   >
                     Download
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+        {/* Next Version Requested banner (video is "Reviewed" on the share page).
+            Once the next version has actually been uploaded, it flips to "available"
+            with a button that jumps to the newer version. */}
+        {!commentsDisabled && isHeaderVideoRevisionRequested && (
+          <div className="bg-primary/10 p-4 shrink-0">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <FileClock className="w-8 h-8 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-foreground font-medium">
+                    {newerVersionThanHeader ? 'Next version available' : 'Next version requested'}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {newerVersionThanHeader
+                      ? `${newerVersionThanHeader.versionLabel || 'A newer version'} is ready for review. Feedback on this version is locked, but you can still add comments.`
+                      : "We're working on the next version of this video. Your feedback is locked in, but you can still add comments."}
+                  </p>
+                </div>
+              </div>
+              {newerVersionThanHeader ? (
+                <div className="shrink-0">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => handleSelectVideoVersion(newerVersionThanHeader.id)}
+                    title={newerVersionThanHeader.versionLabel ? `View ${newerVersionThanHeader.versionLabel}` : 'View the latest version'}
+                  >
+                    View
                   </Button>
                 </div>
               ) : null}
@@ -1436,7 +1596,9 @@ export function CommentSectionView({
           </div>
         ) : null}
 
-        {/* List Controls (directly above the message list) */}
+        {/* List Controls (directly above the message list). Skipped entirely when there
+            are no action buttons — the sort toggle then floats over the message list. */}
+        {showListActionsRow ? (
         <div className="px-4 sm:px-6 py-2 border-b border-border bg-card shrink-0">
           <div className="flex flex-wrap items-center gap-2 justify-between">
             <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
@@ -1451,7 +1613,7 @@ export function CommentSectionView({
                   {exportingSrt ? 'Exporting...' : 'Export Comments'}
                 </Button>
               )}
-              {showVideoActions && showApproveButton && approvalEnabledForHeaderVideo && !isApproved && !headerVideo?.approved && !hasAnyApprovedVideoInGroup && !hasLocallyApprovedVideoInGroup ? (
+              {showApproveVideoButton ? (
                 <Button
                   variant="success"
                   size="sm"
@@ -1459,6 +1621,16 @@ export function CommentSectionView({
                   disabled={approving}
                 >
                   Approve Video
+                </Button>
+              ) : null}
+              {showRequestNextVersion ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowRequestNextConfirm(true)}
+                  disabled={requestingNext}
+                >
+                  Request Next Version
                 </Button>
               ) : null}
             </div>
@@ -1477,9 +1649,43 @@ export function CommentSectionView({
               </div>
             </div>
           </div>
+          {showRequestNextVersion ? (
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              All feedback submitted? Click <span className="font-medium text-foreground">Request Next Version</span>{' '}to let us know you&apos;re done with this version.
+            </p>
+          ) : null}
         </div>
+        ) : null}
+
+        {/* Approved notice above the comment list — styled like the "All feedback
+            submitted?" prompt for consistency. The no-comments empty state below
+            has its own larger version of this message. */}
+        {commentsDisabled && sortedComments.length > 0 ? (
+          <div className="px-4 sm:px-6 py-2 border-b border-border bg-card shrink-0">
+            <p className="text-xs text-muted-foreground">
+              {isProjectApprovedOnly
+                ? 'This project has been approved. Comments are now closed.'
+                : 'This video has been approved. Comments are now closed.'}
+            </p>
+          </div>
+        ) : null}
 
         {/* Messages Area - Threaded Conversations */}
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          {!showListActionsRow && sortedComments.length > 1 ? (
+            <div className="absolute top-2 right-3 z-10">
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={commentSortMode === 'timecode' ? 'Sorted by timecode — switch to newest first' : 'Sorted by newest — switch to timecode'}
+                title={commentSortMode === 'timecode' ? 'Sorted by timecode — switch to newest first' : 'Sorted by newest — switch to timecode'}
+                className="h-8 w-8 p-0 bg-card/90 shadow-sm"
+                onClick={() => setCommentSortMode(commentSortMode === 'timecode' ? 'date' : 'timecode')}
+              >
+                {commentSortMode === 'timecode' ? <Clock className="h-4 w-4" /> : <History className="h-4 w-4" />}
+              </Button>
+            </div>
+          ) : null}
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3 min-h-0 bg-muted/70">
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
@@ -1502,32 +1708,19 @@ export function CommentSectionView({
             </div>
           ) : (
             <>
-              {commentsDisabled && (
-                <div className="py-1 text-muted-foreground">
-                  <div className="flex items-start justify-center gap-1.5 px-4 text-xs text-center">
-                    <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span>
-                      {isProjectApprovedOnly
-                        ? 'This project has been approved. Comments are now closed.'
-                        : 'This video has been approved. Comments are now closed.'}
-                    </span>
-                  </div>
-                  <div className="h-px w-full bg-border mt-4" />
-                </div>
-              )}
               {sortedComments.map((comment) => {
                 const isViewerMessage = isAdminView ? comment.isInternal : !comment.isInternal
                 const hasReplies = comment.replies && comment.replies.length > 0
-                const repliesExpanded = expandedReplies[comment.id] ?? true // Default to expanded
                 const isRecipientAuthored = (c: any) => {
                   if (c?.authorType) return c.authorType === 'RECIPIENT'
                   // Back-compat fallback (less strict): only non-internal.
                   return !c?.isInternal
                 }
 
-                const canDeleteParent = canAdminDelete || (canClientDelete && isRecipientAuthored(comment))
+                // Locked comments (next version requested) are no longer client-deletable.
+                const canDeleteParent = canAdminDelete || (canClientDelete && isRecipientAuthored(comment) && !(comment as any).lockedAt)
                 const allowAnyReplyDelete = canAdminDelete || canClientDelete
-                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply))
+                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply) && !(reply as any).lockedAt)
 
                 // Apply optimistic "mark done" overrides for the admin share page tick.
                 const commentForBubble = {
@@ -1591,8 +1784,6 @@ export function CommentSectionView({
                         commentsDisabled={commentsDisabled}
                         isViewerMessage={isViewerMessage}
                         replies={comment.replies}
-                        repliesExpanded={repliesExpanded}
-                        onToggleReplies={() => toggleReplies(comment.id)}
                         onDeleteReply={allowAnyReplyDelete ? handleDeleteComment : undefined}
                         canDeleteReply={allowAnyReplyDelete ? canDeleteReply : undefined}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
@@ -1612,6 +1803,7 @@ export function CommentSectionView({
               <div ref={messagesEndRef} />
             </>
           )}
+        </div>
         </div>
       </CardContent>
       </Card>

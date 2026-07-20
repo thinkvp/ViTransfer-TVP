@@ -1468,6 +1468,128 @@ export async function sendAdminProjectApprovedEmail({
 }
 
 /**
+ * Email template: Client requested the next version of a video (to admin)
+ */
+export async function renderAdminRevisionRequestedEmail({
+  clientName,
+  projectTitle,
+  videoName,
+  versionLabel,
+  greetingName,
+  branding,
+}: {
+  clientName: string
+  projectTitle: string
+  videoName: string
+  versionLabel?: string | null
+  greetingName?: string
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+  const appDomain = resolved.appDomain
+
+  if (!appDomain) {
+    throw new Error('App domain not configured. Please configure domain in Settings to enable email notifications.')
+  }
+
+  const subject = `Client Requested Next Version: ${projectTitle} - ${videoName}`
+  const versionSuffix = (versionLabel && versionLabel.trim()) ? ` (${versionLabel.trim()})` : ''
+
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
+  const cardStyle = emailCardStyle({ borderRadiusPx: 8 })
+  const cardTitleStyle = emailCardTitleStyle()
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient,
+    headerTextColor,
+    title: 'Next Version Requested',
+    subtitle: `The client has finished reviewing ${videoName}${versionSuffix} and requested the next version`,
+    trackingPixelsEnabled: resolved.trackingPixelsEnabled,
+    appDomain,
+    bodyContent: `
+      <p style="margin: 0 0 20px 0; font-size: 16px; color: #111827; line-height: 1.5;">
+        Hi <strong>${escapeHtml(firstWordName(greetingName) || greetingName || 'there')}</strong>,
+      </p>
+
+      <p style="margin: 0 0 20px 0; font-size: 15px; color: #374151; line-height: 1.5;">
+        Client: <strong>${escapeHtml(clientName)}</strong>
+      </p>
+
+      <div style="${cardStyle}">
+        <div style="${cardTitleStyle}">Next Version Requested</div>
+        <div style="font-size: 15px; color: #374151; padding: 4px 0;">
+          <span style="display: inline-block; width: 6px; height: 6px; background: #374151; border-radius: 50%; margin-right: 8px;"></span>${escapeHtml(videoName)}${escapeHtml(versionSuffix)}
+        </div>
+        <div style="font-size: 13px; color: #6b7280; padding-top: 8px;">
+          The client's feedback on this version has been locked in. They can still add comments.
+        </div>
+      </div>
+
+      <div style="text-align: center; margin: 32px 0;">
+        <a href="${escapeHtml(appDomain)}/admin" style="${primaryButtonStyle}">
+          View in Admin Panel
+        </a>
+      </div>
+    `,
+  })
+
+  return { subject, html }
+}
+
+export async function sendAdminRevisionRequestedEmail({
+  adminEmails,
+  clientName,
+  projectTitle,
+  videoName,
+  versionLabel,
+}: {
+  adminEmails: string[]
+  clientName: string
+  projectTitle: string
+  videoName: string
+  versionLabel?: string | null
+}) {
+  const uniqueEmails = [...new Set(adminEmails.map((e) => String(e || '').trim()).filter(Boolean))]
+  const users = await prisma.user.findMany({
+    where: { email: { in: uniqueEmails } },
+    select: { email: true, name: true },
+  })
+  const nameByEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.name]))
+
+  const promises = uniqueEmails.map(async (email) => {
+    const nameFromDb = nameByEmail.get(email.toLowerCase())
+    const fallback = email.split('@')[0] || 'there'
+    const greetingName = (nameFromDb && nameFromDb.trim()) ? nameFromDb.trim() : fallback
+
+    const { subject, html } = await renderAdminRevisionRequestedEmail({
+      clientName,
+      projectTitle,
+      videoName,
+      versionLabel,
+      greetingName,
+    })
+
+    return sendEmail({
+      to: email,
+      subject,
+      html,
+    })
+  })
+
+  const results = await Promise.allSettled(promises)
+  const successCount = results.filter(r => r.status === 'fulfilled').length
+
+  return {
+    success: successCount > 0,
+    message: `Sent to ${successCount}/${uniqueEmails.length} admins`
+  }
+}
+
+/**
  * Email template: Invoice paid (to admins assigned to the project)
  * Note: explicitly disables tracking pixels.
  */

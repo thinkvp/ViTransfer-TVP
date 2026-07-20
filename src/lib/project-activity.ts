@@ -18,6 +18,7 @@ export type ProjectActivityEventType =
   | 'VIDEO_VERSION_ADDED'
   | 'VIDEO_APPROVED'
   | 'VIDEO_UNAPPROVED'
+  | 'REVISION_REQUESTED'
   | 'SUBTITLES_EDITED'
   | 'COMMENT_ADDED'
   | 'ALBUM_ADDED'
@@ -196,6 +197,10 @@ export async function buildProjectActivity(
         unapprovedById: true,
         unapprovedByRecipientId: true,
         unapprovedByName: true,
+        revisionRequestedAt: true,
+        revisionRequestedById: true,
+        revisionRequestedByRecipientId: true,
+        revisionRequestedByName: true,
         subtitlesEditedAt: true,
         subtitlesEditedById: true,
         subtitlesEditedByRecipientId: true,
@@ -317,6 +322,25 @@ export async function buildProjectActivity(
           userId: video.subtitlesEditedById,
           recipientId: video.subtitlesEditedByRecipientId,
           name: video.subtitlesEditedByName,
+        },
+        audience,
+      ),
+      target: { videoId: video.id, videoName: video.name, versionLabel: video.versionLabel },
+    })
+  }
+
+  // --- Next-version requests (client "Request Next Version", one-shot per version) --
+  for (const video of videos) {
+    if (!video.revisionRequestedAt) continue
+    events.push({
+      id: `revision-requested:${video.id}`,
+      type: 'REVISION_REQUESTED',
+      timestamp: video.revisionRequestedAt.toISOString(),
+      actor: resolveActor(
+        {
+          userId: video.revisionRequestedById,
+          recipientId: video.revisionRequestedByRecipientId,
+          name: video.revisionRequestedByName,
         },
         audience,
       ),

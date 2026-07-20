@@ -277,6 +277,7 @@ export async function GET(
         versionLabel: (video as any).versionLabel ? String((video as any).versionLabel) : undefined,
         isApproved: video.approved === true,
         allowApproval: video.allowApproval === true,
+        isRevisionRequested: (video as any).revisionRequestedAt != null,
         hasTimelinePreviews: hasTimeline,
         timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
         timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,

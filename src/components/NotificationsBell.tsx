@@ -508,7 +508,7 @@ export default function NotificationsBell() {
                   )
 
                   return (
-                    <div key={n.id} className={clearable ? 'pl-3 sm:pl-4 pr-4 sm:pr-5 py-3 bg-warning-visible/60 border-l-[3px] border-l-warning' : 'px-4 sm:px-5 py-3'}>
+                    <div key={n.id} className={`${clearable ? 'pl-3 sm:pl-4 pr-4 sm:pr-5 py-3 bg-warning-visible/60 border-l-[3px] border-l-warning' : 'px-4 sm:px-5 py-3'}${clickable ? ' hover:bg-accent/30' : ''}`}>
                       {clearable ? (
                         <div className="flex items-center justify-between gap-2 mb-2">
                           <div className="flex items-center gap-1.5 text-xs font-medium text-warning">
@@ -534,7 +534,7 @@ export default function NotificationsBell() {
                         {clickable ? (
                           <button
                             type="button"
-                            className="flex-1 text-left hover:bg-accent/30 rounded-md px-0 py-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="flex-1 text-left rounded-md px-0 py-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             onClick={() => {
                               setOpen(false)
                               if (cardId) {

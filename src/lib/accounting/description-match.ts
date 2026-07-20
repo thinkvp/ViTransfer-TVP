@@ -97,6 +97,87 @@ export function scoreDescriptionMatch(targetDescription: string, candidateDescri
   return score
 }
 
+export interface AccountHistoryRecord {
+  /** Supplier + description text of a past expense, or a matched bank txn's description */
+  text: string
+  accountId: string
+  date: string
+}
+
+/**
+ * Recent categorisation history for the token scorer: past expenses and matched
+ * bank transactions across all bank accounts. Loaded once, scored per target.
+ */
+export async function loadAccountHistory(prisma: PrismaClient): Promise<AccountHistoryRecord[]> {
+  const [expenses, transactions] = await Promise.all([
+    prisma.expense.findMany({
+      select: { supplierName: true, description: true, accountId: true, date: true },
+      orderBy: { date: 'desc' },
+      take: 400,
+    }),
+    prisma.bankTransaction.findMany({
+      where: {
+        status: 'MATCHED',
+        OR: [{ accountId: { not: null } }, { expense: { isNot: null } }],
+      },
+      select: { description: true, accountId: true, date: true, expense: { select: { accountId: true } } },
+      orderBy: [{ date: 'desc' }, { updatedAt: 'desc' }],
+      take: 250,
+    }),
+  ])
+
+  const records: AccountHistoryRecord[] = expenses.map((e) => ({
+    text: [e.supplierName, e.description].filter(Boolean).join(' '),
+    accountId: e.accountId,
+    date: e.date,
+  }))
+  for (const t of transactions) {
+    const accountId = t.expense?.accountId ?? t.accountId
+    if (accountId) records.push({ text: t.description, accountId, date: t.date })
+  }
+  return records
+}
+
+/**
+ * The AI assistant's deterministic account fallback: when the model declines to
+ * pick an account for a receipt, score its extracted supplier/description
+ * against the categorisation history — the same scorer the Bank Accounts
+ * suggest-account endpoint uses — and return the top account, restricted to
+ * `allowedAccountIds` (active EXPENSE/COGS). Null when nothing matches.
+ */
+export function suggestAccountFromHistory(
+  history: AccountHistoryRecord[],
+  targetText: string,
+  allowedAccountIds: Set<string>
+): string | null {
+  if (!normalizeDescription(targetText)) return null
+
+  const accountScores = new Map<string, { score: number; matches: number; latestDate: string }>()
+  for (const record of history) {
+    if (!allowedAccountIds.has(record.accountId)) continue
+    const score = scoreDescriptionMatch(targetText, record.text)
+    if (score <= 0) continue
+    const existing = accountScores.get(record.accountId)
+    if (existing) {
+      existing.score += score
+      existing.matches += 1
+      if (record.date > existing.latestDate) existing.latestDate = record.date
+    } else {
+      accountScores.set(record.accountId, { score, matches: 1, latestDate: record.date })
+    }
+  }
+
+  return (
+    [...accountScores.entries()].sort((left, right) => {
+      const byScore = right[1].score - left[1].score
+      if (byScore !== 0) return byScore
+      const byMatches = right[1].matches - left[1].matches
+      if (byMatches !== 0) return byMatches
+      return right[1].latestDate.localeCompare(left[1].latestDate)
+    })[0]?.[0] ?? null
+  )
+}
+
 export interface HistoricalMapping {
   /** The supplier/description key, e.g. "officeworks" */
   label: string

@@ -353,7 +353,7 @@ export function VideoAssetList({
                 <button
                   type="button"
                   onClick={() => handleDownload(asset.id, asset.fileName)}
-                  className="text-sm font-medium truncate text-left text-foreground hover:underline"
+                  className="block w-full max-w-full text-sm font-medium truncate text-left text-foreground hover:underline"
                   title={`Download ${asset.fileName}`}
                 >
                   {asset.fileName}

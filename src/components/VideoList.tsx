@@ -8,7 +8,7 @@ import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download, Captions, Loader2 } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download, Captions, Loader2, FileClock } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
@@ -52,6 +52,7 @@ export default function VideoList({
   const [notesEditValue, setNotesEditValue] = useState('')
   const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
   const [savingAllowApprovalId, setSavingAllowApprovalId] = useState<string | null>(null)
+  const [savingRevisionRequestedId, setSavingRevisionRequestedId] = useState<string | null>(null)
   const [uploadingAssetsFor, setUploadingAssetsFor] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
   const [expandedVideoIds, setExpandedVideoIds] = useState<string[]>([])
@@ -166,6 +167,33 @@ export default function VideoList({
       .finally(() => {
         setApprovingId(null)
       })
+  }
+
+  // Manual "Reviewed" (next version requested) toggle — mirrors the client share-page
+  // Request Next Version state without locking comments.
+  const handleToggleRevisionRequested = async (videoId: string, currentlyRequested: boolean) => {
+    if (!effectiveCanApprove) return
+    if (savingRevisionRequestedId) return
+
+    const previous = (videos.find(v => v.id === videoId) as any)?.revisionRequestedAt ?? null
+    setSavingRevisionRequestedId(videoId)
+
+    // Optimistically update UI
+    setVideos(prev => prev.map(v =>
+      v.id === videoId ? ({ ...v, revisionRequestedAt: currentlyRequested ? null : new Date().toISOString() } as any) : v
+    ))
+
+    try {
+      await apiPatch(`/api/videos/${videoId}`, { revisionRequested: !currentlyRequested })
+      onRefresh?.()
+    } catch (error) {
+      setVideos(prev => prev.map(v =>
+        v.id === videoId ? ({ ...v, revisionRequestedAt: previous } as any) : v
+      ))
+      toast.error('Failed to update Reviewed status')
+    } finally {
+      setSavingRevisionRequestedId(null)
+    }
   }
 
   const handleToggleAllowApproval = async (videoId: string, nextAllowApproval: boolean) => {
@@ -460,6 +488,23 @@ export default function VideoList({
                     ) : (
                       <CheckCircle2 className="w-4 h-4" />
                     )}
+                  </Button>
+                )}
+                {isAdmin && effectiveCanApprove && video.status === 'READY' && !video.approved && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleToggleRevisionRequested(video.id, Boolean((video as any).revisionRequestedAt))}
+                    disabled={savingRevisionRequestedId === video.id}
+                    className={(video as any).revisionRequestedAt
+                      ? "text-primary hover:text-primary/80 hover:bg-primary/10"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
+                    }
+                    title={(video as any).revisionRequestedAt
+                      ? "Clear Reviewed status (next version requested)"
+                      : "Mark as Reviewed (next version requested)"}
+                  >
+                    <FileClock className="w-4 h-4" />
                   </Button>
                 )}
                 {isAdmin && video.status === 'READY' && (

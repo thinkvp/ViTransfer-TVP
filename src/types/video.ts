@@ -30,6 +30,8 @@ export interface Video {
   codec?: string | null
   videoNotes?: string | null
   allowApproval?: boolean
+  // Set when the client requested the next version (share-page "Reviewed" state)
+  revisionRequestedAt?: string | null
   timelinePreviewsReady?: boolean
   createdAt?: string // serialized DateTime
 

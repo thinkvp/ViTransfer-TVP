@@ -32,7 +32,7 @@ import { extractAttachmentText } from '../lib/ai/extraction'
 import { attachmentMimeType, type AiRequestAttachment } from '../lib/ai/attachments'
 import type { LibraryItem } from '../lib/ai/proposal-schemas'
 import { getDefaultTaxRatePercent } from '../lib/sales/line-items'
-import { buildHistoricalMappings } from '../lib/accounting/description-match'
+import { buildHistoricalMappings, loadAccountHistory, suggestAccountFromHistory } from '../lib/accounting/description-match'
 import { processImageBuffer } from '../lib/image-processing'
 
 const DEBUG = process.env.DEBUG_WORKER === 'true'
@@ -524,6 +524,25 @@ async function processExpenseRequest(request: AiAssistantRequest, driver: AiDriv
     guarded.assumptions.push(
       '[guard] No expenses were extracted — are the attached files readable receipts or invoices?'
     )
+  }
+
+  // Deterministic fallback: when the model declined to pick an account, score the
+  // extracted supplier/description against past categorisations (the Bank Accounts
+  // suggest-account scorer). Fills gaps only — never overrides a model pick.
+  if (guarded.expenses.some((e) => !e.accountId)) {
+    const history = await loadAccountHistory(prisma)
+    const allowedIds = new Set(accountsById.keys())
+    for (const e of guarded.expenses) {
+      if (e.accountId) continue
+      const targetText = [e.supplierName, e.description].filter(Boolean).join(' ')
+      const suggested = suggestAccountFromHistory(history, targetText, allowedIds)
+      if (!suggested) continue
+      e.accountId = suggested
+      const account = accountsById.get(suggested)
+      e.notes = [e.notes, `Account ${account?.code} ${account?.name} was suggested from your purchase history — double-check it.`]
+        .filter(Boolean)
+        .join(' ')
+    }
   }
 
   // Flag likely re-entries: an existing expense with the same date and amount

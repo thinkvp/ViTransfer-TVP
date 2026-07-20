@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Comment } from '@prisma/client'
-import { Clock, Trash2, CornerDownRight, ChevronDown, ChevronRight, Download, Check } from 'lucide-react'
+import { Clock, Trash2, CornerDownRight, Download, Check, Lock } from 'lucide-react'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import { CommentFileDisplay } from './FileDisplay'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -31,10 +31,8 @@ interface MessageBubbleProps {
   formatMessageTime: (date: Date) => string
   commentsDisabled: boolean
   isViewerMessage: boolean // Is this the viewer's own message?
-  // Props for extended bubble with replies
+  // Props for extended bubble with replies (always shown expanded)
   replies?: Comment[]
-  repliesExpanded?: boolean
-  onToggleReplies?: () => void
   onDeleteReply?: (replyId: string) => void
   canDeleteReply?: (reply: Comment) => boolean
   onDownloadCommentFile?: (commentId: string, fileId: string, fileName: string) => Promise<void>
@@ -159,8 +157,6 @@ export default function MessageBubble({
   commentsDisabled,
   isViewerMessage,
   replies,
-  repliesExpanded,
-  onToggleReplies,
   onDeleteReply,
   canDeleteReply,
   onDownloadCommentFile,
@@ -188,6 +184,8 @@ export default function MessageBubble({
 
   const fallbackBorderColorClass = comment.isInternal ? 'border-l-foreground' : 'border-l-muted-foreground'
   const displayColor = (comment as any)?.displayColor as string | null | undefined
+  // Locked = the next version was requested for this comment's video version.
+  const isLocked = Boolean((comment as any).lockedAt) && !comment.isInternal
 
   const avatarName = effectiveAuthorName || 'Anonymous'
   const avatarEmail = (comment as any)?.authorEmail as string | null | undefined
@@ -211,13 +209,17 @@ export default function MessageBubble({
         <div
           data-comment-block
           className={
-            (showColorEdge
-              ? `bg-card border border-border ${displayColor ? '' : fallbackBorderColorClass} border-l-4 rounded-lg p-3`
-              : 'bg-card border border-border rounded-lg p-3') +
+            (isLocked
+              // Locked comments (next version requested) get an amber left edge so they
+              // read as "locked in" at a glance, matching the amber timecode pills.
+              ? 'bg-card border border-border border-l-4 border-l-amber-500 rounded-lg p-3'
+              : showColorEdge
+                ? `bg-card border border-border ${displayColor ? '' : fallbackBorderColorClass} border-l-4 rounded-lg p-3`
+                : 'bg-card border border-border rounded-lg p-3') +
             // Ring (not border/bg swaps) so the highlight can't fight the base classes.
             ` transition-shadow duration-200${isPlayheadActive ? ' ring-2 ring-primary/40' : ''}`
           }
-          style={showColorEdge && displayColor ? { borderLeftColor: displayColor } : undefined}
+          style={!isLocked && showColorEdge && displayColor ? { borderLeftColor: displayColor } : undefined}
         >
           {/* Header row: name left, time right */}
           <div className="flex items-start justify-between gap-3 mb-2">
@@ -237,7 +239,12 @@ export default function MessageBubble({
                 </div>
               </div>
             </div>
-            <div className="text-xs text-muted-foreground whitespace-nowrap">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
+              {isLocked ? (
+                <span title="Locked — the next version was requested" className="inline-flex">
+                  <Lock className="w-3 h-3 shrink-0 text-amber-500" aria-label="Locked" />
+                </span>
+              ) : null}
               {formatMessageTime(comment.createdAt)}
             </div>
           </div>
@@ -319,28 +326,11 @@ export default function MessageBubble({
             </div>
           )}
 
-          {/* Replies Section - Extends parent bubble */}
+          {/* Replies Section - Extends parent bubble (always expanded) */}
           {hasReplies && (
             <div className="mt-3 pt-3 border-t border-border">
-              {/* Collapsible Header */}
-              <button
-                onClick={onToggleReplies}
-                className="flex items-center justify-between w-full mb-2 rounded-md px-2 py-1.5 text-xs font-medium text-muted-foreground bg-muted/50 hover:bg-muted/70 hover:text-foreground transition-colors"
-              >
-                <span>
-                  {replies.length} {replies.length === 1 ? 'Reply' : 'Replies'}
-                </span>
-                {repliesExpanded ? (
-                  <ChevronDown className="w-3 h-3" />
-                ) : (
-                  <ChevronRight className="w-3 h-3" />
-                )}
-              </button>
-
-              {/* Reply List */}
-              {repliesExpanded && (
-                <div className="space-y-3">
-                  {replies.map((reply) => {
+              <div className="space-y-3">
+                {replies.map((reply) => {
                     const replyEffectiveName = reply.authorName ||
                       (reply.isInternal && (reply as any).user ?
                         ((reply as any).user.name || (reply as any).user.email) :
@@ -373,6 +363,11 @@ export default function MessageBubble({
                             </span>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
+                            {(reply as any).lockedAt && !reply.isInternal ? (
+                              <span title="Locked — the next version was requested" className="inline-flex">
+                                <Lock className="w-3 h-3 shrink-0 text-amber-500" aria-label="Locked" />
+                              </span>
+                            ) : null}
                             <span className="text-xs text-muted-foreground whitespace-nowrap">
                               {formatMessageTime(reply.createdAt)}
                             </span>
@@ -433,8 +428,7 @@ export default function MessageBubble({
                       </div>
                     )
                   })}
-                </div>
-              )}
+              </div>
             </div>
           )}
 

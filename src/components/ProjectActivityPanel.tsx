@@ -13,6 +13,7 @@ import {
   XCircle,
   Captions,
   Activity,
+  FileClock,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -24,6 +25,7 @@ type ActivityEventType =
   | 'VIDEO_VERSION_ADDED'
   | 'VIDEO_APPROVED'
   | 'VIDEO_UNAPPROVED'
+  | 'REVISION_REQUESTED'
   | 'SUBTITLES_EDITED'
   | 'COMMENT_ADDED'
   | 'ALBUM_ADDED'
@@ -77,6 +79,7 @@ const EVENT_ICONS: Record<ActivityEventType, typeof Video> = {
   VIDEO_VERSION_ADDED: FilePlus2,
   VIDEO_APPROVED: CheckCircle2,
   VIDEO_UNAPPROVED: XCircle,
+  REVISION_REQUESTED: FileClock,
   SUBTITLES_EDITED: Captions,
   COMMENT_ADDED: MessageSquare,
   ALBUM_ADDED: ImageIcon,
@@ -88,6 +91,7 @@ const EVENT_ICONS: Record<ActivityEventType, typeof Video> = {
 const EVENT_ICON_CLASSES: Partial<Record<ActivityEventType, string>> = {
   VIDEO_APPROVED: 'text-green-500',
   VIDEO_UNAPPROVED: 'text-destructive',
+  REVISION_REQUESTED: 'text-primary',
 }
 
 function formatRelativeTime(iso: string): string {
@@ -142,6 +146,8 @@ function eventDescription(event: ActivityEvent): ReactNode {
       return <>approved {videoTarget(event)}</>
     case 'VIDEO_UNAPPROVED':
       return <>removed approval from {videoTarget(event)}</>
+    case 'REVISION_REQUESTED':
+      return <>requested the next version of {videoTarget(event)}</>
     case 'SUBTITLES_EDITED':
       return <>edited subtitles on {videoTarget(event)}</>
     case 'COMMENT_ADDED':

@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  FileClock,
   Images,
   Check,
   Download,
@@ -774,7 +775,16 @@ export default function VideoSidebar({
   const videoThumbnailHeight = Math.round((videoThumbnailWidth * 9) / 16)
 
   // Desktop sidebar: computed groups and render helpers (mobile section is unchanged)
-  const forReviewGroups = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true)))
+  // A group is "Reviewed" when no version is approved AND the latest version has had
+  // its next version requested. Keep this predicate in sync with ShareFilesBrowser
+  // and the share page ordering helper.
+  const isReviewedGroup = (g: VideoGroup) => {
+    if (g.videos.some((v: any) => v.approved === true)) return false
+    const latest = [...g.videos].sort((a: any, b: any) => ((b as any).version ?? 0) - ((a as any).version ?? 0))[0]
+    return Boolean((latest as any)?.revisionRequestedAt)
+  }
+  const forReviewGroups = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true) && !isReviewedGroup(g)))
+  const reviewedGroups = sortedVideoGroups(videoGroups.filter(isReviewedGroup))
   const approvedGroups = sortedVideoGroups(videoGroups.filter(g => g.videos.some((v: any) => v.approved === true)))
   const flatAlphabeticalGroups = sortedVideoGroups(videoGroups)
   // Show bottom section: FILES for hideApprovalGrouping; APPROVED section whenever there are approved videos, albums, or downloadable files
@@ -783,14 +793,14 @@ export default function VideoSidebar({
   // Auto-size the split ratio based on item counts (resets on content change unless user has manually dragged)
   useEffect(() => {
     if (hasManualRatio || hideApprovalGrouping) return
-    const topCount = Math.max(forReviewGroups.length, 1)
+    const topCount = Math.max(forReviewGroups.length + reviewedGroups.length, 1)
     const bottomCount = approvedGroups.length + albumsList.length
     if (bottomCount === 0) return
     // Bottom items are taller (thumbnail + name + file listings) — weight ~3x
     const bottomWeight = bottomCount * 3
     const newRatio = bottomWeight / (topCount + bottomWeight)
     setFilesRatio(Math.max(0.2, Math.min(0.8, newRatio)))
-  }, [forReviewGroups.length, approvedGroups.length, albumsList.length, hideApprovalGrouping, hasManualRatio])
+  }, [forReviewGroups.length, reviewedGroups.length, approvedGroups.length, albumsList.length, hideApprovalGrouping, hasManualRatio])
 
   useEffect(() => {
     if (transferPanelVersion > 0 && hasTransferItems) {
@@ -1024,6 +1034,7 @@ export default function VideoSidebar({
 
   const renderVideoButton = (group: VideoGroup, showDownloadFiles = false) => {
     const hasApprovedVideo = group.videos.some((v: any) => v.approved === true)
+    const isGroupReviewed = isReviewedGroup(group)
     const isActive = !activeAlbumId && activeVideoName === group.name
     const latestVideo = group.videos[0]
     const approvedVideo = group.videos.find((v: any) => v.approved === true)
@@ -1126,6 +1137,8 @@ export default function VideoSidebar({
         {isActive && (
           hasApprovedVideo ? (
             <CheckCircle2 className="w-4 h-4 shrink-0 text-success mt-0.5" />
+          ) : isGroupReviewed ? (
+            <FileClock className="w-4 h-4 shrink-0 text-primary mt-0.5" />
           ) : (
             <Play className="w-4 h-4 shrink-0 text-primary mt-0.5" fill="currentColor" />
           )
@@ -2151,6 +2164,18 @@ export default function VideoSidebar({
                       </div>
                     )}
 
+                    {reviewedGroups.length > 0 && (
+                      <div>
+                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
+                          <FileClock className="w-3 h-3" />
+                          Reviewed
+                        </div>
+                        <div className="space-y-1 px-2 py-2">
+                          {reviewedGroups.map(g => renderVideoButton(g))}
+                        </div>
+                      </div>
+                    )}
+
                     {approvedGroups.length > 0 && (
                       <div>
                         <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-2">
@@ -2225,6 +2250,7 @@ export default function VideoSidebar({
                           contextMenu.file.type === 'video' &&
                           contextMenu.file.isApproved === false &&
                           contextMenu.file.allowApproval === true &&
+                          contextMenu.file.isRevisionRequested !== true &&
                           !!onApproveVideo &&
                           // Don't allow approving another version if one is already approved.
                           !((() => {
@@ -2612,6 +2638,11 @@ export default function VideoSidebar({
                         {hasApprovedVideo && (
                           <div className="absolute bottom-1 right-1 h-6 w-6 rounded-full bg-success-solid flex items-center justify-center shadow">
                             <Check className="h-4 w-4 text-success-foreground" />
+                          </div>
+                        )}
+                        {!hasApprovedVideo && isReviewedGroup(group) && (
+                          <div className="absolute bottom-1 right-1 h-6 w-6 rounded-full bg-primary flex items-center justify-center shadow" title="Reviewed — next version requested">
+                            <FileClock className="h-4 w-4 text-primary-foreground" />
                           </div>
                         )}
                       </div>

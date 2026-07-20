@@ -60,6 +60,29 @@ const isSelectableDownloadableFile = (file: DownloadableFile): boolean => {
   return file.isApproved === true
 }
 
+const getVersionNumberFromLabel = (label?: string): number | null => {
+  if (!label) return null
+  const match = String(label).match(/\d+/)
+  if (!match) return null
+  const value = Number(match[0])
+  return Number.isFinite(value) ? value : null
+}
+
+// A video group is "Reviewed" when no version is approved AND the latest version has had
+// its next version requested. Keep this predicate in sync with VideoSidebar's
+// isReviewedGroup and the share page's video ordering helper.
+const isVideoGroupReviewed = (group: DownloadableGroup): boolean => {
+  if (group.groupType !== 'video') return false
+  const videoFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+    .filter((f) => f.type === 'video')
+  if (videoFiles.length === 0) return false
+  if (videoFiles.some((f) => f.isApproved === true)) return false
+  const latest = [...videoFiles].sort(
+    (a, b) => (getVersionNumberFromLabel(b.versionLabel) ?? -1) - (getVersionNumberFromLabel(a.versionLabel) ?? -1)
+  )[0]
+  return latest?.isRevisionRequested === true
+}
+
 type ShareFilesBrowserProps = {
   groups: DownloadableGroup[]
   selectedFileIds: Set<string>
@@ -813,14 +836,19 @@ export function ShareFilesBrowser({
     [sortedGroups]
   )
 
-  // Root Videos section is split into "For Review" / "Approved" (mirrors VideoSidebar's
-  // own for-review/approved grouping), so a folder moves section the moment any of its
-  // versions is approved.
+  // Root Videos section is split into "For Review" / "Reviewed" / "Approved" (mirrors
+  // VideoSidebar's own grouping), so a folder moves section the moment any of its
+  // versions is approved or its latest version has the next version requested.
   const rootVideoGroupsForReview = useMemo(
     () => rootVideoGroups.filter((group) => {
       const files = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-      return !files.some((f) => f.type === 'video' && f.isApproved === true)
+      return !files.some((f) => f.type === 'video' && f.isApproved === true) && !isVideoGroupReviewed(group)
     }),
+    [rootVideoGroups]
+  )
+
+  const rootVideoGroupsReviewed = useMemo(
+    () => rootVideoGroups.filter((group) => isVideoGroupReviewed(group)),
     [rootVideoGroups]
   )
 
@@ -1675,17 +1703,24 @@ export function ShareFilesBrowser({
         : `${versionLabel} is available for download.`
     }
 
-    const hasApprovableVersion = openFolderVideoVersions.some((file) => file.allowApproval === true)
+    // Revision-requested ("Reviewed") versions can no longer be approved, so they don't
+    // count as approvable for the prompt below.
+    const hasApprovableVersion = openFolderVideoVersions.some((file) => file.allowApproval === true && file.isRevisionRequested !== true)
+    const latestIsRevisionRequested = openFolderVideoVersions[0]?.isRevisionRequested === true
 
     if (openFolderVideoVersions.length === 1) {
       return hasApprovableVersion
         ? 'Approve this video to download.'
-        : 'Download is not enabled for this video.'
+        : latestIsRevisionRequested
+          ? 'A new version of this video has been requested.'
+          : 'Download is not enabled for this video.'
     }
 
     return hasApprovableVersion
       ? 'Approve a version to enable downloads.'
-      : 'Download is not currently enabled for any versions of this video.'
+      : latestIsRevisionRequested
+        ? 'A new version of this video has been requested.'
+        : 'Download is not currently enabled for any versions of this video.'
   }, [openFolder?.groupType, openFolderApprovedVideoVersion, openFolderVideoAssets.length, openFolderVideoVersions])
 
   const openFolderBannerMessage = useMemo(() => {
@@ -2125,7 +2160,8 @@ export function ShareFilesBrowser({
     const latestVideoVersionKey = openFolderVideoVersions.length > 0
       ? getDownloadableFileKey(openFolderVideoVersions[0])
       : null
-    const showForReviewBadge = file.type === 'video' && file.isApproved === false && latestVideoVersionKey === fileKey
+    const showReviewedBadge = file.type === 'video' && file.isApproved === false && file.isRevisionRequested === true && latestVideoVersionKey === fileKey
+    const showForReviewBadge = file.type === 'video' && file.isApproved === false && latestVideoVersionKey === fileKey && !showReviewedBadge
     const videoVersionsInGroup = imageList.filter((entry) => entry.type === 'video')
     const hasMultipleVideoVersions = videoVersionsInGroup.length > 1
     const hasApprovedVideoVersionInGroup = videoVersionsInGroup.some((entry) => entry.isApproved === true)
@@ -2156,6 +2192,8 @@ export function ShareFilesBrowser({
       file.type === 'video' &&
       file.isApproved === false &&
       file.allowApproval === true &&
+      // Once the next version is requested, approval of that version is off the table.
+      file.isRevisionRequested !== true &&
       onApproveVideo &&
       !muteInactiveVideoVersion &&
       !groupHasApprovedVersion
@@ -2358,6 +2396,12 @@ export function ShareFilesBrowser({
                   LATEST
                 </div>
               ) : null}
+
+              {showReviewedBadge ? (
+                <div className="absolute bottom-2 left-2 rounded bg-primary px-1.5 py-0.5 text-[11px] leading-none text-primary-foreground font-semibold tracking-wide" title="Next version requested">
+                  REVIEWED
+                </div>
+              ) : null}
             </div>
 
             <div className="absolute top-2 left-2">
@@ -2446,8 +2490,10 @@ export function ShareFilesBrowser({
       : group.name
     const groupVideoFiles = groupFiles.filter((file) => file.type === 'video')
     const groupHasApprovedVideo = groupVideoFiles.some((file) => file.isApproved === true)
+    const groupIsReviewed = isVideoGroupReviewed(group)
     const showVideoFolderApprovedBadge = group.groupType === 'video' && groupHasApprovedVideo
-    const showVideoFolderForReviewBadge = group.groupType === 'video' && !groupHasApprovedVideo
+    const showVideoFolderReviewedBadge = group.groupType === 'video' && !groupHasApprovedVideo && groupIsReviewed
+    const showVideoFolderForReviewBadge = group.groupType === 'video' && !groupHasApprovedVideo && !groupIsReviewed
     const groupFileKeys = groupFiles.map(getDownloadableFileKey)
     const allChecked = groupFileKeys.length > 0 && groupFileKeys.every((key) => selectedFileIds.has(key))
     const someChecked = groupFileKeys.some((key) => selectedFileIds.has(key))
@@ -2502,6 +2548,12 @@ export function ShareFilesBrowser({
           {showVideoFolderApprovedBadge ? (
             <div className="absolute bottom-2 left-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[11px] leading-none text-white font-semibold tracking-wide">
               APPROVED
+            </div>
+          ) : null}
+
+          {showVideoFolderReviewedBadge ? (
+            <div className="absolute bottom-2 left-2 rounded bg-primary px-1.5 py-0.5 text-[11px] leading-none text-primary-foreground font-semibold tracking-wide" title="Next version requested">
+              REVIEWED
             </div>
           ) : null}
 
@@ -2832,6 +2884,15 @@ export function ShareFilesBrowser({
                     <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos — For Review</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
                       {rootVideoGroupsForReview.map((group) => renderRootFolderCard(group))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {rootVideoGroupsReviewed.length > 0 ? (
+                  <div className="space-y-2">
+                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos — Reviewed</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
+                      {rootVideoGroupsReviewed.map((group) => renderRootFolderCard(group))}
                     </div>
                   </div>
                 ) : null}
@@ -3473,6 +3534,7 @@ export function ShareFilesBrowser({
                   contextMenu.file.type === 'video' &&
                   contextMenu.file.isApproved === false &&
                   contextMenu.file.allowApproval === true &&
+                  contextMenu.file.isRevisionRequested !== true &&
                   !!onApproveVideo &&
                   // Don't allow approving another version if one is already approved.
                   !((() => {

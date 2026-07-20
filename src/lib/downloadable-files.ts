@@ -13,6 +13,8 @@ export interface DownloadableFile {
   isApproved?: boolean
   /** Whether approval is enabled for this video version. */
   allowApproval?: boolean
+  /** Whether the client requested the next version of this video version ("Reviewed"). */
+  isRevisionRequested?: boolean
   /** Set for type 'video' and 'asset' */
   videoId?: string
   /** Set for type 'asset' */
