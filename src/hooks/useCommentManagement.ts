@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Comment } from '@prisma/client'
 import type { Video } from '@/types/video'
 import { useRouter } from 'next/navigation'
-import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
+import { apiFetch, apiPost, apiDelete, apiPatch } from '@/lib/api-client'
 import { secondsToTimecode } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT, validateCommentFile } from '@/lib/fileUpload'
 import { getAccessToken } from '@/lib/token-store'
@@ -905,6 +905,13 @@ export function useCommentManagement({
         return
       }
 
+      // Clients cannot delete comments on an approved video.
+      const commentVideo = videos.find(v => v.id === targetComment.videoId)
+      if (commentVideo?.approved) {
+        toast.error('Comments cannot be deleted after the video has been approved.')
+        return
+      }
+
       if (!shareToken) {
         toast.error('Authentication required to delete comments.')
         return
@@ -941,6 +948,61 @@ export function useCommentManagement({
       window.dispatchEvent(new CustomEvent('commentDeleted'))
     } catch (error) {
       toast.error(`Failed to delete comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
+  // Save an edited comment. Returns true on success so the caller can close the editor.
+  // The PATCH response is the full sanitized comment list, so we reuse the commentPosted
+  // event (without newCommentId — no auto-scroll) to update page + section state at once.
+  const handleEditComment = async (commentId: string, content: string): Promise<boolean> => {
+    const trimmed = content.trim()
+    if (!trimmed) {
+      toast.error('Comment cannot be empty.')
+      return false
+    }
+
+    // Clients cannot edit comments on an approved video.
+    if (!useAdminAuth && !adminUser) {
+      const targetComment = findCommentById(commentId)
+      if (targetComment) {
+        const commentVideo = videos.find(v => v.id === targetComment.videoId)
+        if (commentVideo?.approved) {
+          toast.error('Comments cannot be edited after the video has been approved.')
+          return false
+        }
+      }
+    }
+
+    try {
+      let updatedComments: any
+      if (shareToken) {
+        const response = await fetch(`/api/comments/${commentId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${shareToken}`,
+          },
+          body: JSON.stringify({ content: trimmed }),
+        })
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to update comment')
+        }
+        updatedComments = await response.json()
+      } else if (useAdminAuth) {
+        updatedComments = await apiPatch(`/api/comments/${commentId}`, { content: trimmed })
+      } else {
+        throw new Error('Authentication required to edit comment')
+      }
+
+      window.dispatchEvent(new CustomEvent('commentPosted', {
+        detail: { comments: updatedComments },
+      }))
+      router.refresh()
+      return true
+    } catch (error) {
+      toast.error(`Failed to update comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      return false
     }
   }
 
@@ -1048,6 +1110,7 @@ export function useCommentManagement({
     handleClearRange,
     handleSetCommentTimes,
     handleDeleteComment,
+    handleEditComment,
     pendingDeleteCommentId,
     setPendingDeleteCommentId,
     confirmDeleteComment,

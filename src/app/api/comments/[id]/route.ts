@@ -54,7 +54,15 @@ export async function PATCH(
       select: {
         isInternal: true,
         lockedAt: true,
+        userId: true,
+        recipientId: true,
         projectId: true,
+        videoId: true,
+        video: {
+          select: {
+            approved: true,
+          },
+        },
         project: {
           select: {
             id: true,
@@ -63,6 +71,7 @@ export async function PATCH(
             companyName: true,
             hideFeedback: true,
             status: true,
+            allowClientDeleteComments: true,
             recipients: {
               where: { isPrimary: true },
               take: 1,
@@ -127,9 +136,39 @@ export async function PATCH(
           ? 'makeCommentsOnProjects'
           : 'manageSharePageComments'
 
-        if (!canDoAction(permissions, requiredPermission)) {
+        // Users may always edit their own comments, even without the manage permission.
+        const isOwnComment = existingComment.userId === currentUser.id
+        if (!isOwnComment && !canDoAction(permissions, requiredPermission)) {
           return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         }
+      }
+    }
+
+    // Clients can edit only client comments, and only when client deletion/editing
+    // is allowed by project settings (the two share the same switch).
+    if (!isAdmin) {
+      if (!existingComment.project.allowClientDeleteComments) {
+        return NextResponse.json(
+          { error: 'Client comment editing is disabled for this project' },
+          { status: 403 }
+        )
+      }
+
+      // Clients cannot edit comments on an approved video.
+      if (existingComment.video?.approved) {
+        return NextResponse.json(
+          { error: 'Comments cannot be edited after the video has been approved' },
+          { status: 403 }
+        )
+      }
+
+      // SECURITY: Clients must NEVER be able to edit admin/user-authored or internal
+      // comments. Legacy anonymous comments without a linked recipient are not editable.
+      if (existingComment.userId || !existingComment.recipientId || existingComment.isInternal) {
+        return NextResponse.json(
+          { error: 'Only recipient comments can be edited by clients' },
+          { status: 403 }
+        )
       }
     }
 
@@ -262,6 +301,12 @@ export async function DELETE(
         userId: true,
         recipientId: true,
         projectId: true,
+        videoId: true,
+        video: {
+          select: {
+            approved: true,
+          },
+        },
         project: {
           select: {
             id: true,
@@ -340,6 +385,14 @@ export async function DELETE(
       if (!existingComment.project.allowClientDeleteComments) {
         return NextResponse.json(
           { error: 'Client comment deletion is disabled for this project' },
+          { status: 403 }
+        )
+      }
+
+      // Clients cannot delete comments on an approved video.
+      if (existingComment.video?.approved) {
+        return NextResponse.json(
+          { error: 'Comments cannot be deleted after the video has been approved' },
           { status: 403 }
         )
       }

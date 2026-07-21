@@ -5,6 +5,24 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.8] - 2026-07-21
+
+### Added
+
+- **Clients and admins can edit their own comments inline** — comments and replies now carry a pencil icon that opens an inline editor (textarea + Save/Cancel) in place of the comment text. **Clients** see the pencil only on recipient comments left under their own name (matched against the name they entered on the share page — honor-system by design, names are not verified), only while the project's edit/delete setting is on, and never once "Request Next Version" has locked that video's comments. **Admins and internal users** see the pencil on their own comments (matched by user id) on the admin share page, and can edit their own comments even without the manage-share-page-comments permission (editing *others'* comments still requires it). Server-side, `PATCH /api/comments/[id]` now enforces the same ownership rules it already enforced for DELETE: client sessions are rejected on admin-authored, internal, unlinked-recipient, or locked comments, and require the project setting (previously any authenticated share session could PATCH any unlocked comment's content — this closes that gap). Saves publish the existing `comment` SSE event so open share pages refresh live. The project setting is relabelled **"Allow clients to edit and delete client comments"** (was delete-only wording) — same `allowClientDeleteComments` column, no schema migration. Touches `src/app/api/comments/[id]/route.ts`, `src/hooks/useCommentManagement.ts`, `src/components/MessageBubble.tsx`, `src/components/CommentSection.tsx`, `src/app/admin/projects/[id]/settings/page.tsx`.
+
+### Security
+
+- **Clients cannot edit or delete comments after a video is approved** — server-side, both `PATCH` and `DELETE /api/comments/[id]` now check the comment's owning video `approved` flag and reject non-admin requests with a 403 when set, regardless of the project's `allowClientDeleteComments` setting. Client-side, the delete/edit action buttons are hidden for comments on approved videos (tracked via an `approvedVideoIds` set that includes optimistic local approval state), and the `useCommentManagement` hook adds pre-flight toasts before the API call. Admins are unaffected. Touches `src/app/api/comments/[id]/route.ts`, `src/components/CommentSection.tsx`, `src/hooks/useCommentManagement.ts`. No schema migration.
+
+### Changed
+
+- **Version Notes section on the share page is now collapsible** — the "Version Notes" header in the comment panel becomes a clickable toggle (with chevron indicator), open by default. Collapsing hides the note text, saving vertical space when the note is long or no longer needed. Touches `src/components/CommentSection.tsx`. No schema migration.
+
+- **Comment Delete buttons are now icon-only** — the parent-comment "Delete" text label is gone; delete is a trash-can icon button (replies already were), and edit is a pencil icon button, keeping the comment action row compact. Hover titles ("Edit comment" / "Delete comment") preserved. Touches `src/components/MessageBubble.tsx`.
+
+- **Comment panel spacing brought onto the share page's 16px rhythm** — the comment section was the only area of the share page using 24px insets: its header used the stock `CardHeader` `p-6` (a 106px-tall header for one title + meta row) and the comment list / version-pills / video-notes rows used `sm:px-6`, leaving comment text 36px from the panel edge while the input card below sat at 28px. Header is now `px-4 py-3` (82px tall) and the desktop-only `sm:px-6` bumps are gone, so comment text aligns exactly with the input's text inset (28px) and the panel matches the banners, sidebar, and input (16px standard). Mobile was already on the tighter scale and is unchanged; the admin share page shares the component and tightens identically. Touches `src/components/CommentSection.tsx`. No schema migration.
+
 ## [2.3.7] - 2026-07-21
 
 ### Added

@@ -1001,9 +1001,9 @@ export default function ProjectSettingsPage() {
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="allowClientDeleteComments">Allow clients to delete client comments</Label>
+                    <Label htmlFor="allowClientDeleteComments">Allow clients to edit and delete client comments</Label>
                     <p className="text-xs text-muted-foreground">
-                      All clients will be able to delete any comment left by a client.
+                      All clients will be able to delete any comment left by a client, and edit comments left under their own name. Disabled once the next version has been requested.
                     </p>
                   </div>
                   <Switch
@@ -1428,8 +1428,8 @@ export default function ProjectSettingsPage() {
 
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="allowClientDeleteComments-d">Allow clients to delete client comments</Label>
-                        <p className="text-xs text-muted-foreground">All clients will be able to delete any comment left by a client.</p>
+                        <Label htmlFor="allowClientDeleteComments-d">Allow clients to edit and delete client comments</Label>
+                        <p className="text-xs text-muted-foreground">All clients will be able to delete any comment left by a client, and edit comments left under their own name. Disabled once the next version has been requested.</p>
                       </div>
                       <Switch id="allowClientDeleteComments-d" checked={allowClientDeleteComments} onCheckedChange={setAllowClientDeleteComments} />
                     </div>

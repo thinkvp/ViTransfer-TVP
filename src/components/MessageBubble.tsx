@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Comment } from '@prisma/client'
-import { Clock, Trash2, CornerDownRight, Download, Check, Lock } from 'lucide-react'
+import { Clock, Trash2, CornerDownRight, Download, Check, Lock, Pencil } from 'lucide-react'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import { CommentFileDisplay } from './FileDisplay'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -35,6 +35,10 @@ interface MessageBubbleProps {
   replies?: Comment[]
   onDeleteReply?: (replyId: string) => void
   canDeleteReply?: (reply: Comment) => boolean
+  // Inline editing (own comments only — ownership is decided by the caller)
+  canEdit?: boolean
+  canEditReply?: (reply: Comment) => boolean
+  onSaveEdit?: (commentId: string, content: string) => Promise<boolean>
   onDownloadCommentFile?: (commentId: string, fileId: string, fileName: string) => Promise<void>
   onResolveCommentFilePlaybackUrl?: (commentId: string, fileId: string) => Promise<string | null>
 
@@ -68,6 +72,14 @@ function ResolveTick({ resolved, onClick }: { resolved: boolean; onClick: () => 
       <Check className="h-2.5 w-2.5" />
     </button>
   )
+}
+
+// Comment content is stored as sanitized HTML (plain textarea text with entities escaped).
+// For the edit textarea we need the plain text back.
+function htmlToPlainText(html: string): string {
+  if (typeof window === 'undefined' || typeof DOMParser === 'undefined') return html
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  return doc.body.textContent || ''
 }
 
 function isVoiceNoteFile(fileName: string): boolean {
@@ -159,6 +171,9 @@ export default function MessageBubble({
   replies,
   onDeleteReply,
   canDeleteReply,
+  canEdit = false,
+  canEditReply,
+  onSaveEdit,
   onDownloadCommentFile,
   onResolveCommentFilePlaybackUrl,
   showAuthorAvatar = false,
@@ -169,6 +184,62 @@ export default function MessageBubble({
   isPlayheadActive = false,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
+
+  // Inline edit state — one editor open at a time per bubble (parent or one of its replies).
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  const startEdit = (target: Comment) => {
+    setEditingId(target.id)
+    setEditDraft(htmlToPlainText(target.content))
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditDraft('')
+  }
+
+  const saveEdit = async () => {
+    if (!onSaveEdit || !editingId || savingEdit) return
+    const trimmed = editDraft.trim()
+    if (!trimmed) return
+    setSavingEdit(true)
+    try {
+      const ok = await onSaveEdit(editingId, trimmed)
+      if (ok) cancelEdit()
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const renderEditControls = () => (
+    <div className="mt-2 space-y-2">
+      <textarea
+        value={editDraft}
+        onChange={(e) => setEditDraft(e.target.value)}
+        rows={3}
+        autoFocus
+        className="w-full text-sm bg-background text-foreground border border-border rounded-md p-2 resize-y focus:outline-none focus:ring-1 focus:ring-primary"
+      />
+      <div className="flex items-center justify-end gap-2">
+        <button
+          onClick={cancelEdit}
+          disabled={savingEdit}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={saveEdit}
+          disabled={savingEdit || !editDraft.trim()}
+          className="text-xs font-medium px-2 py-1 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+        >
+          {savingEdit ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </div>
+  )
 
   // Flat blocks (no chat bubbles).
   // Border colors match the timeline marker colors:
@@ -291,11 +362,15 @@ export default function MessageBubble({
               </button>
             ) : null}
 
-            <span
-              className="whitespace-pre-wrap wrap-break-word"
-              dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(comment.content) }}
-            />
+            {editingId !== comment.id ? (
+              <span
+                className="whitespace-pre-wrap wrap-break-word"
+                dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(comment.content) }}
+              />
+            ) : null}
           </div>
+
+          {editingId === comment.id ? renderEditControls() : null}
 
           {/* Attached Files */}
           {commentFiles.length > 0 && (
@@ -341,6 +416,7 @@ export default function MessageBubble({
                     const replyAvatarEmail = (reply as any)?.authorEmail as string | null | undefined
 
                     const replyDeletable = onDeleteReply && (!canDeleteReply || canDeleteReply(reply))
+                    const replyEditable = Boolean(onSaveEdit && canEditReply && canEditReply(reply))
                     const replyFiles = ((reply as any).files || []) as Array<{ id: string; fileName: string; fileSize: number }>
                     const { voiceNoteFiles: replyVoiceNotes, regularFiles: replyRegularFiles } = splitCommentFilesByVoiceNote(replyFiles)
 
@@ -371,6 +447,15 @@ export default function MessageBubble({
                             <span className="text-xs text-muted-foreground whitespace-nowrap">
                               {formatMessageTime(reply.createdAt)}
                             </span>
+                            {replyEditable && editingId !== reply.id && (
+                              <button
+                                onClick={() => startEdit(reply)}
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center"
+                                title="Edit reply"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            )}
                             {replyDeletable && (
                               <button
                                 onClick={() => onDeleteReply(reply.id)}
@@ -383,10 +468,12 @@ export default function MessageBubble({
                           </div>
                         </div>
 
-                        <div
-                          className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground"
-                          dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(reply.content) }}
-                        />
+                        {editingId !== reply.id ? (
+                          <div
+                            className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground"
+                            dangerouslySetInnerHTML={{ __html: sanitizeCommentHtml(reply.content) }}
+                          />
+                        ) : renderEditControls()}
 
                         {/* Reply Attached Files */}
                         {replyFiles.length > 0 && (
@@ -433,7 +520,7 @@ export default function MessageBubble({
           )}
 
           {/* Actions row (inside the block) */}
-          {(!isReply && (showResolveControl || !commentsDisabled || onDelete || onReply)) && (
+          {(!isReply && (showResolveControl || !commentsDisabled || onDelete || onReply || (canEdit && onSaveEdit))) && (
             <div className="mt-3 flex items-center justify-between gap-3">
               <div className="flex items-center">
                 {showResolveControl && onToggleResolved && (
@@ -452,14 +539,22 @@ export default function MessageBubble({
                     Reply
                   </button>
                 )}
+                {canEdit && onSaveEdit && editingId !== comment.id && (
+                  <button
+                    onClick={() => startEdit(comment)}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors font-medium flex items-center"
+                    title="Edit comment"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                )}
                 {onDelete && (
                   <button
                     onClick={onDelete}
-                    className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium flex items-center gap-1"
+                    className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium flex items-center"
                     title="Delete comment"
                   >
                     <Trash2 className="w-3 h-3" />
-                    Delete
                   </button>
                 )}
               </div>

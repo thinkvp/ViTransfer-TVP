@@ -6,7 +6,7 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { AlertTriangle, CheckCircle2, Clock, FileClock, History, Info, Lock, MessageCircle, Share2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, FileClock, History, Info, Lock, MessageCircle, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -133,6 +133,7 @@ export function CommentSectionView({
     handleCancelReply,
     handleClearTimestamp,
     handleDeleteComment,
+    handleEditComment,
     pendingDeleteCommentId,
     setPendingDeleteCommentId,
     confirmDeleteComment,
@@ -291,6 +292,8 @@ export function CommentSectionView({
   const [requestingNext, setRequestingNext] = useState(false)
   const requestingNextRef = useRef(false)
 
+  const [versionNotesOpen, setVersionNotesOpen] = useState(true)
+
   const [exportingSrt, setExportingSrt] = useState(false)
   // Optimistic local flag: remember which video was just approved until server data propagates.
   const [localApprovedVideoId, setLocalApprovedVideoId] = useState<string | null>(null)
@@ -303,6 +306,17 @@ export function CommentSectionView({
 
   const canClientDelete = allowClientDeleteComments && !isAdminView
   const canAdminDelete = isAdminView && canAdminDeleteComments
+
+  // Own-comment check for inline editing. Admins match by userId; clients match by the
+  // name they entered on the share page (honor-system by design — names are not verified).
+  const normalizedViewerName = (authorName || '').trim().toLowerCase()
+  const isOwnComment = (c: any): boolean => {
+    if (isAdminView) {
+      return Boolean(c?.userId && adminUser?.id && c.userId === adminUser.id)
+    }
+    if (!normalizedViewerName) return false
+    return String(c?.authorName || '').trim().toLowerCase() === normalizedViewerName
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -651,6 +665,17 @@ export function CommentSectionView({
   // Project is approved but this specific video is NOT individually approved
   const isProjectApprovedOnly = isApproved && !isCurrentVideoApproved && !hasAnyApprovedVideo && !hasLocallyApprovedVideoInGroup
   const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || hasLocallyApprovedVideoInGroup
+
+  // Set of video IDs that are considered approved (server-side + optimistic local).
+  // Used to gate per-comment edit/delete for non-admin viewers.
+  const approvedVideoIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const v of videos) {
+      if (v.approved === true) ids.add(v.id)
+    }
+    if (localApprovedVideoId) ids.add(localApprovedVideoId)
+    return ids
+  }, [videos, localApprovedVideoId])
 
   // Always use hook comments (includes optimistic updates)
   // Local comments only used as fallback if hook hasn't loaded
@@ -1205,7 +1230,7 @@ export function CommentSectionView({
       {fullscreenChatOverlay}
       <Card className={cn("bg-card border border-border flex flex-col h-full flex-1 min-h-0 rounded-lg overflow-hidden", cardClassName)} data-comment-section>
         {(!hideVideoTitle || showVideoActions) ? (
-        <CardHeader className={cn("border-b border-border shrink-0 space-y-1", hideVideoTitle && !showVideoActions && "hidden")}>
+        <CardHeader className={cn("px-4 py-4 border-b border-border shrink-0 space-y-1", hideVideoTitle && !showVideoActions && "hidden")}>
         <div className="flex items-start gap-4">
           {!hideVideoTitle && (
           <div className="min-w-0 flex-1">
@@ -1468,7 +1493,7 @@ export function CommentSectionView({
 
                 {/* Approval Status Banner */}
         {commentsDisabled && isProjectApprovedOnly && (
-                    <div className="bg-primary border-b border-border p-4 shrink-0">
+                    <div className="bg-primary border-b border-border py-3 px-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="min-w-0">
@@ -1484,7 +1509,7 @@ export function CommentSectionView({
           </div>
         )}
         {commentsDisabled && !isProjectApprovedOnly && (
-          <div className="bg-success-visible border-b border-border p-4 shrink-0">
+          <div className="bg-success-visible border-b border-border py-3 px-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <CheckCircle2 className="w-8 h-8 text-success shrink-0" />
@@ -1518,7 +1543,7 @@ export function CommentSectionView({
             Once the next version has actually been uploaded, it flips to "available"
             with a button that jumps to the newer version. */}
         {!commentsDisabled && isHeaderVideoRevisionRequested && (
-          <div className="bg-primary/10 border-b border-border p-4 shrink-0">
+          <div className="bg-primary/10 border-b border-border py-3 px-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <FileClock className="w-8 h-8 text-primary shrink-0" />
@@ -1590,16 +1615,34 @@ export function CommentSectionView({
         )}
 
         {showVideoNotes && headerVideoNotes ? (
-          <div className="px-4 sm:px-6 py-3 border-b border-border bg-muted/20 shrink-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Version Notes</p>
-            <p className="mt-1 text-sm text-foreground whitespace-pre-wrap wrap-break-word">{headerVideoNotes}</p>
+          <div className="border-b border-border bg-muted/20 shrink-0">
+            <button
+              type="button"
+              className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-muted/30 transition-colors"
+              onClick={() => setVersionNotesOpen(prev => !prev)}
+            >
+              <ChevronDown
+                className={cn(
+                  'w-3.5 h-3.5 text-muted-foreground transition-transform',
+                  !versionNotesOpen && '-rotate-90'
+                )}
+              />
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Version Notes
+              </p>
+            </button>
+            {versionNotesOpen && (
+              <p className="px-4 pb-3 text-sm text-foreground whitespace-pre-wrap wrap-break-word">
+                {headerVideoNotes}
+              </p>
+            )}
           </div>
         ) : null}
 
         {/* List Controls (directly above the message list). Skipped entirely when there
             are no action buttons — the sort toggle then floats over the message list. */}
         {showListActionsRow ? (
-        <div className="px-4 sm:px-6 py-2 border-b border-border bg-card shrink-0">
+        <div className="px-4 py-2 border-b border-border bg-card shrink-0">
           <div className="flex flex-wrap items-center gap-2 justify-between">
             <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
               {isAdminView && (
@@ -1661,7 +1704,7 @@ export function CommentSectionView({
             submitted?" prompt for consistency. The no-comments empty state below
             has its own larger version of this message. */}
         {commentsDisabled && sortedComments.length > 0 ? (
-          <div className="px-4 sm:px-6 py-2 border-b border-border bg-card shrink-0">
+          <div className="px-4 py-2 border-b border-border bg-card shrink-0">
             <p className="text-xs text-muted-foreground">
               {isProjectApprovedOnly
                 ? 'This project has been approved. Comments are now closed.'
@@ -1686,7 +1729,7 @@ export function CommentSectionView({
               </Button>
             </div>
           ) : null}
-        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-3 min-h-0 bg-muted/70">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0 bg-muted/70">
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
               {commentsDisabled ? (
@@ -1718,9 +1761,20 @@ export function CommentSectionView({
                 }
 
                 // Locked comments (next version requested) are no longer client-deletable.
-                const canDeleteParent = canAdminDelete || (canClientDelete && isRecipientAuthored(comment) && !(comment as any).lockedAt)
+                // Comments on approved videos are also not client-deletable.
+                const canDeleteParent = canAdminDelete || (canClientDelete && isRecipientAuthored(comment) && !(comment as any).lockedAt && !approvedVideoIds.has((comment as any).videoId))
                 const allowAnyReplyDelete = canAdminDelete || canClientDelete
-                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply) && !(reply as any).lockedAt)
+                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply) && !(reply as any).lockedAt && !approvedVideoIds.has((reply as any).videoId))
+
+                // Editing is limited to the viewer's own comments. Admins can always edit
+                // their own; clients need the edit/delete setting on, a recipient-authored
+                // comment matching their name, no lock (next version not yet requested),
+                // and the video must not be approved.
+                const canEditOwn = (c: any) => isAdminView
+                  ? isOwnComment(c)
+                  : (canClientDelete && isRecipientAuthored(c) && isOwnComment(c) && !c?.lockedAt && !approvedVideoIds.has(c?.videoId))
+                const canEditParent = canEditOwn(comment)
+                const canEditReply = (reply: Comment) => canEditOwn(reply)
 
                 // Apply optimistic "mark done" overrides for the admin share page tick.
                 const commentForBubble = {
@@ -1749,6 +1803,8 @@ export function CommentSectionView({
                         }}
                         onSeekToTimestamp={handleSeekToTimestamp}
                         onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
+                        canEdit={canEditParent}
+                        onSaveEdit={handleEditComment}
                         onScrollToComment={handleScrollToComment}
                         formatMessageTime={formatMessageTime}
                         commentsDisabled={commentsDisabled}
@@ -1779,6 +1835,9 @@ export function CommentSectionView({
                         }}
                         onSeekToTimestamp={handleSeekToTimestamp}
                         onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
+                        canEdit={canEditParent}
+                        canEditReply={canEditReply}
+                        onSaveEdit={handleEditComment}
                         onScrollToComment={handleScrollToComment}
                         formatMessageTime={formatMessageTime}
                         commentsDisabled={commentsDisabled}
