@@ -5,6 +5,22 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.7] - 2026-07-21
+
+### Added
+
+- **Create a client inline from the Create quote / Create invoice pages** — the Client field on both sales creation pages now has a **+** button at the right end of the input that opens the "Add New Client" form (the same fields as `/admin/clients/new`, including Client Contacts) in a modal. Creating the client closes the modal, adds it to the client list (alphabetically), and selects it in the Client field — no more leaving a half-drafted quote/invoice to add a client first. The standalone new-client page and the modal now share one extracted form component (`ClientCreateForm`), so the two can't drift. Touches `src/components/admin/clients/ClientCreateForm.tsx` (new), `src/components/admin/clients/ClientCreateModal.tsx` (new), `src/app/admin/clients/new/page.tsx`, `src/app/admin/sales/quotes/new/page.tsx`, `src/app/admin/sales/invoices/new/page.tsx`. No schema migration.
+
+### Changed
+
+- **Share page: approval / next-version banners and the empty comment state polished** — the "Video Approved", "Project Approved", and "Next version requested / available" banners in the comment panel now carry a bottom border (`border-b border-border`) matching the top edge, so each banner is framed consistently instead of dissolving into the content below. The empty comment state on an unapproved video now reads "Leave feedback here — comments are time-stamped to the video." (was "Have some feedback? Leave it here."), signalling to first-time clients that feedback is anchored to the current playhead. Touches `src/components/CommentSection.tsx`. No schema migration.
+
+- **Project page video rows reflow on mobile** — on narrow screens the per-version row in the project page's video list now wraps the action-icon cluster (approve / mark-reviewed / upload / delete) onto its own second line while the version label and expand chevron stay on the first, instead of crowding everything onto one line; `sm+` layouts are unchanged (single line). Touches `src/components/VideoList.tsx`. No schema migration.
+
+### Fixed
+
+- **Share page: "Reviewed" state changes now appear live without a refresh** — an admin toggling "Mark as Reviewed" on the project page (or a client requesting the next version in another session) published the SSE event and the share page refetched project data, but the refetched `revisionRequestedAt` never reached the comment panel: `fetchTokensForVideos` returned the cached tokenized video copy wholesale, and that cache is only invalidated when a video's `approved` flag flips — which a Reviewed toggle doesn't touch. The "Next version requested" banner (and the sidebar's Reviewed tick under the loadTokens re-cache race) therefore stayed stale until a manual refresh. Cached/in-flight tokenized copies now get the fresh `revisionRequestedAt` overlaid (same pattern the `allVideosByName` rebuild already used), and the `sidebarVideosByName` approval-field overlay carries `revisionRequestedAt` too. Also, the client "Request Next Version" route now publishes a `comment` event alongside `approval` so *other* open share pages refetch comments and see the just-applied comment locks (the lock was already enforced server-side — this was display-only staleness). Verified live: client share session open, server-side Reviewed toggle + SSE publish → banner and sidebar regrouping appeared/cleared in both directions without reload. Touches `src/app/share/[token]/page.tsx`, `src/app/api/projects/[id]/request-next-version/route.ts`. No schema migration.
+
 ## [2.3.6] - 2026-07-20
 
 ### Changed

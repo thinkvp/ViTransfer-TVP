@@ -2359,7 +2359,17 @@ export default function SharePage() {
       if (!Array.isArray(freshVersions)) { merged[name] = versions as any[]; continue }
       merged[name] = (versions as any[]).map((v) => {
         const f = freshVersions.find((fv) => fv.id === v.id)
-        return f ? { ...v, approved: f.approved, approvedAt: f.approvedAt, unapprovedAt: f.unapprovedAt } : v
+        return f
+          ? {
+              ...v,
+              approved: f.approved,
+              approvedAt: f.approvedAt,
+              unapprovedAt: f.unapprovedAt,
+              // Reviewed state also changes without re-tokenization (see approval
+              // comment above) — keep the sidebar tick/grouping live too.
+              revisionRequestedAt: f.revisionRequestedAt ?? null,
+            }
+          : v
       })
     }
     return merged
@@ -2492,14 +2502,23 @@ export default function SharePage() {
 
     return Promise.all(
       videos.map(async (video: any) => {
+        // Cached/in-flight tokenized copies were built from an earlier payload;
+        // overlay fields that change WITHOUT flipping approval (which is what
+        // invalidates the cache) so e.g. an admin's "Mark as Reviewed" reflects
+        // live in the comments header without a manual refresh.
+        const overlayVolatileFields = (tokenized: any) => ({
+          ...tokenized,
+          revisionRequestedAt: video.revisionRequestedAt ?? null,
+        })
+
         const cached = tokenCacheRef.current.get(video.id)
         if (cached) {
-          return cached
+          return overlayVolatileFields(cached)
         }
 
         const inFlight = tokenRequestCacheRef.current.get(video.id)
         if (inFlight) {
-          return inFlight
+          return inFlight.then(overlayVolatileFields)
         }
 
         const request = (async () => {

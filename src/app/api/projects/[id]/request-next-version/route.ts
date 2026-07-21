@@ -162,8 +162,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       console.error('[REVISION-REQUEST] Error handling notifications:', error)
     }
 
-    // Live-update open share pages / admin dashboards (badge + comment locks).
+    // Live-update open share pages / admin dashboards. `approval` refreshes the
+    // Reviewed badge/banner; `comment` makes other open pages refetch comments so
+    // the just-applied locks (lockedAt) show without a manual refresh — the
+    // `approval` handler alone does not refetch comments.
     await publishProjectEvent(projectId, 'approval')
+    await publishProjectEvent(projectId, 'comment')
 
     return NextResponse.json({ success: true })
   } catch (error) {

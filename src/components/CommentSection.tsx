@@ -1468,7 +1468,7 @@ export function CommentSectionView({
 
                 {/* Approval Status Banner */}
         {commentsDisabled && isProjectApprovedOnly && (
-                    <div className="bg-primary p-4 shrink-0">
+                    <div className="bg-primary border-b border-border p-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="min-w-0">
@@ -1484,7 +1484,7 @@ export function CommentSectionView({
           </div>
         )}
         {commentsDisabled && !isProjectApprovedOnly && (
-          <div className="bg-success-visible border-b-2 border-success-visible p-4 shrink-0">
+          <div className="bg-success-visible border-b border-border p-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <CheckCircle2 className="w-8 h-8 text-success shrink-0" />
@@ -1518,7 +1518,7 @@ export function CommentSectionView({
             Once the next version has actually been uploaded, it flips to "available"
             with a button that jumps to the newer version. */}
         {!commentsDisabled && isHeaderVideoRevisionRequested && (
-          <div className="bg-primary/10 p-4 shrink-0">
+          <div className="bg-primary/10 border-b border-border p-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <FileClock className="w-8 h-8 text-primary shrink-0" />
@@ -1703,7 +1703,7 @@ export function CommentSectionView({
                   ? 'This project has been approved. Comments are now closed.'
                   : commentsDisabled
                     ? 'This video has been approved. Comments are now closed.'
-                    : 'Have some feedback? Leave it here.'}
+                    : 'Leave feedback here — comments are time-stamped to the video.'}
               </p>
             </div>
           ) : (

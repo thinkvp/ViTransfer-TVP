@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { GripVertical, Tag, Trash2 } from 'lucide-react'
+import { GripVertical, Plus, Tag, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,6 +13,7 @@ import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { TaxRateSelect } from '@/components/sales/TaxRateSelect'
 import { createSalesInvoice, fetchSalesSettings, fetchTaxRates, listSalesItems, listSalesLabels } from '@/lib/sales/admin-api'
 import { SalesLineItemPresetsModal } from '@/components/admin/sales/SalesLineItemPresetsModal'
+import { ClientCreateModal } from '@/components/admin/clients/ClientCreateModal'
 import { SearchableLabelSelect } from '@/components/admin/sales/SearchableLabelSelect'
 import { LineItemAutocomplete } from '@/components/sales/LineItemAutocomplete'
 import type { SalesItem, SalesLabel } from '@/lib/sales/admin-api'
@@ -119,6 +120,7 @@ export default function NewInvoicePage() {
   // State mirror of dragIndexRef for render-time use (row highlight)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [showPresetsModal, setShowPresetsModal] = useState(false)
+  const [showClientModal, setShowClientModal] = useState(false)
   const [unitPriceInputs, setUnitPriceInputs] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -290,13 +292,28 @@ export default function NewInvoicePage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Client</Label>
-              <TypeaheadSelect
-                value={clientId}
-                onValueChange={setClientId}
-                options={clients.map((c) => ({ value: c.id, label: c.name }))}
-                placeholder={loadingClients ? 'Loading…' : 'Search client'}
-                allowNone
-              />
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <TypeaheadSelect
+                    value={clientId}
+                    onValueChange={setClientId}
+                    options={clients.map((c) => ({ value: c.id, label: c.name }))}
+                    placeholder={loadingClients ? 'Loading…' : 'Search client'}
+                    allowNone
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-9 w-9 shrink-0"
+                  title="Create new client"
+                  onClick={() => setShowClientModal(true)}
+                >
+                  <Plus className="w-4 h-4" />
+                  <span className="sr-only">Create new client</span>
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -623,6 +640,19 @@ export default function NewInvoicePage() {
           const meaningful = prev.filter((it) => it.description.trim() !== '' || it.unitPriceCents !== 0)
           return [...meaningful, ...newItems]
         })}
+      />
+
+      <ClientCreateModal
+        open={showClientModal}
+        onClose={() => setShowClientModal(false)}
+        onCreated={(client) => {
+          setClients((prev) =>
+            [...prev.filter((c) => c.id !== client.id), { id: client.id, name: client.name }]
+              .sort((a, b) => a.name.localeCompare(b.name))
+          )
+          setClientId(client.id)
+          setShowClientModal(false)
+        }}
       />
     </div>
   )

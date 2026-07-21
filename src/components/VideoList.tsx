@@ -384,8 +384,10 @@ export default function VideoList({
           const isExpanded = expandedVideoIds.includes(video.id)
           return (
         <div key={video.id} className="border rounded-lg bg-muted/40 p-2 sm:p-3 space-y-2">
-          {/* Top row: Approved badge + Version label + Action buttons */}
-          <div className="flex justify-between items-center gap-2">
+          {/* Top row: Approved badge + Version label + Action buttons.
+              Mobile: label + expand chevron on the first line, action buttons wrap to a second line.
+              sm+: everything on a single line. */}
+          <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-x-2 gap-y-1">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               {editingId === video.id ? (
                 <InlineEdit
@@ -413,9 +415,10 @@ export default function VideoList({
                 </>
               )}
             </div>
-            {/* Action icons - right side on all screen sizes */}
+            {/* Action icons - second row on mobile, inline right side on sm+ */}
             {editingId !== video.id && (
-              <div className="flex items-center gap-2 shrink-0">
+              <>
+              <div className="flex items-center gap-2 shrink-0 order-2 w-full justify-end sm:order-none sm:w-auto">
                 {/* Show status badge for non-ready states */}
                 {(video.status === 'UPLOADING' || video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'ERROR') && (
                   <span
@@ -536,18 +539,19 @@ export default function VideoList({
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 )}
-                {video.status === 'READY' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => toggleExpanded(video.id)}
-                    className="text-muted-foreground hover:text-foreground hover:bg-accent"
-                    title={isExpanded ? 'Collapse version' : 'Expand version'}
-                  >
-                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </Button>
-                )}
               </div>
+              {video.status === 'READY' && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => toggleExpanded(video.id)}
+                  className="text-muted-foreground hover:text-foreground hover:bg-accent shrink-0 order-1 sm:order-none"
+                  title={isExpanded ? 'Collapse version' : 'Expand version'}
+                >
+                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </Button>
+              )}
+              </>
             )}
           </div>
 
