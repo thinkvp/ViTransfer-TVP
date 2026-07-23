@@ -211,10 +211,13 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
     // Prefer the cached transcription audio (small mp3) so a (re)generation never
     // re-downloads the full original from storage. Fall back to the original when
     // the cache is absent (feature enabled after upload, or a pre-cache video),
-    // extracting + caching the mp3 for next time. Both Whisper providers accept
-    // mp3 directly; waveform peaks decode it to WAV locally when needed.
+    // extracting + caching the mp3 for next time. On a forced regeneration, skip
+    // the cached audio so any extraction fixes (e.g. timestamp alignment) take
+    // effect from a fresh extract of the original.
+    // Both Whisper providers accept mp3 directly; waveform peaks decode it to
+    // WAV locally when needed.
     let audioMp3Path: string
-    const cachedAudioPath = await getStoredFilePath('VIDEO', videoId, 'TRANSCRIPTION_AUDIO')
+    const cachedAudioPath = force ? null : await getStoredFilePath('VIDEO', videoId, 'TRANSCRIPTION_AUDIO')
     if (cachedAudioPath) {
       const materialized = await materializeStoragePathToLocalFile({
         rawPath: cachedAudioPath,

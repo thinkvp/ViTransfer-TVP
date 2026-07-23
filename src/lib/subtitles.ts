@@ -127,10 +127,13 @@ export function srtToVtt(srt: string): string {
  * `maxCharsPerLine` characters per line and `maxLines` lines. When a cue's text
  * needs more lines than allowed, it is split into multiple cues whose durations
  * are apportioned across the cue's original time range by character count (so
- * nothing is dropped and timing stays roughly in sync). A split that would
- * leave a single orphaned word as the final cue instead folds that word back
- * into the previous cue, letting that line exceed `maxCharsPerLine` — a lone
- * word flashing as its own subtitle reads worse than a slightly long line.
+ * nothing is dropped and timing stays roughly in sync). Splits are refined to
+ * sentence boundaries when possible so a new sentence starts on its own cue
+ * rather than letting 1–2 orphaned words dangle at the end of the previous
+ * cue. A split that would leave a single orphaned word as the final cue instead
+ * folds that word back into the previous cue, letting that line exceed
+ * `maxCharsPerLine` — a lone word flashing as its own subtitle reads worse than
+ * a slightly long line.
  * `maxCharsPerLine <= 0` disables wrapping (returns the cues re-indexed but
  * otherwise untouched).
  * Applied at generation time only — manual edits are left as the user typed them.
@@ -168,6 +171,29 @@ export function reflowCues(
     // Overflow: split into groups of `maxLines` lines, time-proportional by char count.
     const groups: string[][] = []
     for (let i = 0; i < lines.length; i += maxLines) groups.push(lines.slice(i, i + maxLines))
+
+    // Sentence-boundary refinement: when a group's last line ends with 1–2
+    // orphaned words trailing sentence-ending punctuation, move them to the
+    // start of the next group so the new sentence starts on its own cue
+    // instead of dangling at the end of the previous one.
+    for (let gi = 0; gi < groups.length - 1; gi++) {
+      const lastLine = groups[gi][groups[gi].length - 1]
+      // Find the last . ! or ? followed by space or end-of-line
+      const boundaryRe = /[.!?](?=\s|$)/g
+      let match: RegExpExecArray | null
+      let bestIdx = -1
+      while ((match = boundaryRe.exec(lastLine)) !== null) {
+        bestIdx = match.index
+      }
+      if (bestIdx === -1) continue
+      const before = lastLine.slice(0, bestIdx + 1).trim()
+      const after = lastLine.slice(bestIdx + 1).trim()
+      if (!before || !after) continue
+      if (after.split(/\s+/).length > 2) continue // too many words — belongs to the current sentence
+      groups[gi][groups[gi].length - 1] = before
+      groups[gi + 1][0] = after + ' ' + groups[gi + 1][0]
+    }
+
     // Orphan guard: a final group that is just one word folds into the previous
     // group (its last line may exceed maxChars — the lesser evil).
     const last = groups[groups.length - 1]
@@ -237,17 +263,18 @@ export function collapseRepeatedCues(
 /**
  * Merge a cue whose entire text is a single word into the previous cue, so a
  * word Whisper segmented off on its own doesn't flash as its own subtitle.
- * Only merges when the gap to the previous cue is small (`maxGapMs`) — a lone
- * word spoken after a real pause ("...Perfect.") keeps its own cue. Skipped
- * when the merge would exceed MAX_CUE_TEXT_LENGTH. Run BEFORE `reflowCues`
- * (which has its own orphan guard for the splits it creates). Applied at
- * generation time only — manual edits are untouched.
+ * Only merges when the gap to the previous cue is small (`maxGapMs`, default
+ * 500 ms) — a lone word spoken after a real pause ("...Perfect.") keeps its
+ * own cue so the natural gap is visible to the viewer. Skipped when the merge
+ * would exceed MAX_CUE_TEXT_LENGTH. Run BEFORE `reflowCues` (which has its
+ * own orphan guard for the splits it creates). Applied at generation time
+ * only — manual edits are untouched.
  */
 export function mergeOrphanWordCues(
   cues: SubtitleCue[],
   opts: { maxGapMs?: number } = {},
 ): SubtitleCue[] {
-  const maxGapMs = opts.maxGapMs ?? 1200
+  const maxGapMs = opts.maxGapMs ?? 500
   const out: SubtitleCue[] = []
   for (const cue of cues) {
     const prev = out[out.length - 1]

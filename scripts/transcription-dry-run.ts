@@ -168,6 +168,21 @@ const MESSY_SRT =
     )
     return multi.length === 2 && multi[1].text === 'charlie\ndelta echo golf'
   })())
+
+  // Sentence-boundary refinement: when a group's last line has 1-2 orphaned
+  // words trailing a period, move them to the next group so the new sentence
+  // starts on its own cue. "First thing here now. And then" → split at the
+  // period: cue 0 ends with ".", cue 1 starts with "And then".
+  // (The orphan guard may still fold a lone-word final group — that's separate.)
+  const sentBoundary = reflowCues(
+    [{ index: 1, startMs: 0, endMs: 3000, text: 'First thing here now. And then second thing here now more words.' }],
+    { maxCharsPerLine: 30, maxLines: 1 },
+  )
+  check('reflow: sentence boundary — orphaned word moves to next cue',
+    sentBoundary.length === 2 &&
+    sentBoundary[0].text === 'First thing here now.' &&
+    sentBoundary[1].text.startsWith('And then') &&
+    sentBoundary[1].text.includes('second thing'))
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +217,20 @@ const MESSY_SRT =
     { index: 3, startMs: 1400, endMs: 1600, text: 'five' },
   ])
   check('orphan merge: consecutive lone words chain into one cue', chain.length === 1 && chain[0].text === 'one two three four five' && chain[0].endMs === 1600)
+
+  // Gap threshold (default 500 ms): a lone word ≤ 500 ms after the previous
+  // cue is merged; > 500 ms keeps its own cue so the natural pause is visible.
+  const tightGap = mergeOrphanWordCues([
+    { index: 1, startMs: 0, endMs: 2000, text: 'and that is the' },
+    { index: 2, startMs: 2400, endMs: 2800, text: 'end.' }, // 400 ms gap → merge
+  ])
+  check('orphan merge: 400 ms gap merges lone word', tightGap.length === 1 && tightGap[0].text === 'and that is the end.')
+
+  const wideGap = mergeOrphanWordCues([
+    { index: 1, startMs: 0, endMs: 2000, text: 'take a look at this' },
+    { index: 2, startMs: 2600, endMs: 3000, text: 'Wow.' }, // 600 ms gap → keep
+  ])
+  check('orphan merge: 600 ms gap keeps lone word as its own cue', wideGap.length === 2 && wideGap[1].text === 'Wow.')
 }
 
 // ---------------------------------------------------------------------------

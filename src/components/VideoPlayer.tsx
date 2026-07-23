@@ -778,9 +778,10 @@ export default function VideoPlayer({
   const seekIndicatorTimeoutRef = useRef<number | null>(null)
   const centerPulseTimeoutRef = useRef<number | null>(null)
 
-  // If ANY video is approved, only show approved videos (for both admin and client)
+  // If ANY video is approved, only show approved videos for clients.
+  // Admin users can still access all versions to review old comments etc.
   const hasAnyApprovedVideo = videos.some((v: any) => v.approved === true)
-  const displayVideos = hasAnyApprovedVideo
+  const displayVideos = hasAnyApprovedVideo && !isAdmin
     ? videos.filter((v: any) => v.approved === true)
     : videos
 

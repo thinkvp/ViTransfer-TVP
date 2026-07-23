@@ -927,7 +927,7 @@ export function CommentSectionView({
   }
 
   const hasAnyApprovedVideoInGroup = videos.some(v => v.approved === true) || hasLocallyApprovedVideoInGroup
-  const selectableVideos = hasAnyApprovedVideoInGroup
+  const selectableVideos = hasAnyApprovedVideoInGroup && !isAdminView
     ? videos.filter(v => v.approved === true || v.id === localApprovedVideoId)
     : videos
 

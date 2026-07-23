@@ -650,6 +650,12 @@ export async function extractAudioForTranscription(
     '-vn', // drop video
     '-ac', '1', // mono
     '-ar', '16000', // 16 kHz
+    // Force the output audio to a continuous timeline starting at 0. Without
+    // this, audio tracks with container-level edit-list offsets (encoder
+    // priming, remuxed timestamps) drift from the video timeline, producing
+    // subtitles that start early and end late. async=1 fills timestamp gaps /
+    // trims overlaps; first_pts=0 anchors the first sample to absolute zero.
+    '-af', 'aresample=async=1:first_pts=0',
     ...codecArgs,
     '-y',
     outputPath
