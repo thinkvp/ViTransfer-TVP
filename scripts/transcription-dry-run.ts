@@ -24,6 +24,7 @@ import {
   reflowCues,
   collapseRepeatedCues,
   mergeOrphanWordCues,
+  buildCuesFromWords,
 } from '../src/lib/subtitles'
 import {
   splitCueAt,
@@ -135,8 +136,9 @@ const MESSY_SRT =
 {
   const cue = [{ index: 1, startMs: 0, endMs: 4000, text: 'the quick brown fox jumps over the lazy dog again and again' }]
   const wrapped = reflowCues(cue, { maxCharsPerLine: 20, maxLines: 2 })
-  const allLinesFit = wrapped.every((c) => c.text.split('\n').every((l) => l.length <= 20))
-  check('reflow: every line within maxCharsPerLine', allLinesFit)
+  // Lines may exceed maxChars by up to the short-word pullback allowance (+6)
+  const allLinesFit = wrapped.every((c) => c.text.split('\n').every((l) => l.length <= 20 + 6))
+  check('reflow: every line within maxCharsPerLine (+ pullback allowance)', allLinesFit)
   check('reflow: overflow split into multiple cues', wrapped.length > 1)
   check('reflow: split cues stay within original time range', wrapped[0].startMs === 0 && wrapped[wrapped.length - 1].endMs === 4000)
   check('reflow: each cue has at most maxLines lines', wrapped.every((c) => c.text.split('\n').length <= 2))
@@ -158,15 +160,18 @@ const MESSY_SRT =
     [{ index: 1, startMs: 0, endMs: 3000, text: 'the quick brown fox jumps high' }],
     { maxCharsPerLine: 20, maxLines: 1 },
   )
-  check('reflow: two-word remainder keeps its own cue', twoWords.length === 2 && twoWords[1].text === 'jumps high')
+  // "jumps" (5 chars) is pulled back onto line 1 (≤6 threshold), leaving
+  // "high" as a lone word that the orphan guard then folds → 1 cue total.
+  check('reflow: pullback + orphan fold produces single cue', twoWords.length === 1 && twoWords[0].text === 'the quick brown fox jumps high')
   check('reflow: orphan fold also applies with maxLines=2', (() => {
-    // Wraps to 5 lines: alpha / bravo / charlie / delta echo / golf →
-    // the lone "golf" group folds into the previous group's last line.
+    // With pullback at 6: alpha bravo / charlie delta / echo golf.
+    // "bravo" and "delta" get pulled back; "golf" pairs with "echo".
+    // 2-line groups: [alpha bravo, charlie delta] + [echo golf] → 2 cues.
     const multi = reflowCues(
       [{ index: 1, startMs: 0, endMs: 5000, text: 'alpha bravo charlie delta echo golf' }],
       { maxCharsPerLine: 10, maxLines: 2 },
     )
-    return multi.length === 2 && multi[1].text === 'charlie\ndelta echo golf'
+    return multi.length === 2 && multi[1].text === 'echo golf'
   })())
 
   // Sentence-boundary refinement: when a group's last line has 1-2 orphaned
@@ -183,6 +188,53 @@ const MESSY_SRT =
     sentBoundary[0].text === 'First thing here now.' &&
     sentBoundary[1].text.startsWith('And then') &&
     sentBoundary[1].text.includes('second thing'))
+
+  // Short-word pullback: when a line would end on a hanging preposition/article
+  // ("out of") and the next line starts with a very short word ("it,"), pull
+  // that short word back onto the current line despite slightly exceeding
+  // maxCharsPerLine — reads much better than an orphaned "it" / "of".
+  const pulled = reflowCues(
+    [{ index: 1, startMs: 0, endMs: 3000, text: 'She thought I would really get a lot out of it, but I was not expecting to get so much' }],
+    { maxCharsPerLine: 42, maxLines: 1 },
+  )
+  check('reflow: short-word pullback keeps "it" with "out of"',
+    pulled.length === 2 &&
+    pulled[0].text.includes('out of it') &&
+    !pulled[1].text.startsWith('it'))
+}
+
+// ---------------------------------------------------------------------------
+// 6b1b. Word-timestamp cue building (buildCuesFromWords)
+// ---------------------------------------------------------------------------
+{
+  // Words at 100ms intervals: "hello"@0-0.3, "world"@0.4-0.7, "this"@0.7-1.0,
+  // "is"@1.1-1.4, "a"@1.4-1.5, "test"@1.5-1.8
+  const words = [
+    { word: 'hello', start: 0.0, end: 0.3 },
+    { word: 'world', start: 0.4, end: 0.7 },
+    { word: 'this', start: 0.7, end: 1.0 },
+    { word: 'is', start: 1.1, end: 1.2 },
+    { word: 'a', start: 1.2, end: 1.3 },
+    { word: 'test', start: 1.3, end: 1.6 },
+  ]
+  const cues = buildCuesFromWords(words, { maxCharsPerLine: 42, maxLines: 2 })
+  check('buildCuesFromWords: single cue with all words',
+    cues.length === 1 &&
+    cues[0].text === 'hello world this is a test' &&
+    cues[0].startMs === 0 &&
+    cues[0].endMs === 1600)
+
+  // Narrow width forces 2 cues: words split by maxChars
+  const narrow = buildCuesFromWords(words, { maxCharsPerLine: 10, maxLines: 1 })
+  check('buildCuesFromWords: narrow width splits into multiple cues',
+    narrow.length >= 2 &&
+    narrow[0].startMs === 0 &&
+    narrow[narrow.length - 1].endMs === 1600)
+
+  // maxCharsPerLine=0 disables wrapping
+  const noWrap = buildCuesFromWords(words, { maxCharsPerLine: 0, maxLines: 1 })
+  check('buildCuesFromWords: maxCharsPerLine=0 single cue',
+    noWrap.length === 1 && noWrap[0].text === 'hello world this is a test')
 }
 
 // ---------------------------------------------------------------------------

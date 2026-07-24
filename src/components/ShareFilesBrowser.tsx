@@ -55,9 +55,9 @@ type DownloadProgressSnapshot = {
 
 const FILES_CHECKBOX_CLASS = 'rounded accent-primary/75 opacity-70 checked:opacity-100 transition-opacity'
 
-const isSelectableDownloadableFile = (file: DownloadableFile): boolean => {
+const isSelectableDownloadableFile = (file: DownloadableFile, isAdmin = false): boolean => {
   if (file.type !== 'video') return true
-  return file.isApproved === true
+  return isAdmin || file.isApproved === true
 }
 
 const getVersionNumberFromLabel = (label?: string): number | null => {
@@ -112,6 +112,8 @@ type ShareFilesBrowserProps = {
   onRenameUploadFolder?: (folderPath: string, folderName: string) => Promise<void>
   onPreviewTokenExpired?: () => void
   onApproveVideo?: (file: DownloadableFile) => Promise<void>
+  /** Admin users can interact with all versions regardless of approval status. */
+  isAdmin?: boolean
 }
 
 function getFileTypeIcon(file: DownloadableFile) {
@@ -220,6 +222,8 @@ export type ContextMenuItemsProps = {
   onDownloadSocial: () => void
   /** Whether another version in the same video group is already approved. */
   groupHasApprovedVersion?: boolean
+  /** Admin users can interact with all versions regardless of approval status. */
+  isAdmin?: boolean
 }
 
 export function ContextMenuItems({
@@ -249,6 +253,7 @@ export function ContextMenuItems({
   albumPhotoSocialDownloadUrl,
   onDownloadSocial,
   groupHasApprovedVersion = false,
+  isAdmin = false,
 }: ContextMenuItemsProps) {
   if (!contextMenu) return null
 
@@ -260,7 +265,7 @@ export function ContextMenuItems({
   if (group) {
     const isUploads = group.groupType === 'uploads'
     const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-    const hasSelectable = groupFiles.some((f) => f.type !== 'video' || f.isApproved === true)
+    const hasSelectable = groupFiles.some((f) => f.type !== 'video' || isAdmin || f.isApproved === true)
 
     return (
       <>
@@ -309,7 +314,7 @@ export function ContextMenuItems({
   return (
     <>
       {/* Play / Open actions */}
-      {isVideo && !isApproved && groupHasApprovedVersion ? (
+      {isVideo && !isApproved && groupHasApprovedVersion && !isAdmin ? (
         <div className={cn(itemClass, 'opacity-50 cursor-default')}>
           <Play className="mr-2 h-4 w-4" />
           Play (another version approved)
@@ -409,6 +414,7 @@ export function ShareFilesBrowser({
   onRenameUploadFolder,
   onPreviewTokenExpired,
   onApproveVideo,
+  isAdmin = false,
 }: ShareFilesBrowserProps) {
   // Initialise from the parent's requested folder so a freshly-mounted browser
   // (e.g. after switching from the player back to FILES) opens the right folder
@@ -1295,7 +1301,7 @@ export function ShareFilesBrowser({
 
   const toggleGroup = (group: DownloadableGroup, checked: boolean) => {
     const fileKeys = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-      .filter((file) => isSelectableDownloadableFile(file))
+      .filter((file) => isSelectableDownloadableFile(file, isAdmin))
       .map(getDownloadableFileKey)
     setSelectedFileIds((prev) => {
       const next = new Set(prev)
@@ -1310,7 +1316,7 @@ export function ShareFilesBrowser({
 
   const toggleSubset = (files: DownloadableFile[], checked: boolean) => {
     const subsetKeys = files
-      .filter((file) => isSelectableDownloadableFile(file))
+      .filter((file) => isSelectableDownloadableFile(file, isAdmin))
       .map(getDownloadableFileKey)
     if (!subsetKeys.length) return
 
@@ -1375,7 +1381,7 @@ export function ShareFilesBrowser({
     const selectableKeys = new Set(
       groups
         .flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
-        .filter((file) => isSelectableDownloadableFile(file))
+        .filter((file) => isSelectableDownloadableFile(file, isAdmin))
         .map((file) => getDownloadableFileKey(file))
     )
 
@@ -1392,7 +1398,7 @@ export function ShareFilesBrowser({
     if (openFolder) return null
     return groups
       .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
-      .filter((file) => isSelectableDownloadableFile(file))
+      .filter((file) => isSelectableDownloadableFile(file, isAdmin))
       .map(getDownloadableFileKey)
   }, [openFolder, groups])
 
@@ -1406,7 +1412,7 @@ export function ShareFilesBrowser({
       return
     }
     const visibleKeys = visibleFiles
-      .filter((file) => isSelectableDownloadableFile(file))
+      .filter((file) => isSelectableDownloadableFile(file, isAdmin))
       .map(getDownloadableFileKey)
     if (!visibleKeys.length) return
 
@@ -1426,7 +1432,7 @@ export function ShareFilesBrowser({
       return rootViewAllKeys.length > 0 && rootViewAllKeys.every((key) => selectedFileIds.has(key))
     }
     const visibleSelectableKeys = visibleFiles
-      .filter((file) => isSelectableDownloadableFile(file))
+      .filter((file) => isSelectableDownloadableFile(file, isAdmin))
       .map(getDownloadableFileKey)
     return visibleSelectableKeys.length > 0 && visibleSelectableKeys.every((key) => selectedFileIds.has(key))
   }, [rootViewAllKeys, visibleFiles, selectedFileIds])
@@ -1448,7 +1454,7 @@ export function ShareFilesBrowser({
         : filesInOpenFolder
       : groups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
     const selectedFiles = scopedFiles.filter((file) => selectedFileIds.has(getDownloadableFileKey(file)))
-      .filter((file) => file.type !== 'video' || file.isApproved !== false)
+      .filter((file) => file.type !== 'video' || isAdmin || file.isApproved !== false)
     if (!selectedFiles.length) return
 
     // Annotate each file with the FSA download folder path so runBulkFsaDownload can
@@ -2152,8 +2158,8 @@ export function ShareFilesBrowser({
       ? formatDuration(file.durationSeconds ?? derivedVideoDurationByFileKey[fileKey] ?? undefined)
       : null
     const fileExtensionLabel = getFileExtensionLabel(file.fileName)
-    const canDownloadFile = file.type !== 'video' || file.isApproved !== false
-    const canSelectFile = isSelectableDownloadableFile(file)
+    const canDownloadFile = file.type !== 'video' || isAdmin || file.isApproved !== false
+    const canSelectFile = isSelectableDownloadableFile(file, isAdmin)
     const displayFileName = file.type === 'video'
       ? `${openFolder?.name || file.fileName} - ${file.versionLabel || 'Version'}`
       : file.fileName
@@ -2170,6 +2176,8 @@ export function ShareFilesBrowser({
       hasMultipleVideoVersions &&
       hasApprovedVideoVersionInGroup &&
       file.isApproved !== true
+    // Admins can still interact with muted versions; clients are fully blocked.
+    const blockInactiveVideoInteraction = muteInactiveVideoVersion && !isAdmin
     const uploadTransfer = file.type === 'upload-file' && file.uploadFileId
       ? pendingUploadTransferByFileId.get(file.uploadFileId)
       : null
@@ -2197,7 +2205,7 @@ export function ShareFilesBrowser({
       onApproveVideo &&
       !muteInactiveVideoVersion &&
       !groupHasApprovedVersion
-    const showPlayableVideoOverlay = !isPlaybackPurgedAsset && (isVideoAssetFile || (file.type === 'video' && !muteInactiveVideoVersion)) && (showImagePreview || showVideoPreview)
+    const showPlayableVideoOverlay = !isPlaybackPurgedAsset && (isVideoAssetFile || (file.type === 'video' && (!muteInactiveVideoVersion || isAdmin))) && (showImagePreview || showVideoPreview)
     const actionButtons = canDownloadFile ? (
       <div className="flex items-center gap-1">
         {file.type === 'upload-file' && canDeleteUploads && onDeleteUploadFile && file.uploadFileId ? (
@@ -2221,7 +2229,7 @@ export function ShareFilesBrowser({
           variant="default"
           size="icon"
           className={cn('shrink-0 bg-primary text-primary-foreground hover:bg-primary/90', compact ? 'h-6 w-6' : 'h-7 w-7')}
-          disabled={muteInactiveVideoVersion}
+          disabled={blockInactiveVideoInteraction}
           onClick={(event) => { event.stopPropagation(); void onDownloadFile(file) }}
           onMouseDown={(event) => event.stopPropagation()}
           onDoubleClick={(event) => event.stopPropagation()}
@@ -2264,7 +2272,7 @@ export function ShareFilesBrowser({
             : 'border border-border hover:border-primary/45'
         )}
         onClick={() => {
-          if (muteInactiveVideoVersion) return
+          if (blockInactiveVideoInteraction) return
           if (file.type === 'upload-file') return
           if (file.type === 'video' && file.videoId && onOpenVideoVersion) {
             onOpenVideoVersion(file, openFolder?.name || null)
@@ -2283,7 +2291,7 @@ export function ShareFilesBrowser({
           }
         }}
         onDoubleClick={() => {
-          if (muteInactiveVideoVersion) return
+          if (blockInactiveVideoInteraction) return
           if (file.type === 'upload-file') {
             if (!canDownloadFile) return
             void onDownloadFile(file)
@@ -2408,9 +2416,9 @@ export function ShareFilesBrowser({
               <input
                 type="checkbox"
                 checked={isSelected}
-                disabled={!canSelectFile || muteInactiveVideoVersion}
+                disabled={!canSelectFile || blockInactiveVideoInteraction}
                 onChange={(event) => {
-                  if (!canSelectFile || muteInactiveVideoVersion) return
+                  if (!canSelectFile || blockInactiveVideoInteraction) return
                   toggleFile(fileKey, event.target.checked)
                 }}
                 onDoubleClick={(event) => event.stopPropagation()}
@@ -2418,7 +2426,7 @@ export function ShareFilesBrowser({
                 className={cn(
                   'w-4 h-4',
                   FILES_CHECKBOX_CLASS,
-                  canSelectFile && !muteInactiveVideoVersion ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
+                  canSelectFile && !blockInactiveVideoInteraction ? 'cursor-pointer' : 'cursor-not-allowed opacity-40'
                 )}
                 aria-label={`Select ${file.fileName}`}
               />
@@ -2483,7 +2491,7 @@ export function ShareFilesBrowser({
 
   const renderRootFolderCard = (group: DownloadableGroup) => {
     const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-    const hasSelectableFiles = groupFiles.some((f) => isSelectableDownloadableFile(f))
+    const hasSelectableFiles = groupFiles.some((f) => isSelectableDownloadableFile(f, isAdmin))
     const uploadFolderPath = group.groupType === 'uploads' ? getUploadsFolderPathFromGroup(group.name) : ''
     const displayGroupName = group.groupType === 'uploads'
       ? getUploadsFolderLabelFromGroup(group.name)
@@ -3518,18 +3526,18 @@ export function ShareFilesBrowser({
                 contextMenu={contextMenu}
                 file={contextMenu.file}
                 group={contextMenu.group}
-                canSelectFile={contextMenu.file ? isSelectableDownloadableFile(contextMenu.file) : false}
+                canSelectFile={contextMenu.file ? isSelectableDownloadableFile(contextMenu.file, isAdmin) : false}
                 isSelected={contextMenu.file ? selectedFileIds.has(getDownloadableFileKey(contextMenu.file)) : false}
                 isGroupSelected={
                   contextMenu.group
                     ? (() => {
                         const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
-                          .filter((f) => isSelectableDownloadableFile(f))
+                          .filter((f) => isSelectableDownloadableFile(f, isAdmin))
                         return files.length > 0 && files.every((f) => selectedFileIds.has(getDownloadableFileKey(f)))
                       })()
                     : false
                 }
-                canDownloadFile={contextMenu.file ? (contextMenu.file.type !== 'video' || contextMenu.file.isApproved !== false) : false}
+                canDownloadFile={contextMenu.file ? (contextMenu.file.type !== 'video' || isAdmin || contextMenu.file.isApproved !== false) : false}
                 showApproveButton={contextMenu.file ? (
                   contextMenu.file.type === 'video' &&
                   contextMenu.file.isApproved === false &&
@@ -3581,7 +3589,7 @@ export function ShareFilesBrowser({
                 onDownloadFolder={() => {
                   if (!contextMenu.group) return
                   const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
-                    .filter((f) => isSelectableDownloadableFile(f))
+                    .filter((f) => isSelectableDownloadableFile(f, isAdmin))
                   if (files.length > 0) {
                     if (onDownloadFiles) {
                       void onDownloadFiles(files)
@@ -3619,7 +3627,7 @@ export function ShareFilesBrowser({
                 onSelectFolder={() => {
                   if (!contextMenu.group) return
                   const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
-                    .filter((f) => isSelectableDownloadableFile(f))
+                    .filter((f) => isSelectableDownloadableFile(f, isAdmin))
                   const allKeys = files.map((f) => getDownloadableFileKey(f))
                   const allSelected = allKeys.every((k) => selectedFileIds.has(k))
                   setSelectedFileIds((prev) => {
@@ -3648,6 +3656,7 @@ export function ShareFilesBrowser({
                   }
                 }}
                 groupHasApprovedVersion={groupHasApprovedVersion}
+                isAdmin={isAdmin}
               />
             </div>,
             document.body,

@@ -4,8 +4,8 @@ import fs from 'fs'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import type { TranscriptionJob } from '../lib/queue'
-import { whisperTranscribe, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
-import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues } from '../lib/subtitles'
+import { whisperTranscribe, whisperTranscribeVerbose, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
+import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, buildCuesFromWords } from '../lib/subtitles'
 import { usesBritishSpelling, convertToBritishEnglish } from '../lib/american-to-british'
 import { extractAudioForTranscription } from '../lib/ffmpeg'
 import { computeWaveformPeaksFromWav } from '../lib/waveform-peaks'
@@ -313,16 +313,50 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
     }
 
     console.log(`[transcription] Transcribing video ${videoId} via ${config.provider} (${config.model})`)
-    const rawSrt = await whisperTranscribe({
-      config,
-      audio: whisperAudioPath,
-      fileName: whisperFileName,
-      mimeType: whisperMimeType,
-      responseFormat: 'srt',
-      timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
-    })
 
-    let cues = parseSrt(rawSrt)
+    let cues: ReturnType<typeof parseSrt>
+
+    if (config.provider === 'OPENAI') {
+      // Word-level timestamps via verbose_json — every word carries start/end
+      // times, so we can build cues with word-precise timing instead of relying
+      // on Whisper's coarse segment boundaries and character-count approximation.
+      const verbose = await whisperTranscribeVerbose({
+        config,
+        audio: whisperAudioPath,
+        fileName: whisperFileName,
+        mimeType: whisperMimeType,
+        timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
+      })
+      const allWords = verbose.segments.flatMap((s) => s.words ?? [])
+      if (allWords.length === 0) {
+        console.log(`[transcription] Video ${videoId}: no speech detected — no subtitles generated`)
+        await prisma.video.update({
+          where: { id: videoId },
+          data: {
+            transcriptionStatus: 'READY',
+            transcriptionError: null,
+            subtitlesEditedAt: null,
+            subtitlesEditedById: null,
+            subtitlesEditedByRecipientId: null,
+            subtitlesEditedByName: null,
+          },
+        })
+        return
+      }
+      cues = buildCuesFromWords(allWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
+    } else {
+      // Local Whisper — standard SRT path
+      const rawSrt = await whisperTranscribe({
+        config,
+        audio: whisperAudioPath,
+        fileName: whisperFileName,
+        mimeType: whisperMimeType,
+        responseFormat: 'srt',
+        timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
+      })
+      cues = parseSrt(rawSrt)
+    }
+
     if (cues.length === 0) {
       // No detectable speech (music-only cut, silent b-roll). Nothing to attach —
       // READY with no asset means the player simply shows no CC button.

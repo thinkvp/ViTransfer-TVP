@@ -153,12 +153,24 @@ export function reflowCues(
     const words = cue.text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
     if (words.length === 0) continue
 
-    // Greedy word-wrap; a single over-long word gets its own line rather than being split.
+    // Greedy word-wrap; a single over-long word gets its own line rather than
+    // being split. Short words (≤3 chars — typically function words like "it",
+    // "of", "the") that barely overflow maxChars are pulled back onto the
+    // current line: a slight exceedance reads much better than an orphaned "it"
+    // dangling at the start of the next subtitle.
+    const SHORT_PULLBACK = 6
+    const SHORT_PULLBACK_ALLOWANCE = 6
     const lines: string[] = []
     let cur = ''
     for (const w of words) {
       if (cur === '') cur = w
       else if ((cur + ' ' + w).length <= maxChars) cur += ' ' + w
+      else if (
+        w.length <= SHORT_PULLBACK &&
+        (cur + ' ' + w).length <= maxChars + SHORT_PULLBACK_ALLOWANCE
+      ) {
+        cur += ' ' + w
+      }
       else { lines.push(cur); cur = w }
     }
     if (cur) lines.push(cur)
@@ -306,4 +318,107 @@ export function cuesToTranscriptTxt(cues: SubtitleCue[]): string {
       .replace(/\s+/g, ' ')
       .trim() + '\n'
   )
+}
+
+// ---------------------------------------------------------------------------
+// Build cues from word-level timestamps (OpenAI verbose_json)
+// ---------------------------------------------------------------------------
+
+/** A single word with timing in seconds (from Whisper verbose_json). */
+export interface TimedWord {
+  word: string
+  start: number // seconds
+  end: number   // seconds
+}
+
+/**
+ * Build subtitle cues directly from word-level timestamps. Words are grouped
+ * into lines (greedy word-wrap with the same pullback tolerance as reflowCues)
+ * and lines into cues (maxLines per cue). Each cue's start/end comes from the
+ * actual word timestamps of its first/last word — no character-count
+ * approximation. This replaces Whisper's coarse segment-level SRT timestamps
+ * with word-precise timing.
+ *
+ * The returned cues are already sized to fit `maxCharsPerLine` × `maxLines`,
+ * so running them through `reflowCues` afterwards is a near-no-op (splits are
+ * rare; the primary purpose of the follow-up reflowCues pass is sentence-
+ * boundary refinement and orphan folding).
+ */
+export function buildCuesFromWords(
+  allWords: TimedWord[],
+  opts: { maxCharsPerLine: number; maxLines: number },
+): SubtitleCue[] {
+  const maxChars = Math.floor(opts.maxCharsPerLine)
+  const maxLines = Math.max(1, Math.floor(opts.maxLines))
+  const SHORT_PULLBACK = 6
+  const SHORT_PULLBACK_ALLOWANCE = 6
+
+  if (!Number.isFinite(maxChars) || maxChars <= 0 || allWords.length === 0) {
+    if (allWords.length === 0) return []
+    // No wrapping — single cue spanning all words
+    return [{
+      index: 1,
+      startMs: Math.round(allWords[0].start * 1000),
+      endMs: Math.round(allWords[allWords.length - 1].end * 1000),
+      text: allWords.map(w => w.word).join(' '),
+    }]
+  }
+
+  const cues: SubtitleCue[] = []
+  let i = 0
+
+  while (i < allWords.length) {
+    const cueLines: string[] = []
+    let cueStartMs = Math.round(allWords[i].start * 1000)
+    let cueEndWordIdx = i // track the last word included in this cue
+
+    // Build up to maxLines lines for this cue
+    for (let lineNum = 0; lineNum < maxLines && i < allWords.length; lineNum++) {
+      let curLine = ''
+      let lineWordCount = 0
+
+      // Fill one line greedily (same logic as reflowCues word-wrap)
+      while (i < allWords.length) {
+        const w = allWords[i]
+        if (curLine === '') {
+          curLine = w.word
+          lineWordCount = 1
+          cueEndWordIdx = i
+          i++
+        } else if ((curLine + ' ' + w.word).length <= maxChars) {
+          curLine += ' ' + w.word
+          lineWordCount++
+          cueEndWordIdx = i
+          i++
+        } else if (
+          w.word.length <= SHORT_PULLBACK &&
+          (curLine + ' ' + w.word).length <= maxChars + SHORT_PULLBACK_ALLOWANCE
+        ) {
+          curLine += ' ' + w.word
+          lineWordCount++
+          cueEndWordIdx = i
+          i++
+        } else {
+          break // line is full
+        }
+      }
+
+      if (curLine) cueLines.push(curLine)
+
+      // If we consumed no words this iteration, break to avoid infinite loop
+      if (lineWordCount === 0) break
+    }
+
+    if (cueLines.length === 0) continue
+
+    const lastWord = allWords[cueEndWordIdx]
+    cues.push({
+      index: cues.length + 1,
+      startMs: cueStartMs,
+      endMs: Math.round(lastWord.end * 1000),
+      text: cueLines.join('\n'),
+    })
+  }
+
+  return cues
 }

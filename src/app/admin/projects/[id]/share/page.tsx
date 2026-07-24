@@ -2232,11 +2232,10 @@ export default function AdminSharePage() {
     ? []
     : activeVideos.filter((v: any) => v.status === 'READY')
 
-  // If any video is approved, show ONLY approved videos (for both admin and client)
-  const hasApprovedVideo = readyVideos.some((v: any) => v.approved)
-  if (hasApprovedVideo) {
-    readyVideos = readyVideos.filter((v: any) => v.approved)
-  }
+  // Admin share page intentionally shows ALL ready versions regardless of approval
+  // status — admins need to review old comments on earlier versions.
+  // (The client share page filters to approved-only; the VideoPlayer's isAdmin prop
+  // provides a second layer of enforcement for the client path.)
 
   const hasMultipleVideos = project.videosByName && Object.keys(project.videosByName).length > 1
 
@@ -2519,6 +2518,7 @@ export default function AdminSharePage() {
                 onDeleteUploadFile={handleDeleteUploadFile}
                 onDeleteUploadFolder={handleDeleteUploadFolder}
                 onRenameUploadFolder={handleRenameUploadFolder}
+                isAdmin={true}
               />
               </div>
               <div

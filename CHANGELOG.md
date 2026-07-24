@@ -5,6 +5,36 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-07-24
+
+### Added
+
+- **Word-level timestamp subtitles via OpenAI `verbose_json`** — subtitles now carry word-precise timing rather than Whisper's coarse segment boundaries. When the OpenAI provider is configured, the transcription pipeline requests `verbose_json` with `timestamp_granularities=["word"]` so every word carries its own start/end time. A new `buildCuesFromWords()` function groups words into lines and cues using those actual timestamps, replacing the previous character-count-proportional approximation. Local Whisper servers continue to use the standard SRT path unchanged. Zero-speech videos (music-only cuts, silent b-roll) are detected early and skip subtitle generation entirely. Touches `src/lib/subtitles.ts` (new `buildCuesFromWords`), `src/lib/whisper.ts` (new `whisperTranscribeVerbose` + `WhisperVerboseJsonResponse`/`WhisperWord`/`WhisperVerboseSegment` types), `src/worker/transcription-processor.ts` (OpenAI branch), `scripts/transcription-dry-run.ts` (new word-level test cases). No schema migration.
+
+### Changed
+
+- **Short-word pullback in subtitle reflow** — both `reflowCues` and `buildCuesFromWords` now pull a very short word (≤3 characters — typically function words like "it", "of", "the") back onto the previous line when it barely overflows `maxCharsPerLine`, allowing up to +6 characters of exceedance. This prevents orphaned single short words from dangling at the start of the next subtitle. Touches `src/lib/subtitles.ts`, `scripts/transcription-dry-run.ts`. No schema migration.
+
+- **Admin share page shows all video versions regardless of approval status** — the admin share-preview page previously filtered to approved-only videos when any version was approved, the same as the client share page. Admins now see every READY version so they can review old comments on earlier versions and interact with unapproved files. The client share page's approved-only filter is unchanged. The `ShareFilesBrowser` receives a new `isAdmin` prop that unlocks the Play action, download selection, and group-select for unapproved video versions (admins no longer see the greyed-out "Play (another version approved)" message). Touches `src/app/admin/projects/[id]/share/page.tsx`, `src/components/ShareFilesBrowser.tsx`. No schema migration.
+
+### Security
+
+- **Bumped `sharp` override to ≥0.35.0** — CVE-2026-33327 (high-severity) and related vulnerabilities in sharp <0.35.0 were flagged by `npm audit`. Added `sharp: ">=0.35.0"` to the `overrides` section. Touches `package.json`, `package-lock.json`. No schema migration.
+
+## [2.3.9] - 2026-07-23
+
+### Fixed
+
+- **Subtitle timing drift from audio extraction timestamp offsets** — some video files (particularly MP4/MOV containers with AAC encoder priming or edit-list offsets) produced extracted audio whose timeline drifted from the video: subtitles started early at the beginning and appeared late by the end, with the middle roughly in sync. The FFmpeg audio-extraction command now includes `-af aresample=async=1:first_pts=0`, which forces the output audio to a continuous timeline anchored at absolute zero — correcting the drift. For well-formed files this is a no-op. Touches `src/lib/ffmpeg.ts`. No schema migration.
+
+- **Forced subtitle regeneration now re-extracts audio from the original video** — the cached transcription audio (created before the timing fix above) was still used even during a manual "Regenerate" action, so the fix never reached existing videos. A forced regeneration now skips the cached audio and pulls a fresh extract from the original, then overwrites the cache with the corrected version. Touches `src/worker/transcription-processor.ts`. No schema migration.
+
+### Changed
+
+- **Subtitle reflow respects sentence boundaries** — when a subtitle cue's text overflows the configured max-lines setting and must be split into multiple cues, the split now detects sentence-ending punctuation (`. ! ?`) and avoids leaving 1–2 orphaned words from the next sentence dangling at the end of the current cue. Instead, the split shifts to the boundary so the new sentence starts fresh on its own cue. The time distribution (character-count-proportional across the original cue) recalculates from the refined groups, so timing stays in sync. Touches `src/lib/subtitles.ts`, `scripts/transcription-dry-run.ts`. No schema migration.
+
+- **Lone-word subtitle merge threshold tightened from 1.2s to 0.5s** — `mergeOrphanWordCues` previously merged any single-word cue within 1.2 seconds of the previous cue, swallowing natural pauses. The default `maxGapMs` is now 500 ms: a lone word within half a second still merges (same utterance), but a deliberate pause of 0.5s or more keeps the word as its own cue with a visible gap. Touches `src/lib/subtitles.ts`, `scripts/transcription-dry-run.ts`. No schema migration.
+
 ## [2.3.8] - 2026-07-21
 
 ### Added
@@ -22,20 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Comment Delete buttons are now icon-only** — the parent-comment "Delete" text label is gone; delete is a trash-can icon button (replies already were), and edit is a pencil icon button, keeping the comment action row compact. Hover titles ("Edit comment" / "Delete comment") preserved. Touches `src/components/MessageBubble.tsx`.
 
 - **Comment panel spacing brought onto the share page's 16px rhythm** — the comment section was the only area of the share page using 24px insets: its header used the stock `CardHeader` `p-6` (a 106px-tall header for one title + meta row) and the comment list / version-pills / video-notes rows used `sm:px-6`, leaving comment text 36px from the panel edge while the input card below sat at 28px. Header is now `px-4 py-3` (82px tall) and the desktop-only `sm:px-6` bumps are gone, so comment text aligns exactly with the input's text inset (28px) and the panel matches the banners, sidebar, and input (16px standard). Mobile was already on the tighter scale and is unchanged; the admin share page shares the component and tightens identically. Touches `src/components/CommentSection.tsx`. No schema migration.
-
-## [2.3.9] - 2026-07-23
-
-### Fixed
-
-- **Subtitle timing drift from audio extraction timestamp offsets** — some video files (particularly MP4/MOV containers with AAC encoder priming or edit-list offsets) produced extracted audio whose timeline drifted from the video: subtitles started early at the beginning and appeared late by the end, with the middle roughly in sync. The FFmpeg audio-extraction command now includes `-af aresample=async=1:first_pts=0`, which forces the output audio to a continuous timeline anchored at absolute zero — correcting the drift. For well-formed files this is a no-op. Touches `src/lib/ffmpeg.ts`. No schema migration.
-
-- **Forced subtitle regeneration now re-extracts audio from the original video** — the cached transcription audio (created before the timing fix above) was still used even during a manual "Regenerate" action, so the fix never reached existing videos. A forced regeneration now skips the cached audio and pulls a fresh extract from the original, then overwrites the cache with the corrected version. Touches `src/worker/transcription-processor.ts`. No schema migration.
-
-### Changed
-
-- **Subtitle reflow respects sentence boundaries** — when a subtitle cue's text overflows the configured max-lines setting and must be split into multiple cues, the split now detects sentence-ending punctuation (`. ! ?`) and avoids leaving 1–2 orphaned words from the next sentence dangling at the end of the current cue. Instead, the split shifts to the boundary so the new sentence starts fresh on its own cue. The time distribution (character-count-proportional across the original cue) recalculates from the refined groups, so timing stays in sync. Touches `src/lib/subtitles.ts`, `scripts/transcription-dry-run.ts`. No schema migration.
-
-- **Lone-word subtitle merge threshold tightened from 1.2s to 0.5s** — `mergeOrphanWordCues` previously merged any single-word cue within 1.2 seconds of the previous cue, swallowing natural pauses. The default `maxGapMs` is now 500 ms: a lone word within half a second still merges (same utterance), but a deliberate pause of 0.5s or more keeps the word as its own cue with a visible gap. Touches `src/lib/subtitles.ts`, `scripts/transcription-dry-run.ts`. No schema migration.
 
 ## [2.3.7] - 2026-07-21
 

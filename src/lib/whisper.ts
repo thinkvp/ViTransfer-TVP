@@ -47,6 +47,10 @@ function normalizeFetchError(e: unknown, url: string): WhisperError {
 /**
  * Transcribe an audio file. responseFormat 'srt' returns raw SRT text;
  * 'json' returns the plain transcript text.
+ *
+ * For word-level timestamps use {@link whisperTranscribeVerbose} instead —
+ * it requests `verbose_json` with `timestamp_granularities=["word"]` so
+ * every word carries start/end times, enabling precise subtitle timing.
  */
 export async function whisperTranscribe(params: {
   config: WhisperConfig
@@ -89,6 +93,91 @@ export async function whisperTranscribe(params: {
       throw new WhisperError('Whisper JSON response missing "text" field')
     }
     return json.text
+  } catch (e) {
+    throw normalizeFetchError(e, config.url)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Word-level timestamps (verbose_json)
+// ---------------------------------------------------------------------------
+
+/** A single word with start/end times in seconds. */
+export interface WhisperWord {
+  word: string
+  start: number
+  end: number
+}
+
+/** One segment from a verbose_json response — includes word timestamps when requested. */
+export interface WhisperVerboseSegment {
+  id: number
+  seek: number
+  start: number
+  end: number
+  text: string
+  tokens: number[]
+  temperature: number
+  avg_logprob: number
+  compression_ratio: number
+  no_speech_prob: number
+  words?: WhisperWord[]
+}
+
+/** The full verbose_json transcription response. */
+export interface WhisperVerboseJsonResponse {
+  task: string
+  language: string
+  duration: number
+  text: string
+  segments: WhisperVerboseSegment[]
+}
+
+/**
+ * Transcribe with word-level timestamps. Requests `verbose_json` +
+ * `timestamp_granularities=["word"]` so every word carries start/end times.
+ * Only supported by the OpenAI provider (api.openai.com); local Whisper
+ * servers may not implement this — use {@link whisperTranscribe} with 'srt'
+ * format as the fallback.
+ */
+export async function whisperTranscribeVerbose(params: {
+  config: WhisperConfig
+  audio: Buffer | string
+  fileName: string
+  mimeType: string
+  timeoutMs: number
+}): Promise<WhisperVerboseJsonResponse> {
+  const { config, fileName, mimeType, timeoutMs } = params
+  const buffer = typeof params.audio === 'string' ? await readFile(params.audio) : params.audio
+
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), fileName)
+  form.append('model', config.model)
+  form.append('response_format', 'verbose_json')
+  form.append('timestamp_granularities[]', 'word')
+  const language = config.language?.trim().split(/[-_]/)[0].toLowerCase()
+  if (language) form.append('language', language)
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${baseUrl(config.url)}/v1/audio/transcriptions`, {
+      method: 'POST',
+      headers: authHeaders(config),
+      body: form,
+      signal: controller.signal,
+    })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      throw new WhisperError(`Whisper server returned ${res.status}: ${body.slice(0, 300)}`)
+    }
+    const json = (await res.json()) as WhisperVerboseJsonResponse
+    if (!json.segments || !Array.isArray(json.segments)) {
+      throw new WhisperError('Whisper verbose_json response missing "segments" array')
+    }
+    return json
   } catch (e) {
     throw normalizeFetchError(e, config.url)
   } finally {
