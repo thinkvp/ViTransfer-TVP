@@ -336,6 +336,10 @@ export default async function SalesDocPublicViewPage(
                       height={88}
                       className="h-11 w-auto object-contain"
                       priority
+                      // In S3 mode /api/branding/logo 302s to a presigned URL. The image
+                      // optimizer invokes the route in-process and does not follow redirects,
+                      // so it sees an empty body and drops the logo. Serve it directly.
+                      unoptimized
                     />
                   </div>
                 )}

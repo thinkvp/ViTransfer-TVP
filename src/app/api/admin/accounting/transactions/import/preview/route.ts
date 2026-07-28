@@ -57,28 +57,43 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No valid transactions found in CSV file' }, { status: 400 })
   }
 
-  // Load existing transactions to check duplicates
+  // Load existing transactions to check duplicates. A duplicate requires an exact
+  // date match, so scoping the query to the file's date range is lossless.
+  const importDates = parseResult.transactions.map(t => t.date).sort()
   const existingTxns = await prisma.bankTransaction.findMany({
-    where: { bankAccountId: bankAccountId! },
+    where: {
+      bankAccountId: bankAccountId!,
+      date: { gte: importDates[0], lte: importDates[importDates.length - 1] },
+    },
     select: { date: true, amountCents: true, description: true },
   })
 
-  const existingSet = new Set(
-    existingTxns.map(e => `${e.date}|${e.amountCents}|${e.description.trim().toLowerCase()}`)
-  )
-  const seenInBatch = new Set<string>()
+  const keyOf = (t: { date: string; amountCents: number; description: string }) =>
+    `${t.date}|${t.amountCents}|${t.description.trim().toLowerCase()}`
+
+  const existingSet = new Set(existingTxns.map(keyOf))
+
+  // Count how often each key appears in the file itself. Repeated rows are NOT
+  // duplicates — a statement legitimately lists two identical purchases on the
+  // same day — so they stay selected and are only surfaced as a note.
+  const batchCounts = new Map<string, number>()
+  for (const t of parseResult.transactions) {
+    const key = keyOf(t)
+    batchCounts.set(key, (batchCounts.get(key) ?? 0) + 1)
+  }
 
   const rows = parseResult.transactions.map((t, index) => {
-    const key = `${t.date}|${t.amountCents}|${t.description.trim().toLowerCase()}`
-    const isDuplicate = existingSet.has(key) || seenInBatch.has(key)
-    seenInBatch.add(key)
+    const key = keyOf(t)
     return {
       index,
       date: t.date,
       description: t.description,
       reference: t.reference,
       amountCents: t.amountCents,
-      isDuplicate,
+      // Already present in this bank account — deselected by default.
+      isDuplicate: existingSet.has(key),
+      // Appears more than once in this file — informational only.
+      isRepeat: (batchCounts.get(key) ?? 0) > 1,
     }
   })
 

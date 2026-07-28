@@ -138,10 +138,20 @@ export async function POST(
       },
     })
 
-    // Update project title immediately (storagePath is updated by the worker on completion)
+    // Update project title and (if changing) clientId immediately.
+    // storagePath stays as-is until the worker completes the S3 move, so the
+    // old location remains valid while the copy is in progress.
+    // companyName is written alongside clientId to match the project PATCH route —
+    // it is the storage-path fallback and the client-facing name in emails, so it
+    // must not be left pointing at the previous client if the follow-up PATCH fails.
+    const updateData: { title: string; clientId?: string; companyName?: string } = { title: newTitle }
+    if (newClientId !== undefined && newClientId !== project.clientId) {
+      updateData.clientId = newClientId
+      updateData.companyName = targetClientName
+    }
     await prisma.project.update({
       where: { id },
-      data: { title: newTitle },
+      data: updateData,
     })
 
     // Enqueue the BullMQ job

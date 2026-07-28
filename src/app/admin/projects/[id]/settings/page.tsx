@@ -1614,12 +1614,22 @@ export default function ProjectSettingsPage() {
                   onClick={async () => {
                     setRenameConfirming(true)
                     try {
-                      await apiPost(`/api/projects/${projectId}/rename-confirm`, { title: pendingRenameTitle })
+                      const confirmBody: { title: string; clientId?: string } = { title: pendingRenameTitle }
+                      // If the rename was triggered by a client change, forward the new clientId
+                      // so rename-confirm can compute the correct storage paths and create the
+                      // right FolderRenameJob. Without this, a client change alone (no title
+                      // change) causes rename-confirm to see no path delta and return early,
+                      // so the follow-up saveSettings triggers the same 202 → modal loops.
+                      if (pendingRenameUpdates?.clientId) {
+                        confirmBody.clientId = pendingRenameUpdates.clientId
+                      }
+                      await apiPost(`/api/projects/${projectId}/rename-confirm`, confirmBody)
                       setRenameConfirmOpen(false)
                       setRenameSizeInfo(null)
                       // Re-save the full settings payload now that rename-confirm has saved
-                      // the title. The second PATCH won't trigger another 202 since the
-                      // title now matches the DB, and it clears the unsaved-changes state.
+                      // the title and created the background rename job. The second PATCH
+                      // detects the matching in-progress FolderRenameJob and skips the 202,
+                      // letting the clientId / other settings save through immediately.
                       if (pendingRenameUpdates) {
                         setPendingRenameUpdates(null)
                         await saveSettings(pendingRenameUpdates, pendingRenameReprocess)

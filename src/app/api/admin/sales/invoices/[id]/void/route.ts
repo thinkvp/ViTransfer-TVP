@@ -51,16 +51,16 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
 
         // Only unpaid invoices may be voided. Reject anything with real money
         // attached (manual or Stripe payments), regardless of stored status.
-        const [manualAgg, stripeAgg] = await Promise.all([
-          tx.salesPayment.aggregate({
-            where: { invoiceId: id, excludeFromInvoiceBalance: false },
-            _sum: { amountCents: true },
-          }),
-          tx.salesInvoiceStripePayment.aggregate({
-            where: { invoiceDocId: id },
-            _sum: { invoiceAmountCents: true },
-          }),
-        ])
+        // Sequential, not Promise.all: an interactive transaction pins a single pg
+        // client, and concurrent queries on one client are deprecated (removed in pg@9).
+        const manualAgg = await tx.salesPayment.aggregate({
+          where: { invoiceId: id, excludeFromInvoiceBalance: false },
+          _sum: { amountCents: true },
+        })
+        const stripeAgg = await tx.salesInvoiceStripePayment.aggregate({
+          where: { invoiceDocId: id },
+          _sum: { invoiceAmountCents: true },
+        })
         const paidCents =
           Number(manualAgg?._sum?.amountCents ?? 0) + Number(stripeAgg?._sum?.invoiceAmountCents ?? 0)
 

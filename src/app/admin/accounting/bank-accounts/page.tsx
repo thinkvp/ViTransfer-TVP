@@ -147,11 +147,11 @@ export default function BankAccountsPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
-  const [importResult, setImportResult] = useState<{ imported: number; duplicates: number } | null>(null)
+  const [importResult, setImportResult] = useState<{ imported: number; duplicates: number; unreadable: number } | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
   const [importStep, setImportStep] = useState<'pick' | 'preview' | 'done'>('pick')
   const [importPreviewing, setImportPreviewing] = useState(false)
-  type PreviewRow = { index: number; date: string; description: string; reference: string | null; amountCents: number; isDuplicate: boolean }
+  type PreviewRow = { index: number; date: string; description: string; reference: string | null; amountCents: number; isDuplicate: boolean; isRepeat: boolean }
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([])
   const [selectedImportIndices, setSelectedImportIndices] = useState<Set<number>>(new Set())
   const [previewFormat, setPreviewFormat] = useState('')
@@ -618,7 +618,7 @@ export default function BankAccountsPage() {
       const res = await apiFetch('/api/admin/accounting/transactions/import', { method: 'POST', body: fd })
       if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Import failed'); return }
       const d = await res.json()
-      setImportResult({ imported: d.batch?.rowCount ?? 0, duplicates: d.batch?.skippedCount ?? 0 })
+      setImportResult({ imported: d.inserted ?? 0, duplicates: d.duplicates ?? 0, unreadable: d.skipped ?? 0 })
       setImportFile(null)
       setImportStep('done')
       await loadTransactions(selectedAccountId, activeTab, txnPage)
@@ -1367,7 +1367,11 @@ export default function BankAccountsPage() {
             {importStep === 'done' && importResult ? (
               <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-4 text-sm">
                 <p className="font-medium text-emerald-400">Import complete</p>
-                <p className="text-muted-foreground mt-1">{importResult.imported} transaction{importResult.imported !== 1 ? 's' : ''} imported{importResult.duplicates > 0 ? `, ${importResult.duplicates} duplicate${importResult.duplicates !== 1 ? 's' : ''} skipped` : ''}.</p>
+                <p className="text-muted-foreground mt-1">
+                  {importResult.imported} transaction{importResult.imported !== 1 ? 's' : ''} imported
+                  {importResult.duplicates > 0 ? `, ${importResult.duplicates} duplicate${importResult.duplicates !== 1 ? 's' : ''} skipped` : ''}
+                  {importResult.unreadable > 0 ? `, ${importResult.unreadable} row${importResult.unreadable !== 1 ? 's' : ''} could not be read` : ''}.
+                </p>
               </div>
             ) : importStep === 'preview' ? (
               <div className="space-y-3">
@@ -1405,7 +1409,11 @@ export default function BankAccountsPage() {
                           <td className="px-2 py-1.5 max-w-[260px] truncate">{row.description}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums whitespace-nowrap">{row.amountCents < 0 ? '-' : ''}${(Math.abs(row.amountCents) / 100).toFixed(2)}</td>
                           <td className="px-2 py-1.5">
-                            {row.isDuplicate && <AlertTriangle className="w-3.5 h-3.5 text-warning" aria-label="Possible duplicate" />}
+                            {row.isDuplicate ? (
+                              <AlertTriangle className="w-3.5 h-3.5 text-warning" aria-label="Already imported into this account" />
+                            ) : row.isRepeat ? (
+                              <span className="text-muted-foreground text-[10px]" title="This row appears more than once in the file — both entries will be imported">×2</span>
+                            ) : null}
                           </td>
                         </tr>
                       ))}
@@ -1415,7 +1423,12 @@ export default function BankAccountsPage() {
                 {previewRows.some(r => r.isDuplicate) && (
                   <p className="text-xs text-warning flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    Rows marked with a warning may already exist and are deselected by default.
+                    Rows marked with a warning already exist in this account and are deselected by default. Re-tick any you still want imported — your selection is always honoured.
+                  </p>
+                )}
+                {previewRows.some(r => r.isRepeat && !r.isDuplicate) && (
+                  <p className="text-xs text-muted-foreground">
+                    Rows marked ×2 appear more than once in this file. They are treated as separate transactions and will all be imported.
                   </p>
                 )}
               </div>
@@ -1633,7 +1646,7 @@ export default function BankAccountsPage() {
 
       {/* Match Expense Dialog */}
       <Dialog open={!!matchExpenseTarget} onOpenChange={open => { if (!open && !matchingExpense) { setMatchExpenseTarget(null) } }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Match to Expense — {matchExpenseTarget ? fmtAmt(matchExpenseTarget.amountCents) : ''}</DialogTitle>
           </DialogHeader>
@@ -1650,25 +1663,30 @@ export default function BankAccountsPage() {
             ) : unmatchedExpenses.length === 0 ? (
               <div className="py-4 text-center text-sm text-muted-foreground">No unmatched expenses found.</div>
             ) : (
-              <div className="max-h-72 overflow-y-auto border border-border rounded-md divide-y divide-border">
-                {unmatchedExpenses.map(exp => (
-                  <button key={exp.id} type="button"
-                    onClick={() => setSelectedExpenseId(exp.id)}
-                    className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
-                      selectedExpenseId === exp.id && 'bg-primary/10 border-l-2 border-primary'
-                    )}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{exp.supplierName ? `${exp.supplierName} — ` : ''}{exp.description}</p>
-                      <p className="text-xs text-muted-foreground">{exp.accountCode} · {exp.accountName}</p>
-                      <p className="text-xs text-muted-foreground">{formatDate(exp.date)} · {exp.taxCode}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-medium tabular-nums">{fmtAud(exp.amountIncGstCents)}</p>
-                      <p className="text-xs text-muted-foreground capitalize">{exp.status.toLowerCase()}</p>
-                    </div>
-                  </button>
-                ))}
+              <div className="max-h-[50vh] overflow-y-auto overflow-x-hidden border border-border rounded-md divide-y divide-border">
+                {unmatchedExpenses.map(exp => {
+                  const label = `${exp.supplierName ? `${exp.supplierName} — ` : ''}${exp.description}`
+                  return (
+                    <button key={exp.id} type="button"
+                      onClick={() => setSelectedExpenseId(exp.id)}
+                      className={cn('w-full text-left pl-3 pr-4 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-4',
+                        selectedExpenseId === exp.id && 'bg-primary/10 border-l-2 border-primary'
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        {/* Near-identical expenses (e.g. repeat rideshare fares) are only told apart
+                            by the tail of the description, so wrap to two lines instead of truncating. */}
+                        <p className="text-sm font-medium line-clamp-2 break-words" title={label}>{label}</p>
+                        <p className="text-xs text-muted-foreground break-words">{exp.accountCode} · {exp.accountName}</p>
+                        <p className="text-xs text-muted-foreground">{formatDate(exp.date)} · {exp.taxCode}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-medium tabular-nums whitespace-nowrap">{fmtAud(exp.amountIncGstCents)}</p>
+                        <p className="text-xs text-muted-foreground capitalize">{exp.status.toLowerCase()}</p>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             )}
           </div>

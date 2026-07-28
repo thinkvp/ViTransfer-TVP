@@ -80,25 +80,38 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'No transactions selected for import' }, { status: 400 })
   }
 
-  // Load existing transactions for this bank account to deduplicate
-  // Scope to the date range of the import +/- 7 days to avoid loading the entire table
-  const importDates = candidateTransactions.map(t => t.date).sort()
-  const minDate = importDates[0]
-  const maxDate = importDates[importDates.length - 1]
-  const pad = (d: string, days: number) => {
-    const dt = new Date(d)
-    dt.setDate(dt.getDate() + days)
-    return dt.toISOString().split('T')[0]
-  }
-  const existingTxns = await prisma.bankTransaction.findMany({
-    where: {
-      bankAccountId: bankAccountId!,
-      date: { gte: pad(minDate, -7), lte: pad(maxDate, 7) },
-    },
-    select: { date: true, amountCents: true, description: true },
-  })
+  // When the caller passed an explicit selection it came from the preview step, where
+  // suspected duplicates are shown and deselected by default. Re-ticking a flagged row
+  // is a deliberate decision, so import exactly what was selected. Auto-deduplication
+  // only applies to the import-everything path, which has had no such review.
+  let toInsert = candidateTransactions
+  let duplicates = 0
 
-  const { toInsert, duplicates } = deduplicateTransactions(candidateTransactions, existingTxns)
+  if (!selectedSet) {
+    // Scope to the date range of the import +/- 7 days to avoid loading the entire table
+    const importDates = candidateTransactions.map(t => t.date).sort()
+    const minDate = importDates[0]
+    const maxDate = importDates[importDates.length - 1]
+    const pad = (d: string, days: number) => {
+      const dt = new Date(d)
+      dt.setDate(dt.getDate() + days)
+      return dt.toISOString().split('T')[0]
+    }
+    const existingTxns = await prisma.bankTransaction.findMany({
+      where: {
+        bankAccountId: bankAccountId!,
+        date: { gte: pad(minDate, -7), lte: pad(maxDate, 7) },
+      },
+      select: { date: true, amountCents: true, description: true },
+    })
+
+    const result = deduplicateTransactions(candidateTransactions, existingTxns)
+    toInsert = result.toInsert
+    duplicates = result.duplicates
+  }
+
+  // Rows the user left unticked in the preview — not duplicates, not parse failures
+  const deselected = parseResult.transactions.length - candidateTransactions.length
 
   // Create batch + insert transactions in a transaction
   const batch = await prisma.$transaction(async (tx) => {
@@ -108,7 +121,7 @@ export async function POST(request: NextRequest) {
         fileName: file.name,
         rowCount: toInsert.length,
         matchedCount: 0,
-        skippedCount: duplicates + parseResult.skipped,
+        skippedCount: duplicates + parseResult.skipped + deselected,
         importedById: authResult.id,
         importedByName: authResult.name ?? authResult.email ?? null,
       },
@@ -136,6 +149,7 @@ export async function POST(request: NextRequest) {
     batch: bankImportBatchFromDb(batch),
     inserted: toInsert.length,
     duplicates,
+    deselected,
     skipped: parseResult.skipped,
     format: parseResult.format,
   }, { status: 201 })

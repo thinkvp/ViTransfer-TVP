@@ -1390,7 +1390,7 @@ export function ShareFilesBrowser({
       const next = new Set(Array.from(prev).filter((key) => selectableKeys.has(key)))
       return next.size === prev.size ? prev : next
     })
-  }, [groups, setSelectedFileIds])
+  }, [groups, setSelectedFileIds, isAdmin])
 
   // When no folder is open (root PROJECT view), "Select all" selects every file
   // across all groups — matching the sidebar's Select All behavior.
@@ -1400,7 +1400,7 @@ export function ShareFilesBrowser({
       .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
       .filter((file) => isSelectableDownloadableFile(file, isAdmin))
       .map(getDownloadableFileKey)
-  }, [openFolder, groups])
+  }, [openFolder, groups, isAdmin])
 
   const selectAllVisible = () => {
     if (rootViewAllKeys) {
@@ -1435,7 +1435,7 @@ export function ShareFilesBrowser({
       .filter((file) => isSelectableDownloadableFile(file, isAdmin))
       .map(getDownloadableFileKey)
     return visibleSelectableKeys.length > 0 && visibleSelectableKeys.every((key) => selectedFileIds.has(key))
-  }, [rootViewAllKeys, visibleFiles, selectedFileIds])
+  }, [rootViewAllKeys, visibleFiles, selectedFileIds, isAdmin])
 
   const toggleAllVisibleSelection = () => {
     if (allVisibleSelected) {

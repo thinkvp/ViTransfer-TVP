@@ -233,7 +233,12 @@ export function parseCSV(csvText: string): ParseResult {
   }
 }
 
-// Deduplicate against existing transactions by (bankAccountId, date, amountCents, description)
+// Deduplicate against already-stored transactions by (date, amountCents, description).
+//
+// Repeats *within* the parsed file are deliberately kept: a statement can legitimately
+// list two identical transactions (same day, same merchant, same amount), and dropping
+// the second silently loses a real expense. Only rows that already exist in the account
+// are treated as duplicates.
 export function deduplicateTransactions(
   parsed: ParsedTransaction[],
   existing: Array<{ date: string; amountCents: number; description: string }>
@@ -251,8 +256,6 @@ export function deduplicateTransactions(
       duplicates++
     } else {
       toInsert.push(t)
-      // Add to set to catch duplicates within the import itself
-      existingSet.add(key)
     }
   }
 
