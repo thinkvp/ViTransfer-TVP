@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -12,8 +12,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft, ArrowUp, ArrowDown, Eye, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Trash2, Plus, Pencil } from 'lucide-react'
-import type { Account, AccountTaxCode, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
-import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
+import type { Account, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
+import {
+  fmtAud,
+  getEntryAmountExGst,
+  type AccountLedgerEntry as Entry,
+  type SalesInvoiceEntry,
+  type SplitEntry,
+  type BankAccountTxnEntry,
+} from '@/components/admin/accounting/account-ledger-entries'
 import { cn, formatDate } from '@/lib/utils'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
@@ -23,63 +30,9 @@ import { LinkedBankTransactionDialog } from '@/components/admin/accounting/Linke
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
-type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: AccountTaxCode; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
-type BankAccountTxnEntry = { id: string; description: string; reference: string | null; amountCents: number; status: string; matchType: string | null }
-type SalesInvoiceEntry = {
-  id: string
-  invoiceId: string
-  invoiceNumber: string
-  description: string
-  amountCents: number
-  clientName: string | null
-  labelName: string | null
-  accountName: string
-  accountCode: string
-  linkedBankTransactions: { id: string; date: string; description: string; amountCents: number }[]
-}
-
-type Entry =
-  | { kind: 'expense'; date: string; entry: Expense }
-  | { kind: 'bankTransaction'; date: string; entry: BankTransaction }
-  | { kind: 'journal'; date: string; entry: JournalEntry }
-  | { kind: 'salesInvoice'; date: string; entry: SalesInvoiceEntry }
-  | { kind: 'split'; date: string; entry: SplitEntry }
-  | { kind: 'bankAccountTxn'; date: string; entry: BankAccountTxnEntry }
-
-function fmtAud(cents: number) {
-  const abs = Math.abs(cents)
-  return (cents < 0 ? '-' : '') + '$' + (abs / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
 function getDefaultJournalDate() {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
-function isDebitNormalAccountType(accountType: Account['type'] | undefined) {
-  return accountType === 'ASSET' || accountType === 'EXPENSE' || accountType === 'COGS'
-}
-
-function getEntryAmountExGst(row: Entry, accountType: Account['type'] | undefined, taxRatePercent: number) {
-  if (row.kind === 'expense') return (row.entry as Expense).amountExGst
-  if (row.kind === 'bankTransaction') {
-    const t = row.entry as BankTransaction
-    const exGst = amountExcludingGst(t.amountCents, t.taxCode, taxRatePercent)
-    return isDebitNormalAccountType(accountType) ? -exGst : exGst
-  }
-  if (row.kind === 'journal') {
-    // Journals store accounting convention (positive = debit). For credit-normal
-    // accounts (INCOME/LIABILITY/EQUITY) a credit increases the balance, so negate.
-    const j = row.entry as JournalEntry
-    const exGst = amountExcludingGst(j.amountCents, j.taxCode, taxRatePercent)
-    return isDebitNormalAccountType(accountType) ? exGst : -exGst
-  }
-  if (row.kind === 'salesInvoice') return (row.entry as SalesInvoiceEntry).amountCents
-  if (row.kind === 'bankAccountTxn') return (row.entry as BankAccountTxnEntry).amountCents
-
-  const s = row.entry as SplitEntry
-  const exGst = amountExcludingGst(s.amountCents, s.taxCode, taxRatePercent)
-  return isDebitNormalAccountType(accountType) ? -exGst : exGst
 }
 
 export default function AccountLedgerPage() {
@@ -457,14 +410,14 @@ export default function AccountLedgerPage() {
                       const e = row.entry as Expense
                       const isOwn = e.accountId === account?.id
                       return (
-                        <tr key={`exp-${e.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                        <tr key={`exp-${e.id}-${i}`} className="hover:bg-accent/20 transition-colors align-top">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(e.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/10 text-red-400">Expense</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={e.accountName ?? account?.name}>{!isOwn && e.accountName ? `\u2014 ${e.accountName}` : e.accountName ?? account?.name ?? '\u2014'}</td>
-                          <td className="px-4 py-2.5 truncate">{e.description}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{e.supplierName ?? '—'}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{e.description}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{e.supplierName ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             <button type="button" onClick={() => setEditExpenseId(e.id)} className="tabular-nums hover:underline cursor-pointer">{fmtAud(e.amountExGst)}</button>
                           </td>
@@ -488,14 +441,14 @@ export default function AccountLedgerPage() {
                       const t = row.entry as BankTransaction
                       const isOwn = t.accountId === account?.id
                       return (
-                        <tr key={`txn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                        <tr key={`txn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors align-top">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(t.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">Bank Txn</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={t.accountName ?? account?.name ?? undefined}>{!isOwn && t.accountName ? `\u2014 ${t.accountName}` : t.accountName ?? account?.name ?? '\u2014'}</td>
-                          <td className="px-4 py-2.5 truncate">{t.description}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{t.reference ?? '—'}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{t.description}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{t.reference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">
                             <div className="flex items-center justify-end gap-2">
@@ -515,14 +468,14 @@ export default function AccountLedgerPage() {
                       const j = row.entry as JournalEntry
                       const isOwn = j.accountId === account?.id
                       return (
-                        <tr key={`je-${j.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                        <tr key={`je-${j.id}-${i}`} className="hover:bg-accent/20 transition-colors align-top">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(j.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">Journal</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={j.accountName ?? account?.name}>{!isOwn && j.accountName ? `\u2014 ${j.accountName}` : j.accountName ?? account?.name ?? '\u2014'}</td>
-                          <td className="px-4 py-2.5 truncate">{j.description}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{j.reference ?? '—'}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{j.description}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{j.reference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">
                             {isOwn && (
@@ -542,14 +495,14 @@ export default function AccountLedgerPage() {
                       const s = row.entry as SalesInvoiceEntry
                       const isOwnSales = s.accountCode === account?.code
                       return (
-                        <tr key={`sales-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                        <tr key={`sales-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors align-top">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(row.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">Sales Invoice</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSales && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
-                          <td className="px-4 py-2.5 truncate">{s.invoiceNumber} - {s.description}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.labelName ?? s.clientName ?? '—'}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{s.invoiceNumber} - {s.description}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{s.labelName ?? s.clientName ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">
                             <Link href={`/admin/sales/invoices/${s.invoiceId}`} className="tabular-nums hover:underline cursor-pointer">{fmtAud(s.amountCents)}</Link>
                           </td>
@@ -565,14 +518,14 @@ export default function AccountLedgerPage() {
                     } else if (row.kind === 'bankAccountTxn') {
                       const t = row.entry as BankAccountTxnEntry
                       return (
-                        <tr key={`batxn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                        <tr key={`batxn-${t.id}-${i}`} className="hover:bg-accent/20 transition-colors align-top">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(row.date)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400">Cash</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]">{account?.name ?? '—'}</td>
-                          <td className="px-4 py-2.5 truncate">{t.description}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{t.reference ?? '—'}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{t.description}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{t.reference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(t.amountCents)}</td>
                           <td className="px-4 py-2.5 text-right">
                             <AccountingTableActionButton onClick={() => void openLinkedTransaction(t.id)} title="View bank transaction" aria-label="View bank transaction">
@@ -585,14 +538,14 @@ export default function AccountLedgerPage() {
                       const s = row.entry as SplitEntry
                       const isOwnSplit = s.accountCode === account?.code
                       return (
-                        <tr key={`split-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors">
+                        <tr key={`split-${s.id}-${i}`} className="hover:bg-accent/20 transition-colors align-top">
                           <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(s.bankTransactionDate)}</td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">Split</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSplit && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
-                          <td className="px-4 py-2.5 truncate">{s.description || s.bankTransactionDescription}</td>
-                          <td className="px-4 py-2.5 text-muted-foreground text-xs truncate">{s.bankTransactionReference ?? '—'}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{s.description || s.bankTransactionDescription}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{s.bankTransactionReference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">
                             <AccountingTableActionButton onClick={() => void openLinkedTransaction(s.bankTransactionId)} title="View linked bank transaction" aria-label="View linked bank transaction">

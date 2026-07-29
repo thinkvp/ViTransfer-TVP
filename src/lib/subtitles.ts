@@ -154,10 +154,10 @@ export function reflowCues(
     if (words.length === 0) continue
 
     // Greedy word-wrap; a single over-long word gets its own line rather than
-    // being split. Short words (≤3 chars — typically function words like "it",
-    // "of", "the") that barely overflow maxChars are pulled back onto the
-    // current line: a slight exceedance reads much better than an orphaned "it"
-    // dangling at the start of the next subtitle.
+    // being split. Short words (≤6 chars — small function/filler words like
+    // "it", "of", "the", "really") that barely overflow maxChars are pulled
+    // back onto the current line: a slight exceedance reads much better than
+    // an orphaned "it" dangling at the start of the next subtitle.
     const SHORT_PULLBACK = 6
     const SHORT_PULLBACK_ALLOWANCE = 6
     const lines: string[] = []
@@ -332,12 +332,20 @@ export interface TimedWord {
 }
 
 /**
- * Build subtitle cues directly from word-level timestamps. Words are grouped
- * into lines (greedy word-wrap with the same pullback tolerance as reflowCues)
- * and lines into cues (maxLines per cue). Each cue's start/end comes from the
- * actual word timestamps of its first/last word — no character-count
- * approximation. This replaces Whisper's coarse segment-level SRT timestamps
- * with word-precise timing.
+ * Build subtitle cues directly from word-level timestamps. The word stream is
+ * first split into pause-delimited runs (`maxWordGapMs`, default 800 ms) so a
+ * cue never straddles a real silence — otherwise its text would linger on
+ * screen through the gap, the same problem `mergeOrphanWordCues`' gap guard
+ * protects against on the SRT path. Within a run, words are grouped into lines
+ * (greedy word-wrap with the same pullback tolerance as reflowCues) and lines
+ * into cues (maxLines per cue). Each cue's start/end comes from the actual
+ * word timestamps of its first/last word — no character-count approximation.
+ * This replaces Whisper's coarse segment-level SRT timestamps with
+ * word-precise timing.
+ *
+ * `maxCharsPerLine <= 0` disables wrapping: each pause-delimited run becomes
+ * one cue (never a single cue spanning the whole video — callers wanting the
+ * old segment shape should build cues from Whisper's segments instead).
  *
  * The returned cues are already sized to fit `maxCharsPerLine` × `maxLines`,
  * so running them through `reflowCues` afterwards is a near-no-op (splits are
@@ -346,78 +354,98 @@ export interface TimedWord {
  */
 export function buildCuesFromWords(
   allWords: TimedWord[],
-  opts: { maxCharsPerLine: number; maxLines: number },
+  opts: { maxCharsPerLine: number; maxLines: number; maxWordGapMs?: number },
 ): SubtitleCue[] {
   const maxChars = Math.floor(opts.maxCharsPerLine)
   const maxLines = Math.max(1, Math.floor(opts.maxLines))
+  const maxWordGapMs = opts.maxWordGapMs ?? 800
   const SHORT_PULLBACK = 6
   const SHORT_PULLBACK_ALLOWANCE = 6
 
-  if (!Number.isFinite(maxChars) || maxChars <= 0 || allWords.length === 0) {
-    if (allWords.length === 0) return []
-    // No wrapping — single cue spanning all words
-    return [{
-      index: 1,
-      startMs: Math.round(allWords[0].start * 1000),
-      endMs: Math.round(allWords[allWords.length - 1].end * 1000),
-      text: allWords.map(w => w.word).join(' '),
-    }]
+  if (allWords.length === 0) return []
+
+  // Split into pause-delimited runs: a gap larger than maxWordGapMs between
+  // consecutive words always starts a new run (and therefore a new cue).
+  const runs: TimedWord[][] = []
+  let run: TimedWord[] = []
+  for (const w of allWords) {
+    const prev = run[run.length - 1]
+    if (prev && (w.start - prev.end) * 1000 > maxWordGapMs) {
+      runs.push(run)
+      run = []
+    }
+    run.push(w)
   }
+  if (run.length > 0) runs.push(run)
 
+  const wrappingEnabled = Number.isFinite(maxChars) && maxChars > 0
   const cues: SubtitleCue[] = []
-  let i = 0
 
-  while (i < allWords.length) {
-    const cueLines: string[] = []
-    let cueStartMs = Math.round(allWords[i].start * 1000)
-    let cueEndWordIdx = i // track the last word included in this cue
-
-    // Build up to maxLines lines for this cue
-    for (let lineNum = 0; lineNum < maxLines && i < allWords.length; lineNum++) {
-      let curLine = ''
-      let lineWordCount = 0
-
-      // Fill one line greedily (same logic as reflowCues word-wrap)
-      while (i < allWords.length) {
-        const w = allWords[i]
-        if (curLine === '') {
-          curLine = w.word
-          lineWordCount = 1
-          cueEndWordIdx = i
-          i++
-        } else if ((curLine + ' ' + w.word).length <= maxChars) {
-          curLine += ' ' + w.word
-          lineWordCount++
-          cueEndWordIdx = i
-          i++
-        } else if (
-          w.word.length <= SHORT_PULLBACK &&
-          (curLine + ' ' + w.word).length <= maxChars + SHORT_PULLBACK_ALLOWANCE
-        ) {
-          curLine += ' ' + w.word
-          lineWordCount++
-          cueEndWordIdx = i
-          i++
-        } else {
-          break // line is full
-        }
-      }
-
-      if (curLine) cueLines.push(curLine)
-
-      // If we consumed no words this iteration, break to avoid infinite loop
-      if (lineWordCount === 0) break
+  for (const words of runs) {
+    if (!wrappingEnabled) {
+      // No wrapping — one cue per pause-delimited run.
+      cues.push({
+        index: cues.length + 1,
+        startMs: Math.round(words[0].start * 1000),
+        endMs: Math.round(words[words.length - 1].end * 1000),
+        text: words.map(w => w.word).join(' '),
+      })
+      continue
     }
 
-    if (cueLines.length === 0) continue
+    let i = 0
+    while (i < words.length) {
+      const cueLines: string[] = []
+      const cueStartMs = Math.round(words[i].start * 1000)
+      let cueEndWordIdx = i // track the last word included in this cue
 
-    const lastWord = allWords[cueEndWordIdx]
-    cues.push({
-      index: cues.length + 1,
-      startMs: cueStartMs,
-      endMs: Math.round(lastWord.end * 1000),
-      text: cueLines.join('\n'),
-    })
+      // Build up to maxLines lines for this cue
+      for (let lineNum = 0; lineNum < maxLines && i < words.length; lineNum++) {
+        let curLine = ''
+        let lineWordCount = 0
+
+        // Fill one line greedily (same logic as reflowCues word-wrap)
+        while (i < words.length) {
+          const w = words[i]
+          if (curLine === '') {
+            curLine = w.word
+            lineWordCount = 1
+            cueEndWordIdx = i
+            i++
+          } else if ((curLine + ' ' + w.word).length <= maxChars) {
+            curLine += ' ' + w.word
+            lineWordCount++
+            cueEndWordIdx = i
+            i++
+          } else if (
+            w.word.length <= SHORT_PULLBACK &&
+            (curLine + ' ' + w.word).length <= maxChars + SHORT_PULLBACK_ALLOWANCE
+          ) {
+            curLine += ' ' + w.word
+            lineWordCount++
+            cueEndWordIdx = i
+            i++
+          } else {
+            break // line is full
+          }
+        }
+
+        if (curLine) cueLines.push(curLine)
+
+        // If we consumed no words this iteration, break to avoid infinite loop
+        if (lineWordCount === 0) break
+      }
+
+      if (cueLines.length === 0) continue
+
+      const lastWord = words[cueEndWordIdx]
+      cues.push({
+        index: cues.length + 1,
+        startMs: cueStartMs,
+        endMs: Math.round(lastWord.end * 1000),
+        text: cueLines.join('\n'),
+      })
+    }
   }
 
   return cues

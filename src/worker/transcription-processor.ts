@@ -320,30 +320,48 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       // Word-level timestamps via verbose_json — every word carries start/end
       // times, so we can build cues with word-precise timing instead of relying
       // on Whisper's coarse segment boundaries and character-count approximation.
-      const verbose = await whisperTranscribeVerbose({
-        config,
-        audio: whisperAudioPath,
-        fileName: whisperFileName,
-        mimeType: whisperMimeType,
-        timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
-      })
-      const allWords = verbose.segments.flatMap((s) => s.words ?? [])
-      if (allWords.length === 0) {
-        console.log(`[transcription] Video ${videoId}: no speech detected — no subtitles generated`)
-        await prisma.video.update({
-          where: { id: videoId },
-          data: {
-            transcriptionStatus: 'READY',
-            transcriptionError: null,
-            subtitlesEditedAt: null,
-            subtitlesEditedById: null,
-            subtitlesEditedByRecipientId: null,
-            subtitlesEditedByName: null,
-          },
+      // Only whisper-1 supports verbose_json + word granularity; any other
+      // configured model (or an OpenAI-compatible proxy) falls back to the
+      // plain SRT path below instead of failing the job.
+      try {
+        const verbose = await whisperTranscribeVerbose({
+          config,
+          audio: whisperAudioPath,
+          fileName: whisperFileName,
+          mimeType: whisperMimeType,
+          timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
         })
-        return
+        const allWords = verbose.segments.flatMap((s) => s.words ?? [])
+        if (allWords.length > 0 && config.maxCharsPerLine > 0) {
+          cues = buildCuesFromWords(allWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
+        } else {
+          // Segments without word timings (model accepted verbose_json but not
+          // word granularity), or wrapping disabled (word grouping needs a line
+          // budget): use Whisper's own segment cues — the pre-2.4.0 shape.
+          // Empty segments (no speech) yield zero cues, handled below.
+          cues = verbose.segments
+            .map((s, idx) => ({
+              index: idx + 1,
+              startMs: Math.round(s.start * 1000),
+              endMs: Math.round(s.end * 1000),
+              text: s.text.trim(),
+            }))
+            .filter((c) => c.text.length > 0)
+        }
+      } catch (verboseError) {
+        console.warn(
+          `[transcription] Video ${videoId}: verbose_json transcription failed (${verboseError instanceof Error ? verboseError.message : verboseError}) — falling back to SRT`,
+        )
+        const rawSrt = await whisperTranscribe({
+          config,
+          audio: whisperAudioPath,
+          fileName: whisperFileName,
+          mimeType: whisperMimeType,
+          responseFormat: 'srt',
+          timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
+        })
+        cues = parseSrt(rawSrt)
       }
-      cues = buildCuesFromWords(allWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
     } else {
       // Local Whisper — standard SRT path
       const rawSrt = await whisperTranscribe({

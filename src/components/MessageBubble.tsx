@@ -75,11 +75,16 @@ function ResolveTick({ resolved, onClick }: { resolved: boolean; onClick: () => 
 }
 
 // Comment content is stored as sanitized HTML (plain textarea text with entities escaped).
-// For the edit textarea we need the plain text back.
+// For the edit textarea we need the plain text back. `textContent` alone would collapse
+// <br> and block-element boundaries into nothing, silently joining lines — convert them
+// to newlines first so multi-line comments round-trip through the editor.
 function htmlToPlainText(html: string): string {
   if (typeof window === 'undefined' || typeof DOMParser === 'undefined') return html
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  return doc.body.textContent || ''
+  const withBreaks = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6]|blockquote|pre)>/gi, '\n')
+  const doc = new DOMParser().parseFromString(withBreaks, 'text/html')
+  return (doc.body.textContent || '').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 function isVoiceNoteFile(fileName: string): boolean {

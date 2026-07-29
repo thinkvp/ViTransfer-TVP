@@ -231,10 +231,30 @@ const MESSY_SRT =
     narrow[0].startMs === 0 &&
     narrow[narrow.length - 1].endMs === 1600)
 
-  // maxCharsPerLine=0 disables wrapping
+  // maxCharsPerLine=0 disables wrapping — one cue per pause-delimited run
+  // (this fixture has no pauses, so a single cue)
   const noWrap = buildCuesFromWords(words, { maxCharsPerLine: 0, maxLines: 1 })
   check('buildCuesFromWords: maxCharsPerLine=0 single cue',
     noWrap.length === 1 && noWrap[0].text === 'hello world this is a test')
+
+  // A gap larger than maxWordGapMs splits the cue so text never lingers
+  // through the silence — with wrapping on AND off.
+  const paused = [
+    { word: 'hello', start: 0.0, end: 0.3 },
+    { word: 'world', start: 0.4, end: 0.7 },
+    { word: 'again', start: 3.0, end: 3.4 },
+  ]
+  const pauseSplit = buildCuesFromWords(paused, { maxCharsPerLine: 42, maxLines: 2 })
+  check('buildCuesFromWords: pause splits cues (wrapping on)',
+    pauseSplit.length === 2 &&
+    pauseSplit[0].text === 'hello world' &&
+    pauseSplit[0].endMs === 700 &&
+    pauseSplit[1].startMs === 3000)
+  const pauseSplitNoWrap = buildCuesFromWords(paused, { maxCharsPerLine: 0, maxLines: 1 })
+  check('buildCuesFromWords: pause splits cues (wrapping off — never one giant cue)',
+    pauseSplitNoWrap.length === 2 &&
+    pauseSplitNoWrap[0].text === 'hello world' &&
+    pauseSplitNoWrap[1].text === 'again')
 }
 
 // ---------------------------------------------------------------------------

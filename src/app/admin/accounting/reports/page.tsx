@@ -9,7 +9,7 @@ import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/a
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import type { PdfSection, PdfRow } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
-import Link from 'next/link'
+import { AccountEntriesDialog } from '@/components/admin/accounting/AccountEntriesDialog'
 import { BarChart2, Scale } from 'lucide-react'
 import type { ProfitLossReport, BalanceSheetReport, ProfitLossSection, BalanceSheetSection, AccountingSettings } from '@/lib/accounting/types'
 import { cn } from '@/lib/utils'
@@ -30,6 +30,9 @@ export default function ReportsPage() {
   const [plReport, setPlReport] = useState<ProfitLossReport | null>(null)
   const [plLoading, setPlLoading] = useState(false)
   const [settingsLoading, setSettingsLoading] = useState(true)
+
+  // P&L drill-down modal — the account ledger for the clicked line, over the reported period
+  const [drillAccount, setDrillAccount] = useState<{ code: string; label: string } | null>(null)
 
   // Balance Sheet state
   const [bsAsOf, setBsAsOf] = useState(new Date().toISOString().slice(0, 10))
@@ -217,9 +220,9 @@ export default function ReportsPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground mb-3">All figures shown ex GST.</p>
-                <PLSection title="Income" rows={plReport.income} total={plReport.totalIncomeCents} totalLabel="Total Income" positive from={plFrom} to={plTo} />
+                <PLSection title="Income" rows={plReport.income} total={plReport.totalIncomeCents} totalLabel="Total Income" positive onDrillDown={setDrillAccount} />
                 {plReport.cogs.length > 0 && (
-                  <PLSection title="Cost of Goods Sold" rows={plReport.cogs} total={plReport.totalCogsCents} totalLabel="Total Cost of Goods Sold" from={plFrom} to={plTo} />
+                  <PLSection title="Cost of Goods Sold" rows={plReport.cogs} total={plReport.totalCogsCents} totalLabel="Total Cost of Goods Sold" onDrillDown={setDrillAccount} />
                 )}
                 <div className="flex justify-between py-1.5 font-semibold text-sm border-t border-border mt-2">
                   <span>Gross Profit</span>
@@ -227,7 +230,7 @@ export default function ReportsPage() {
                     {fmtAud(plReport.grossProfitCents)}
                   </span>
                 </div>
-                <PLSection title="Expenses" rows={plReport.expenses} total={plReport.totalExpenseCents} totalLabel="Total Expenses" from={plFrom} to={plTo} />
+                <PLSection title="Expenses" rows={plReport.expenses} total={plReport.totalExpenseCents} totalLabel="Total Expenses" onDrillDown={setDrillAccount} />
                 <div className="flex justify-between py-2 font-bold text-sm border-t-2 border-border mt-2">
                   <span>Net Profit</span>
                   <span className={plReport.netProfitCents >= 0 ? 'text-green-400' : 'text-red-400'}>
@@ -289,18 +292,25 @@ export default function ReportsPage() {
         </div>
       )}
 
+      <AccountEntriesDialog
+        open={drillAccount !== null}
+        accountRef={drillAccount?.code ?? null}
+        accountLabel={drillAccount?.label}
+        from={plReport?.fromDate ?? plFrom}
+        to={plReport?.toDate ?? plTo}
+        onOpenChange={open => { if (!open) setDrillAccount(null) }}
+      />
     </div>
   )
 }
 
-function PLSection({ title, rows, total, totalLabel, positive, from, to }: {
+function PLSection({ title, rows, total, totalLabel, positive, onDrillDown }: {
   title: string
   rows: import('@/lib/accounting/types').ProfitLossSection[]
   total?: number
   totalLabel?: string
   positive?: boolean
-  from?: string
-  to?: string
+  onDrillDown?: (account: { code: string; label: string }) => void
 }) {
   if (rows.length === 0) return null
   return (
@@ -315,14 +325,15 @@ function PLSection({ title, rows, total, totalLabel, positive, from, to }: {
             {row.accountCode ? `${row.accountCode} — ` : ''}{row.accountName}
           </span>
           {row.hideAmount ? <span /> : (
-            row.accountCode && from && to
+            row.accountCode && onDrillDown
               ? (
-                <Link
-                  href={`/admin/accounting/chart-of-accounts/${row.accountCode}?from=${from}&to=${to}`}
-                  className="tabular-nums hover:underline underline-offset-2"
+                <button
+                  type="button"
+                  onClick={() => onDrillDown({ code: row.accountCode!, label: `${row.accountCode} — ${row.accountName}` })}
+                  className="tabular-nums hover:underline underline-offset-2 cursor-pointer"
                 >
                   {fmtAud(row.amountCents)}
-                </Link>
+                </button>
               )
               : <span className="tabular-nums">{fmtAud(row.amountCents)}</span>
           )}

@@ -5,6 +5,24 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.2] - 2026-07-29
+
+### Fixed
+
+- **Word-level subtitles no longer collapse into one video-length cue when line wrapping is disabled** — with the OpenAI provider and "Max characters / line" set to 0 (or cleared), `buildCuesFromWords` returned a single cue containing the entire transcript, spanning the whole video, and the downstream `reflowCues` pass is a no-op at `maxCharsPerLine <= 0` so nothing rescued it. The worker now uses Whisper's own segment cues (the pre-2.4.0 shape, but with verbose-json timing) whenever wrapping is off, and `buildCuesFromWords` itself falls back to one-cue-per-pause rather than one giant cue. Touches `src/lib/subtitles.ts`, `src/worker/transcription-processor.ts`. No schema migration.
+
+- **Word-built cues now break at real pauses** — cues were grouped purely by character count, so a cue could straddle a multi-second silence and its text lingered on screen through the gap (the same problem 2.3.9 fixed for the SRT path from the other direction). `buildCuesFromWords` now splits the word stream at gaps larger than 800 ms before wrapping, so a pause always starts a fresh cue. Touches `src/lib/subtitles.ts`. No schema migration.
+
+- **OpenAI transcription falls back to SRT when `verbose_json` isn't supported** — the model field is free text, but word-level timestamps are a whisper-1-only feature; configuring any other model (e.g. `gpt-4o-transcribe`) made the 2.4.0 path throw and fail the whole job. A verbose-json failure now logs a warning and retries via the plain SRT path. A verbose response whose segments carry no `words` array (granularity accepted but ignored) similarly no longer registers as "no speech detected" — it builds segment-level cues instead. Touches `src/worker/transcription-processor.ts`. No schema migration.
+
+- **Editing a multi-line comment no longer joins its lines** — the inline editor recovered plain text from the stored sanitized HTML via `textContent`, which collapses `<br>` and block-element boundaries into nothing; any comment containing markup lost its line breaks on save. `<br>` and closing block tags now convert to newlines before extraction. Touches `src/components/MessageBubble.tsx`. No schema migration.
+
+### Changed
+
+- **Account ledger descriptions wrap instead of forcing a horizontal scroll bar** — the Description and Ref / Supplier cells on an individual chart-of-accounts page used `truncate`, which sets `white-space: nowrap`. In an auto-layout table that makes each column as wide as its longest single-line value, so one long description pushed the table well past the viewport (measured 1887px of content in a 1172px container) and the whole ledger had to be scrolled sideways to read the amounts. Both columns now wrap and break long tokens, rows are top-aligned, and the table fits its container at any description length. Touches `src/app/admin/accounting/chart-of-accounts/[id]/page.tsx`. No schema migration.
+
+- **Profit & Loss amounts open the account's entries in a modal** — clicking an amount navigated away to the full chart-of-accounts ledger page, losing the report you had just run: getting back meant re-entering the date range and pressing Run Report again. Amounts now open a drill-down dialog listing that account's entries for the reported period (date, type, description, ref, ex-GST amount, period total, paged at 50) with an "Open full ledger" link for the editing/export tools, so the P&L stays on screen underneath. The shared row types and the ex-GST/debit-normal sign logic moved into `src/components/admin/accounting/account-ledger-entries.ts` so the ledger page and the modal cannot drift apart. Touches `src/app/admin/accounting/reports/page.tsx`, `src/components/admin/accounting/AccountEntriesDialog.tsx`, `src/components/admin/accounting/account-ledger-entries.ts`, `src/app/admin/accounting/chart-of-accounts/[id]/page.tsx`. No schema migration.
+
 ## [2.4.1] - 2026-07-29
 
 ### Fixed
