@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 
@@ -17,7 +17,7 @@ const matchBasSchema = z.object({
 // Creates split lines from the saved GST and PAYG components and marks the transaction
 // as MATCHED with matchType=BAS_PAYMENT.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rl = await rateLimit(

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesQuoteFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
 }
 
 export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'sales')
+  const authResult = await requireApiMenuAction(request, 'sales', 'manageSales')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(
@@ -153,7 +153,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 }
 
 export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'sales')
+  const authResult = await requireApiMenuAction(request, 'sales', 'manageSales')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

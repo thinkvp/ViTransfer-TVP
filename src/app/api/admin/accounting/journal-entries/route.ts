@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { journalEntryFromDb } from '@/lib/accounting/db-mappers'
 
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/admin/accounting/journal-entries
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rl = await rateLimit(request, { windowMs: 60_000, maxRequests: 60, message: 'Too many requests.' }, 'accounting-journal-entries-post', authResult.id)

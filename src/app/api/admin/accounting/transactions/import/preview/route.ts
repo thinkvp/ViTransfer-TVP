@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { parseCSV } from '@/lib/accounting/csv-parser'
 
@@ -17,7 +17,7 @@ const bodySchema = z.object({
 // POST /api/admin/accounting/transactions/import/preview
 // Parses a CSV and returns rows with isDuplicate flags — does NOT insert anything.
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rl = await rateLimit(

@@ -33,6 +33,8 @@ export type ActionKey =
   | 'changeProjectStatuses'
   | 'deleteProjects'
   | 'viewAnalytics'
+  | 'manageSales'
+  | 'manageAccounting'
 
 export interface RolePermissions {
   menuVisibility: Record<MenuKey, boolean>
@@ -71,6 +73,8 @@ const ALL_ACTIONS: ActionKey[] = [
   'changeProjectStatuses',
   'deleteProjects',
   'viewAnalytics',
+  'manageSales',
+  'manageAccounting',
 ]
 
 // Backwards-compatibility: historically, some areas were effectively gated by menu access only.
@@ -82,8 +86,8 @@ const FALLBACK_ACTIONS_BY_MENU: Record<MenuKey, ActionKey[]> = {
   projects: ['manageProjectAlbums'],
   sharePage: [],
   clients: ['manageClients', 'manageClientFiles'],
-  sales: [],
-  accounting: [],
+  sales: ['manageSales'],
+  accounting: ['manageAccounting'],
   assistant: [],
   settings: ['changeSettings', 'sendTestEmail'],
   users: ['manageUsers', 'manageRoles'],
@@ -230,6 +234,12 @@ export function canDoAction(permissions: RolePermissions, action: ActionKey): bo
 
     case 'viewAnalytics':
       return permissions.menuVisibility.analytics === true
+
+    // Sales / Accounting: menu grants read-only access; writes need the explicit action
+    case 'manageSales':
+      return permissions.menuVisibility.sales === true && permissions.actions.manageSales === true
+    case 'manageAccounting':
+      return permissions.menuVisibility.accounting === true && permissions.actions.manageAccounting === true
 
     default:
       return permissions.actions[action] === true

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiMenu(request, 'sales')
+  const authResult = await requireApiMenuAction(request, 'sales', 'manageSales')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  const authResult = await requireApiMenu(request, 'sales')
+  const authResult = await requireApiMenuAction(request, 'sales', 'manageSales')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

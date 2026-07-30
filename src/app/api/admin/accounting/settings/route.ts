@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getAccountingSettings, saveAccountingSettings } from '@/lib/accounting/settings'
 
@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 // POST /api/admin/accounting/transactions/[id]/unmatch
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

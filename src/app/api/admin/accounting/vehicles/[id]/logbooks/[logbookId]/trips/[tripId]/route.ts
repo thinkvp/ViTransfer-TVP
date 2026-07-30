@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { vehicleTripFromDb } from '@/lib/accounting/db-mappers'
 
@@ -22,7 +22,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; logbookId: string; tripId: string }> }
 ) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(
@@ -75,7 +75,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; logbookId: string; tripId: string }> }
 ) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

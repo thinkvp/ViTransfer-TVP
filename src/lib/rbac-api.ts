@@ -35,6 +35,13 @@ function logActionDenied(user: any, resource: string, request?: NextRequest) {
   }).catch(() => {})
 }
 
+// Friendlier denial messages for actions where the user can see the area but not modify it.
+const READ_ONLY_MESSAGE = 'Your account has read-only access. Request permission from an administrator to be able to make changes.'
+const ACTION_DENIED_MESSAGES: Partial<Record<ActionKey, string>> = {
+  manageSales: READ_ONLY_MESSAGE,
+  manageAccounting: READ_ONLY_MESSAGE,
+}
+
 export function requireMenuAccess(user: any, menu: MenuKey, request?: NextRequest): Response | null {
   const permissions = getUserPermissions(user)
   if (!canSeeMenu(permissions, menu)) {
@@ -48,7 +55,7 @@ export function requireActionAccess(user: any, action: ActionKey, request?: Next
   const permissions = getUserPermissions(user)
   if (!canDoAction(permissions, action)) {
     logActionDenied(user, `action:${action}`, request)
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    return NextResponse.json({ error: ACTION_DENIED_MESSAGES[action] ?? 'Forbidden' }, { status: 403 })
   }
   return null
 }

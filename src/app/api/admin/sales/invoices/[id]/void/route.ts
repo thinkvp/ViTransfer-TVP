@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
@@ -15,7 +15,7 @@ const bodySchema = z.object({
 })
 
 export async function POST(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'sales')
+  const authResult = await requireApiMenuAction(request, 'sales', 'manageSales')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

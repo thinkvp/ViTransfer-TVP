@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { basPeriodFromDb } from '@/lib/accounting/db-mappers'
 
@@ -26,7 +26,7 @@ const paymentSchema = z.object({
 // No Expense records are created — reconciliation happens when the ATO bank debit
 // is matched as BAS_PAYMENT against this period.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rl = await rateLimit(
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 // Clears the recorded payment from the BAS period.
 // If a bank transaction has been matched as BAS_PAYMENT, unmatches it first.
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rl = await rateLimit(

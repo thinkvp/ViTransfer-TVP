@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { accountFromDb, expenseFromDb, bankTransactionFromDb, journalEntryFromDb } from '@/lib/accounting/db-mappers'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
@@ -295,7 +295,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 // DELETE /api/admin/accounting/accounts/[id]/entries?entryId=xxx&kind=expense|bankTransaction
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'accounting')
+  const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

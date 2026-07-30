@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.3] - 2026-07-30
+
+### Added
+
+- **Read-only Sales and Accounting access — new "Make changes" role sub-options** — the Sales and Accounting menus were all-or-nothing: any role that could see them could also create, edit and delete invoices, expenses, journal entries, bank imports and settings. Each menu now has a "Make changes" sub-option in the role editor (Users → Roles), following the existing Projects "Full Control" / Share Page "Make and delete comments" pattern. A role with the menu enabled but "Make changes" off gets full read access — dashboards, lists, reports, attachment downloads and the BAS calculation preview all work — while every write endpoint (69 handlers across both areas, including bank-import preview) returns 403 with "Your account has read-only access. Request permission from an administrator to be able to make changes." Denied attempts are recorded as `PERMISSION_DENIED` security events, giving an audit trail of attempted changes. Existing roles are unaffected: legacy permission JSON without the new keys defaults "Make changes" to on whenever the menu is enabled. Note for read-only roles: the AI Assistant's Expense mode can still draft expense extractions if the role also has the AI Assistant menu, but committing a drafted expense goes through the now-gated expenses endpoint, so nothing can be saved. Touches `src/lib/rbac.ts`, `src/lib/rbac-api.ts`, `src/app/admin/users/page.tsx`, `scripts/check-rbac-gates.mjs`, and the write handlers under `src/app/api/admin/sales/**` and `src/app/api/admin/accounting/**`. No schema migration.
+
 ## [2.4.2] - 2026-07-29
 
 ### Fixed

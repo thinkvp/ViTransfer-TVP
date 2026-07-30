@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 
@@ -8,7 +8,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const authResult = await requireApiMenu(request, 'sales')
+  const authResult = await requireApiMenuAction(request, 'sales', 'manageSales')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(

@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import crypto from 'crypto'
 import { z } from 'zod'
 import { prisma } from '@/lib/db'
-import { requireApiMenu } from '@/lib/auth'
+import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import {
   EMAIL_THEME,
@@ -74,7 +74,7 @@ async function computeInvoicePaidAtYmdForExpiry(tx: Prisma.TransactionClient, in
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireApiMenu(request, 'sales')
+  const authResult = await requireApiMenuAction(request, 'sales', 'manageSales')
   if (authResult instanceof Response) return authResult
 
   const rateLimitResult = await rateLimit(
