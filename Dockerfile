@@ -7,7 +7,12 @@
 # ========================================
 FROM node:24.13.0-alpine3.23 AS base-common
 
-RUN npm install -g npm@latest && npm cache clean --force
+# Pinned to the npm 11 major on purpose — do NOT restore `npm@latest`.
+# npm 12 requires node ^22.22.2 || ^24.15.0 || >=26.0.0, so `@latest` silently
+# breaks this build against the pinned node above the moment npm ships a major.
+# This project also requires npm 11 specifically: npm 10's `ci` rejects the
+# nested override in package-lock.json that npm 11 accepts.
+RUN npm install -g npm@11 && npm cache clean --force
 
 # Use a stable Alpine mirror (helps in environments where dl-cdn.alpinelinux.org DNS fails)
 RUN sed -i 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.edge.kernel.org/alpine|g' /etc/apk/repositories

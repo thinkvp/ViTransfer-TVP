@@ -8,7 +8,7 @@ import { revokeToken, isTokenRevoked, isUserTokensRevoked } from './token-revoca
 import { getRedis } from './redis'
 import { isShareSessionRevoked } from './session-invalidation'
 import { adminAllPermissions, normalizeRolePermissions, type RolePermissions } from './rbac'
-import { requireActionAccess, requireAnyActionAccess, requireMenuAccess } from './rbac-api'
+import { requireActionAccess, requireAnyActionAccess, requireAnyMenuAccess, requireMenuAccess } from './rbac-api'
 import { logSecurityEvent } from './video-access'
 import { getClientIpAddress } from './utils'
 
@@ -443,6 +443,14 @@ export async function requireApiMenu(request: NextRequest, menu: Parameters<type
   const user = await requireApiUser(request)
   if (user instanceof Response) return user
   const forbidden = requireMenuAccess(user, menu)
+  if (forbidden) return forbidden
+  return user
+}
+
+export async function requireApiAnyMenu(request: NextRequest, menus: Parameters<typeof requireAnyMenuAccess>[1]): Promise<AuthUser | Response> {
+  const user = await requireApiUser(request)
+  if (user instanceof Response) return user
+  const forbidden = requireAnyMenuAccess(user, menus)
   if (forbidden) return forbidden
   return user
 }

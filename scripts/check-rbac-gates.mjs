@@ -37,6 +37,7 @@ function hasAuthGate(source) {
     source.includes('requireApiAdmin(') ||
     source.includes('requireApiMenu(') ||
     source.includes('requireApiMenuAction(') ||
+    source.includes('requireApiAnyMenu(') ||
     source.includes('requireApiAction(') ||
     source.includes('requireApiAnyAction(') ||
     source.includes('requireApiSystemAdmin(')
@@ -50,7 +51,9 @@ function hasRbacGate(source) {
     source.includes('requireApiAction(') ||
     source.includes('requireApiAnyAction(') ||
     source.includes('requireApiSystemAdmin(') ||
+    source.includes('requireApiAnyMenu(') ||
     source.includes('requireMenuAccess(') ||
+    source.includes('requireAnyMenuAccess(') ||
     source.includes('requireActionAccess(') ||
     source.includes('requireAnyActionAccess(')
   )

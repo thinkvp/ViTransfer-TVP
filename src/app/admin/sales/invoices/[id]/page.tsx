@@ -42,7 +42,7 @@ import { downloadInvoicePdf } from '@/lib/sales/pdf'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesViewsAndTrackingSection } from '@/components/admin/sales/SalesViewsAndTrackingSection'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
-import { apiFetch } from '@/lib/api-client'
+import { apiFetch, isReadOnlyDenial } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { invoiceEffectiveStatus as computeInvoiceEffectiveStatus } from '@/lib/sales/status'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
@@ -580,7 +580,8 @@ export default function InvoiceDetailPage() {
         window.location.reload()
         return
       }
-      toast.error(msg)
+      // Read-only denials are already surfaced by apiFetch.
+      if (!isReadOnlyDenial(e)) toast.error(msg)
     } finally {
       setSaving(false)
     }
@@ -627,7 +628,8 @@ export default function InvoiceDetailPage() {
         window.location.reload()
         return
       }
-      toast.error(msg)
+      // Read-only denials are already surfaced by apiFetch.
+      if (!isReadOnlyDenial(e)) toast.error(msg)
     }
   }
 
@@ -645,7 +647,8 @@ export default function InvoiceDetailPage() {
         window.location.reload()
         return
       }
-      toast.error(msg)
+      // Read-only denials are already surfaced by apiFetch.
+      if (!isReadOnlyDenial(e)) toast.error(msg)
     }
   }
 
@@ -760,7 +763,8 @@ export default function InvoiceDetailPage() {
                       window.location.reload()
                       return
                     }
-                    toast.error(msg)
+                    // Read-only denials are already surfaced by apiFetch.
+                    if (!isReadOnlyDenial(e)) toast.error(msg)
                   }
                 })()
               }}

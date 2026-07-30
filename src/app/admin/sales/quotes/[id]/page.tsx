@@ -32,7 +32,7 @@ import { downloadQuotePdf } from '@/lib/sales/pdf'
 import { createSalesDocShareUrl } from '@/lib/sales/public-share'
 import { SalesViewsAndTrackingSection } from '@/components/admin/sales/SalesViewsAndTrackingSection'
 import { SalesSendEmailDialog } from '@/components/admin/sales/SalesSendEmailDialog'
-import { apiFetch } from '@/lib/api-client'
+import { apiFetch, isReadOnlyDenial } from '@/lib/api-client'
 import { SalesRemindersBellButton } from '@/components/admin/sales/SalesRemindersBellButton'
 import { quoteEffectiveStatus } from '@/lib/sales/status'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
@@ -378,6 +378,16 @@ export default function QuoteDetailPage() {
       setSavedSnapshot(JSON.stringify({ status: next.status, clientId, projectId, issueDate, validUntil, notes, terms, items }))
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
+    } catch (e) {
+      // Without this the save failed completely silently — no toast, no state change.
+      const msg = e instanceof Error ? e.message : 'Failed to save quote'
+      if (msg === 'Conflict') {
+        toast.error('This quote was updated in another session. Reloading.')
+        window.location.reload()
+        return
+      }
+      // Read-only denials are already surfaced by apiFetch.
+      if (!isReadOnlyDenial(e)) toast.error(msg)
     } finally {
       setSaving(false)
     }

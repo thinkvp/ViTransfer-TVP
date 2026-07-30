@@ -3,6 +3,35 @@ import { clearTokens, getAccessToken, getRefreshToken, isCurrentWindowSessionTim
 let isRedirecting = false
 let refreshInFlight: Promise<boolean> | null = null
 
+// Stable toast id so repeated denials replace the existing toast instead of stacking.
+const READ_ONLY_TOAST_ID = 'rbac-read-only'
+
+/**
+ * Surface an RBAC read-only denial (403 with `readOnly: true`) as a toast.
+ *
+ * This lives in the fetch layer on purpose: most write handlers across the admin
+ * UI wrap their calls in `try { … } finally { … }` with no `catch`, so a rejected
+ * write would otherwise fail completely silently — the user clicks Save and
+ * nothing at all happens. Handling it here guarantees feedback on every write
+ * path without auditing ~90 call sites.
+ */
+async function notifyIfReadOnlyDenied(response: Response): Promise<void> {
+  if (response.status !== 403) return
+  try {
+    const body = await response.clone().json()
+    if (!body?.readOnly) return
+    const message = typeof body.error === 'string' && body.error
+      ? body.error
+      : 'Your account has read-only access.'
+    // Imported lazily to keep the UI toast library out of this module's graph for
+    // every other request (and out of any server-side importer).
+    const { toast } = await import('sonner')
+    toast.error(message, { id: READ_ONLY_TOAST_ID })
+  } catch {
+    // Non-JSON or unreadable body — nothing to surface.
+  }
+}
+
 export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit
@@ -22,6 +51,7 @@ export async function apiFetch(
       if (refreshed) {
         const retryResponse = await fetch(input, withAuthHeader(init))
         if (retryResponse.status !== 401) {
+          await notifyIfReadOnlyDenied(retryResponse)
           return retryResponse
         }
       }
@@ -47,11 +77,22 @@ export async function apiFetch(
       }
     }
 
+    await notifyIfReadOnlyDenied(response)
+
     return response
   } catch (error) {
     console.error('[API] Request failed:', error)
     throw error
   }
+}
+
+/**
+ * True when this error came from an RBAC read-only denial that apiFetch has
+ * already surfaced as a toast. Callers that show their own error toast should
+ * skip it for these, or the user sees the same message twice.
+ */
+export function isReadOnlyDenial(error: unknown): boolean {
+  return !!(error && typeof error === 'object' && (error as { readOnly?: boolean }).readOnly === true)
 }
 
 export async function apiJson<T = any>(
@@ -62,7 +103,9 @@ export async function apiJson<T = any>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Request failed' }))
-    throw new Error(error.error || `HTTP ${response.status}`)
+    const thrown = new Error(error.error || `HTTP ${response.status}`)
+    if (error?.readOnly) (thrown as Error & { readOnly?: boolean }).readOnly = true
+    throw thrown
   }
 
   return response.json()

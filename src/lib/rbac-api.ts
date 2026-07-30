@@ -51,11 +51,31 @@ export function requireMenuAccess(user: any, menu: MenuKey, request?: NextReques
   return null
 }
 
+/**
+ * Menu access where any one of several menus is sufficient.
+ * Used by cross-area lookups (e.g. client/project name resolution, which Sales and
+ * Accounting need even when the Clients/Projects areas themselves are hidden).
+ */
+export function requireAnyMenuAccess(user: any, menus: MenuKey[], request?: NextRequest): Response | null {
+  const permissions = getUserPermissions(user)
+  if (!menus.some((m) => canSeeMenu(permissions, m))) {
+    // Menu access denial is expected RBAC behaviour — not logged as a security event.
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  return null
+}
+
 export function requireActionAccess(user: any, action: ActionKey, request?: NextRequest): Response | null {
   const permissions = getUserPermissions(user)
   if (!canDoAction(permissions, action)) {
     logActionDenied(user, `action:${action}`, request)
-    return NextResponse.json({ error: ACTION_DENIED_MESSAGES[action] ?? 'Forbidden' }, { status: 403 })
+    const readOnlyMessage = ACTION_DENIED_MESSAGES[action]
+    // `readOnly` lets the client surface the denial as a toast without string-matching
+    // the message (see apiFetch in src/lib/api-client.ts).
+    return NextResponse.json(
+      readOnlyMessage ? { error: readOnlyMessage, readOnly: true } : { error: 'Forbidden' },
+      { status: 403 }
+    )
   }
   return null
 }
