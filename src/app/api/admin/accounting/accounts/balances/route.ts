@@ -117,17 +117,23 @@ export async function GET(request: NextRequest) {
   // coaAccountId column is added by a pending migration; cast to bypass stale Prisma client types.
   const linkedBankAccounts = await (prisma.bankAccount.findMany as Function)({
     where: { coaAccountId: { not: null } },
-    select: { coaAccountId: true, id: true, openingBalance: true },
-  }) as { coaAccountId: string; id: string; openingBalance: number }[]
+    select: { coaAccountId: true, id: true, openingBalance: true, openingBalanceDate: true },
+  }) as { coaAccountId: string; id: string; openingBalance: number; openingBalanceDate: string | null }[]
 
   if (linkedBankAccounts.length > 0) {
     const bankAccountIds = linkedBankAccounts.map(ba => ba.id)
+    // A bank account's balance is a running position, not a period movement, so `from`
+    // is deliberately ignored here: bounding the sum on both ends would drop every
+    // movement before the window and report a figure that is neither a balance nor a
+    // movement (picking "last 30 days" would otherwise read as the full balance).
+    // Filtering on `to` alone yields the closing balance as at that date — the same rule
+    // buildBalanceSheet() applies via its `asOf` filter, and what the Bank Accounts page shows.
     const linkedTxns = await prisma.bankTransaction.findMany({
       select: { bankAccountId: true, amountCents: true },
       where: {
         bankAccountId: { in: bankAccountIds },
         status: { not: 'EXCLUDED' },
-        ...(hasDateFilter ? { date: dateFilter } : {}),
+        ...(to ? { date: { lte: to } } : {}),
       },
     })
     const coaByBankAccountId = Object.fromEntries(linkedBankAccounts.map(ba => [ba.id, ba.coaAccountId]))
@@ -136,9 +142,11 @@ export async function GET(request: NextRequest) {
       if (!coaId) continue
       balances[coaId] = (balances[coaId] ?? 0) + Number(txn.amountCents)
     }
-    // Always include the opening balance — it is the account's starting point and must
-    // be reflected in the CoA balance regardless of the selected date range filter.
+    // The opening balance is the account's starting point, so it is included regardless
+    // of `from` — but only once the account actually opened: a range that ends before
+    // then must not report money the business did not yet hold.
     for (const ba of linkedBankAccounts) {
+      if (to && ba.openingBalanceDate && ba.openingBalanceDate > to) continue
       balances[ba.coaAccountId] = (balances[ba.coaAccountId] ?? 0) + Number(ba.openingBalance)
     }
   }

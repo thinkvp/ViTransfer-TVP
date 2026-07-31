@@ -39,7 +39,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
     include: {
-      bankAccount: { select: { id: true, name: true } },
+      bankAccount: { select: { id: true, name: true, coaAccountId: true } },
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
@@ -49,6 +49,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   if (txn.status === 'MATCHED') return NextResponse.json({ error: 'Transaction is already posted' }, { status: 409 })
+  const ownCoaAccountId = (txn.bankAccount as unknown as { coaAccountId?: string | null } | null)?.coaAccountId ?? null
 
   const body = await request.json().catch(() => null)
   const parsed = splitSchema.safeParse(body)
@@ -72,6 +73,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })
   if (accounts.length !== accountIds.length) {
     return NextResponse.json({ error: 'One or more accounts not found' }, { status: 400 })
+  }
+
+  // Split lines cannot post back to the bank account's own Chart of Accounts account —
+  // the balance already counts the transaction as raw cash, so this would double it.
+  if (ownCoaAccountId && accountIds.includes(ownCoaAccountId)) {
+    return NextResponse.json(
+      { error: "A split line cannot use this bank account's own Chart of Accounts account. Choose the accounts the money moved to or from." },
+      { status: 400 }
+    )
   }
 
   await prisma.$transaction(async (tx) => {

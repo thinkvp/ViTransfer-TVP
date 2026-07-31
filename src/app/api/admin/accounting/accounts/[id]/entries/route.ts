@@ -258,6 +258,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return sum + (row.entry as { amountCents: number }).amountCents
   }, 0)
 
+  // Balance brought forward: the account's position at the start of the range — its
+  // opening balance plus every cash movement before `from`. Without it the Balance row
+  // would silently drop all history before the window, the same trap the balances route
+  // avoids by filtering only on `to`.
+  let openingBalanceCents: number | null = null
+  let openingBalanceAsOf: string | null = null
+  let openingBalanceIsBroughtForward = false
+  if (linkedBankAccount) {
+    const openedOn = linkedBankAccount.openingBalanceDate
+    const priorTxns = from
+      ? await prisma.bankTransaction.aggregate({
+          _sum: { amountCents: true },
+          where: {
+            bankAccountId: linkedBankAccount.id,
+            status: { not: 'EXCLUDED' },
+            date: { lt: from },
+          },
+        })
+      : null
+    // Skip the opening balance only when the whole range predates the account opening.
+    const hasOpened = !to || !openedOn || openedOn <= to
+    openingBalanceCents = (hasOpened ? Number(linkedBankAccount.openingBalance) : 0)
+      + Number(priorTxns?._sum.amountCents ?? 0)
+    openingBalanceIsBroughtForward = Boolean(from)
+    openingBalanceAsOf = from || openedOn || null
+  }
+
   // Apply search filter (affects count/pagination but not period total)
   const q = url.searchParams.get('q')?.toLowerCase().trim() ?? ''
   const qMatch = q.replace(/^\$/, '')  // strip leading $ to support amount searches like "$12.50"
@@ -284,6 +311,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     entries: slice,
     total,
     periodTotalCents,
+    // The starting balance is not an entry, so it is reported separately for the page to
+    // show above the period total. `openingBalanceCents` + `periodTotalCents` is the
+    // closing balance at `to`, matching the chart-of-accounts Balance column.
+    openingBalanceCents,
+    openingBalanceAsOf,
+    openingBalanceIsBroughtForward,
     taxRatePercent,
     page,
     pageSize,

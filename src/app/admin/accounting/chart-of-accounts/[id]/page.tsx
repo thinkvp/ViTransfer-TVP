@@ -45,6 +45,9 @@ export default function AccountLedgerPage() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [total, setTotal] = useState(0)
   const [periodTotalCents, setPeriodTotalCents] = useState(0)
+  const [openingBalanceCents, setOpeningBalanceCents] = useState<number | null>(null)
+  const [openingBalanceAsOf, setOpeningBalanceAsOf] = useState<string | null>(null)
+  const [openingBalanceIsBroughtForward, setOpeningBalanceIsBroughtForward] = useState(false)
   const [taxRatePercent, setTaxRatePercent] = useState(10)
   const [hasChildAccounts, setHasChildAccounts] = useState(false)
   const [page, setPage] = useState(1)
@@ -117,6 +120,9 @@ export default function AccountLedgerPage() {
       setEntries(d.entries ?? [])
       setTotal(d.total ?? 0)
       setPeriodTotalCents(d.periodTotalCents ?? 0)
+      setOpeningBalanceCents(d.openingBalanceCents ?? null)
+      setOpeningBalanceAsOf(d.openingBalanceAsOf ?? null)
+      setOpeningBalanceIsBroughtForward(d.openingBalanceIsBroughtForward ?? false)
       setTaxRatePercent(d.taxRatePercent ?? 10)
       setHasChildAccounts(d.hasChildAccounts ?? false)
       setPageCount(d.pageCount ?? 1)
@@ -559,13 +565,30 @@ export default function AccountLedgerPage() {
                 </tbody>
                 {!loading && entries.length > 0 && (
                   <tfoot>
-                    <tr className="border-t-2 border-border bg-muted/30">
+                    {openingBalanceCents !== null && (
+                      <tr className="border-t-2 border-border bg-muted/20">
+                        <td colSpan={5} className="px-4 py-2.5 text-right text-sm text-muted-foreground">
+                          {openingBalanceIsBroughtForward ? 'Balance brought forward' : 'Opening balance'}
+                          {openingBalanceAsOf ? ` (${openingBalanceIsBroughtForward ? 'as at ' : ''}${formatDate(openingBalanceAsOf)})` : ''}
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{fmtAud(openingBalanceCents)}</td>
+                        <td />
+                      </tr>
+                    )}
+                    <tr className={cn('bg-muted/30', openingBalanceCents === null && 'border-t-2 border-border')}>
                       <td colSpan={5} className="px-4 py-2.5 text-right text-sm font-semibold text-foreground">
                         {pageCount > 1 ? 'Period Total ex-GST (all pages)' : 'Period Total (ex-GST)'}
                       </td>
                       <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-foreground">{fmtAud(periodTotalCents)}</td>
                       <td />
                     </tr>
+                    {openingBalanceCents !== null && (
+                      <tr className="border-t border-border bg-muted/50">
+                        <td colSpan={5} className="px-4 py-2.5 text-right text-sm font-semibold text-foreground">Balance</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-foreground">{fmtAud(periodTotalCents + openingBalanceCents)}</td>
+                        <td />
+                      </tr>
+                    )}
                   </tfoot>
                 )}
               </table>

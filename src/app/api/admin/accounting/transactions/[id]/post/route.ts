@@ -42,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
     include: {
-      bankAccount: { select: { id: true, name: true } },
+      bankAccount: { select: { id: true, name: true, coaAccountId: true } },
       expense: { include: { account: true } },
       account: true,
       invoicePayment: { select: { id: true, amountCents: true, paymentDate: true, invoiceId: true } },
@@ -62,6 +62,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // Verify the account exists
   const account = await prisma.account.findUnique({ where: { id: d.accountId }, select: { id: true, name: true } })
   if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 400 })
+
+  // A transaction can never be posted to its own bank's Chart of Accounts account: the
+  // balance already counts it as raw cash, so posting it there counts the same money
+  // twice (money cannot move from an account to itself in any case).
+  if (txn.bankAccount?.coaAccountId && d.accountId === txn.bankAccount.coaAccountId) {
+    return NextResponse.json(
+      { error: `"${account.name}" is this bank account's own Chart of Accounts account. Choose the account the money moved to or from.` },
+      { status: 400 }
+    )
+  }
 
   // Negate so debit (money out, negative amountCents) yields positive expense,
   // and credit (money in, positive amountCents) yields negative expense (refund/reduction).

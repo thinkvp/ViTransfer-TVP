@@ -65,7 +65,10 @@ export function bankAccountFromDb(row: any): BankAccount {
     accountNumber: row.accountNumber ?? null,
     currency: row.currency,
     openingBalance: Number(row.openingBalance ?? 0),
-    currentBalance: Number(row.currentBalance ?? row.openingBalance ?? 0),
+    // Derived by withBankAccountBalances(), never a column — do NOT fall back to
+    // openingBalance here: that silently reports a stale figure as the current balance
+    // for any caller that forgot to run its rows through the helper.
+    currentBalance: Number(row.currentBalance ?? 0),
     pendingTransactionAmount: Number(row.pendingTransactionAmount ?? 0),
     openingBalanceDate: row.openingBalanceDate ?? null,
     isActive: Boolean(row.isActive),

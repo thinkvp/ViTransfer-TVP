@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankAccountFromDb } from '@/lib/accounting/db-mappers'
+import { withBankAccountBalances } from '@/lib/accounting/bank-balance'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -14,7 +15,8 @@ const updateSchema = z.object({
   accountNumber: z.string().trim().min(1).max(50).optional(),
   bankName: z.string().trim().max(100).optional().nullable(),
   currency: z.string().trim().length(3).optional(),
-  openingBalance: z.number().min(0).optional(),
+  // Negative is valid: an overdrawn account or a credit card starts below zero.
+  openingBalance: z.number().optional(),
   openingBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   isActive: z.boolean().optional(),
   coaAccountId: z.string().trim().min(1).optional().nullable(),
@@ -42,7 +44,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Bank account not found' }, { status: 404 })
   }
 
-  const res = NextResponse.json({ bankAccount: bankAccountFromDb(account) })
+  const [withBalance] = await withBankAccountBalances([account])
+  const res = NextResponse.json({ bankAccount: bankAccountFromDb(withBalance) })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }
@@ -89,7 +92,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     include: { _count: { select: { transactions: true } }, coaAccount: { select: { code: true, name: true } } },
   })
 
-  const res = NextResponse.json({ bankAccount: bankAccountFromDb(updated) })
+  const [updatedWithBalance] = await withBankAccountBalances([updated])
+  const res = NextResponse.json({ bankAccount: bankAccountFromDb(updatedWithBalance) })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }

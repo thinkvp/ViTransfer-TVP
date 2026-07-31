@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankAccountFromDb } from '@/lib/accounting/db-mappers'
+import { withBankAccountBalances } from '@/lib/accounting/bank-balance'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -14,7 +15,8 @@ const createSchema = z.object({
   accountNumber: z.string().trim().min(1).max(50),
   bankName: z.string().trim().max(100).optional().nullable(),
   currency: z.string().trim().length(3).default('AUD'),
-  openingBalance: z.number().min(0).default(0).describe('Opening balance in dollars'),
+  // Negative is valid: an overdrawn account or a credit card starts below zero.
+  openingBalance: z.number().default(0).describe('Opening balance in dollars'),
   openingBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
   coaAccountId: z.string().trim().min(1).optional().nullable(),
 })
@@ -36,26 +38,7 @@ export async function GET(request: NextRequest) {
     orderBy: { createdAt: 'asc' },
   })
 
-  // Compute current balance = openingBalance + SUM of all non-excluded transaction amounts
-  const txnSums = await prisma.bankTransaction.groupBy({
-    by: ['bankAccountId'],
-    where: { status: { not: 'EXCLUDED' } },
-    _sum: { amountCents: true },
-  })
-  const sumByAccountId = Object.fromEntries(txnSums.map(r => [r.bankAccountId, r._sum.amountCents ?? 0]))
-
-  const pendingTxnSums = await prisma.bankTransaction.groupBy({
-    by: ['bankAccountId'],
-    where: { status: 'UNMATCHED' },
-    _sum: { amountCents: true },
-  })
-  const pendingSumByAccountId = Object.fromEntries(pendingTxnSums.map(r => [r.bankAccountId, r._sum.amountCents ?? 0]))
-
-  const accountsWithBalance = accounts.map(a => ({
-    ...a,
-    currentBalance: Number(a.openingBalance) + (sumByAccountId[a.id] ?? 0),
-    pendingTransactionAmount: pendingSumByAccountId[a.id] ?? 0,
-  }))
+  const accountsWithBalance = await withBankAccountBalances(accounts)
 
   const res = NextResponse.json({ bankAccounts: accountsWithBalance.map(bankAccountFromDb) })
   res.headers.set('Cache-Control', 'no-store')
@@ -96,7 +79,8 @@ export async function POST(request: NextRequest) {
     include: { _count: { select: { transactions: true } }, coaAccount: { select: { code: true, name: true } } },
   })
 
-  const res = NextResponse.json({ bankAccount: bankAccountFromDb(bankAccount) }, { status: 201 })
+  const [withBalance] = await withBankAccountBalances([bankAccount])
+  const res = NextResponse.json({ bankAccount: bankAccountFromDb(withBalance) }, { status: 201 })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }

@@ -201,6 +201,15 @@ export default function BankAccountsPage() {
   const [splitting, setSplitting] = useState(false)
 
   const selectedAccount = accounts.find(a => a.id === selectedAccountId) ?? null
+  // A transaction can't post to its own bank's Chart of Accounts account — the balance
+  // already counts it as raw cash, so coding it there would double the amount. Hidden
+  // from the picker; the API rejects it too.
+  const postableAccounts = useMemo(
+    () => (selectedAccount?.coaAccountId
+      ? coaAccounts.filter(a => a.id !== selectedAccount.coaAccountId)
+      : coaAccounts),
+    [coaAccounts, selectedAccount]
+  )
   const txnPageCount = Math.max(1, Math.ceil(txnTotal / PAGE_SIZE))
   const matchableBasPaymentAmounts = useMemo(() => new Set(
     matchableBasPeriods
@@ -1048,7 +1057,7 @@ export default function BankAccountsPage() {
                                       </div>
                                       <div className="relative">
                                         {(() => {
-                                          const filteredAccounts = coaAccounts.filter(a => {
+                                          const filteredAccounts = postableAccounts.filter(a => {
                                             const q = form.accountSearch.trim().toLowerCase()
                                             return !q || a.searchText.includes(q)
                                           })
@@ -1181,7 +1190,7 @@ export default function BankAccountsPage() {
                                         <button type="button" onClick={() => setSplitTxnId(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
                                       </div>
                                       {splitLines.map((line, idx) => {
-                                        const filteredAccounts = coaAccounts.filter(a => {
+                                        const filteredAccounts = postableAccounts.filter(a => {
                                           const q = line.accountSearch.trim().toLowerCase()
                                           return !q || a.searchText.includes(q)
                                         })
