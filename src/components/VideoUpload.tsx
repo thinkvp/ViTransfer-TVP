@@ -50,7 +50,7 @@ export default function VideoUpload({
   const [versionLabel, setVersionLabel] = useState('')
   const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
   const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? true)
-  const [autoGenerateSubtitles, setAutoGenerateSubtitles] = useState<boolean>(true)
+  const [autoGenerateSubtitles, setAutoGenerateSubtitles] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -177,7 +177,7 @@ export default function VideoUpload({
           versionLabel: trimmedVersionLabel,
           videoNotes: trimmedVideoNotes,
           allowApproval: allowApproval === true,
-          autoGenerateSubtitles: transcriptionEnabled ? autoGenerateSubtitles === true : true,
+          autoGenerateSubtitles: transcriptionEnabled ? autoGenerateSubtitles === true : false,
           originalFileName: file.name,
           originalFileSize: file.size,
           name: trimmedVideoName,

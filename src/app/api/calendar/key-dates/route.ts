@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getUserPermissions } from '@/lib/rbac-api'
+import { adminAllPermissions } from '@/lib/rbac'
 import { icsJoinLines, icsProperty, icsTextProperty } from '@/lib/ics'
 import { rateLimit } from '@/lib/rate-limit'
 
@@ -114,9 +115,16 @@ export async function GET(request: NextRequest) {
     return new NextResponse('Not found', { status: 404 })
   }
 
-  const permissions = getUserPermissions({ permissions: user.appRole?.permissions } as any)
-  const statuses = permissions.projectVisibility.statuses
+  // This route authenticates by calendarFeedToken, so it never passes through
+  // fetchUserById() — which is where every other route substitutes adminAllPermissions()
+  // for system admins. Resolve permissions the same way here, otherwise a stored role
+  // record with an incomplete projectVisibility.statuses list silently drops projects
+  // from the feed while they stay visible everywhere in the UI.
   const isSystemAdmin = user.appRole?.isSystemAdmin === true
+  const permissions = isSystemAdmin
+    ? adminAllPermissions()
+    : getUserPermissions({ permissions: user.appRole?.permissions } as any)
+  const statuses = permissions.projectVisibility.statuses
 
   const today = isoDateTodayLocal()
   const end = addMonthsUtc(today, 12)

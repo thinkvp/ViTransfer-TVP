@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
         versionLabel: effectiveVersionLabel,
         videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
         allowApproval: allowApproval ?? true,
-        autoGenerateSubtitles: autoGenerateSubtitles ?? true,
+        autoGenerateSubtitles: autoGenerateSubtitles ?? false,
         status: 'UPLOADING',
         duration: 0,
         width: 0,

@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from './db'
 import { hashPassword } from './encryption'
 import { redactEmailForLogs } from './log-sanitization'
-import { adminAllPermissions } from './rbac'
+import { adminAllPermissions, normalizeRolePermissions } from './rbac'
 
 /**
  * Ensure security settings are initialized
@@ -32,6 +32,61 @@ async function ensureSecuritySettings() {
 }
 
 /**
+ * Ensure system admin roles carry the current full permission set.
+ *
+ * The Admin role is written once, at first boot, and the roles API refuses to edit
+ * any system-admin role — so its stored JSON is frozen at whatever adminAllPermissions()
+ * returned back then. Every menu/action/status added since is silently absent.
+ *
+ * Almost everything reads a system admin's permissions via fetchUserById(), which
+ * substitutes adminAllPermissions() and masks the drift. Routes that authenticate by
+ * standalone token (e.g. the key-dates ICS feed) read the stored record directly and
+ * quietly lose access to anything the fossil is missing. Reconcile on every boot.
+ */
+async function ensureSystemAdminPermissions() {
+  try {
+    const desired = adminAllPermissions()
+
+    const roles = await prisma.role.findMany({
+      where: { isSystemAdmin: true },
+      select: { id: true, name: true, permissions: true },
+    })
+
+    for (const role of roles) {
+      const stored = normalizeRolePermissions(role.permissions)
+
+      const missingStatuses = desired.projectVisibility.statuses.filter(
+        (status) => !stored.projectVisibility.statuses.includes(status)
+      )
+      const missingMenus = Object.keys(desired.menuVisibility).filter(
+        (menu) => stored.menuVisibility[menu as keyof typeof stored.menuVisibility] !== true
+      )
+      const missingActions = Object.keys(desired.actions).filter(
+        (action) => stored.actions[action as keyof typeof stored.actions] !== true
+      )
+
+      if (!missingStatuses.length && !missingMenus.length && !missingActions.length) continue
+
+      await prisma.role.update({
+        where: { id: role.id },
+        data: { permissions: desired as unknown as Prisma.InputJsonValue },
+      })
+
+      const repaired = [
+        missingStatuses.length ? `statuses: ${missingStatuses.join(', ')}` : null,
+        missingMenus.length ? `menus: ${missingMenus.join(', ')}` : null,
+        missingActions.length ? `actions: ${missingActions.join(', ')}` : null,
+      ].filter(Boolean)
+
+      console.log(`Refreshed system admin role "${role.name}" (${repaired.join('; ')})`)
+    }
+  } catch (error) {
+    console.error('Error ensuring system admin role permissions:', error)
+    // Don't throw - app should still start even if this fails
+  }
+}
+
+/**
  * Ensure default admin user exists
  * This is called automatically when the app starts
  *
@@ -40,6 +95,10 @@ async function ensureSecuritySettings() {
  */
 export async function ensureDefaultAdmin() {
   try {
+    // Reconcile before the early return below — on an established install this is the
+    // only branch that ever runs, and a fresh DB has no roles yet so it's a no-op.
+    await ensureSystemAdminPermissions()
+
     // SECURITY: Check if ANY admin exists (not just the default one)
     // This prevents recreating default admin after it's been changed/removed
     const anyAdmin = await prisma.user.findFirst({

@@ -5,6 +5,20 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.6] - 2026-08-06
+
+### Changed
+
+- **Automatic subtitle generation is now opt-in on upload** — the "Generate subtitles" checkbox defaulted to on in both the single and multi-video uploaders, so every upload queued a Whisper transcription job unless the checkbox was noticed and cleared. On a batch upload that is a lot of avoidable worker time for videos that will never need captions. The box now starts unticked and transcription runs only when it is explicitly enabled. The server-side default for a request that omits the field flipped to match, as did the fallback used when transcription is disabled globally — previously that path forced the flag on regardless. Existing videos and already-queued jobs are unaffected. Touches `src/app/api/videos/route.ts`, `src/components/VideoUpload.tsx`, `src/components/MultiVideoUploadModal.tsx`. No schema migration.
+
+### Fixed
+
+- **Key dates for In Progress projects were missing from the subscribed calendar feed** — every key date on an affected project was absent from the ICS output while showing correctly on the Projects dashboard, the calendar panel and everywhere else in the app, with nothing to indicate anything had been filtered. The two halves of the app resolve a system admin's permissions differently: `fetchUserById()` discards the stored role record and substitutes `adminAllPermissions()`, so every session-authenticated route sees the complete status list regardless of what is in the database. `GET /api/calendar/key-dates` authenticates by `calendarFeedToken` instead and so never passes through it — it called `getUserPermissions()` on the raw stored `appRole.permissions` and fed the result straight into `project.status.in`. It did read `isSystemAdmin`, but only to bypass the assignment check, never for statuses. Any project at a status absent from the stored record therefore vanished from the feed alone. The feed now applies the same `adminAllPermissions()` substitution as every other consumer. This was the only route reading `appRole.permissions` directly; the other eleven `getUserPermissions()` call sites all pass an `AuthUser` that has already been through `fetchUserById()`. Touches `src/app/api/calendar/key-dates/route.ts`. No schema migration.
+
+  Note on scope: the affected statuses depend on when the database was first seeded (see below), so an install could equally have been losing `REVIEWED` projects. Key dates with an empty Notes field were never a factor — an empty note simply omits the optional `DESCRIPTION` line, which is valid ICS.
+
+- **System admin roles now pick up permissions added after the database was first seeded** — `ensureDefaultAdmin()` wrote `adminAllPermissions()` into the Admin role on create and never again (it returns early on every subsequent boot once an admin exists), and the roles API rejects any edit to a system-admin role. The stored JSON was therefore frozen at whatever the permission set looked like on the day that install first booted, and no code path existed that could ever update it. `projectVisibility.statuses` alone has been amended four times — `IN_PROGRESS` was added in v1.28, `REVIEWED` in v1.36 — so a long-lived database can be missing statuses, menus and actions that have been standard for many releases. The drift is invisible because `fetchUserById()` masks it everywhere except token-authenticated routes. A new `ensureSystemAdminPermissions()` pass now reconciles system-admin roles against the current `adminAllPermissions()` on every boot, writing only when something is actually missing and logging what it repaired. It is a no-op on a fresh database and cannot clobber user configuration, since system-admin roles are not editable in the first place. Touches `src/lib/seed.ts`. No schema migration.
+
 ## [2.4.5] - 2026-07-31
 
 ### Fixed

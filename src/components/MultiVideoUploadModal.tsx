@@ -161,7 +161,7 @@ export default function MultiVideoUploadModal({
           versionLabel: parsed.versionLabel,
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
-          autoGenerateSubtitles: true,
+          autoGenerateSubtitles: false,
           status: 'pending',
           error: null,
         })
@@ -284,7 +284,7 @@ export default function MultiVideoUploadModal({
             versionLabel: trimmedVersionLabel,
             videoNotes: trimmedVideoNotes,
             allowApproval: item.allowApproval === true,
-            autoGenerateSubtitles: transcriptionEnabled ? item.autoGenerateSubtitles === true : true,
+            autoGenerateSubtitles: transcriptionEnabled ? item.autoGenerateSubtitles === true : false,
             originalFileName: item.file.name,
             originalFileSize: item.file.size,
             name: trimmedVideoName,
