@@ -15,11 +15,13 @@ import {
   Loader2,
   Copy,
   Captions,
+  Upload,
 } from 'lucide-react'
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
 import { AssetCopyMoveModal } from './AssetCopyMoveModal'
+import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { withDownloadTracking } from '@/lib/download-url'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
@@ -58,6 +60,7 @@ export function VideoAssetList({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [settingThumbnail, setSettingThumbnail] = useState<string | null>(null)
   const [showCopyModal, setShowCopyModal] = useState(false)
+  const [showUploadQueue, setShowUploadQueue] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currentThumbnailPath, setCurrentThumbnailPath] = useState<string | null>(null)
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<{ id: string; name: string } | null>(null)
@@ -303,7 +306,7 @@ export function VideoAssetList({
     )
   }
 
-  if (assets.length === 0) {
+  if (assets.length === 0 && !canManage) {
     return null
   }
 
@@ -313,20 +316,45 @@ export function VideoAssetList({
       <div className="space-y-2">
         <div className="flex items-center justify-between mb-3 gap-2">
           <div className="text-sm font-medium text-muted-foreground">
-            Uploaded Assets ({assets.length})
+            Assets ({assets.length})
           </div>
           {canManage && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setShowCopyModal(true)}
-            >
-              <Copy className="h-4 w-4 mr-2" />
-              Copy to Version
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCopyModal(true)}
+              >
+                <Copy className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Copy to Version</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowUploadQueue((prev) => !prev)}
+              >
+                <Upload className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Upload Assets</span>
+              </Button>
+            </div>
           )}
         </div>
+        {canManage && showUploadQueue && (
+          <div className="mb-3">
+            <VideoAssetUploadQueue
+              videoId={videoId}
+              maxConcurrent={3}
+              onUploadComplete={() => {
+                fetchAssets()
+                if (onAssetDeleted) {
+                  onAssetDeleted()
+                }
+              }}
+            />
+          </div>
+        )}
         <div className="space-y-2">
           {assets.map((asset) => (
             <div

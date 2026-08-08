@@ -45,6 +45,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CameraCaptureDialog } from '@/components/admin/accounting/CameraCaptureButton'
 import { ProjectProposalCard } from '@/components/admin/assistant/ProjectProposalCard'
 import { SalesProposalCard } from '@/components/admin/assistant/SalesProposalCard'
@@ -61,6 +62,14 @@ interface SubmittedFlags {
   /** Expense (receipt extraction) mode — exclusive of the flags above */
   wantExpense: boolean
   docType: 'QUOTE' | 'INVOICE' | 'BOTH'
+  /** Set when the project proposal tops up an existing project rather than creating one */
+  targetProject: ProjectTarget | null
+}
+
+/** An existing project the assistant can add to */
+interface ProjectTarget {
+  id: string
+  title: string
 }
 
 /** Proposal-mode turns return AssistantResult; expense-mode turns return ResolvedExpenseResult */
@@ -242,6 +251,11 @@ export default function AssistantPage() {
   const [wantExpense, setWantExpense] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
 
+  // Add-to-existing-project target for the Project pill (null = create a new project)
+  const [targetProjectId, setTargetProjectId] = useState<string>('')
+  const [projectOptions, setProjectOptions] = useState<ProjectTarget[]>([])
+  const [projectOptionsLoaded, setProjectOptionsLoaded] = useState(false)
+
   // Shared review state across turns
   const [clients, setClients] = useState<ClientOption[]>([])
   const [linkedProjectId, setLinkedProjectId] = useState<string | null>(null)
@@ -359,6 +373,21 @@ export default function AssistantPage() {
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    // Only fetched once the Project pill is on — most sessions create a new project and
+    // never need the list.
+    if (!wantProject || projectOptionsLoaded) return
+    setProjectOptionsLoaded(true)
+    apiFetch('/api/projects?limit=200')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (Array.isArray(data?.projects)) {
+          setProjectOptions(data.projects.map((p: { id: string; title: string }) => ({ id: p.id, title: p.title })))
+        }
+      })
+      .catch(() => {})
+  }, [wantProject, projectOptionsLoaded])
 
   // Auto-grow the composer textarea up to a cap
   useLayoutEffect(() => {
@@ -697,6 +726,7 @@ export default function AssistantPage() {
         wantReply: submitted.wantReply,
         wantExpense: submitted.wantExpense,
         docType: submitted.docType,
+        targetProjectId: submitted.targetProject?.id ?? null,
       })
       return
     }
@@ -707,7 +737,16 @@ export default function AssistantPage() {
     if (wantExpense && attachments.length === 0) return
 
     const docType: SubmittedFlags['docType'] = wantQuote && wantInvoice ? 'BOTH' : wantInvoice ? 'INVOICE' : 'QUOTE'
-    const submitted: SubmittedFlags = { wantProject, wantSales, wantReply: wantResponse, wantExpense, docType }
+    const targetProject =
+      wantProject && targetProjectId ? projectOptions.find((p) => p.id === targetProjectId) ?? null : null
+    const submitted: SubmittedFlags = {
+      wantProject,
+      wantSales,
+      wantReply: wantResponse,
+      wantExpense,
+      docType,
+      targetProject,
+    }
     const attachSnapshot = attachments
     const turnId = ++turnSeqRef.current
     if (listeningRef.current) stopListening({ discard: true })
@@ -734,6 +773,7 @@ export default function AssistantPage() {
       wantReply: wantResponse,
       wantExpense,
       docType,
+      targetProjectId: targetProject?.id ?? null,
     })
   }
 
@@ -932,6 +972,8 @@ export default function AssistantPage() {
                             proposal={result.project!}
                             clients={clients}
                             attachments={turn.attachments}
+                            currentUserId={user?.id ?? null}
+                            updateTarget={turn.submitted.targetProject}
                             onClientCreated={(client) => setClients((prev) => [...prev, client])}
                             onProjectCreated={({ id }) => setLinkedProjectId(id)}
                           />
@@ -1004,6 +1046,33 @@ export default function AssistantPage() {
                   </>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Where the project proposal lands — a new project, or additions to one that exists */}
+          {!isRefine && wantProject && (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="text-xs text-muted-foreground">Project:</span>
+              <Select
+                value={targetProjectId || '__new__'}
+                disabled={running}
+                onValueChange={(value) => setTargetProjectId(value === '__new__' ? '' : value)}
+              >
+                <SelectTrigger className="h-8 w-64 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__new__">Create a new project</SelectItem>
+                  {projectOptions.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      Add to: {p.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {targetProjectId && (
+                <span className="text-xs text-muted-foreground">Only new recipients and key dates are added.</span>
+              )}
             </div>
           )}
 

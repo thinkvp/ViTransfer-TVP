@@ -240,7 +240,6 @@ async function main() {
     const spots = [
       'src/app/api/admin/sales/calendar/route.ts',
       'src/app/api/admin/sales/rollup/route.ts',
-      'src/app/api/admin/sales/projects-chart/route.ts',
     ]
     for (const spot of spots) {
       const src = await readSource(spot)

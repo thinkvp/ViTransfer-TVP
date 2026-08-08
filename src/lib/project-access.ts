@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getCurrentUserFromRequest, getShareContext } from '@/lib/auth'
+import { getCurrentUserFromRequest, getShareContext, type AuthUser } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import {
   isVisibleProjectStatusForUser,
@@ -200,4 +200,38 @@ export async function verifyProjectAccess(
     shareTokenSessionId: shareContext.sessionId,
     shareRecipientId: shareContext.recipientId,
   }
+}
+
+/**
+ * Admin-side project scoping for routes that act on one project: returns null when the
+ * project does not exist, its status is hidden from the caller's role, or the caller is
+ * not assigned to it (non-system-admins). Callers turn null into a 404 so a project the
+ * user may not see is indistinguishable from one that isn't there.
+ *
+ * Unlike verifyProjectAccess above there is no share-token path — this is for internal
+ * routes only. Re-exported by src/lib/gantt/access.ts for the schedule routes.
+ */
+export async function assertProjectAccessOr404(projectId: string, auth: AuthUser) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true, status: true, title: true, companyName: true, startDate: true },
+  })
+  if (!project) return null
+
+  if (!isVisibleProjectStatusForUser(auth, project.status)) return null
+
+  if (auth.appRoleIsSystemAdmin !== true) {
+    const assignment = await prisma.projectUser.findUnique({
+      where: {
+        projectId_userId: {
+          projectId: project.id,
+          userId: auth.id,
+        },
+      },
+      select: { projectId: true },
+    })
+    if (!assignment) return null
+  }
+
+  return project
 }

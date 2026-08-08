@@ -31,7 +31,9 @@ export function initialClientChoice(match: ClientMatch, clients: ClientOption[])
       recipients: match.proposedNewClient.recipients ?? [],
     }
   }
-  return { mode: 'existing', clientId: clients[0]?.id ?? '' }
+  // No match and nothing proposed: leave it unselected rather than silently pre-picking
+  // the alphabetically-first client, which reads as an AI decision but isn't one.
+  return { mode: 'existing', clientId: '' }
 }
 
 interface ClientPickerProps {

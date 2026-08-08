@@ -124,6 +124,9 @@ export const createProjectSchema = z.object({
         email: emailSchema.optional().nullable().or(z.literal('')),
         displayColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid display colour').nullable().optional(),
         alsoAddToClient: z.boolean().optional(),
+        // Link this project recipient to an existing ClientRecipient instead of
+        // resolving one by email. Verified against the project's client server-side.
+        clientRecipientId: cuidSchema.nullable().optional(),
         isPrimary: z.boolean().optional(),
         receiveNotifications: z.boolean().optional(),
       })

@@ -51,7 +51,17 @@ async function main() {
       client: { sourceName: realClient.name, matchedClientId: realClient.id, matchConfidence: 'exact', proposedNewClient: null },
       recipients: [{ name: 'Jane Doe', email: 'jane@acme.example', isPrimary: true }],
       startDate: '2026-07-20',
-      keyDates: [{ type: 'SHOOTING', date: '2026-07-28', notes: null }],
+      keyDates: [
+        {
+          type: 'SHOOTING',
+          date: '2026-07-28',
+          allDay: false,
+          startTime: '07:30',
+          finishTime: '17:00',
+          reminderDaysBefore: null,
+          notes: null,
+        },
+      ],
       schedule: { useStandardTemplate: true, anchorDate: '2026-07-28', includeWeekends: false, extraTasks: [] },
     },
     sales: {

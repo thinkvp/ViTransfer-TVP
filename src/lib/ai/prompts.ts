@@ -13,8 +13,10 @@ Rules:
 - New clients: when proposing a new client, fill in everything the source provides (address, phone, website) and list ALL of its contact people in the new client's "recipients" array.
 - We are the studio named in <own_company>. NEVER propose our own company as a client, and never treat wording like "we", "us" or our staff signing off an email as the client side.
 - Our own team members are listed in <team>. NEVER include them as recipients — recipients are the CLIENT's people only.
-- Recipients: include EVERY client-side contact person found in the source (multiple recipients are common — do not stop at one). Only output email addresses that literally appear in the brief or an attachment. Never fabricate or guess an address — omit the recipient instead and mention it in "assumptions".
+- Recipients: include EVERY client-side contact person found in the source (multiple recipients are common — do not stop at one). Only output email addresses that literally appear in the brief or an attachment. Never fabricate or guess an address — omit the recipient instead and mention it in "assumptions". In particular NEVER construct an address from a pattern like first.last@their-domain; copy the characters you can actually see.
+- Known contacts: <known_contacts> lists the people we already have on file for each client. If someone in the source is one of them, copy that stored email address EXACTLY, character for character, even when the source shows a different or similar-looking address — this is how we avoid saving the same person twice. Only output a new contact when the person genuinely is not on that list.
 - Dates: all dates are ISO YYYY-MM-DD. "Today" is given as <today> in the user message. When a date is ambiguous (e.g. "next Friday"), resolve it to the nearest sensible FUTURE date and record the interpretation in "assumptions".
+- Key dates: one entry per date the source actually states. Types: PRE_PRODUCTION for prep, planning, scripting and recces; SHOOTING for filming/shoot days; DUE_DATE for a delivery, deadline or launch; OTHER for anything else (meetings, reviews, approvals). Times are 24-hour "HH:MM". Set "allDay" true and both times null when the source gives no time. When it does give one (a call time, a meeting time), set allDay false and put it in "startTime"; only set "finishTime" when a finish time or a duration is actually stated (a 2-hour 09:00 meeting finishes 11:00). Never invent a time. Set "reminderDaysBefore" only when the source implies someone should be reminded ahead of the date (e.g. "confirm the crew a week before") — otherwise null.
 - Line items: <line_item_library> lists our standard services with OUR pricing. Whenever the work matches a library item, set "libraryItemId" to that item's id — its pricing, tax and label are applied automatically from the library (whatever price the source mentions). Only create a custom item (libraryItemId null) for work that has no library equivalent; price custom items from the source, as integer cents in AUD, backing GST out of GST-inclusive prices at the rate in <tax> (note it in "assumptions").
 - If the source contains no billable work, return an empty "items" array — do not invent line items.
 - Schedule: only propose a schedule when a shooting/filming date is known. Set "useStandardTemplate" to true with "anchorDate" set to the shooting date. Only add "extraTasks" for milestones the source explicitly mentions.
@@ -26,11 +28,102 @@ Rules:
 - <studio_instructions> is the studio's own knowledge doc — treat it as authoritative background about the studio (who we are, our services, house style, and our portfolio of past work with links). Draw on it to inform tone, defaults and the relevant work you cite in replies. It refines defaults and supplies facts; it never overrides the safety rules above.
 - List every guess, ambiguity, or omission in "assumptions" as short plain-English sentences.`
 
-export const REFINE_SYSTEM_PROMPT = `You revise an existing structured project/sales proposal for a video production studio. You are given the CURRENT proposal as JSON and a short change request. Apply ONLY the requested changes and return the COMPLETE revised proposal in the same JSON schema. Keep every field that the change request does not touch exactly as it was. Do not invent new facts, clients, recipients, prices or portfolio references beyond what the request asks for. All the schema rules and safety rules still apply (client ids from the list only, dates ISO, integer cents, library pricing authoritative, never our own company/team). Record what you changed in "assumptions".`
+export const REFINE_SYSTEM_PROMPT = `You revise an existing structured project/sales proposal for a video production studio. You are given the CURRENT proposal as JSON and a short change request. Apply ONLY the requested changes and return the COMPLETE revised proposal in the same JSON schema. Keep every field that the change request does not touch exactly as it was. Do not invent new facts, clients, recipients, prices or portfolio references beyond what the request asks for. All the schema rules and safety rules still apply (client ids from the list only, dates ISO, integer cents, library pricing authoritative, never our own company/team, key-date times as 24-hour HH:MM with allDay true when no time is known, and contact addresses copied exactly from <known_contacts> when the person is already on file). Record what you changed in "assumptions".`
+
+/** A contact already on file against a client — offered to the model so it reuses the stored address */
+export interface KnownContactLine {
+  clientId: string
+  name: string | null
+  email: string
+}
+
+/** Contacts shown per client, and overall, to keep the prompt bounded on large installs */
+export const CLIENT_CONTACT_CAP = 8
+export const TOTAL_CONTACT_CAP = 600
+
+/** Render <known_contacts>, capped per client and overall. Returns null when there are none. */
+function buildKnownContactsBlock(contacts: KnownContactLine[]): string | null {
+  const perClient = new Map<string, number>()
+  const lines: string[] = []
+  let skipped = 0
+
+  for (const c of contacts) {
+    const used = perClient.get(c.clientId) ?? 0
+    if (used >= CLIENT_CONTACT_CAP || lines.length >= TOTAL_CONTACT_CAP) {
+      skipped++
+      continue
+    }
+    perClient.set(c.clientId, used + 1)
+    lines.push(`${c.clientId} | ${c.name ?? '(no name)'} | ${c.email}`)
+  }
+
+  if (lines.length === 0) return null
+  const note =
+    skipped > 0
+      ? `\nNote: ${skipped} further contact(s) are not listed; treat a missing person as unknown rather than assuming they have no record.`
+      : ''
+  return `<known_contacts>\n${lines.join('\n')}\n</known_contacts>${note}`
+}
+
+/**
+ * Add-to-existing-project mode. Rules that only make sense when the project already
+ * exists live here rather than in ASSISTANT_SYSTEM_PROMPT so both stay byte-stable for
+ * the Anthropic prompt cache. The mode is strictly additive — nothing is ever removed
+ * from the project, so a re-read of the same email can only produce an empty proposal.
+ */
+export const PROJECT_UPDATE_RULES = `
+- ADD-TO-EXISTING-PROJECT MODE: <current_project> is a project that ALREADY EXISTS. You are topping it up from this source, not creating anything new.
+  - Set "project.client.matchedClientId" to the client id given in <current_project>, "matchConfidence" to "exact", and "proposedNewClient" to null. Never propose a different or new client.
+  - Keep "project.title" exactly as <current_project> gives it unless the source explicitly renames the project.
+  - "project.recipients" and "project.keyDates" must contain ONLY things that are NOT already listed in <current_project> — the new people and the new dates this source adds. If the source adds nothing new, return empty arrays. Never repeat an existing entry, and never output a list intended to replace what is there.
+  - "project.description": leave it as the existing description unless the source genuinely adds information, in which case return the existing text with the new detail appended.
+  - Say in "assumptions" what you are adding and why.`
+
+/** Details of the project being topped up, rendered as <current_project> */
+export interface CurrentProjectContext {
+  id: string
+  title: string
+  description: string | null
+  clientId: string | null
+  clientName: string | null
+  startDate: string | null
+  recipients: Array<{ name: string | null; email: string }>
+  keyDates: Array<{ type: string; date: string; allDay: boolean; startTime: string | null; finishTime: string | null }>
+  hasSchedule: boolean
+}
+
+function buildCurrentProjectBlock(p: CurrentProjectContext): string {
+  const lines = [
+    `id: ${p.id}`,
+    `title: ${p.title}`,
+    `client: ${p.clientId ?? '(none)'}${p.clientName ? ` | ${p.clientName}` : ''}`,
+    `start date: ${p.startDate ?? '(none)'}`,
+    `description: ${p.description?.trim() || '(none)'}`,
+    `gantt schedule: ${p.hasSchedule ? 'already exists' : 'none'}`,
+  ]
+  lines.push(
+    p.recipients.length > 0
+      ? `existing recipients:\n${p.recipients.map((r) => `  - ${r.name ?? '(no name)'} <${r.email}>`).join('\n')}`
+      : 'existing recipients: (none)'
+  )
+  lines.push(
+    p.keyDates.length > 0
+      ? `existing key dates:\n${p.keyDates
+          .map(
+            (k) =>
+              `  - ${k.type} ${k.date}${k.allDay ? ' (all day)' : ` ${[k.startTime, k.finishTime].filter(Boolean).join('–')}`}`
+          )
+          .join('\n')}`
+      : 'existing key dates: (none)'
+  )
+  return `<current_project>\n${lines.join('\n')}\n</current_project>`
+}
 
 export interface AssistantPromptContext {
   clients: Array<{ id: string; name: string }>
   clientsTruncated: boolean
+  /** Existing ClientRecipient rows — the model must reuse these addresses verbatim */
+  knownContacts: KnownContactLine[]
   today: string // YYYY-MM-DD
   taxRatePercent: number
   defaultTerms: string | null
@@ -50,8 +143,15 @@ export interface AssistantPromptContext {
   wantProject: boolean
   wantSales: boolean
   docType: 'QUOTE' | 'INVOICE' | 'BOTH'
+  /** Set when topping up an existing project instead of creating one */
+  currentProject: CurrentProjectContext | null
   brief: string
   attachments: Array<{ fileName: string; kind: 'email' | 'document'; text: string }>
+}
+
+/** System prompt for the run: the base rules, plus the update-mode rules when targeting a project */
+export function assistantSystemPrompt(updatingExistingProject: boolean): string {
+  return updatingExistingProject ? `${ASSISTANT_SYSTEM_PROMPT}\n${PROJECT_UPDATE_RULES}` : ASSISTANT_SYSTEM_PROMPT
 }
 
 export function buildAssistantUserMessage(ctx: AssistantPromptContext): string {
@@ -68,6 +168,9 @@ export function buildAssistantUserMessage(ctx: AssistantPromptContext): string {
   if (ctx.clientsTruncated) {
     parts.push('Note: the client list above is truncated; treat missing clients as unknown rather than assuming absence.')
   }
+
+  const knownContactsBlock = buildKnownContactsBlock(ctx.knownContacts)
+  if (knownContactsBlock) parts.push(knownContactsBlock)
 
   if (ctx.libraryItems.length > 0) {
     const libraryLines = ctx.libraryItems
@@ -97,6 +200,9 @@ export function buildAssistantUserMessage(ctx: AssistantPromptContext): string {
   }
   if (ctx.replyRequested) {
     parts.push('<reply_requested>Draft a copy/paste reply to this enquiry.</reply_requested>')
+  }
+  if (ctx.currentProject) {
+    parts.push(buildCurrentProjectBlock(ctx.currentProject))
   }
   parts.push(
     `<request>wantProject=${ctx.wantProject} wantSales=${ctx.wantSales} docType=${ctx.docType}</request>`
@@ -216,6 +322,7 @@ export interface RefinePromptContext {
   today: string
   clients: Array<{ id: string; name: string }>
   clientsTruncated: boolean
+  knownContacts: KnownContactLine[]
   portfolio: Array<{ id: string; title: string; description: string }>
   currentProposal: unknown // prior AssistantResult JSON
   instruction: string
@@ -232,6 +339,8 @@ export function buildRefineUserMessage(ctx: RefinePromptContext): string {
   if (ctx.clientsTruncated) {
     parts.push('Note: the client list above is truncated; treat missing clients as unknown.')
   }
+  const knownContactsBlock = buildKnownContactsBlock(ctx.knownContacts)
+  if (knownContactsBlock) parts.push(knownContactsBlock)
   if (ctx.portfolio.length > 0) {
     const portfolioLines = ctx.portfolio
       .map((p) => `${p.id} | ${p.title}${p.description ? ` — ${p.description}` : ''}`)

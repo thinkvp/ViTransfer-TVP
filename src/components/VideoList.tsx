@@ -8,9 +8,8 @@ import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Upload, Check, X, ChevronDown, ChevronUp, Eye, Download, Captions, Loader2, FileClock } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Check, X, ChevronDown, ChevronUp, Eye, Download, Captions, Loader2, FileClock } from 'lucide-react'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
-import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
 import { VideoAssetList } from './VideoAssetList'
 import { withDownloadTracking } from '@/lib/download-url'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -53,7 +52,6 @@ export default function VideoList({
   const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
   const [savingAllowApprovalId, setSavingAllowApprovalId] = useState<string | null>(null)
   const [savingRevisionRequestedId, setSavingRevisionRequestedId] = useState<string | null>(null)
-  const [uploadingAssetsFor, setUploadingAssetsFor] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
   const [expandedVideoIds, setExpandedVideoIds] = useState<string[]>([])
   const [pendingDeleteVideoId, setPendingDeleteVideoId] = useState<string | null>(null)
@@ -97,13 +95,6 @@ export default function VideoList({
     setExpandedVideoIds((prev) =>
       prev.includes(videoId) ? prev.filter((id) => id !== videoId) : [...prev, videoId]
     )
-
-    // If a panel is being collapsed, also hide the asset uploader for that version.
-    setUploadingAssetsFor((prev) => (prev === videoId ? null : prev))
-  }
-
-  const ensureExpanded = (videoId: string) => {
-    setExpandedVideoIds((prev) => (prev.includes(videoId) ? prev : [...prev, videoId]))
   }
 
   const handleDelete = (videoId: string) => {
@@ -510,23 +501,6 @@ export default function VideoList({
                     <FileClock className="w-4 h-4" />
                   </Button>
                 )}
-                {isAdmin && video.status === 'READY' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => {
-                      setUploadingAssetsFor((prev) => {
-                        const willOpen = prev !== video.id
-                        if (willOpen) ensureExpanded(video.id)
-                        return willOpen ? video.id : null
-                      })
-                    }}
-                    className="text-primary hover:text-primary/80 hover:bg-primary/10"
-                    title="Upload Assets"
-                  >
-                    <Upload className="w-4 h-4" />
-                  </Button>
-                )}
                 {isAdmin && effectiveCanDelete && (
                   <Button
                     variant="ghost"
@@ -757,20 +731,6 @@ export default function VideoList({
               )}
             </div>
             )
-          )}
-
-          {/* Asset upload section */}
-          {isAdmin && isExpanded && uploadingAssetsFor === video.id && video.status === 'READY' && (
-            <div className="mt-4 pt-4 border-t space-y-4">
-              <VideoAssetUploadQueue
-                videoId={video.id}
-                maxConcurrent={3}
-                onUploadComplete={() => {
-                  setAssetRefreshTrigger(prev => prev + 1) // Trigger asset list refresh
-                  onRefresh?.()
-                }}
-              />
-            </div>
           )}
 
           {/* Asset list section - always visible for READY videos if admin */}

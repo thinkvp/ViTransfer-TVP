@@ -10,6 +10,7 @@ import { getSafeguardLimits } from '@/lib/settings'
 import { getRawStoragePath } from '@/lib/storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { parseProjectStartDateInput } from '@/lib/project-start-date'
+import { generateRandomHexDisplayColor } from '@/lib/display-color'
 import { sendPushNotification } from '@/lib/push-notifications'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
@@ -383,6 +384,7 @@ export async function POST(request: NextRequest) {
           name: normalizeName(r?.name),
           displayColor: normalizeDisplayColor(r?.displayColor),
           alsoAddToClient: Boolean(r?.alsoAddToClient),
+          clientRecipientId: typeof r?.clientRecipientId === 'string' && r.clientRecipientId ? r.clientRecipientId : null,
           isPrimary: Boolean(r?.isPrimary),
           receiveNotifications: r?.receiveNotifications !== false,
         }))
@@ -499,10 +501,86 @@ export async function POST(request: NextRequest) {
         })
       }
 
+      // Resolve each recipient's Client-profile contact BEFORE creating the project
+      // recipients, so the rows can carry clientRecipientId. Leaving it null orphans the
+      // project recipient from the client contact it plainly is (same resolve-or-create
+      // semantics as addRecipient() in src/lib/recipients.ts).
+      const clientRecipientIdByIndex = new Map<number, string>()
+      if (newProject.clientId && effectiveRecipients.length > 0) {
+        const clientId = newProject.clientId
+
+        // Contact ids supplied by the caller (the AI assistant reusing a known contact) —
+        // only honoured when they really belong to this client.
+        const requestedIds = Array.from(
+          new Set(effectiveRecipients.map((r) => r.clientRecipientId).filter((v): v is string => !!v))
+        )
+        const validRequestedIds = new Set(
+          requestedIds.length > 0
+            ? (
+                await tx.clientRecipient.findMany({
+                  where: { id: { in: requestedIds }, clientId },
+                  select: { id: true },
+                })
+              ).map((r) => r.id)
+            : []
+        )
+
+        const toAdd = effectiveRecipients.filter((r) => r.alsoAddToClient && r.email)
+        const idByEmail = new Map<string, string>()
+        if (toAdd.length > 0) {
+          const emails = Array.from(new Set(toAdd.map((r) => String(r.email || '').trim()).filter(Boolean)))
+          const existing = await tx.clientRecipient.findMany({
+            where: { clientId, email: { in: emails } },
+            select: { id: true, email: true },
+          })
+          for (const row of existing) idByEmail.set(String(row.email || '').trim(), row.id)
+
+          for (const r of toAdd) {
+            const email = String(r.email).trim()
+            if (!email || idByEmail.has(email)) continue
+            const created = await tx.clientRecipient.create({
+              data: {
+                clientId,
+                email,
+                name: r.name,
+                displayColor: r.displayColor ?? generateRandomHexDisplayColor(),
+                isPrimary: false,
+                receiveNotifications: true,
+              },
+              select: { id: true },
+            })
+            idByEmail.set(email, created.id)
+          }
+
+          // Refresh details on contacts we already held — but only fields the caller
+          // actually supplied. Writing `displayColor: null` unconditionally used to wipe
+          // an existing contact's colour whenever the caller sent none.
+          for (const r of toAdd) {
+            if (!r.displayColor && !r.name) continue
+            await tx.clientRecipient.updateMany({
+              where: { clientId, email: String(r.email).trim() },
+              data: {
+                ...(r.displayColor ? { displayColor: r.displayColor } : {}),
+                ...(r.name ? { name: r.name } : {}),
+              },
+            })
+          }
+        }
+
+        effectiveRecipients.forEach((r, i) => {
+          const explicit =
+            r.clientRecipientId && validRequestedIds.has(r.clientRecipientId) ? r.clientRecipientId : null
+          const byEmail = r.alsoAddToClient && r.email ? idByEmail.get(String(r.email).trim()) ?? null : null
+          const resolved = explicit ?? byEmail
+          if (resolved) clientRecipientIdByIndex.set(i, resolved)
+        })
+      }
+
       if (effectiveRecipients.length > 0) {
         await tx.projectRecipient.createMany({
-          data: effectiveRecipients.map((r) => ({
+          data: effectiveRecipients.map((r, i) => ({
             projectId: newProject.id,
+            clientRecipientId: clientRecipientIdByIndex.get(i) ?? null,
             email: r.email,
             name: r.name,
             displayColor: r.displayColor ?? null,
@@ -510,45 +588,6 @@ export async function POST(request: NextRequest) {
             receiveNotifications: r.receiveNotifications,
           })),
         })
-      }
-
-      // Optionally add recipients to the Client profile (matched by email)
-      if (newProject.clientId) {
-        const toAdd = effectiveRecipients.filter((r) => r.alsoAddToClient && r.email)
-        if (toAdd.length > 0) {
-          const emails = Array.from(new Set(toAdd.map((r) => String(r.email || '').trim()).filter(Boolean)))
-          const existing = await tx.clientRecipient.findMany({
-            where: { clientId: newProject.clientId, email: { in: emails } },
-            select: { email: true },
-          })
-          const existingSet = new Set(existing.map((r) => String(r.email || '').trim()))
-
-          const missing = toAdd.filter((r) => r.email && !existingSet.has(String(r.email).trim()))
-          if (missing.length > 0) {
-            await tx.clientRecipient.createMany({
-              data: missing.map((r) => ({
-                clientId: newProject.clientId as string,
-                email: r.email,
-                name: r.name,
-                displayColor: r.displayColor ?? null,
-                isPrimary: false,
-                receiveNotifications: true,
-              })),
-            })
-          }
-
-          // If already present, sync displayColor/name best-effort
-          for (const r of toAdd) {
-            if (!r.email) continue
-            await tx.clientRecipient.updateMany({
-              where: { clientId: newProject.clientId, email: r.email },
-              data: {
-                displayColor: r.displayColor ?? null,
-                ...(r.name ? { name: r.name } : {}),
-              },
-            })
-          }
-        }
       }
 
       return newProject

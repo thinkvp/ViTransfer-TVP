@@ -6,6 +6,7 @@ import { z } from 'zod'
 
 export const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 
 export const RecipientProposalSchema = z.object({
   name: z.string(),
@@ -35,6 +36,14 @@ export const ClientMatchSchema = z.object({
 export const KeyDateProposalSchema = z.object({
   type: z.enum(['PRE_PRODUCTION', 'SHOOTING', 'DUE_DATE', 'OTHER']),
   date: z.string(), // YYYY-MM-DD
+  // Times are HH:MM (24h) strings like the DB columns — allDay true means "no time known".
+  // applyProposalGuards enforces the format and the allDay/times consistency.
+  allDay: z.boolean(),
+  startTime: z.string().nullable(),
+  finishTime: z.string().nullable(),
+  // Internal email reminder N days before the date; the model never emits a datetime
+  // (the review card turns this into reminderAt). Null = no reminder.
+  reminderDaysBefore: z.number().nullable(),
   notes: z.string().nullable(),
 })
 
@@ -129,6 +138,25 @@ export interface ResolvedPortfolioPick {
   url: string
 }
 
+/** A contact already stored against a client (ClientRecipient) — the guard's reuse source */
+export interface KnownContact {
+  id: string
+  clientId: string
+  name: string | null
+  email: string
+}
+
+/**
+ * A recipient after guard resolution. `clientRecipientId` is set when the proposal was
+ * matched to an existing ClientRecipient — the review card renders it as an existing
+ * contact and passes the id through so the ProjectRecipient links to it instead of a
+ * duplicate being created. Follows the ResolvedSalesLineItem precedent: the model never
+ * sees or fills these fields.
+ */
+export interface ResolvedRecipient extends RecipientProposal {
+  clientRecipientId?: string | null
+}
+
 /** The guard attaches resolved portfolio picks + signature to the reply for the UI to render */
 export interface ResolvedReplyDraft extends ReplyDraft {
   portfolio: ResolvedPortfolioPick[]
@@ -170,6 +198,31 @@ export interface ProposalGuardContext {
   ownCompanyNames: string[]
   /** Our own team's emails (Users) — never client recipients */
   teamEmails: Set<string>
+  /**
+   * Existing ClientRecipient rows keyed by client id. A proposed contact is resolved
+   * against these so a known person is reused (with their stored address) rather than
+   * duplicated under a reconstructed email.
+   */
+  contactsByClientId: Map<string, KnownContact[]>
+  /**
+   * The brief plus every attachment's extracted text, verbatim. Any recipient email the
+   * model emits must appear in here — the prompt says "only addresses that literally
+   * appear in the source", and this is what enforces it (same idea as studioKnowledge
+   * for reply URLs). Empty string disables the check.
+   */
+  sourceText: string
+  /**
+   * Set in add-to-existing-project mode. The client is pinned to the project's, and
+   * anything the project already holds is dropped from the proposal so committing it
+   * can only ever add. Prompt rules say the same; this enforces it.
+   */
+  targetProject?: {
+    id: string
+    clientId: string | null
+    existingRecipientEmails: Set<string>
+    /** `TYPE|YYYY-MM-DD` for each key date already on the project */
+    existingKeyDateKeys: Set<string>
+  } | null
   /** Line Item Library keyed by id — authoritative pricing/labels */
   libraryById: Map<string, LibraryItem>
   /** Portfolio pieces keyed by id — authoritative title/url for reply links */
@@ -258,6 +311,20 @@ function significantTokens(value: string): Set<string> {
  * job is only to catch a confidently-wrong match (e.g. source "Etex Australia" → "Simba
  * Industries"), not to adjudicate close calls. Returns true when it can't tell.
  */
+/**
+ * Whether a proposed contact is the same person as one we already store for this client.
+ * Deliberately STRICT, the mirror image of clientNamesRoughlyMatch: full normalised-name
+ * equality and at least two name parts, so "Nicholas Davis" reuses the stored contact but
+ * "Nick Davis" or a bare "Accounts" never silently rewrites someone else's address.
+ */
+function findKnownContactByName(known: KnownContact[], proposedName: string): KnownContact | null {
+  const target = normalizeName(proposedName)
+  if (!target || proposedName.trim().split(/\s+/).length < 2) return null
+  const hits = known.filter((c) => c.name && normalizeName(c.name) === target)
+  // Ambiguous (two stored contacts share the name) — leave it to the human reviewer
+  return hits.length === 1 ? hits[0] : null
+}
+
 function clientNamesRoughlyMatch(sourceName: string, matchedName: string): boolean {
   const a = normalizeName(sourceName)
   const b = normalizeName(matchedName)
@@ -284,22 +351,77 @@ export function applyProposalGuards(input: AssistantResult, ctx: ProposalGuardCo
   const ownCompanySet = new Set(ctx.ownCompanyNames.map(normalizeName).filter(Boolean))
   const teamEmails = new Set(Array.from(ctx.teamEmails, (e) => e.trim().toLowerCase()))
 
-  const guardRecipients = (recipients: RecipientProposal[], label: string): RecipientProposal[] =>
-    recipients.filter((r) => {
-      const email = r.email.trim().toLowerCase()
+  // Lowercased brief + attachments. Empty (e.g. a refine pass, which resends no source)
+  // disables the verbatim check rather than dropping every recipient.
+  const sourceHaystack = (ctx.sourceText ?? '').toLowerCase()
+  const emailAppearsInSource = (email: string) => sourceHaystack === '' || sourceHaystack.includes(email)
+
+  /**
+   * Validate, de-fabricate and de-duplicate a recipient list. `clientId` is the client the
+   * recipients will end up under (null for a brand-new client, which has no stored contacts).
+   */
+  const guardRecipients = (
+    recipients: RecipientProposal[],
+    label: string,
+    clientId: string | null
+  ): RecipientProposal[] => {
+    const known = (clientId ? ctx.contactsByClientId.get(clientId) : null) ?? []
+    const knownByEmail = new Map(known.map((c) => [c.email.trim().toLowerCase(), c]))
+    const kept: RecipientProposal[] = []
+    const seen = new Set<string>()
+
+    for (const raw of recipients) {
+      const r = raw as ResolvedRecipient
+      let email = r.email.trim().toLowerCase()
+
       if (!EMAIL_RE.test(email)) {
         note(`${label}: recipient "${r.name}" dropped — "${r.email}" is not a valid email.`)
-        return false
+        continue
       }
       if (teamEmails.has(email)) {
         note(`${label}: recipient "${r.name}" <${email}> dropped — that's one of our own team members.`)
-        return false
+        continue
       }
-      r.email = email
-      return true
-    })
 
-  const guardClient = (client: ClientMatch, label: string) => {
+      // Reuse a contact we already hold for this client: exact address first, then the
+      // same person under a different address (the model reconstructing first.last@domain).
+      let match = knownByEmail.get(email) ?? null
+      if (!match) {
+        const byName = findKnownContactByName(known, r.name)
+        if (byName) {
+          note(
+            `${label}: "${r.name}" <${email}> matched the existing contact ${byName.name ?? byName.email} <${byName.email}> by name — using the stored address so a second contact isn't created.`
+          )
+          email = byName.email.trim().toLowerCase()
+          match = byName
+        }
+      }
+
+      // Anti-fabrication backstop. An address we already hold is trusted by definition;
+      // anything else must literally appear in the brief or an attachment.
+      if (!match && !emailAppearsInSource(email)) {
+        note(
+          `${label}: recipient "${r.name}" <${email}> dropped — that address doesn't appear anywhere in the source, so it looks invented. Add them by hand if the contact is real.`
+        )
+        continue
+      }
+
+      if (seen.has(email)) {
+        note(`${label}: duplicate recipient <${email}> dropped.`)
+        continue
+      }
+      seen.add(email)
+
+      r.email = email
+      r.clientRecipientId = match ? match.id : null
+      kept.push(r)
+    }
+
+    return kept
+  }
+
+  /** Validates the client match and returns the client id the recipients belong to (null = new client). */
+  const guardClient = (client: ClientMatch, label: string): string | null => {
     if (client.matchedClientId && !ctx.validClientIds.has(client.matchedClientId)) {
       note(`${label}: matched client id "${client.matchedClientId}" is not a known client — cleared.`)
       client.matchedClientId = null
@@ -336,28 +458,94 @@ export function applyProposalGuards(input: AssistantResult, ctx: ProposalGuardCo
       } else {
         client.proposedNewClient.recipients = guardRecipients(
           client.proposedNewClient.recipients,
-          `${label} (new client)`
+          `${label} (new client)`,
+          null
         )
       }
     }
+
+    return client.matchedClientId
   }
 
   if (result.project) {
     const p = result.project
-    guardClient(p.client, 'Project')
+    const target = ctx.targetProject ?? null
+
+    // Topping up an existing project: the client is whatever the project already has,
+    // no matter what the model decided.
+    if (target) {
+      if (p.client.matchedClientId !== target.clientId) {
+        note(`Project: the client is fixed to the existing project's client — the proposed match was ignored.`)
+      }
+      p.client.matchedClientId = target.clientId
+      p.client.matchConfidence = target.clientId ? 'exact' : 'none'
+      p.client.proposedNewClient = null
+      // The client came from the project, not from reading the source, so the
+      // source-name sanity check below must not second-guess it.
+      p.client.sourceName = null
+    }
+
+    const projectClientId = guardClient(p.client, 'Project')
 
     if (p.startDate && !ISO_DATE_RE.test(p.startDate)) {
       note(`Project: invalid start date "${p.startDate}" — cleared.`)
       p.startDate = null
     }
 
-    p.recipients = guardRecipients(p.recipients, 'Project')
+    p.recipients = guardRecipients(p.recipients, 'Project', projectClientId)
+    if (target) {
+      p.recipients = p.recipients.filter((r) => {
+        if (target.existingRecipientEmails.has(r.email)) {
+          note(`Project: <${r.email}> is already on this project — not added again.`)
+          return false
+        }
+        return true
+      })
+    }
 
     p.keyDates = p.keyDates.filter((kd) => {
       if (!ISO_DATE_RE.test(kd.date)) {
         note(`Project: key date "${kd.type}" dropped — invalid date "${kd.date}".`)
         return false
       }
+      if (target && target.existingKeyDateKeys.has(`${kd.type}|${kd.date}`)) {
+        note(`Project: key date ${kd.type} on ${kd.date} is already on this project — not added again.`)
+        return false
+      }
+
+      const label = `${kd.type} on ${kd.date}`
+      if (kd.startTime && !TIME_RE.test(kd.startTime)) {
+        note(`Project: key date ${label} — invalid start time "${kd.startTime}", cleared.`)
+        kd.startTime = null
+      }
+      if (kd.finishTime && !TIME_RE.test(kd.finishTime)) {
+        note(`Project: key date ${label} — invalid finish time "${kd.finishTime}", cleared.`)
+        kd.finishTime = null
+      }
+      // A finish without a start, or one that isn't after it, is meaningless
+      if (kd.finishTime && (!kd.startTime || kd.finishTime <= kd.startTime)) {
+        note(`Project: key date ${label} — finish time "${kd.finishTime}" isn't after the start, cleared.`)
+        kd.finishTime = null
+      }
+      // Keep allDay and the times consistent. A timed entry with no start would render as
+      // all-day in the calendar feed anyway, so make that explicit here.
+      if (kd.allDay) {
+        kd.startTime = null
+        kd.finishTime = null
+      } else if (!kd.startTime) {
+        kd.allDay = true
+      }
+
+      if (kd.reminderDaysBefore != null) {
+        const days = Math.trunc(kd.reminderDaysBefore)
+        if (!Number.isFinite(days) || days < 0 || days > 90) {
+          note(`Project: key date ${label} — reminder offset "${kd.reminderDaysBefore}" out of range, cleared.`)
+          kd.reminderDaysBefore = null
+        } else {
+          kd.reminderDaysBefore = days
+        }
+      }
+
       return true
     })
 
@@ -380,6 +568,7 @@ export function applyProposalGuards(input: AssistantResult, ctx: ProposalGuardCo
   if (result.sales) {
     const s = result.sales
     guardClient(s.client, 'Sales')
+    // Sales documents carry no recipient list of their own — only the client match.
 
     if (!ISO_DATE_RE.test(s.issueDate)) {
       note(`Sales: invalid issue date "${s.issueDate}" — replaced with today (${ctx.today}).`)

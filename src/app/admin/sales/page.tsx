@@ -24,6 +24,7 @@ export default function SalesDashboardPage() {
   const [tick, setTick] = useState(0)
   const [nowIso, setNowIso] = useState<string | null>(null)
   const [clientNameById, setClientNameById] = useState<Record<string, string>>({})
+  const [clientNamesLoaded, setClientNamesLoaded] = useState(false)
 
   const [loading, setLoading] = useState(true)
 
@@ -98,6 +99,9 @@ export default function SalesDashboardPage() {
     const run = async () => {
       const clients = await fetchClientOptions().catch(() => [])
       setClientNameById(Object.fromEntries(clients.map((c) => [c.id, c.name])))
+      // Flagged separately so the Clients Overview leaderboard can wait for names
+      // rather than flashing "Unknown client" — and still resolves if the lookup failed.
+      setClientNamesLoaded(true)
     }
     void run()
   }, [])
@@ -332,7 +336,13 @@ export default function SalesDashboardPage() {
         </CardContent>
       </Card>
 
-      <SalesDashboardCharts rollup={rollup} settings={settings} nowIso={nowIso} />
+      <SalesDashboardCharts
+        rollup={rollup}
+        clientNameById={clientNameById}
+        clientNamesLoaded={clientNamesLoaded}
+        settings={settings}
+        nowIso={nowIso}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         <Card>

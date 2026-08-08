@@ -17,7 +17,7 @@ import {
   type ResolvedExpenseResult,
 } from '../lib/ai/expense-schemas'
 import {
-  ASSISTANT_SYSTEM_PROMPT,
+  assistantSystemPrompt,
   REFINE_SYSTEM_PROMPT,
   EXPENSE_SYSTEM_PROMPT,
   EXPENSE_REFINE_SYSTEM_PROMPT,
@@ -25,12 +25,13 @@ import {
   buildRefineUserMessage,
   buildExpenseUserMessage,
   buildExpenseRefineUserMessage,
+  type CurrentProjectContext,
   type ExpenseAccountOption,
   type ExpenseReceiptPart,
 } from '../lib/ai/prompts'
 import { extractAttachmentText } from '../lib/ai/extraction'
 import { attachmentMimeType, type AiRequestAttachment } from '../lib/ai/attachments'
-import type { LibraryItem } from '../lib/ai/proposal-schemas'
+import type { KnownContact, LibraryItem } from '../lib/ai/proposal-schemas'
 import { getDefaultTaxRatePercent } from '../lib/sales/line-items'
 import { buildHistoricalMappings, loadAccountHistory, suggestAccountFromHistory } from '../lib/accounting/description-match'
 import { processImageBuffer } from '../lib/image-processing'
@@ -38,6 +39,10 @@ import { processImageBuffer } from '../lib/image-processing'
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
 const CLIENT_LIST_CAP = 1000
+// Upper bound on the ClientRecipient rows loaded for reuse; the prompt builder caps
+// what it actually renders (CLIENT_CONTACT_CAP / TOTAL_CONTACT_CAP), but the guards
+// benefit from the full set for the clients we listed.
+const CONTACT_QUERY_CAP = 5000
 const MAX_ERROR_LENGTH = 4000
 
 interface RequestInputMeta {
@@ -46,11 +51,14 @@ interface RequestInputMeta {
   wantReply: boolean
   wantExpense: boolean
   docType: 'QUOTE' | 'INVOICE' | 'BOTH'
+  /** Add-to-existing-project mode; already access-checked by the API route */
+  targetProjectId: string | null
 }
 
 function parseRequestMeta(contextJson: unknown): RequestInputMeta {
   const meta = (contextJson as { request?: Partial<RequestInputMeta> } | null)?.request ?? {}
   return {
+    targetProjectId: typeof meta.targetProjectId === 'string' && meta.targetProjectId ? meta.targetProjectId : null,
     wantProject: meta.wantProject !== false,
     wantSales: meta.wantSales !== false,
     // Reply drafts are opt-in per request (the page "Response" pill), not a global setting
@@ -164,6 +172,30 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
     })
     const clientsTruncated = clients.length > CLIENT_LIST_CAP
     const clientList = clients.slice(0, CLIENT_LIST_CAP)
+
+    // Contacts we already hold for those clients. Shown to the model (so it copies the
+    // stored address instead of reconstructing one) and used by the guards to resolve a
+    // proposed contact onto an existing ClientRecipient rather than duplicating it.
+    const clientIds = clientList.map((c) => c.id)
+    const knownContactRows =
+      clientIds.length > 0
+        ? await prisma.clientRecipient.findMany({
+            where: { clientId: { in: clientIds }, email: { not: null } },
+            select: { id: true, clientId: true, name: true, email: true },
+            orderBy: [{ clientId: 'asc' }, { isPrimary: 'desc' }, { createdAt: 'asc' }],
+            take: CONTACT_QUERY_CAP,
+          })
+        : []
+    const knownContacts = knownContactRows
+      .filter((c): c is typeof c & { email: string } => !!c.email)
+      .map((c) => ({ id: c.id, clientId: c.clientId, name: c.name, email: c.email }))
+    const contactsByClientId = new Map<string, KnownContact[]>()
+    for (const contact of knownContacts) {
+      const list = contactsByClientId.get(contact.clientId)
+      if (list) list.push(contact)
+      else contactsByClientId.set(contact.clientId, [contact])
+    }
+
     const today = new Date().toISOString().slice(0, 10)
     const taxRatePercent = await getDefaultTaxRatePercent(prisma)
     const salesSettings = await prisma.salesSettings
@@ -222,6 +254,62 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
     // Refine mode: revise a prior proposal with a targeted change instead of a fresh extraction
     const refine = parseRefineInput(request.contextJson)
 
+    const promptAttachments = extractedAttachments
+      // 'audio' attachments belong to dictation requests (transcription queue) and never reach this prompt
+      .filter((a): a is typeof a & { kind: 'email' | 'document' } => !!a.extractedText && a.kind !== 'audio')
+      .map((a) => ({ fileName: a.fileName, kind: a.kind, text: a.extractedText as string }))
+    const promptContacts = knownContacts.map((c) => ({ clientId: c.clientId, name: c.name, email: c.email }))
+
+    // Add-to-existing-project mode: what the project already holds, so the model (and the
+    // guards) only ever add to it. The API route already checked the caller may see it.
+    const targetProjectRow = meta.targetProjectId
+      ? await prisma.project.findUnique({
+          where: { id: meta.targetProjectId },
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            clientId: true,
+            startDate: true,
+            client: { select: { name: true } },
+            recipients: { select: { name: true, email: true } },
+            keyDates: { select: { type: true, date: true, allDay: true, startTime: true, finishTime: true } },
+            schedule: { select: { id: true } },
+          },
+        })
+      : null
+
+    const targetProjectRecipients = (targetProjectRow?.recipients ?? [])
+      .filter((r): r is typeof r & { email: string } => !!r.email)
+      .map((r) => ({ name: r.name, email: r.email.trim().toLowerCase() }))
+
+    const currentProject: CurrentProjectContext | null = targetProjectRow
+      ? {
+          id: targetProjectRow.id,
+          title: targetProjectRow.title,
+          description: targetProjectRow.description,
+          clientId: targetProjectRow.clientId,
+          clientName: targetProjectRow.client?.name ?? null,
+          startDate: targetProjectRow.startDate ? targetProjectRow.startDate.toISOString().slice(0, 10) : null,
+          recipients: targetProjectRecipients,
+          keyDates: targetProjectRow.keyDates.map((k) => ({
+            type: k.type,
+            date: k.date,
+            allDay: k.allDay,
+            startTime: k.startTime,
+            finishTime: k.finishTime,
+          })),
+          hasSchedule: targetProjectRow.schedule != null,
+        }
+      : null
+
+    // Everything the model was allowed to read. The guards check each proposed recipient
+    // address against this so an invented one can't reach the review card. A refine pass
+    // resends no source, so it stays empty there and the check is skipped.
+    const sourceText = refine
+      ? ''
+      : [request.prompt ?? '', ...promptAttachments.map((a) => a.text)].join('\n')
+
     let system: string
     let user: string
     if (refine) {
@@ -230,15 +318,18 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
         today,
         clients: clientList,
         clientsTruncated,
+        knownContacts: promptContacts,
         portfolio: [],
         currentProposal: refine.of,
         instruction: refine.instruction,
       })
     } else {
-      system = ASSISTANT_SYSTEM_PROMPT
+      system = assistantSystemPrompt(currentProject != null)
       user = buildAssistantUserMessage({
         clients: clientList,
         clientsTruncated,
+        knownContacts: promptContacts,
+        currentProject,
         today,
         taxRatePercent,
         defaultTerms: salesSettings?.defaultTerms ?? null,
@@ -259,10 +350,7 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
         wantSales: meta.wantSales,
         docType: meta.docType,
         brief: request.prompt || '(no text brief — extract everything from the attachments)',
-        attachments: extractedAttachments
-          // 'audio' attachments belong to dictation requests (transcription queue) and never reach this prompt
-          .filter((a): a is typeof a & { kind: 'email' | 'document' } => !!a.extractedText && a.kind !== 'audio')
-          .map((a) => ({ fileName: a.fileName, kind: a.kind, text: a.extractedText as string })),
+        attachments: promptAttachments,
       })
     }
 
@@ -307,6 +395,16 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
       today,
       ownCompanyNames,
       teamEmails: new Set(teamUsers.map((u) => u.email)),
+      contactsByClientId,
+      sourceText,
+      targetProject: currentProject
+        ? {
+            id: currentProject.id,
+            clientId: currentProject.clientId,
+            existingRecipientEmails: new Set(targetProjectRecipients.map((r) => r.email)),
+            existingKeyDateKeys: new Set(currentProject.keyDates.map((k) => `${k.type}|${k.date}`)),
+          }
+        : null,
       libraryById: new Map(libraryItems.map((item) => [item.id, item])),
       portfolioById: new Map(),
       replySignature,

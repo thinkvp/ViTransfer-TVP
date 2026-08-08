@@ -193,6 +193,30 @@ export function generateSecurePassword(): string {
   return password
 }
 
+/**
+ * Turn a key date + "N days before" offset into the ISO instant the reminder should fire,
+ * in the admin's own timezone (the key-date editor does the same via a local Date).
+ *
+ * The API rejects a reminder in the past, so a computed time that has already gone by is
+ * reported as `alreadyPassed` — callers drop just the reminder rather than losing the key
+ * date with it. Lives here rather than in the card because reading the clock is impure and
+ * the react-hooks purity rule (correctly) bans it inside a component file.
+ */
+export function keyDateReminderIso(
+  date: string,
+  daysBefore: number,
+  time: string
+): { iso: string | null; alreadyPassed: boolean } {
+  const [y, m, d] = date.split('-').map(Number)
+  const [hh, mm] = time.split(':').map(Number)
+  if (!y || !m || !d) return { iso: null, alreadyPassed: false }
+  const dt = new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0)
+  if (isNaN(dt.getTime())) return { iso: null, alreadyPassed: false }
+  dt.setDate(dt.getDate() - Math.max(0, Math.trunc(daysBefore)))
+  if (dt.getTime() <= Date.now()) return { iso: null, alreadyPassed: true }
+  return { iso: dt.toISOString(), alreadyPassed: false }
+}
+
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped'
 
 export interface CreateStep {

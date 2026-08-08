@@ -6,6 +6,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { requireMenuAccess } from '@/lib/rbac-api'
 import { rateLimit } from '@/lib/rate-limit'
 import { getAiAssistantQueue } from '@/lib/queue'
+import { assertProjectAccessOr404 } from '@/lib/project-access'
 import { isSuspiciousFilename, sanitizeFilename } from '@/lib/file-validation'
 import {
   MAX_ATTACHMENTS,
@@ -39,6 +40,8 @@ const createSchema = z.object({
   // Expense (receipt extraction) mode — exclusive of the flags above
   wantExpense: z.boolean().default(false),
   docType: z.enum(['QUOTE', 'INVOICE', 'BOTH']).default('QUOTE'),
+  // Add-to-existing-project mode: the proposal tops up this project instead of creating one
+  targetProjectId: z.string().min(1).max(64).nullable().optional(),
   // Refine mode: prior proposal JSON + the change request lives in `prompt`
   refineOf: z.unknown().optional(),
 })
@@ -112,6 +115,18 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Targeting an existing project must respect the same visibility + assignment rules
+  // as the project's own routes — the assistant menu alone isn't authority over a project.
+  let targetProjectId: string | null = null
+  if (input.targetProjectId) {
+    if (input.wantExpense) {
+      return NextResponse.json({ error: "Expense mode can't target a project." }, { status: 400 })
+    }
+    const project = await assertProjectAccessOr404(input.targetProjectId, authResult)
+    if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 })
+    targetProjectId = project.id
+  }
+
   if (!isRefine && !input.wantExpense && !input.wantProject && !input.wantSales && !input.wantReply) {
     return NextResponse.json({ error: 'Select at least one thing to draft (project, quote, invoice or response).' }, { status: 400 })
   }
@@ -178,6 +193,7 @@ export async function POST(request: NextRequest) {
           wantReply: input.wantReply,
           wantExpense: input.wantExpense,
           docType: input.docType,
+          targetProjectId,
         },
         ...(isRefine ? { refine: { instruction: input.prompt, of: input.refineOf } } : {}),
       } as unknown as Prisma.InputJsonValue,

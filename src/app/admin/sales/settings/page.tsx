@@ -724,7 +724,7 @@ export default function SalesSettingsPage() {
                   <SelectItem value="CASH">Cash (payment date)</SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">Applies to the FY sales KPI and Sales Overview chart.</p>
+              <p className="text-xs text-muted-foreground">Applies to the FY sales KPI and the Sales, Projects and Clients Overview charts. Separate from the Accounting reporting basis.</p>
             </div>
 
             <div className="space-y-2">

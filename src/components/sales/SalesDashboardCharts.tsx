@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Bar,
   CartesianGrid,
@@ -21,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { apiFetch } from '@/lib/api-client'
 import type { SalesRollupResponse } from '@/lib/sales/admin-api'
 import type { SalesSettings } from '@/lib/sales/types'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
@@ -45,14 +44,6 @@ interface PeriodRange {
   end: Date
   months: PeriodMonth[]
   isAllTime?: boolean
-}
-
-interface ProjectChartRow {
-  id: string
-  startDate: string
-  totalInvoicedCents: number
-  clientId: string | null
-  clientName: string | null
 }
 
 function formatCurrencyAmount(
@@ -589,30 +580,138 @@ export function QuotesOverviewChart({ rollup, settings, nowIso }: QuotesOverview
 }
 
 // ---------------------------------------------------------------------------
+// Revenue contributions — shared, basis-aware input for charts 3 and 4
+// ---------------------------------------------------------------------------
+
+/**
+ * One unit of recognised revenue. Under CASH basis that is a payment received
+ * (dated by paymentDate); under ACCRUAL it is an invoice raised (dated by
+ * issueDate). Charts 3 and 4 aggregate these so their period totals reconcile
+ * with the Sales Overview chart, which applies the same rules in
+ * useSalesChartData. Anything keyed off project.startDate is deliberately gone:
+ * it matched neither basis and silently hid clients whose projects were still
+ * open or had started in a prior period.
+ */
+interface RevenueContribution {
+  /** YYYY-MM of the recognition date. */
+  ym: string
+  clientId: string | null
+  /**
+   * Distinct-count key for "how many projects". The project when the document
+   * is linked to one, otherwise the document itself — so unlinked invoices and
+   * ad-hoc payments still count as one unit each rather than vanishing from the
+   * denominator of an average.
+   */
+  unitKey: string
+  amountCents: number
+}
+
+function useRevenueContributions(
+  rollup: SalesRollupResponse | null,
+  settings: SalesSettings,
+  period: PeriodRange,
+): RevenueContribution[] {
+  return useMemo(() => {
+    const invoices = rollup?.invoices ?? []
+    const payments = rollup?.payments ?? []
+    const rollupById = rollup?.invoiceRollupById ?? {}
+    const invoiceById = Object.fromEntries(invoices.map((inv) => [inv.id, inv]))
+    const reportingBasis = getSalesDashboardReportingBasis(settings)
+    const includeGst = salesDashboardIncludesGst(settings)
+    const startMs = period.start.getTime()
+    const endMs = period.end.getTime()
+
+    // All-time keeps every dated document; every other period is a window.
+    const isInPeriod = (ymd: string): boolean => {
+      const ms = new Date(`${ymd}T00:00:00`).getTime()
+      if (Number.isNaN(ms)) return false
+      if (period.isAllTime) return true
+      return ms >= startMs && ms <= endMs
+    }
+
+    const out: RevenueContribution[] = []
+
+    if (reportingBasis === 'CASH') {
+      for (const payment of payments) {
+        if (payment.excludeFromInvoiceBalance) continue
+        if (!isInPeriod(payment.paymentDate)) continue
+
+        const invoice = payment.invoiceId ? invoiceById[payment.invoiceId] : null
+        const amountCents = getPaymentDashboardAmountCents(
+          payment,
+          invoice ?? null,
+          settings.taxRatePercent,
+          includeGst,
+        )
+        if (amountCents <= 0) continue
+
+        out.push({
+          ym: isoToYearMonth(payment.paymentDate),
+          clientId: payment.clientId ?? invoice?.clientId ?? null,
+          unitKey: invoice?.projectId ? `project:${invoice.projectId}` : `payment:${payment.id}`,
+          amountCents,
+        })
+      }
+    } else {
+      for (const inv of invoices) {
+        if (!isInPeriod(inv.issueDate)) continue
+
+        // Returns 0 for VOID invoices, which are cancelled and earn nothing.
+        const amountCents = getInvoiceDashboardAmountCents(
+          inv,
+          settings.taxRatePercent,
+          includeGst,
+          rollupById[inv.id],
+        )
+        if (amountCents <= 0) continue
+
+        out.push({
+          ym: isoToYearMonth(inv.issueDate),
+          clientId: inv.clientId ?? null,
+          unitKey: inv.projectId ? `project:${inv.projectId}` : `invoice:${inv.id}`,
+          amountCents,
+        })
+      }
+    }
+
+    return out
+  }, [rollup, settings, period])
+}
+
+/** Muted one-liner telling the reader which basis produced the numbers. */
+function reportingBasisCaption(settings: SalesSettings): string {
+  const taxWord = settings.taxLabel?.trim() || 'tax'
+  const gst = salesDashboardIncludesGst(settings) ? `incl. ${taxWord}` : `excl. ${taxWord}`
+  return getSalesDashboardReportingBasis(settings) === 'CASH'
+    ? `Cash basis · payments received (${gst})`
+    : `Accrual basis · invoices issued (${gst})`
+}
+
+// ---------------------------------------------------------------------------
 // Chart 3: Projects Overview
 // ---------------------------------------------------------------------------
 
 function useProjectsChartData(
-  projects: ProjectChartRow[],
+  contributions: RevenueContribution[],
   period: PeriodRange,
 ) {
   return useMemo(() => {
-    const countMap = new Map<string, number>()
+    const unitsByMonth = new Map<string, Set<string>>()
     const totalMap = new Map<string, number>()
     for (const m of period.months) {
-      countMap.set(m.key, 0)
+      unitsByMonth.set(m.key, new Set<string>())
       totalMap.set(m.key, 0)
     }
 
-    for (const p of projects) {
-      const ym = isoToYearMonth(p.startDate)
-      if (!countMap.has(ym)) continue
-      countMap.set(ym, (countMap.get(ym) ?? 0) + 1)
-      totalMap.set(ym, (totalMap.get(ym) ?? 0) + p.totalInvoicedCents)
+    for (const c of contributions) {
+      const units = unitsByMonth.get(c.ym)
+      if (!units) continue
+      units.add(c.unitKey)
+      totalMap.set(c.ym, (totalMap.get(c.ym) ?? 0) + c.amountCents)
     }
 
     return period.months.map((m) => {
-      const count = countMap.get(m.key) ?? 0
+      const count = unitsByMonth.get(m.key)?.size ?? 0
       const total = totalMap.get(m.key) ?? 0
       const avg = count > 0 ? Math.round(total / count / 100) : 0
       return {
@@ -621,17 +720,16 @@ function useProjectsChartData(
         avg,
       }
     })
-  }, [projects, period])
+  }, [contributions, period])
 }
 
 interface ProjectsOverviewChartProps {
-  projects: ProjectChartRow[]
-  loading: boolean
+  rollup: SalesRollupResponse | null
   settings: SalesSettings
   nowIso: string | null
 }
 
-export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: ProjectsOverviewChartProps) {
+export function ProjectsOverviewChart({ rollup, settings, nowIso }: ProjectsOverviewChartProps) {
   const [period, setPeriod] = useState<PeriodKey>('fy-to-date')
 
   const now = useMemo(() => (nowIso ? new Date(nowIso) : new Date()), [nowIso])
@@ -639,19 +737,21 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
     () => computePeriod(period, settings.fiscalYearStartMonth ?? 7, now),
     [period, settings.fiscalYearStartMonth, now],
   )
-  const data = useProjectsChartData(projects, periodRange)
+  const contributions = useRevenueContributions(rollup, settings, periodRange)
+  const data = useProjectsChartData(contributions, periodRange)
   const sym = getCurrencySymbol(settings.currencyCode)
 
-  const totalProjects = data.reduce((s, d) => s + d.count, 0)
-  const totalRevCents = projects
-    .filter((p) => {
-      const ym = isoToYearMonth(p.startDate)
-      return periodRange.months.some((m) => m.key === ym)
-    })
-    .reduce((s, p) => s + p.totalInvoicedCents, 0)
+  // Distinct across the whole period — summing the monthly counts would
+  // double-count a project that earned revenue in more than one month.
+  const totalProjects = useMemo(
+    () => new Set(contributions.map((c) => c.unitKey)).size,
+    [contributions],
+  )
+  const totalRevCents = contributions.reduce((s, c) => s + c.amountCents, 0)
   const overallAvg =
     totalProjects > 0 ? Math.round(totalRevCents / totalProjects / 100) : 0
 
+  const loading = rollup === null
   const hasData = data.some((d) => d.count > 0)
 
   return (
@@ -660,9 +760,10 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
         <div>
           <CardTitle className="text-base">Projects Overview</CardTitle>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {totalProjects} closed{' '}
-            {overallAvg > 0 && `· avg ${sym}${overallAvg.toLocaleString('en-AU')} / project`}
+            {totalProjects} {totalProjects === 1 ? 'project' : 'projects'}
+            {overallAvg > 0 && ` · avg ${sym}${overallAvg.toLocaleString('en-AU')} / project`}
           </p>
+          <p className="text-[11px] text-muted-foreground/70 mt-0.5">{reportingBasisCaption(settings)}</p>
         </div>
         <PeriodSelect value={period} onChange={setPeriod} />
       </CardHeader>
@@ -674,7 +775,7 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
           </div>
         ) : !hasData ? (
           <div className="flex items-center justify-center flex-1 text-sm text-muted-foreground">
-            No closed projects for this period
+            No project revenue for this period
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={220}>
@@ -766,44 +867,40 @@ export function ProjectsOverviewChart({ projects, loading, settings, nowIso }: P
 interface ClientLeaderboardRow {
   clientId: string
   clientName: string
+  /** Projects that earned revenue in the period (unlinked documents count as one each). */
   projectCount: number
-  totalInvoicedCents: number
-  avgInvoicedCents: number
+  totalCents: number
+  avgCents: number
 }
 
 function useClientsLeaderboard(
-  projects: ProjectChartRow[],
-  period: PeriodRange,
+  contributions: RevenueContribution[],
+  clientNameById: Record<string, string>,
 ): ClientLeaderboardRow[] {
   return useMemo(() => {
-    const periodMonthSet = new Set(period.months.map((m) => m.key))
-    const map = new Map<string, ClientLeaderboardRow>()
+    const map = new Map<string, { totalCents: number; units: Set<string> }>()
 
-    for (const p of projects) {
-      if (!period.isAllTime) {
-        const ym = isoToYearMonth(p.startDate)
-        if (!periodMonthSet.has(ym)) continue
+    for (const c of contributions) {
+      if (!c.clientId) continue
+      let entry = map.get(c.clientId)
+      if (!entry) {
+        entry = { totalCents: 0, units: new Set<string>() }
+        map.set(c.clientId, entry)
       }
-      if (!p.clientId) continue
-
-      const existing = map.get(p.clientId)
-      if (existing) {
-        existing.projectCount += 1
-        existing.totalInvoicedCents += p.totalInvoicedCents
-        existing.avgInvoicedCents = Math.round(existing.totalInvoicedCents / existing.projectCount)
-      } else {
-        map.set(p.clientId, {
-          clientId: p.clientId,
-          clientName: p.clientName ?? 'Unknown client',
-          projectCount: 1,
-          totalInvoicedCents: p.totalInvoicedCents,
-          avgInvoicedCents: p.totalInvoicedCents,
-        })
-      }
+      entry.totalCents += c.amountCents
+      entry.units.add(c.unitKey)
     }
 
-    return [...map.values()].sort((a, b) => b.totalInvoicedCents - a.totalInvoicedCents)
-  }, [projects, period])
+    return [...map.entries()]
+      .map(([clientId, entry]) => ({
+        clientId,
+        clientName: clientNameById[clientId] ?? 'Unknown client',
+        projectCount: entry.units.size,
+        totalCents: entry.totalCents,
+        avgCents: entry.units.size > 0 ? Math.round(entry.totalCents / entry.units.size) : 0,
+      }))
+      .sort((a, b) => b.totalCents - a.totalCents)
+  }, [contributions, clientNameById])
 }
 
 const RANK_COLORS = [
@@ -813,13 +910,14 @@ const RANK_COLORS = [
 ]
 
 interface ClientsOverviewChartProps {
-  projects: ProjectChartRow[]
-  loading: boolean
+  rollup: SalesRollupResponse | null
+  clientNameById: Record<string, string>
+  clientNamesLoaded: boolean
   settings: SalesSettings
   nowIso: string | null
 }
 
-export function ClientsOverviewChart({ projects, loading, settings, nowIso }: ClientsOverviewChartProps) {
+export function ClientsOverviewChart({ rollup, clientNameById, clientNamesLoaded, settings, nowIso }: ClientsOverviewChartProps) {
   const [period, setPeriod] = useState<PeriodKey>('fy-to-date')
 
   const now = useMemo(() => (nowIso ? new Date(nowIso) : new Date()), [nowIso])
@@ -827,11 +925,13 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
     () => computePeriod(period, settings.fiscalYearStartMonth ?? 7, now),
     [period, settings.fiscalYearStartMonth, now],
   )
-  const rows = useClientsLeaderboard(projects, periodRange)
+  const contributions = useRevenueContributions(rollup, settings, periodRange)
+  const rows = useClientsLeaderboard(contributions, clientNameById)
   const sym = getCurrencySymbol(settings.currencyCode)
 
-  const maxTotal = rows[0]?.totalInvoicedCents ?? 1
-  const grandTotal = rows.reduce((s, r) => s + r.totalInvoicedCents, 0)
+  const loading = rollup === null || !clientNamesLoaded
+  const maxTotal = rows[0]?.totalCents ?? 1
+  const grandTotal = rows.reduce((s, r) => s + r.totalCents, 0)
 
   return (
     <Card className="overflow-hidden">
@@ -839,8 +939,9 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
         <div>
           <CardTitle className="text-base">Clients Overview</CardTitle>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {rows.length} clients · {sym}{Math.round(grandTotal / 100).toLocaleString('en-AU')} total revenue
+            {rows.length} {rows.length === 1 ? 'client' : 'clients'} · {sym}{Math.round(grandTotal / 100).toLocaleString('en-AU')} total revenue
           </p>
+          <p className="text-[11px] text-muted-foreground/70 mt-0.5">{reportingBasisCaption(settings)}</p>
         </div>
         <PeriodSelect value={period} onChange={setPeriod} options={PERIOD_OPTIONS_WITH_ALL_TIME} />
       </CardHeader>
@@ -851,14 +952,14 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
           </div>
         ) : rows.length === 0 ? (
           <div className="flex items-center justify-center h-[120px] text-sm text-muted-foreground">
-            {period === 'all-time' ? 'No closed projects yet.' : 'No closed projects for this period.'}
+            {period === 'all-time' ? 'No client revenue yet.' : 'No client revenue for this period.'}
           </div>
         ) : (
           <div className="overflow-y-auto max-h-[340px] space-y-2 pr-1">
             {rows.map((row, idx) => {
-              const pct = maxTotal > 0 ? (row.totalInvoicedCents / maxTotal) * 100 : 0
-              const total = Math.round(row.totalInvoicedCents / 100)
-              const avg = Math.round(row.avgInvoicedCents / 100)
+              const pct = maxTotal > 0 ? (row.totalCents / maxTotal) * 100 : 0
+              const total = Math.round(row.totalCents / 100)
+              const avg = Math.round(row.avgCents / 100)
               const rankColor = RANK_COLORS[idx] ?? 'from-indigo-400 to-indigo-300'
               const isTopThree = idx < 3
 
@@ -914,32 +1015,15 @@ export function ClientsOverviewChart({ projects, loading, settings, nowIso }: Cl
 
 export interface SalesDashboardChartsProps {
   rollup: SalesRollupResponse | null
+  /** Client id → display name, used by the Clients Overview leaderboard. */
+  clientNameById: Record<string, string>
+  /** True once the client lookup has resolved (successfully or not). */
+  clientNamesLoaded: boolean
   settings: SalesSettings
   nowIso: string | null
 }
 
-export function SalesDashboardCharts({ rollup, settings, nowIso }: SalesDashboardChartsProps) {
-  const [projects, setProjects] = useState<ProjectChartRow[]>([])
-  const [projectsLoading, setProjectsLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    setProjectsLoading(true)
-    apiFetch('/api/admin/sales/projects-chart', { method: 'GET' })
-      .then((r) => r.json())
-      .then((json) => {
-        if (cancelled) return
-        setProjects(Array.isArray(json.projects) ? json.projects : [])
-      })
-      .catch(() => {
-        if (!cancelled) setProjects([])
-      })
-      .finally(() => {
-        if (!cancelled) setProjectsLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [])
-
+export function SalesDashboardCharts({ rollup, clientNameById, clientNamesLoaded, settings, nowIso }: SalesDashboardChartsProps) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -947,8 +1031,14 @@ export function SalesDashboardCharts({ rollup, settings, nowIso }: SalesDashboar
         <QuotesOverviewChart rollup={rollup} settings={settings} nowIso={nowIso} />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ProjectsOverviewChart projects={projects} loading={projectsLoading} settings={settings} nowIso={nowIso} />
-        <ClientsOverviewChart projects={projects} loading={projectsLoading} settings={settings} nowIso={nowIso} />
+        <ProjectsOverviewChart rollup={rollup} settings={settings} nowIso={nowIso} />
+        <ClientsOverviewChart
+          rollup={rollup}
+          clientNameById={clientNameById}
+          clientNamesLoaded={clientNamesLoaded}
+          settings={settings}
+          nowIso={nowIso}
+        />
       </div>
     </div>
   )

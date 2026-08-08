@@ -37,11 +37,54 @@ const CANNED_RESULT: AssistantResult = {
     recipients: [
       { name: 'Jane Doe', email: 'jane@acme.example', isPrimary: true },
       { name: 'Simon', email: 'simon@ourstudio.example', isPrimary: false }, // own team → guard drops it
+      // Same person as the stored contact, address reconstructed from a pattern →
+      // guard swaps in the stored address rather than creating a second contact
+      { name: 'Nicholas Davis', email: 'n.davis@acme.example', isPrimary: false },
+      // Plausible but appears nowhere in the brief and matches no stored contact → dropped
+      { name: 'Invented Person', email: 'invented@acme.example', isPrimary: false },
     ],
     startDate: '2026-07-20',
     keyDates: [
-      { type: 'SHOOTING', date: '2026-07-28', notes: null },
-      { type: 'DUE_DATE', date: 'sometime in august', notes: null }, // invalid on purpose → guard drops it
+      // Timed, with a reminder a week out
+      {
+        type: 'SHOOTING',
+        date: '2026-07-28',
+        allDay: false,
+        startTime: '07:30',
+        finishTime: '17:00',
+        reminderDaysBefore: 7,
+        notes: 'Call time 07:30 at the warehouse',
+      },
+      // allDay false but no start time → guard normalises it to all-day
+      {
+        type: 'PRE_PRODUCTION',
+        date: '2026-07-21',
+        allDay: false,
+        startTime: null,
+        finishTime: null,
+        reminderDaysBefore: null,
+        notes: null,
+      },
+      // Finish before start, and an out-of-range reminder → both cleared, key date kept
+      {
+        type: 'OTHER',
+        date: '2026-07-22',
+        allDay: false,
+        startTime: '14:00',
+        finishTime: '09:00',
+        reminderDaysBefore: 999,
+        notes: null,
+      },
+      // invalid date on purpose → guard drops the whole row
+      {
+        type: 'DUE_DATE',
+        date: 'sometime in august',
+        allDay: true,
+        startTime: null,
+        finishTime: null,
+        reminderDaysBefore: null,
+        notes: null,
+      },
     ],
     schedule: { useStandardTemplate: true, anchorDate: '2026-07-28', includeWeekends: false, extraTasks: [] },
   },
@@ -74,12 +117,24 @@ const CANNED_RESULT: AssistantResult = {
   assumptions: ['Shoot date taken from "the last Tuesday of July".'],
 }
 
+const BRIEF = 'Brand video for Acme. Shoot last Tuesday of July. Budget ~$2,400 + GST. Contact jane@acme.example.'
+
 const GUARD_CTX = {
   validClientIds: new Set(['client-acme']),
   clientNamesById: new Map([['client-acme', 'Acme Widgets Pty Ltd']]),
   today: '2026-07-05',
   ownCompanyNames: ['Our Studio Pty Ltd'],
   teamEmails: new Set(['simon@ourstudio.example']),
+  contactsByClientId: new Map([
+    [
+      'client-acme',
+      [
+        { id: 'cr-nick', clientId: 'client-acme', name: 'Nicholas Davis', email: 'nicholas.davis@acme.example' },
+        { id: 'cr-jane', clientId: 'client-acme', name: 'Jane Doe', email: 'jane@acme.example' },
+      ],
+    ],
+  ]),
+  sourceText: BRIEF,
   libraryById: new Map([
     [
       'lib-halfday',
@@ -145,6 +200,11 @@ async function main() {
     const user = buildAssistantUserMessage({
       clients: [{ id: 'client-acme', name: 'Acme Widgets' }],
       clientsTruncated: false,
+      knownContacts: [
+        { clientId: 'client-acme', name: 'Nicholas Davis', email: 'nicholas.davis@acme.example' },
+        { clientId: 'client-acme', name: 'Jane Doe', email: 'jane@acme.example' },
+      ],
+      currentProject: null,
       today: '2026-07-05',
       taxRatePercent: 10,
       defaultTerms: null,
@@ -159,9 +219,13 @@ async function main() {
       wantProject: true,
       wantSales: true,
       docType: 'QUOTE',
-      brief: 'Brand video for Acme. Shoot last Tuesday of July. Budget ~$2,400 + GST.',
+      brief: BRIEF,
       attachments: [],
     })
+    check(
+      'prompt lists the client’s known contacts',
+      user.includes('<known_contacts>') && user.includes('nicholas.davis@acme.example')
+    )
     const raw = await driver.generateStructured({
       system: ASSISTANT_SYSTEM_PROMPT,
       user,
@@ -179,14 +243,40 @@ async function main() {
     // 4. guards
     const guarded = applyProposalGuards(parsed.data, GUARD_CTX)
     check('guard keeps valid client', guarded.project?.client.matchedClientId === 'client-acme')
+    const kds = guarded.project?.keyDates ?? []
+    check('guard drops invalid key date', kds.length === 3 && !kds.some((k) => k.type === 'DUE_DATE'))
     check(
-      'guard drops invalid key date',
-      guarded.project?.keyDates.length === 1 && guarded.project.keyDates[0].type === 'SHOOTING'
+      'guard keeps a timed key date intact',
+      kds[0]?.allDay === false && kds[0]?.startTime === '07:30' && kds[0]?.finishTime === '17:00'
     )
-    check('guard truncates float cents', guarded.sales?.items[1]?.unitPriceCents === 15000)
+    check('guard keeps a valid reminder offset', kds[0]?.reminderDaysBefore === 7)
+    check('guard normalises timed-without-start to all-day', kds[1]?.allDay === true)
     check(
-      'guard drops own-team recipient',
-      guarded.project?.recipients.length === 1 && guarded.project.recipients[0].email === 'jane@acme.example'
+      'guard clears a finish time that is not after the start',
+      kds[2]?.finishTime === null && kds[2]?.startTime === '14:00'
+    )
+    check('guard clears an out-of-range reminder offset', kds[2]?.reminderDaysBefore === null)
+    check('guard truncates float cents', guarded.sales?.items[1]?.unitPriceCents === 15000)
+
+    const recips = (guarded.project?.recipients ?? []) as Array<{
+      name: string
+      email: string
+      clientRecipientId?: string | null
+    }>
+    check(
+      'guard drops own-team recipient and the fabricated address',
+      recips.length === 2 && !recips.some((r) => r.email === 'simon@ourstudio.example') &&
+        !recips.some((r) => r.email === 'invented@acme.example'),
+      recips.map((r) => r.email).join(', ')
+    )
+    check(
+      'guard reuses the stored contact when the name matches but the address differs',
+      recips.some((r) => r.name === 'Nicholas Davis' && r.email === 'nicholas.davis@acme.example' && r.clientRecipientId === 'cr-nick'),
+      recips.map((r) => `${r.name}<${r.email}>`).join(', ')
+    )
+    check(
+      'guard links an exact-email match to the stored contact',
+      recips.find((r) => r.email === 'jane@acme.example')?.clientRecipientId === 'cr-jane'
     )
     check('guard clears own company as new client', guarded.sales?.client.proposedNewClient === null)
     const libItem = guarded.sales?.items[0] as (typeof CANNED_RESULT.sales & object)['items'][0] & {
@@ -238,11 +328,57 @@ async function main() {
     // and does NOT reject a genuine name correspondence (source "Acme Widgets" ↔ "Acme Widgets Pty Ltd")
     check('guard keeps a genuine client match (name corresponds)', guarded.project?.client.matchedClientId === 'client-acme')
 
+    // 4c. add-to-existing-project mode: the client is pinned and anything already on the
+    // project is dropped, so committing the proposal can only ever add.
+    const updateGuarded = applyProposalGuards(
+      {
+        ...CANNED_RESULT,
+        project: {
+          ...CANNED_RESULT.project!,
+          // The model wrongly proposed a different client — update mode overrides it
+          client: { sourceName: 'Somewhere Else', matchedClientId: null, matchConfidence: 'none', proposedNewClient: { name: 'Somewhere Else', address: null, phone: null, website: null, recipients: [] } },
+        },
+        sales: null,
+        reply: null,
+      },
+      {
+        ...GUARD_CTX,
+        targetProject: {
+          id: 'project-1',
+          clientId: 'client-acme',
+          existingRecipientEmails: new Set(['jane@acme.example']),
+          existingKeyDateKeys: new Set(['SHOOTING|2026-07-28']),
+        },
+      }
+    )
+    check(
+      'update mode pins the client to the project’s own',
+      updateGuarded.project?.client.matchedClientId === 'client-acme' &&
+        updateGuarded.project?.client.proposedNewClient === null
+    )
+    check(
+      'update mode drops a recipient already on the project',
+      !updateGuarded.project?.recipients.some((r) => r.email === 'jane@acme.example'),
+      updateGuarded.project?.recipients.map((r) => r.email).join(', ')
+    )
+    check(
+      'update mode drops a key date already on the project',
+      !updateGuarded.project?.keyDates.some((k) => k.type === 'SHOOTING' && k.date === '2026-07-28')
+    )
+
+    // 4d. a refine pass resends no source text — the verbatim check must not fire then
+    const refineGuarded = applyProposalGuards(CANNED_RESULT, { ...GUARD_CTX, sourceText: '' })
+    check(
+      'no source text (refine) keeps recipients instead of dropping them all',
+      refineGuarded.project?.recipients.some((r) => r.email === 'invented@acme.example') === true
+    )
+
     // 4b. refine prompt shape includes current proposal + change request
     const refineUser = buildRefineUserMessage({
       today: '2026-07-05',
       clients: [{ id: 'client-acme', name: 'Acme Widgets' }],
       clientsTruncated: false,
+      knownContacts: [],
       portfolio: [],
       currentProposal: guarded,
       instruction: 'Move the shoot to the 30th.',
@@ -355,6 +491,8 @@ async function main() {
       user: buildAssistantUserMessage({
         clients: [{ id: 'client-acme', name: 'Acme Widgets' }],
         clientsTruncated: false,
+        knownContacts: [{ clientId: 'client-acme', name: 'Jane Doe', email: 'jane@acme.example' }],
+        currentProject: null,
         today: new Date().toISOString().slice(0, 10),
         taxRatePercent: 10,
         defaultTerms: null,
