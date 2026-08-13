@@ -967,17 +967,22 @@ export async function PATCH(
           data: updateData,
         })
 
-        if (projectStorageRename) {
-          const videos = await tx.video.findMany({
-            where: { projectId: id },
-            select: { id: true },
-          })
-          // Video/VideoAsset path columns dropped — StoredFile handles path rebasing
-          // via renameStoredPaths() called by the folder-rename-processor
-          for (const video of videos) {
-            // No per-column updates needed — paths are in StoredFile
+        // A folder rename needs no per-entity path updates here — every path lives in
+        // StoredFile and is rebased by renameStoredPaths() in the folder-rename-processor.
+
+        // Replace the project's user assignments with the validated set
+        if (assignedUsersToSet !== null) {
+          await tx.projectUser.deleteMany({ where: { projectId: id } })
+          if (assignedUsersToSet.length > 0) {
+            await tx.projectUser.createMany({
+              data: assignedUsersToSet.map((a) => ({
+                projectId: id,
+                userId: a.userId,
+                receiveNotifications: a.receiveNotifications !== false,
+              })),
+              skipDuplicates: true,
+            })
           }
-          // Asset/Photo/File path columns dropped — StoredFile handles path rebasing
         }
 
         return updated

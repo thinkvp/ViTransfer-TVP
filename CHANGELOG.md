@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-08-14
+
+### Fixed
+
+- **Adding or removing a user on an existing project did nothing** — the Users panel on the project page accepted the change, the row appeared, and the `PATCH /api/projects/[id]` call returned 200, but the assignment was never written: re-fetching the project brought back the old list, the user never gained access to the project, and removals came back too. The route still did all the surrounding work — validating the requested ids, enforcing "at least one Admin assigned", forcing `receiveNotifications: false` on users without share-page access, snapshotting the previous assignment set and even sending the newly-added user their `PROJECT_USER_ASSIGNED` notification — but the `projectUser.deleteMany` + `createMany` pair that applies `assignedUsersToSet` had been deleted from inside the update transaction by the StoredFile refactor (`3303f80e`, 2026-06-10), which removed the adjacent per-entity `storagePath` column rewrites and took the assignment block with them. Nothing failed loudly because the notification path reads `assignedUsersToSet`, not the database, so the added user was told they had been added to a project they had not been added to. Project *creation* was unaffected — `POST /api/projects` writes its assignments in its own transaction — which is why new projects looked fine and only edits silently reverted. The block is restored inside the same transaction as the project update, so a failed assignment write rolls back the rest of the settings change rather than half-applying it. Touches `src/app/api/projects/[id]/route.ts`. No schema migration.
+
 ## [2.4.9] - 2026-08-14
 
 ### Added
