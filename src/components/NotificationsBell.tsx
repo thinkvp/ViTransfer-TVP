@@ -483,18 +483,18 @@ export default function NotificationsBell() {
                   const content = (
                     <>
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <div className="text-sm font-medium text-foreground wrap-break-word">{title}</div>
                           </div>
-                          {projectName ? <div className="text-xs text-muted-foreground truncate">{projectName}</div> : null}
+                          {projectName ? <div className="text-xs text-muted-foreground truncate" title={projectName}>{projectName}</div> : null}
                         </div>
-                        <div className="text-[11px] text-muted-foreground whitespace-nowrap">{formatDateTime(n.sentAt)}</div>
+                        <div className="text-[11px] text-muted-foreground whitespace-nowrap shrink-0">{formatDateTime(n.sentAt)}</div>
                       </div>
                       {lines.length > 0 ? (
                         <div className="mt-2 space-y-1">
                           {lines.map(([k, v]) => (
-                            <div key={k} className="text-xs text-muted-foreground">
+                            <div key={k} className="text-xs text-muted-foreground wrap-break-word">
                               <span className="font-medium text-foreground/80">{k}:</span> {v}
                             </div>
                           ))}
@@ -502,7 +502,7 @@ export default function NotificationsBell() {
                       ) : null}
 
                       {!n.success ? (
-                        <div className="mt-2 text-xs text-destructive">Send failed: {n.message || 'Unknown error'}</div>
+                        <div className="mt-2 text-xs text-destructive wrap-break-word">Send failed: {n.message || 'Unknown error'}</div>
                       ) : null}
                     </>
                   )
@@ -534,7 +534,7 @@ export default function NotificationsBell() {
                         {clickable ? (
                           <button
                             type="button"
-                            className="flex-1 text-left rounded-md px-0 py-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="flex-1 min-w-0 text-left rounded-md px-0 py-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             onClick={() => {
                               setOpen(false)
                               if (cardId) {

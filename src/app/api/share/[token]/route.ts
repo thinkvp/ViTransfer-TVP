@@ -295,6 +295,7 @@ export async function GET(
       hideFeedback: project.hideFeedback,
       useFullTimecode: (project as any).useFullTimecode ?? false,
       allowClientDeleteComments: project.allowClientDeleteComments,
+      allowClientReactions: (project as any).allowClientReactions ?? true,
       enableClientUploads: project.enableClientUploads ?? true,
       allowClientUploadFiles: project.allowClientUploadFiles,
       previewResolutions: project.previewResolutions,

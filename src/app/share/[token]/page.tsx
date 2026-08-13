@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Lock, Check, Mail, KeyRound } from 'lucide-react'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch, attemptRefresh } from '@/lib/api-client'
+import { withCommentIdentity } from '@/lib/comment-identity'
 import { getAccessToken } from '@/lib/token-store'
 import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
 import { isS3Mode } from '@/lib/storage-provider-client'
@@ -478,7 +479,13 @@ export default function SharePage() {
 
     setCommentsLoading(true)
     try {
-      const response = await apiFetch(`/api/share/${token}/comments`, {
+      // The viewer's chosen recipient id rides along so the server can mark their own
+      // reactions. Absent on the very first load (the project isn't known yet); the
+      // refetch that follows identity selection fills it in.
+      const commentsUrl = project?.id
+        ? withCommentIdentity(`/api/share/${token}/comments`, String(project.id))
+        : `/api/share/${token}/comments`
+      const response = await apiFetch(commentsUrl, {
         cache: 'no-store',
         headers: !isAdminSession && authToken ? { Authorization: `Bearer ${authToken}` } : undefined,
       })
@@ -495,7 +502,7 @@ export default function SharePage() {
     } finally {
       setCommentsLoading(false)
     }
-  }, [token, isAdminSession, handleSessionExpired])
+  }, [token, isAdminSession, handleSessionExpired, project?.id])
 
   // Listen for comment updates (post, delete, etc.)
   useEffect(() => {
@@ -3865,7 +3872,7 @@ function ShareFeedbackGrid({
   const fetchComments = useCallback(async () => {
     try {
       if (!projectId || !shareToken) return
-      const response = await fetch(`/api/comments?projectId=${projectId}`, {
+      const response = await fetch(withCommentIdentity(`/api/comments?projectId=${projectId}`, projectId), {
         headers: { Authorization: `Bearer ${shareToken}` },
       })
       if (!response.ok) return
@@ -3918,6 +3925,7 @@ function ShareFeedbackGrid({
     useAdminAuth: false,
     companyName,
     allowClientDeleteComments: Boolean(project.allowClientDeleteComments),
+    allowClientReactions: project.allowClientReactions !== false,
     allowClientUploadFiles: Boolean(project.allowClientUploadFiles),
   })
 
@@ -4161,6 +4169,7 @@ function ShareFeedbackGrid({
               shareToken={shareToken}
               showShortcutsButton={isDesktop}
               allowClientDeleteComments={project.allowClientDeleteComments}
+              allowClientReactions={project.allowClientReactions !== false}
               allowClientUploadFiles={project.allowClientUploadFiles}
               allowCommentFileUpload={Boolean(project.allowClientUploadFiles)}
               hideInput={true}

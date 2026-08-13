@@ -6,6 +6,11 @@ import { validateCommentLength, containsSuspiciousPatterns, sanitizeCommentHtml 
 import { sendImmediateNotification, queueNotification } from '@/lib/notifications'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { canDoAction, isProjectStatusVisible, normalizeRolePermissions } from '@/lib/rbac'
+import {
+  buildReactionSummaries,
+  collectCommentIds,
+  type CommentReactionSummary,
+} from '@/lib/comment-reactions'
 
 function buildAdminShareUrl(projectId: string, videoName?: string | null, videoVersion?: number | null): string {
   if (!videoName || !Number.isFinite(videoVersion ?? NaN)) {
@@ -140,6 +145,58 @@ export async function resolveCommentAuthor(params: {
   }
 
   return { authorEmail: finalAuthorEmail, fallbackName }
+}
+
+/**
+ * Load emoji reactions for a whole comment list (parents and replies) in one query and
+ * roll them up per comment, ready to hand to sanitizeComment().
+ *
+ * The viewer identity decides `viewerReacted`. A share session's recipient normally comes
+ * from the token, but the share page lets a viewer pick their name after the token was
+ * issued, so `requestedRecipientId` accepts a client-supplied id — validated against the
+ * project first, since an unvalidated id would let a caller read back whether some other
+ * named recipient had reacted.
+ */
+export async function hydrateCommentReactions(params: {
+  comments: Array<{ id: string; replies?: Array<{ id: string }> }>
+  isAdmin: boolean
+  // Reactor names go to admins and authenticated share viewers — the same audience that
+  // already sees comment author names in sanitizeComment. Anonymous viewers get counts only.
+  isAuthenticated?: boolean
+  viewerUserId?: string | null
+  viewerRecipientId?: string | null
+  requestedRecipientId?: string | null
+  projectId?: string | null
+}): Promise<Map<string, CommentReactionSummary[]>> {
+  const { comments, isAdmin, viewerUserId, projectId } = params
+  const includeNames = isAdmin || params.isAuthenticated === true
+
+  const commentIds = collectCommentIds(comments)
+  if (commentIds.length === 0) return new Map()
+
+  let viewerRecipientId = params.viewerRecipientId || null
+  const requested = typeof params.requestedRecipientId === 'string' ? params.requestedRecipientId.trim() : ''
+  if (!viewerRecipientId && requested && projectId) {
+    const recipient = await prisma.projectRecipient.findFirst({
+      where: { id: requested, projectId },
+      select: { id: true },
+    })
+    viewerRecipientId = recipient?.id || null
+  }
+
+  const rows = await prisma.commentReaction.findMany({
+    where: { commentId: { in: commentIds } },
+    select: {
+      commentId: true,
+      emoji: true,
+      userId: true,
+      recipientId: true,
+      user: { select: { name: true, email: true } },
+      recipient: { select: { name: true, email: true } },
+    },
+  })
+
+  return buildReactionSummaries(rows, { userId: viewerUserId || null, recipientId: viewerRecipientId }, includeNames)
 }
 
 /**

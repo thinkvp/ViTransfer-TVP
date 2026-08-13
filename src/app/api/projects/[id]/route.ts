@@ -80,6 +80,7 @@ const updateProjectSchema = z.object({
   hideFeedback: z.boolean().optional(),
   useFullTimecode: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
+  allowClientReactions: z.boolean().optional(),
   enableClientUploads: z.boolean().optional(),
   allowClientUploadFiles: z.boolean().optional(),
   allowAuthenticatedProjectSwitching: z.boolean().optional(),
@@ -708,6 +709,9 @@ export async function PATCH(
     }
     if (validatedBody.allowClientDeleteComments !== undefined) {
       updateData.allowClientDeleteComments = validatedBody.allowClientDeleteComments
+    }
+    if (validatedBody.allowClientReactions !== undefined) {
+      updateData.allowClientReactions = validatedBody.allowClientReactions
     }
     if (validatedBody.enableClientUploads !== undefined) {
       updateData.enableClientUploads = validatedBody.enableClientUploads

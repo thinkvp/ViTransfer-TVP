@@ -15,6 +15,7 @@ import {
   validateCommentPermissions,
   resolveCommentAuthor,
   sanitizeAndValidateContent,
+  hydrateCommentReactions,
   handleCommentNotifications,
   fetchProjectComments,
   resolveCommentDisplayColorSnapshot
@@ -190,6 +191,16 @@ export async function GET(request: NextRequest) {
         .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
         .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
     )])
+    // Emoji reactions for the whole thread in one query (parents + replies).
+    const reactionsByComment = await hydrateCommentReactions({
+      comments: visibleComments as any[],
+      isAdmin,
+      isAuthenticated,
+      viewerUserId: accessCheck.adminUserId,
+      viewerRecipientId: accessCheck.shareRecipientId,
+      requestedRecipientId: searchParams.get('recipientId'),
+      projectId: project.id,
+    })
     // Sanitize the response data
     const sanitizedComments = visibleComments.map((comment: any) =>
       sanitizeComment(
@@ -198,6 +209,7 @@ export async function GET(request: NextRequest) {
         isAuthenticated,
         fallbackName,
         usersWithAvatar,
+        reactionsByComment,
       )
     )
 
@@ -532,9 +544,23 @@ export async function POST(request: NextRequest) {
         .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
         .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
     )])
+    // Emoji reactions for the whole thread in one query (parents + replies). The freshly
+    // created comment has none yet, but sibling comments in the response do.
+    const reactionsByComment = await hydrateCommentReactions({
+      comments: visibleComments as any[],
+      isAdmin,
+      isAuthenticated,
+      viewerUserId: accessCheck.adminUserId,
+      viewerRecipientId: accessCheck.shareRecipientId,
+      // Validated against the project rather than trusted, even though this route already
+      // accepts the same id for comment authorship — here it decides whose reactions read
+      // back as "yours".
+      requestedRecipientId: recipientId,
+      projectId: project.id,
+    })
     // Sanitize the response data
     const sanitizedComments = visibleComments.map((comment: any) =>
-      sanitizeComment(comment, isAdmin, isAuthenticated, fallbackName, usersWithAvatar)
+      sanitizeComment(comment, isAdmin, isAuthenticated, fallbackName, usersWithAvatar, reactionsByComment)
     )
 
     return NextResponse.json(sanitizedComments, { headers: noStoreHeaders })

@@ -207,6 +207,7 @@ export async function PATCH(request: NextRequest) {
       defaultPreviewResolutions,
       defaultPreviewResolution,
       defaultAllowClientDeleteComments,
+      defaultAllowClientReactions,
       defaultEnableClientUploads,
       defaultAllowClientUploadFiles,
       defaultAllowAuthenticatedProjectSwitching,
@@ -631,6 +632,7 @@ export async function PATCH(request: NextRequest) {
         ? JSON.stringify(defaultPreviewResolutions)
         : (defaultPreviewResolution !== undefined ? JSON.stringify([defaultPreviewResolution]) : undefined),
       defaultAllowClientDeleteComments,
+      defaultAllowClientReactions,
       defaultEnableClientUploads,
       defaultAllowClientUploadFiles,
       defaultAllowAuthenticatedProjectSwitching,
@@ -730,6 +732,7 @@ export async function PATCH(request: NextRequest) {
           ? JSON.stringify(defaultPreviewResolutions)
           : (defaultPreviewResolution !== undefined ? JSON.stringify([defaultPreviewResolution]) : '["720p"]'),
         defaultAllowClientDeleteComments,
+        defaultAllowClientReactions,
         defaultEnableClientUploads,
         defaultAllowClientUploadFiles,
         defaultAllowAuthenticatedProjectSwitching,

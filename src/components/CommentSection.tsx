@@ -14,6 +14,7 @@ import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { formatDate, formatTimestamp, formatDateTime, formatFileSize } from '@/lib/utils'
 import { timecodeToSeconds } from '@/lib/timecode'
 import { apiFetch } from '@/lib/api-client'
+import { withCommentIdentity } from '@/lib/comment-identity'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
@@ -52,6 +53,7 @@ interface CommentSectionProps {
   shareToken?: string | null
   showShortcutsButton?: boolean
   allowClientDeleteComments?: boolean
+  allowClientReactions?: boolean
   allowClientUploadFiles?: boolean
   allowCommentFileUpload?: boolean
   hideInput?: boolean
@@ -96,6 +98,7 @@ export function CommentSectionView({
   shareToken = null,
   showShortcutsButton = false,
   allowClientDeleteComments = false,
+  allowClientReactions = true,
   allowClientUploadFiles = false,
   allowCommentFileUpload = allowClientUploadFiles || isAdminView,
   hideInput = false,
@@ -134,6 +137,7 @@ export function CommentSectionView({
     handleClearTimestamp,
     handleDeleteComment,
     handleEditComment,
+    handleToggleReaction,
     pendingDeleteCommentId,
     setPendingDeleteCommentId,
     confirmDeleteComment,
@@ -306,6 +310,15 @@ export function CommentSectionView({
 
   const canClientDelete = allowClientDeleteComments && !isAdminView
   const canAdminDelete = isAdminView && canAdminDeleteComments
+
+  // Reaction picker visibility. Counts render for everyone regardless; this only decides
+  // whether the viewer gets the add/toggle affordance. Per-comment lock state is applied
+  // inside MessageBubble.
+  // Deliberately not gated on commentsDisabled: approving a video freezes new feedback, but
+  // reacting to feedback that already exists stays available (the API agrees). Admins are
+  // gated server-side on makeCommentsOnProjects — there is no client-side mirror of that
+  // action here. Per-comment lock state is applied inside MessageBubble.
+  const canReact = isAdminView || allowClientReactions
 
   // Own-comment check for inline editing. Admins match by userId; clients match by the
   // name they entered on the share page (honor-system by design — names are not verified).
@@ -592,7 +605,7 @@ export function CommentSectionView({
       const response = isAdminView
         ? await apiFetch(`/api/comments?projectId=${projectId}`)
         : shareToken
-          ? await fetch(`/api/comments?projectId=${projectId}`, {
+          ? await fetch(withCommentIdentity(`/api/comments?projectId=${projectId}`, projectId), {
               headers: { Authorization: `Bearer ${shareToken}` },
             })
           : null
@@ -635,14 +648,38 @@ export function CommentSectionView({
       fetchComments()
     }
 
+    // Reactions patch a single comment in place rather than replacing the list — a full
+    // refetch on every pill click would fight the optimistic update it's meant to confirm.
+    const handleReactionsUpdated = (e: CustomEvent) => {
+      const commentId = e.detail?.commentId as string | undefined
+      const reactions = e.detail?.reactions
+      if (!commentId || !Array.isArray(reactions)) return
+
+      setLocalComments((prev) => prev.map((comment: any) => {
+        if (comment.id === commentId) return { ...comment, reactions }
+        if (!Array.isArray(comment.replies)) return comment
+        if (!comment.replies.some((reply: any) => reply.id === commentId)) return comment
+        return {
+          ...comment,
+          replies: comment.replies.map((reply: any) =>
+            reply.id === commentId ? { ...reply, reactions } : reply
+          ),
+        }
+      }))
+    }
+
     window.addEventListener('commentDeleted', handleCommentUpdate)
     window.addEventListener('commentPosted', handleCommentPosted as EventListener)
     window.addEventListener('videoApprovalChanged', handleCommentUpdate)
+    window.addEventListener('commentIdentityChanged', handleCommentUpdate)
+    window.addEventListener('commentReactionsUpdated', handleReactionsUpdated as EventListener)
 
     return () => {
       window.removeEventListener('commentDeleted', handleCommentUpdate)
       window.removeEventListener('commentPosted', handleCommentPosted as EventListener)
       window.removeEventListener('videoApprovalChanged', handleCommentUpdate)
+      window.removeEventListener('commentIdentityChanged', handleCommentUpdate)
+      window.removeEventListener('commentReactionsUpdated', handleReactionsUpdated as EventListener)
     }
   }, [fetchComments])
 
@@ -1817,6 +1854,8 @@ export function CommentSectionView({
                         showResolveControl={isAdminView}
                         onToggleResolved={handleToggleResolved}
                         isPlayheadActive={isCommentAtPlayhead(comment)}
+                        canReact={canReact}
+                        onToggleReaction={handleToggleReaction}
                       />
                     ) : (
                       // Has replies - render extended bubble
@@ -1853,6 +1892,8 @@ export function CommentSectionView({
                         showResolveControl={isAdminView}
                         onToggleResolved={handleToggleResolved}
                         isPlayheadActive={isCommentAtPlayhead(comment)}
+                        canReact={canReact}
+                        onToggleReaction={handleToggleReaction}
                       />
                     )}
                   </div>
@@ -1894,6 +1935,7 @@ export default function CommentSection(props: CommentSectionProps) {
     isAdminView = false,
     companyName = 'Studio',
     allowClientDeleteComments = false,
+    allowClientReactions = true,
     allowClientUploadFiles = false,
   } = props
 
@@ -1911,6 +1953,7 @@ export default function CommentSection(props: CommentSectionProps) {
     useAdminAuth: isAdminView,
     companyName,
     allowClientDeleteComments,
+    allowClientReactions,
     allowClientUploadFiles,
   })
 

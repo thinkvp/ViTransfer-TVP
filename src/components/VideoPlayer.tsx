@@ -12,6 +12,7 @@ import { Button } from './ui/button'
 import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, MessageSquare, Rewind, FastForward, Download, Settings, Loader2, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { timecodeToSeconds, secondsToTimecode } from '@/lib/timecode'
+import { commentHtmlToPreviewText } from '@/lib/comment-plain-text'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { VideoAssetDownloadModal } from './VideoAssetDownloadModal'
 import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
@@ -1021,9 +1022,8 @@ export default function VideoPlayer({
   }, [commentByIdForTimeline, timelineCommentHover.commentId, timelineCommentHover.visible])
 
   const getTimelineCommentPreviewText = (content: unknown) => {
-    return String(content ?? '')
-      .replace(/\s+/g, ' ')
-      .trim()
+    // Stored as sanitized HTML — unescape it, this tooltip renders text.
+    return commentHtmlToPreviewText(content)
   }
 
   // Dispatch event when selected video changes (for immediate comment section update)
@@ -3975,7 +3975,15 @@ export default function VideoPlayer({
                         <button
                           key={m.id}
                           type="button"
-                          className="absolute top-1/2 bg-transparent opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100 active:opacity-100 focus-visible:outline-none"
+                          // The width MUST be explicit and match the avatar. Without it the
+                          // button is auto-width, so an absolutely positioned marker sizes
+                          // shrink-to-fit against the space left of its `left` offset — which
+                          // is zero at `left: 100%`. Tailwind's preflight puts `max-width: 100%`
+                          // on <img>, so a photo avatar then collapses to 0px and the marker
+                          // vanishes, leaving only the absolutely positioned reply badge behind.
+                          // (An initials <div> has no max-width, which is why only authors with
+                          // an uploaded profile picture disappeared at the end of the timeline.)
+                          className="absolute top-1/2 w-[30px] sm:w-[24px] bg-transparent opacity-50 transition-opacity hover:opacity-100 focus-visible:opacity-100 active:opacity-100 focus-visible:outline-none"
                           style={position}
                           title="Jump to comment"
                           aria-label="Jump to comment"

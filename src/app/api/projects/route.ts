@@ -248,6 +248,7 @@ export async function POST(request: NextRequest) {
       enableUploads,
       restrictCommentsToLatestVersion,
       allowClientDeleteComments,
+      allowClientReactions,
       startDate,
     } = validation.data as typeof validation.data & { startDate?: string | null }
 
@@ -443,6 +444,7 @@ export async function POST(request: NextRequest) {
       select: {
         defaultPreviewResolutions: true,
         defaultAllowClientDeleteComments: true,
+        defaultAllowClientReactions: true,
         defaultEnableClientUploads: true,
         defaultAllowClientUploadFiles: true,
         defaultAllowAuthenticatedProjectSwitching: true,
@@ -475,6 +477,7 @@ export async function POST(request: NextRequest) {
           authMode: resolvedAuthMode,
           restrictCommentsToLatestVersion: restrictCommentsToLatestVersion || false,
           allowClientDeleteComments: allowClientDeleteComments ?? settings?.defaultAllowClientDeleteComments ?? false,
+          allowClientReactions: allowClientReactions ?? settings?.defaultAllowClientReactions ?? true,
           enableClientUploads: settings?.defaultEnableClientUploads ?? true,
           allowClientUploadFiles: settings?.defaultAllowClientUploadFiles ?? false,
           allowAuthenticatedProjectSwitching: settings?.defaultAllowAuthenticatedProjectSwitching ?? true,

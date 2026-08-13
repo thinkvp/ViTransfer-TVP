@@ -12,6 +12,7 @@
  * - src/app/api/share/[token]/comments/route.ts
  */
 import { secondsToTimecode, parseTimecodeInput, isValidTimecode } from './timecode'
+import type { CommentReactionSummary } from './comment-reactions'
 
 // Fallback for legacy comments that still have a numeric timestamp column
 const normalizeTimecode = (comment: any): string => {
@@ -76,6 +77,10 @@ export function sanitizeComment(
   // exposed for those, so the client doesn't request /api/users/[id]/avatar (and log a 404)
   // for authors on default initials. Omit to keep the legacy always-expose behaviour.
   usersWithAvatar?: Set<string>,
+  // Per-comment emoji reaction rollups, keyed by comment id and covering replies too.
+  // Built once per request by hydrateCommentReactions() so a threaded list costs one query.
+  // Omit to emit no reactions at all (callers that don't hydrate them).
+  reactionsByComment?: Map<string, CommentReactionSummary[]>,
 ) {
   const normalizedTimecode = normalizeTimecode(comment)
 
@@ -110,6 +115,10 @@ export function sanitizeComment(
     // Set when the next version was requested for the comment's video: hides the client
     // delete control and shows the lock indicator. Enforced server-side in /api/comments/[id].
     lockedAt: comment.lockedAt ?? null,
+    // Emoji reactions. Counts and the viewer's own state are non-PII and safe for every
+    // audience; reactor names are stripped for non-admins upstream in
+    // buildReactionSummaries. Always an array so the UI has no undefined branch.
+    reactions: reactionsByComment?.get(comment.id) ?? [],
   }
 
   // Non-PII: expose display color for UI highlights.
@@ -178,10 +187,12 @@ export function sanitizeComment(
     sanitized.authorName = comment.isInternal ? 'Admin' : 'Client'
   }
 
-  // Recursively sanitize replies
+  // Recursively sanitize replies. usersWithAvatar is forwarded too — every caller builds
+  // that set from reply authors as well as top-level ones, and dropping it here made reply
+  // authors on default initials emit an avatarUrl that 404s.
   if (comment.replies && Array.isArray(comment.replies)) {
     sanitized.replies = comment.replies.map((reply: any) =>
-      sanitizeComment(reply, isAdmin, isAuthenticated, clientName)
+      sanitizeComment(reply, isAdmin, isAuthenticated, clientName, usersWithAvatar, reactionsByComment)
     )
   }
 

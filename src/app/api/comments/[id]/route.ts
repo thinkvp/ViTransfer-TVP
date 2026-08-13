@@ -5,7 +5,7 @@ import { validateRequest, updateCommentSchema } from '@/lib/validation'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { filterInternalComments, sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml } from '@/lib/security/html-sanitization'
-import { cancelCommentNotification } from '@/lib/comment-helpers'
+import { cancelCommentNotification, hydrateCommentReactions } from '@/lib/comment-helpers'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -258,12 +258,23 @@ export async function PATCH(
         .flatMap((c: any) => [c.userId, ...((c.replies || []).map((r: any) => r.userId))])
         .filter((id: any): id is string => typeof id === 'string' && id.length > 0),
     )])
+    // Emoji reactions for the whole thread in one query (parents + replies).
+    const reactionsByComment = await hydrateCommentReactions({
+      comments: visibleComments as any[],
+      isAdmin,
+      isAuthenticated,
+      viewerUserId: accessCheck.adminUserId,
+      viewerRecipientId: accessCheck.shareRecipientId,
+      requestedRecipientId: request.nextUrl.searchParams.get('recipientId'),
+      projectId: existingComment.projectId,
+    })
     const sanitizedComments = visibleComments.map((comment: any) => sanitizeComment(
       comment,
       isAdmin,
       isAuthenticated,
       primaryRecipientName,
       usersWithAvatar,
+      reactionsByComment,
     ))
 
     return NextResponse.json(sanitizedComments)

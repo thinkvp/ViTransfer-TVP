@@ -152,6 +152,7 @@ export const createProjectSchema = z.object({
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
+  allowClientReactions: z.boolean().optional(),
   previewResolution: z.enum(['480p', '720p', '1080p']).optional(),
   previewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
   enableVideos: z.boolean().optional(),
@@ -179,6 +180,7 @@ export const updateProjectSchema = z.object({
   restrictCommentsToLatestVersion: z.boolean().optional(),
   hideFeedback: z.boolean().optional(),
   allowClientDeleteComments: z.boolean().optional(),
+  allowClientReactions: z.boolean().optional(),
   status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'ON_HOLD', 'APPROVED', 'CLOSED']).optional(),
   previewResolution: z.enum(['480p', '720p', '1080p']).optional(),
   previewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
@@ -245,6 +247,7 @@ export const updateSettingsSchema = z.object({
   defaultPreviewResolution: z.enum(['480p', '720p', '1080p']).optional(),
   defaultPreviewResolutions: z.array(z.enum(['480p', '720p', '1080p'])).min(1).optional(),
   defaultAllowClientDeleteComments: z.boolean().optional(),
+  defaultAllowClientReactions: z.boolean().optional(),
   maxUploadSizeGB: z.number().int().min(1).max(100).optional() // 1GB to 100GB
 })
 

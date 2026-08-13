@@ -8,11 +8,14 @@ import { CommentFileDisplay } from './FileDisplay'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import VoiceNotePlayer from './VoiceNotePlayer'
 import { sanitizeCommentHtml } from '@/lib/sanitize-comment-html'
+import { CommentReactionBar } from '@/components/CommentReactionBar'
+import type { CommentReactionSummary } from '@/lib/comment-reactions'
 
 type CommentWithReplies = Comment & {
   replies?: Comment[]
   files?: Array<{ id: string; fileName: string; fileSize: number }>
   avatarUrl?: string | null
+  reactions?: CommentReactionSummary[]
 }
 
 interface MessageBubbleProps {
@@ -54,6 +57,11 @@ interface MessageBubbleProps {
 
   // True while the video playhead sits at this comment's timecode (or inside its range).
   isPlayheadActive?: boolean
+
+  // Emoji reactions. Counts always render when present; the picker only appears when
+  // canReact is true (project setting on, comment unlocked, viewer has an identity).
+  canReact?: boolean
+  onToggleReaction?: (commentId: string, emoji: string, nextActive: boolean) => void
 }
 
 // Green circular "mark done" tick placed in the lower-left corner of a comment.
@@ -187,6 +195,8 @@ export default function MessageBubble({
   showResolveControl = false,
   onToggleResolved,
   isPlayheadActive = false,
+  canReact = false,
+  onToggleReaction,
 }: MessageBubbleProps) {
   const hasReplies = replies && replies.length > 0
 
@@ -406,10 +416,13 @@ export default function MessageBubble({
             </div>
           )}
 
-          {/* Replies Section - Extends parent bubble (always expanded) */}
+          {/* Replies Section - Extends parent bubble (always expanded).
+              Each reply is an inset card on a lighter surface: containment is what marks a
+              reply, so there is no divider above the stack and no per-reply ↳ arrow — both
+              were saying the same thing more quietly. */}
           {hasReplies && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <div className="space-y-3">
+            <div className="mt-3">
+              <div className="space-y-2">
                 {replies.map((reply) => {
                     const replyEffectiveName = reply.authorName ||
                       (reply.isInternal && (reply as any).user ?
@@ -426,10 +439,12 @@ export default function MessageBubble({
                     const { voiceNoteFiles: replyVoiceNotes, regularFiles: replyRegularFiles } = splitCommentFilesByVoiceNote(replyFiles)
 
                     return (
-                      <div key={reply.id} className="pl-3">
+                      <div
+                        key={reply.id}
+                        className="rounded-lg border border-border/60 bg-muted/50 px-2.5 py-2"
+                      >
                         <div className="flex items-start justify-between gap-3 mb-1">
                           <div className="flex items-center gap-2 min-w-0">
-                            <CornerDownRight className="w-3 h-3 text-muted-foreground shrink-0" />
                             {showAuthorAvatar ? (
                               <InitialsAvatar
                                 name={replyAvatarName}
@@ -482,7 +497,7 @@ export default function MessageBubble({
 
                         {/* Reply Attached Files */}
                         {replyFiles.length > 0 && (
-                          <div className="mt-2 pt-2 border-t border-border space-y-2">
+                          <div className="mt-2 pt-2 border-t border-border/60 space-y-2">
                             {replyVoiceNotes.map((file) => (
                               <VoiceNoteAttachment
                                 key={file.id}
@@ -508,13 +523,29 @@ export default function MessageBubble({
                           </div>
                         )}
 
-                        {/* Per-reply "mark done" tick (admin share page only) */}
-                        {showResolveControl && onToggleResolved && (
-                          <div className="mt-2 flex items-center">
-                            <ResolveTick
-                              resolved={!!(reply as any).resolvedAt}
-                              onClick={() => onToggleResolved(reply.id, !!(reply as any).resolvedAt)}
-                            />
+                        {/* Per-reply actions row: "mark done" tick (admin share page only) then
+                            reactions, sharing one line. Replies have no other bottom row —
+                            edit/delete live in the header beside the timestamp. */}
+                        {((showResolveControl && onToggleResolved) || editingId !== reply.id) && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 empty:mt-0">
+                            {showResolveControl && onToggleResolved && (
+                              <ResolveTick
+                                resolved={!!(reply as any).resolvedAt}
+                                onClick={() => onToggleResolved(reply.id, !!(reply as any).resolvedAt)}
+                              />
+                            )}
+                            {editingId !== reply.id && (
+                              <CommentReactionBar
+                                size="sm"
+                                reactions={(reply as any).reactions}
+                                canReact={canReact && !(reply as any).lockedAt}
+                                onToggle={
+                                  onToggleReaction
+                                    ? (emoji, nextActive) => onToggleReaction(reply.id, emoji, nextActive)
+                                    : undefined
+                                }
+                              />
+                            )}
                           </div>
                         )}
                       </div>
@@ -525,15 +556,24 @@ export default function MessageBubble({
           )}
 
           {/* Actions row (inside the block) */}
-          {(!isReply && (showResolveControl || !commentsDisabled || onDelete || onReply || (canEdit && onSaveEdit))) && (
-            <div className="mt-3 flex items-center justify-between gap-3">
-              <div className="flex items-center">
+          {(!isReply && (showResolveControl || !commentsDisabled || onDelete || onReply || (canEdit && onSaveEdit) || canReact || (comment.reactions || []).length > 0)) && (
+            <div className="mt-3 flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 {showResolveControl && onToggleResolved && (
                   <ResolveTick
                     resolved={!!(comment as any).resolvedAt}
                     onClick={() => onToggleResolved(comment.id, !!(comment as any).resolvedAt)}
                   />
                 )}
+                <CommentReactionBar
+                  reactions={comment.reactions}
+                  canReact={canReact && !isLocked}
+                  onToggle={
+                    onToggleReaction
+                      ? (emoji, nextActive) => onToggleReaction(comment.id, emoji, nextActive)
+                      : undefined
+                  }
+                />
               </div>
               <div className="flex items-center gap-3">
                 {!isReply && !commentsDisabled && onReply && (

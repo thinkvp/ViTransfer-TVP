@@ -6,6 +6,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { filterInternalComments, sanitizeComment } from '@/lib/comment-sanitization'
 import { batchResolveFileSizes, getUserIdsWithAvatar } from '@/lib/stored-file'
 import { getRateLimitSettings } from '@/lib/settings'
+import { hydrateCommentReactions } from '@/lib/comment-helpers'
 export const runtime = 'nodejs'
 
 
@@ -171,6 +172,17 @@ export async function GET(
     )]
     const usersWithAvatar = await getUserIdsWithAvatar(authorUserIds)
 
+    // Emoji reactions for the whole thread in one query (parents + replies).
+    const reactionsByComment = await hydrateCommentReactions({
+      comments: visibleComments as any[],
+      isAdmin,
+      isAuthenticated,
+      viewerUserId: accessCheck.adminUserId,
+      viewerRecipientId: accessCheck.shareRecipientId,
+      requestedRecipientId: request.nextUrl.searchParams.get('recipientId'),
+      projectId: project.id,
+    })
+
     // Sanitize comments - never expose PII to non-admins
     const sanitizedComments = visibleComments.map((comment: any) => sanitizeComment(
       comment,
@@ -178,6 +190,7 @@ export async function GET(
       isAuthenticated,
       fallbackName,
       usersWithAvatar,
+      reactionsByComment,
     ))
 
     return NextResponse.json(sanitizedComments, { headers: noStoreHeaders })

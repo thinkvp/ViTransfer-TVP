@@ -102,8 +102,10 @@ export function TimePicker24h({
         className={className}
       />
 
+      {/* Popover width is independent of the trigger: narrow triggers (e.g. the assistant's w-28
+          time fields) would otherwise squash the hour grid. min-w-full keeps wide triggers matched. */}
       {open ? (
-        <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover text-popover-foreground shadow-md p-2 space-y-2">
+        <div className="absolute left-0 z-50 mt-1 w-[15rem] min-w-full max-w-[calc(100vw-2rem)] rounded-md border border-border bg-popover text-popover-foreground shadow-md p-2 space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <Button
               type="button"

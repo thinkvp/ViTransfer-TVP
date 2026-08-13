@@ -2815,6 +2815,7 @@ function AdminShareFeedbackGrid({
     canAdminManageComments: canManageShareComments,
     companyName,
     allowClientDeleteComments: Boolean(project.allowClientDeleteComments),
+    allowClientReactions: project.allowClientReactions !== false,
     allowClientUploadFiles: false,
   })
 
@@ -3027,6 +3028,7 @@ function AdminShareFeedbackGrid({
               shareToken={null}
               showShortcutsButton={isDesktop}
               allowClientDeleteComments={project.allowClientDeleteComments}
+              allowClientReactions={project.allowClientReactions !== false}
               allowCommentFileUpload={true}
               hideInput={true}
               showApproveButton={false}

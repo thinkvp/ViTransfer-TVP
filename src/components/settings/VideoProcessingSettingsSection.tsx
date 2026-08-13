@@ -17,6 +17,8 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultPreviewResolutions: (value: string[]) => void
   defaultAllowClientDeleteComments: boolean
   setDefaultAllowClientDeleteComments: (value: boolean) => void
+  defaultAllowClientReactions: boolean
+  setDefaultAllowClientReactions: (value: boolean) => void
   defaultEnableClientUploads: boolean
   setDefaultEnableClientUploads: (value: boolean) => void
   defaultAllowClientUploadFiles: boolean
@@ -53,6 +55,8 @@ export function VideoProcessingSettingsSection({
   setDefaultPreviewResolutions,
   defaultAllowClientDeleteComments,
   setDefaultAllowClientDeleteComments,
+  defaultAllowClientReactions,
+  setDefaultAllowClientReactions,
   defaultEnableClientUploads,
   setDefaultEnableClientUploads,
   defaultAllowClientUploadFiles,
@@ -156,6 +160,20 @@ export function VideoProcessingSettingsSection({
                 id="defaultAllowClientDeleteComments"
                 checked={defaultAllowClientDeleteComments}
                 onCheckedChange={setDefaultAllowClientDeleteComments}
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-3 mt-3 border-t border-border">
+              <div className="space-y-0.5">
+                <Label htmlFor="defaultAllowClientReactions">Allow clients to react to comments</Label>
+                <p className="text-xs text-muted-foreground">
+                  Clients who have identified themselves can add emoji reactions to comments and replies. Reaction counts stay visible either way.
+                </p>
+              </div>
+              <Switch
+                id="defaultAllowClientReactions"
+                checked={defaultAllowClientReactions}
+                onCheckedChange={setDefaultAllowClientReactions}
               />
             </div>
 

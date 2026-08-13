@@ -49,6 +49,7 @@ interface Settings {
   appDomain: string | null
   defaultPreviewResolution: string | null
   defaultAllowClientDeleteComments: boolean | null
+  defaultAllowClientReactions: boolean | null
   defaultAllowClientUploadFiles: boolean | null
   defaultAllowAuthenticatedProjectSwitching: boolean | null
   defaultMaxClientUploadAllocationMB: number | null
@@ -194,6 +195,7 @@ export default function GlobalSettingsPage() {
   const [mainCompanyDomain, setMainCompanyDomain] = useState('')
   const [defaultPreviewResolutions, setDefaultPreviewResolutions] = useState<string[]>(['720p'])
   const [defaultAllowClientDeleteComments, setDefaultAllowClientDeleteComments] = useState(false)
+  const [defaultAllowClientReactions, setDefaultAllowClientReactions] = useState(true)
   const [defaultEnableClientUploads, setDefaultEnableClientUploads] = useState(true)
   const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
   const [defaultAllowAuthenticatedProjectSwitching, setDefaultAllowAuthenticatedProjectSwitching] = useState(true)
@@ -345,7 +347,7 @@ export default function GlobalSettingsPage() {
     accentColor, accentTextMode, emailHeaderColor, emailHeaderTextMode,
     smtpServer, smtpPort, smtpUsername, smtpPassword, emailTrackingPixelsEnabled,
     emailCustomFooterText, smtpFromAddress, smtpSecure, appDomain, mainCompanyDomain,
-    defaultPreviewResolutions, defaultAllowClientDeleteComments, defaultAllowClientUploadFiles,
+    defaultPreviewResolutions, defaultAllowClientDeleteComments, defaultAllowClientReactions, defaultAllowClientUploadFiles,
     defaultAllowAuthenticatedProjectSwitching, defaultMaxClientUploadAllocationMB,
     clientUploadCategories, clientUploadCustomExtensions,
     autoApproveProject, autoDeletePreviewsOnClose, excludeInternalIpsFromAnalytics,
@@ -451,6 +453,7 @@ export default function GlobalSettingsPage() {
           } catch { return ['720p'] }
         })())
         setDefaultAllowClientDeleteComments(data.defaultAllowClientDeleteComments ?? false)
+        setDefaultAllowClientReactions(data.defaultAllowClientReactions ?? true)
         setDefaultEnableClientUploads(data.defaultEnableClientUploads ?? true)
         setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
         setDefaultAllowAuthenticatedProjectSwitching(data.defaultAllowAuthenticatedProjectSwitching ?? true)
@@ -784,6 +787,7 @@ export default function GlobalSettingsPage() {
         mainCompanyDomain: mainCompanyDomain || null,
         defaultPreviewResolutions: defaultPreviewResolutions.length > 0 ? defaultPreviewResolutions : ['720p'],
         defaultAllowClientDeleteComments,
+        defaultAllowClientReactions,
         defaultEnableClientUploads,
         defaultAllowClientUploadFiles,
         defaultAllowAuthenticatedProjectSwitching,
@@ -971,6 +975,7 @@ export default function GlobalSettingsPage() {
           } catch { return ['720p'] }
         })())
         setDefaultAllowClientDeleteComments(refreshedData.defaultAllowClientDeleteComments ?? false)
+        setDefaultAllowClientReactions(refreshedData.defaultAllowClientReactions ?? true)
         setDefaultEnableClientUploads(refreshedData.defaultEnableClientUploads ?? true)
         setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
         setDefaultAllowAuthenticatedProjectSwitching(refreshedData.defaultAllowAuthenticatedProjectSwitching ?? true)
@@ -1377,6 +1382,8 @@ export default function GlobalSettingsPage() {
             setDefaultPreviewResolutions={setDefaultPreviewResolutions}
             defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
             setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
+            defaultAllowClientReactions={defaultAllowClientReactions}
+            setDefaultAllowClientReactions={setDefaultAllowClientReactions}
             defaultEnableClientUploads={defaultEnableClientUploads}
             setDefaultEnableClientUploads={setDefaultEnableClientUploads}
             defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}
@@ -1782,6 +1789,8 @@ export default function GlobalSettingsPage() {
                 setDefaultPreviewResolutions={setDefaultPreviewResolutions}
                 defaultAllowClientDeleteComments={defaultAllowClientDeleteComments}
                 setDefaultAllowClientDeleteComments={setDefaultAllowClientDeleteComments}
+                defaultAllowClientReactions={defaultAllowClientReactions}
+                setDefaultAllowClientReactions={setDefaultAllowClientReactions}
                 defaultEnableClientUploads={defaultEnableClientUploads}
                 setDefaultEnableClientUploads={setDefaultEnableClientUploads}
                 defaultAllowClientUploadFiles={defaultAllowClientUploadFiles}

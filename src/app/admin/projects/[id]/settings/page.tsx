@@ -88,6 +88,7 @@ interface Project {
   hideFeedback: boolean
   useFullTimecode: boolean
   allowClientDeleteComments: boolean
+  allowClientReactions: boolean
   allowClientUploadFiles: boolean
   allowAuthenticatedProjectSwitching: boolean
   maxClientUploadAllocationMB: number
@@ -132,6 +133,7 @@ export default function ProjectSettingsPage() {
   const [hideFeedback, setHideFeedback] = useState(false)
   const [useFullTimecode, setUseFullTimecode] = useState(false)
   const [allowClientDeleteComments, setAllowClientDeleteComments] = useState(false)
+  const [allowClientReactions, setAllowClientReactions] = useState(true)
   const [enableClientUploads, setEnableClientUploads] = useState(true)
   const [allowClientUploadFiles, setAllowClientUploadFiles] = useState(false)
   const [allowAuthenticatedProjectSwitching, setAllowAuthenticatedProjectSwitching] = useState(true)
@@ -157,7 +159,7 @@ export default function ProjectSettingsPage() {
   const currentSnapshot = JSON.stringify({
     title, description, companyName, enableVideos, enablePhotos, enableUploads, selectedClientId,
     restrictCommentsToLatestVersion, hideFeedback,
-    useFullTimecode, allowClientDeleteComments, allowClientUploadFiles,
+    useFullTimecode, allowClientDeleteComments, allowClientReactions, allowClientUploadFiles,
     allowAuthenticatedProjectSwitching, maxClientUploadAllocationMB, sharePassword,
     authMode, useCustomSlug, customSlugValue,
     previewResolutions, clientNotificationSchedule, clientNotificationTime,
@@ -238,6 +240,7 @@ export default function ProjectSettingsPage() {
         setHideFeedback(data.hideFeedback || false)
         setUseFullTimecode(data.useFullTimecode ?? false)
         setAllowClientDeleteComments(data.allowClientDeleteComments ?? false)
+        setAllowClientReactions(data.allowClientReactions ?? true)
         setEnableClientUploads(data.enableClientUploads ?? true)
         setAllowClientUploadFiles(data.allowClientUploadFiles ?? false)
         setAllowAuthenticatedProjectSwitching(data.allowAuthenticatedProjectSwitching ?? true)
@@ -403,6 +406,7 @@ export default function ProjectSettingsPage() {
         hideFeedback,
         useFullTimecode,
         allowClientDeleteComments,
+        allowClientReactions,
         enableClientUploads,
         allowClientUploadFiles,
         allowAuthenticatedProjectSwitching,
@@ -1038,6 +1042,20 @@ export default function ProjectSettingsPage() {
                             onCheckedChange={setAllowClientDeleteComments}
                           />
                         </div>
+
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="allowClientReactions">Allow clients to react to comments</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Clients who have identified themselves can add emoji reactions to comments and replies. Reaction counts stay visible either way. Disabled once the next version has been requested.
+                            </p>
+                          </div>
+                          <Switch
+                            id="allowClientReactions"
+                            checked={allowClientReactions}
+                            onCheckedChange={setAllowClientReactions}
+                          />
+                        </div>
                       </>
                     )}
 
@@ -1462,6 +1480,14 @@ export default function ProjectSettingsPage() {
                             <p className="text-xs text-muted-foreground">All clients will be able to delete any comment left by a client, and edit comments left under their own name. Disabled once the next version has been requested.</p>
                           </div>
                           <Switch id="allowClientDeleteComments-d" checked={allowClientDeleteComments} onCheckedChange={setAllowClientDeleteComments} />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="allowClientReactions-d">Allow clients to react to comments</Label>
+                            <p className="text-xs text-muted-foreground">Clients who have identified themselves can add emoji reactions to comments and replies. Reaction counts stay visible either way. Disabled once the next version has been requested.</p>
+                          </div>
+                          <Switch id="allowClientReactions-d" checked={allowClientReactions} onCheckedChange={setAllowClientReactions} />
                         </div>
                       </>
                     )}

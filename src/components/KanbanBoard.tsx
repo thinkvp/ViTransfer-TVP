@@ -51,6 +51,7 @@ import { useAuth } from '@/components/AuthProvider'
 import { TypeaheadSelect } from '@/components/sales/TypeaheadSelect'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { formatDate, formatDateTime } from '@/lib/utils'
+import { commentHtmlToPlainText } from '@/lib/comment-plain-text'
 import { fetchClientOptions, fetchProjectOptionsForClient } from '@/lib/sales/lookups'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
@@ -1905,7 +1906,7 @@ function TaskCommentBubble({
         </div>
 
         <div className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground">
-          {comment.content}
+          {commentHtmlToPlainText(comment.content)}
         </div>
 
         <div className="mt-2">
@@ -1970,7 +1971,7 @@ function TaskCommentBubble({
                         </div>
                       </div>
                       <div className="text-sm whitespace-pre-wrap wrap-break-word leading-relaxed text-foreground">
-                        {reply.content}
+                        {commentHtmlToPlainText(reply.content)}
                       </div>
                     </div>
                   )

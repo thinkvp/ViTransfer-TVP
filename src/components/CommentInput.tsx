@@ -15,6 +15,7 @@ import { secondsToTimecode, timecodeToSeconds, formatTimecodeDisplay } from '@/l
 import { useTimeDisplayMode, type TimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { cn, formatTimestamp } from '@/lib/utils'
+import { commentHtmlToPlainText } from '@/lib/comment-plain-text'
 
 type VoiceNoteDraft = {
   file: File
@@ -867,7 +868,7 @@ export default function CommentInput({
               ) : null}
             </p>
             <p className="text-xs text-gray-400 line-clamp-2 leading-snug">
-              {replyingToComment.content}
+              {commentHtmlToPlainText(replyingToComment.content)}
             </p>
           </div>
           <button

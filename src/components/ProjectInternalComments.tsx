@@ -20,6 +20,7 @@ import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { formatDateTime } from '@/lib/utils'
 import { sanitizeCommentHtml } from '@/lib/sanitize-comment-html'
+import { commentHtmlToPlainText } from '@/lib/comment-plain-text'
 
 const UNSENT_COMMENT_MESSAGE = 'You have an unsent comment. Are you sure you want to leave?'
 
@@ -41,16 +42,6 @@ function formatMessageTime(dateLike: string) {
   const date = new Date(dateLike)
   if (Number.isNaN(date.getTime())) return dateLike
   return formatDateTime(dateLike)
-}
-
-function stripHtmlToPlainText(html: string) {
-  if (!html) return ''
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/?p>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
 }
 
 function InternalCommentBubble(props: {
@@ -286,7 +277,7 @@ export function ProjectInternalComments(props: {
 
   const replyingPreview = useMemo(() => {
     if (!replyingTo) return null
-    const text = stripHtmlToPlainText(replyingTo.content)
+    const text = commentHtmlToPlainText(replyingTo.content)
     const short = text.length > 140 ? `${text.slice(0, 140)}…` : text
     return {
       author: replyingTo.authorName || 'Unknown',

@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import type { DownloadableFile } from '@/lib/downloadable-files'
 import type { DownloadQueueItem } from '@/lib/download-queue'
-import { downloadFilesAsZip } from '@/lib/download-zip-stream'
+import { downloadFilesAsZip, pickZipSaveTarget } from '@/lib/download-zip-stream'
 import {
   calculateTransferSummary,
   createTransferId,
@@ -247,6 +247,15 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
     onProgress?: (progress: DownloadProgressSnapshot) => void
   ) => {
     const zipFileName = `${projectTitle || 'Download'} Files.zip`
+
+    // The save dialog needs transient user activation, so it has to be opened
+    // before the first await in this call chain — resolving download tokens and
+    // fetching member files takes far longer than the activation window, after
+    // which the picker is refused and the archive silently falls back to being
+    // buffered in memory (nothing reaches disk until the very end).
+    const saveTarget = await pickZipSaveTarget(zipFileName)
+    if (saveTarget.kind === 'canceled') return
+
     const zipTransferId = createTransferId('zip')
 
     const initialItem: TransferItem = {
@@ -326,10 +335,10 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
       )
       notifyProgress(nextItems)
 
-      await downloadFilesAsZip(
-        entries,
-        zipFileName,
-        (loaded, total) => {
+      await downloadFilesAsZip(entries, zipFileName, {
+        saveTarget,
+        signal,
+        onProgress: (loaded, total) => {
           const now = Date.now()
           const previous = progressRef
           let speedBytesPerSecond: number | null = previous.smoothedSpeed
@@ -378,8 +387,7 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
             notifyProgress(nextItems)
           }
         },
-        signal
-      )
+      })
 
       nextItems = updateTransferItems((items) =>
         items.map((item) =>

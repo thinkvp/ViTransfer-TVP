@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions } from '@/lib/rbac-api'
+import { commentHtmlToPreviewText } from '@/lib/comment-plain-text'
 
 // Order a version's comments by video timecode (chronological position in the video),
 // keeping each reply immediately after its parent.
@@ -38,18 +39,10 @@ function orderThreaded(comments: FeedbackComment[]): FeedbackComment[] {
 }
 
 // Comment content is stored as sanitized HTML. The feedback list only needs a compact
-// text preview, so strip tags and decode the handful of entities the editor produces.
+// text preview, so strip tags and decode entities via the shared helper (which decodes in
+// a single pass — the previous chained replaces turned a literal `&amp;lt;` into `<`).
 function toPlainText(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
+  return commentHtmlToPreviewText(html)
 }
 
 export const runtime = 'nodejs'

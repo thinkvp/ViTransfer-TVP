@@ -6,6 +6,8 @@ import type { Video } from '@/types/video'
 import { useRouter } from 'next/navigation'
 import { apiFetch, apiPost, apiDelete, apiPatch } from '@/lib/api-client'
 import { secondsToTimecode } from '@/lib/timecode'
+import { applyViewerReaction, type CommentReactionSummary } from '@/lib/comment-reactions'
+import { withCommentIdentity } from '@/lib/comment-identity'
 import { MAX_FILES_PER_COMMENT, validateCommentFile } from '@/lib/fileUpload'
 import { getAccessToken } from '@/lib/token-store'
 import { isS3Mode } from '@/lib/storage-provider-client'
@@ -33,6 +35,7 @@ interface UseCommentManagementProps {
   canAdminManageComments?: boolean
   companyName?: string
   allowClientDeleteComments?: boolean
+  allowClientReactions?: boolean
   allowClientUploadFiles?: boolean
 }
 
@@ -63,6 +66,7 @@ export function useCommentManagement({
   canAdminManageComments,
   companyName = 'Studio',
   allowClientDeleteComments = false,
+  allowClientReactions = true,
   allowClientUploadFiles = false,
 }: UseCommentManagementProps) {
   const router = useRouter()
@@ -769,7 +773,7 @@ export function useCommentManagement({
       if (filesToUpload.length > 0) {
         try {
           const response = shareToken
-            ? await fetch(`/api/comments?projectId=${projectId}`, {
+            ? await fetch(withCommentIdentity(`/api/comments?projectId=${projectId}`, projectId), {
                 headers: { Authorization: `Bearer ${shareToken}` },
                 cache: 'no-store',
               })
@@ -1008,6 +1012,96 @@ export function useCommentManagement({
     }
   }
 
+  /**
+   * Add or remove one of the viewer's emoji reactions on a comment or reply.
+   *
+   * Updates the UI optimistically, then reconciles from the server response. The route is
+   * idempotent per direction, so a double-click can't leave the two out of step. On
+   * failure the pre-click state is restored rather than refetched — a refetch here would
+   * race the SSE-driven one already in flight from other viewers' reactions.
+   */
+  const handleToggleReaction = async (commentId: string, emoji: string, nextActive: boolean) => {
+    const isAdminContext = useAdminAuth || !!adminUser
+
+    if (isAdminContext && canAdminManageComments === false) {
+      toast.error('You do not have permission to react to comments on the Share Page.')
+      return
+    }
+
+    if (!isAdminContext) {
+      if (!allowClientReactions) {
+        toast.error('Reactions are disabled for this project.')
+        return
+      }
+
+      if (!shareToken) {
+        toast.error('Authentication required to react to comments.')
+        return
+      }
+
+      // Reactions are attributable-only, so an unidentified viewer has nothing to key on.
+      // Password-protected shares can fix that inline via the name picker in the comment
+      // box; open shares have no recipient to become.
+      if (!recipientId) {
+        toast.error(
+          isPasswordProtected
+            ? 'Select your name in the comment box before reacting.'
+            : 'Reactions are only available to named project recipients.'
+        )
+        return
+      }
+    }
+
+    const target = findCommentById(commentId)
+    const previousReactions = ((target as any)?.reactions || []) as CommentReactionSummary[]
+
+    const emitReactions = (reactions: CommentReactionSummary[]) => {
+      window.dispatchEvent(new CustomEvent('commentReactionsUpdated', {
+        detail: { commentId, reactions },
+      }))
+    }
+
+    emitReactions(applyViewerReaction(previousReactions, emoji, nextActive))
+
+    try {
+      const query = new URLSearchParams({ emoji })
+      if (!isAdminContext && recipientId) query.set('recipientId', recipientId)
+
+      let payload: any
+      if (shareToken) {
+        const response = await fetch(
+          nextActive
+            ? `/api/comments/${commentId}/reactions`
+            : `/api/comments/${commentId}/reactions?${query.toString()}`,
+          {
+            method: nextActive ? 'POST' : 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${shareToken}`,
+            },
+            body: nextActive ? JSON.stringify({ emoji, recipientId: recipientId || undefined }) : undefined,
+          }
+        )
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}))
+          throw new Error(err.error || 'Failed to update reaction')
+        }
+        payload = await response.json()
+      } else if (useAdminAuth) {
+        payload = nextActive
+          ? await apiPost(`/api/comments/${commentId}/reactions`, { emoji })
+          : await apiDelete(`/api/comments/${commentId}/reactions?${query.toString()}`)
+      } else {
+        throw new Error('Authentication required to react to comments')
+      }
+
+      if (Array.isArray(payload?.reactions)) emitReactions(payload.reactions)
+    } catch (error) {
+      emitReactions(previousReactions)
+      toast.error(`Failed to update reaction: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    }
+  }
+
   // Wrapper for setAuthorName that also persists to sessionStorage
   const handleAuthorNameChange = (name: string) => {
     setAuthorName(name)
@@ -1029,6 +1123,10 @@ export function useCommentManagement({
     } catch {
       // Ignore storage errors
     }
+
+    // Which reactions read back as "yours" depends on this choice, so the list has to be
+    // re-fetched under the new identity — nothing else about the comments changed.
+    window.dispatchEvent(new CustomEvent('commentIdentityChanged'))
   }
 
   // Get FPS of currently selected video
@@ -1119,6 +1217,7 @@ export function useCommentManagement({
     handleSetCommentTimes,
     handleDeleteComment,
     handleEditComment,
+    handleToggleReaction,
     pendingDeleteCommentId,
     setPendingDeleteCommentId,
     confirmDeleteComment,

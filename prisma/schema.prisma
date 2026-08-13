@@ -30,6 +30,7 @@ model User {
   projects                Project[]
   assignedProjects        ProjectUser[]
   comments                Comment[]
+  commentReactions        CommentReaction[]
   resolvedComments        Comment[]                @relation("CommentResolvedBy")
   internalProjectComments ProjectInternalComment[]
   passkeys                PasskeyCredential[]
@@ -278,6 +279,10 @@ model Project {
   hideFeedback                    Boolean @default(false)
   useFullTimecode                 Boolean @default(false) // Display comment times as full timecode (HH:MM:SS:FF / DF) instead of M:SS
   allowClientDeleteComments       Boolean @default(false)
+  // Emoji reactions on share-page comments. Separate from allowClientDeleteComments, which
+  // already doubles as the client edit permission — overloading it further would make the
+  // settings copy inaccurate.
+  allowClientReactions            Boolean @default(true)
   enableClientUploads             Boolean @default(true)  // Show UPLOADS folder to clients on the Share page FILES mode
   allowClientUploadFiles          Boolean @default(false) // Allow clients to upload files with comments
   maxClientUploadAllocationMB     Int     @default(1000) // Total allowed client comment-attachment uploads per project (0 = unlimited)
@@ -763,7 +768,8 @@ model ProjectRecipient {
   receiveNotifications Boolean  @default(true) // Per-recipient notification toggle
   createdAt            DateTime @default(now())
 
-  comments Comment[]
+  comments         Comment[]
+  commentReactions CommentReaction[]
 
   @@index([projectId])
   @@index([clientRecipientId])
@@ -962,8 +968,9 @@ model Comment {
   // allowClientDeleteComments on). Admins are unaffected.
   lockedAt DateTime?
 
-  project Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  files   CommentFile[] // Files uploaded with this comment
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  files     CommentFile[] // Files uploaded with this comment
+  reactions CommentReaction[] // Emoji reactions (share page + admin)
 
   @@index([projectId])
   @@index([videoId])
@@ -978,6 +985,44 @@ model Comment {
   @@index([recipientId])
   // Chronological-per-project scan for the Project Activity feed.
   @@index([projectId, createdAt])
+}
+
+/// Emoji reaction on a Comment (top-level comments and replies alike — replies are
+/// Comment rows with a parentId, so no special case is needed here).
+///
+/// Reactions are attributable-only: every reactor is either an admin User or a project
+/// ProjectRecipient. Share visitors who have not identified themselves as a recipient
+/// see counts but cannot react — there is deliberately no anonymous/session-keyed lane,
+/// because the unique constraints below are what stop a viewer inflating a count, and a
+/// clearable session id would not hold that line.
+///
+/// `emoji` is validated server-side against the fixed allowlist in
+/// src/lib/comment-reactions.ts — it is never free text.
+model CommentReaction {
+  id        String   @id @default(cuid())
+  commentId String
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  emoji     String   @db.VarChar(16)
+  createdAt DateTime @default(now())
+
+  // Exactly one of userId / recipientId is set. Both are SetNull rather than Cascade so a
+  // deleted author leaves the count intact (matching Comment's own author FKs), which is
+  // why neither column can carry a NOT NULL constraint.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  recipientId String?
+  recipient   ProjectRecipient? @relation(fields: [recipientId], references: [id], onDelete: SetNull)
+
+  // One reaction per emoji per identity. Postgres treats NULLs as distinct, so each
+  // constraint only binds rows where its author column is actually set — the admin
+  // constraint ignores recipient rows and vice versa.
+  @@unique([commentId, emoji, userId])
+  @@unique([commentId, emoji, recipientId])
+  // Serves the single grouped count query that hydrates a whole comment list.
+  @@index([commentId])
+  @@index([userId])
+  @@index([recipientId])
 }
 
 model ProjectInternalComment {
@@ -1096,6 +1141,7 @@ model Settings {
 
   // Default project behavior
   defaultAllowClientDeleteComments   Boolean @default(false)
+  defaultAllowClientReactions        Boolean @default(true)  // Default toggle for emoji reactions on share-page comments
   defaultEnableClientUploads         Boolean @default(true)  // Default: show UPLOADS folder to clients on the Share page FILES mode
   defaultAllowClientUploadFiles      Boolean @default(false) // Default toggle for client file uploads
   defaultAllowAuthenticatedProjectSwitching Boolean @default(true) // Default toggle for authenticated client project switching

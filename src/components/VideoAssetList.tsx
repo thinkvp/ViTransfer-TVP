@@ -22,6 +22,7 @@ import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
 import { AssetCopyMoveModal } from './AssetCopyMoveModal'
 import { VideoAssetUploadQueue } from './VideoAssetUploadQueue'
+import { hasActiveAssetUploads } from '@/hooks/useAssetUploadQueue'
 import { withDownloadTracking } from '@/lib/download-url'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
@@ -60,7 +61,10 @@ export function VideoAssetList({
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [settingThumbnail, setSettingThumbnail] = useState<string | null>(null)
   const [showCopyModal, setShowCopyModal] = useState(false)
-  const [showUploadQueue, setShowUploadQueue] = useState(false)
+  // Collapsing the version card unmounts this component while asset uploads may
+  // still be running (the queue itself lives outside React). Re-open the panel on
+  // re-mount so the in-flight progress is visible again instead of silently gone.
+  const [showUploadQueue, setShowUploadQueue] = useState(() => hasActiveAssetUploads(videoId))
   const [error, setError] = useState<string | null>(null)
   const [currentThumbnailPath, setCurrentThumbnailPath] = useState<string | null>(null)
   const [pendingDeleteAsset, setPendingDeleteAsset] = useState<{ id: string; name: string } | null>(null)
