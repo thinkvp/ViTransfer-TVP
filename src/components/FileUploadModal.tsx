@@ -8,7 +8,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { AlertCircle, Upload, X } from 'lucide-react'
-import { getAllowedFileTypesDescription, validateCommentFile } from '@/lib/fileUpload'
+import { getAllowedFileTypesDescription, validateCommentFile } from '@/lib/upload-policy'
+import { useUploadPolicy } from '@/hooks/useUploadPolicy'
 
 interface FileUploadModalProps {
   open: boolean
@@ -32,6 +33,7 @@ export function FileUploadModal({
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const uploadPolicy = useUploadPolicy()
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
@@ -72,7 +74,7 @@ export function FileUploadModal({
 
     try {
       for (const file of files) {
-        const validation = validateCommentFile(file.name, file.type, file.size)
+        const validation = validateCommentFile(file.name, file.type, file.size, uploadPolicy)
         if (!validation.valid) {
           throw new Error(validation.error || 'File is not allowed')
         }
@@ -155,7 +157,7 @@ export function FileUploadModal({
             )}
             <p className="text-xs text-muted-foreground font-medium mb-1">Supported file types:</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              {getAllowedFileTypesDescription()}
+              {getAllowedFileTypesDescription(uploadPolicy)}
             </p>
           </div>
 

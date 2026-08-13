@@ -344,13 +344,15 @@ export default function ProjectSettingsPage() {
     }
   }, [initialLoadComplete, savedSnapshot, currentSnapshot])
 
-  // Reset active desktop section when video sections become unavailable
+  // Reset active desktop section when its project type becomes unavailable
   useEffect(() => {
-    const videoOnlySections = ['video-processing', 'feedback']
-    if (!enableVideos && videoOnlySections.includes(activeSection)) {
+    if (!enableVideos && activeSection === 'video-processing') {
       setActiveSection('project-details')
     }
-  }, [enableVideos, activeSection])
+    if (!enableVideos && !enableUploads && activeSection === 'feedback') {
+      setActiveSection('project-details')
+    }
+  }, [enableVideos, enableUploads, activeSection])
 
   async function handleSave() {
     if (!canChangeProjectSettings) {
@@ -555,6 +557,8 @@ export default function ProjectSettingsPage() {
     { id: 'notifications', label: 'Notifications', description: 'Set notification schedule for client recipients', icon: Bell },
     ...(enableVideos ? [
       { id: 'video-processing', label: 'Video Processing', description: 'Configure how videos are processed and displayed', icon: Video },
+    ] : []),
+    ...(enableVideos || enableUploads ? [
       { id: 'feedback', label: 'Feedback & Client Uploads', description: "Control clients ability to see or leave feedback and upload files", icon: MessageSquare },
     ] : []),
     { id: 'security', label: 'Security', description: 'Password protection for the share page', icon: Shield },
@@ -567,6 +571,22 @@ export default function ProjectSettingsPage() {
       </div>
     )
   }
+
+  // Summarises the effective client access for the Uploads project type, based on the
+  // two switches in Feedback & Client Uploads.
+  const uploadsAccessHint = !enableClientUploads
+    ? 'Not accessible by Clients.'
+    : allowClientUploadFiles
+      ? 'Clients can access and upload.'
+      : 'Clients can access but not upload.'
+
+  // Both notes read as one paragraph under the tickbox rather than two stacked lines.
+  const uploadsHelperText = [
+    enableUploads ? uploadsAccessHint : null,
+    (project._count?.shareUploadFiles ?? 0) > 0
+      ? 'Remove existing uploaded files to disable Uploads in this project.'
+      : null,
+  ].filter(Boolean).join(' ')
 
   return (
     <div className="flex-1 min-h-0 bg-background">
@@ -696,9 +716,9 @@ export default function ProjectSettingsPage() {
                         />
                         Uploads
                       </label>
-                      {(project?._count?.shareUploadFiles ?? 0) > 0 && (
+                      {uploadsHelperText && (
                         <p className="text-xs text-muted-foreground mt-1">
-                          Remove existing uploaded files to disable Uploads in this project.
+                          {uploadsHelperText}
                         </p>
                       )}
                     </div>
@@ -932,7 +952,11 @@ export default function ProjectSettingsPage() {
                 </CardContent>
                 )}
               </Card>
+            </>
+          )}
 
+          {(enableVideos || enableUploads) && (
+            <>
               {/* Comment Settings */}
               <Card className="border-border">
                 <CardHeader
@@ -957,61 +981,65 @@ export default function ProjectSettingsPage() {
                 {showFeedback && (
                   <CardContent className="space-y-6 border-t pt-4">
                   <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="hideFeedback">Hide Feedback Section</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Completely hide the Feedback & Discussion window from clients
-                        </p>
-                      </div>
-                      <Switch
-                        id="hideFeedback"
-                        checked={hideFeedback}
-                        onCheckedChange={setHideFeedback}
-                      />
-                    </div>
+                    {enableVideos && (
+                      <>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="hideFeedback">Hide Feedback Section</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Completely hide the Feedback & Discussion window from clients
+                            </p>
+                          </div>
+                          <Switch
+                            id="hideFeedback"
+                            checked={hideFeedback}
+                            onCheckedChange={setHideFeedback}
+                          />
+                        </div>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="restrictComments">Restrict Comments to Latest Version</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Only allow feedback on the most recent video version
-                        </p>
-                      </div>
-                      <Switch
-                        id="restrictComments"
-                        checked={restrictCommentsToLatestVersion}
-                        onCheckedChange={setRestrictCommentsToLatestVersion}
-                      />
-                    </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="restrictComments">Restrict Comments to Latest Version</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Only allow feedback on the most recent video version
+                            </p>
+                          </div>
+                          <Switch
+                            id="restrictComments"
+                            checked={restrictCommentsToLatestVersion}
+                            onCheckedChange={setRestrictCommentsToLatestVersion}
+                          />
+                        </div>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="useFullTimecode">Display Full Timecode</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.
-                        </p>
-                      </div>
-                      <Switch
-                        id="useFullTimecode"
-                        checked={useFullTimecode}
-                        onCheckedChange={setUseFullTimecode}
-                      />
-                    </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="useFullTimecode">Display Full Timecode</Label>
+                            <p className="text-xs text-muted-foreground">
+                              Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.
+                            </p>
+                          </div>
+                          <Switch
+                            id="useFullTimecode"
+                            checked={useFullTimecode}
+                            onCheckedChange={setUseFullTimecode}
+                          />
+                        </div>
 
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5 flex-1">
-                    <Label htmlFor="allowClientDeleteComments">Allow clients to edit and delete client comments</Label>
-                    <p className="text-xs text-muted-foreground">
-                      All clients will be able to delete any comment left by a client, and edit comments left under their own name. Disabled once the next version has been requested.
-                    </p>
-                  </div>
-                  <Switch
-                    id="allowClientDeleteComments"
-                    checked={allowClientDeleteComments}
-                    onCheckedChange={setAllowClientDeleteComments}
-                  />
-                </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="allowClientDeleteComments">Allow clients to edit and delete client comments</Label>
+                            <p className="text-xs text-muted-foreground">
+                              All clients will be able to delete any comment left by a client, and edit comments left under their own name. Disabled once the next version has been requested.
+                            </p>
+                          </div>
+                          <Switch
+                            id="allowClientDeleteComments"
+                            checked={allowClientDeleteComments}
+                            onCheckedChange={setAllowClientDeleteComments}
+                          />
+                        </div>
+                      </>
+                    )}
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="space-y-0.5 flex-1">
@@ -1031,7 +1059,7 @@ export default function ProjectSettingsPage() {
                   <div className="space-y-0.5 flex-1">
                     <Label htmlFor="allowClientUploadFiles">Allow clients to upload files to Projects</Label>
                     <p className="text-xs text-muted-foreground">
-                      Authenticated clients can upload files with comments on the Share page and to Uploads directories (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.
+                      Authenticated clients can upload files with comments on the Share page and to Uploads directories (if enabled). Which file types are accepted is set system-wide in Settings &rarr; Default Project Settings.
                     </p>
                   </div>
                   <Switch
@@ -1277,7 +1305,7 @@ export default function ProjectSettingsPage() {
                             <input type="checkbox" checked={enableUploads} onChange={(e) => setEnableUploads(e.target.checked)} disabled={(project?._count?.shareUploadFiles ?? 0) > 0 && enableUploads} className="h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-60" />
                             Uploads
                           </label>
-                          {(project?._count?.shareUploadFiles ?? 0) > 0 && <p className="text-xs text-muted-foreground mt-1">Remove existing uploaded files to disable Uploads in this project.</p>}
+                          {uploadsHelperText && <p className="text-xs text-muted-foreground mt-1">{uploadsHelperText}</p>}
                         </div>
                       </div>
                     </div>
@@ -1402,37 +1430,41 @@ export default function ProjectSettingsPage() {
                 </CardHeader>
                 <CardContent className="space-y-6 border-t pt-4">
                   <div className="space-y-3 border p-4 rounded-lg bg-muted/30">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="hideFeedback-d">Hide Feedback Section</Label>
-                        <p className="text-xs text-muted-foreground">Completely hide the Feedback &amp; Discussion window from clients</p>
-                      </div>
-                      <Switch id="hideFeedback-d" checked={hideFeedback} onCheckedChange={setHideFeedback} />
-                    </div>
+                    {enableVideos && (
+                      <>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="hideFeedback-d">Hide Feedback Section</Label>
+                            <p className="text-xs text-muted-foreground">Completely hide the Feedback &amp; Discussion window from clients</p>
+                          </div>
+                          <Switch id="hideFeedback-d" checked={hideFeedback} onCheckedChange={setHideFeedback} />
+                        </div>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="restrictComments-d">Restrict Comments to Latest Version</Label>
-                        <p className="text-xs text-muted-foreground">Only allow feedback on the most recent video version</p>
-                      </div>
-                      <Switch id="restrictComments-d" checked={restrictCommentsToLatestVersion} onCheckedChange={setRestrictCommentsToLatestVersion} />
-                    </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="restrictComments-d">Restrict Comments to Latest Version</Label>
+                            <p className="text-xs text-muted-foreground">Only allow feedback on the most recent video version</p>
+                          </div>
+                          <Switch id="restrictComments-d" checked={restrictCommentsToLatestVersion} onCheckedChange={setRestrictCommentsToLatestVersion} />
+                        </div>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="useFullTimecode-d">Display Full Timecode</Label>
-                        <p className="text-xs text-muted-foreground">Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.</p>
-                      </div>
-                      <Switch id="useFullTimecode-d" checked={useFullTimecode} onCheckedChange={setUseFullTimecode} />
-                    </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="useFullTimecode-d">Display Full Timecode</Label>
+                            <p className="text-xs text-muted-foreground">Show comment timestamps as full timecode (HH:MM:SS:FF / DF) instead of M:SS.</p>
+                          </div>
+                          <Switch id="useFullTimecode-d" checked={useFullTimecode} onCheckedChange={setUseFullTimecode} />
+                        </div>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="space-y-0.5 flex-1">
-                        <Label htmlFor="allowClientDeleteComments-d">Allow clients to edit and delete client comments</Label>
-                        <p className="text-xs text-muted-foreground">All clients will be able to delete any comment left by a client, and edit comments left under their own name. Disabled once the next version has been requested.</p>
-                      </div>
-                      <Switch id="allowClientDeleteComments-d" checked={allowClientDeleteComments} onCheckedChange={setAllowClientDeleteComments} />
-                    </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="allowClientDeleteComments-d">Allow clients to edit and delete client comments</Label>
+                            <p className="text-xs text-muted-foreground">All clients will be able to delete any comment left by a client, and edit comments left under their own name. Disabled once the next version has been requested.</p>
+                          </div>
+                          <Switch id="allowClientDeleteComments-d" checked={allowClientDeleteComments} onCheckedChange={setAllowClientDeleteComments} />
+                        </div>
+                      </>
+                    )}
 
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
@@ -1445,7 +1477,7 @@ export default function ProjectSettingsPage() {
                     <div className="flex items-center justify-between gap-4">
                       <div className="space-y-0.5 flex-1">
                         <Label htmlFor="allowClientUploadFiles-d">Allow clients to upload files to Projects</Label>
-                        <p className="text-xs text-muted-foreground">Authenticated clients can upload files with comments on the Share page and to Uploads directories (if enabled). Supported: Images, Videos, Audio files, PDFs, Documents, Fonts, Archives.</p>
+                        <p className="text-xs text-muted-foreground">Authenticated clients can upload files with comments on the Share page and to Uploads directories (if enabled). Which file types are accepted is set system-wide in Settings &rarr; Default Project Settings.</p>
                       </div>
                       <Switch id="allowClientUploadFiles-d" checked={allowClientUploadFiles} onCheckedChange={setAllowClientUploadFiles} />
                     </div>

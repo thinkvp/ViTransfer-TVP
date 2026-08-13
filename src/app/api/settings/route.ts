@@ -5,6 +5,7 @@ import { encrypt } from '@/lib/encryption'
 import { rateLimit } from '@/lib/rate-limit'
 import { invalidateEmailSettingsCache } from '@/lib/email'
 import { invalidateSettingsCaches } from '@/lib/settings'
+import { normalizeUploadCategories, parseCustomExtensions } from '@/lib/upload-policy'
 import {
   MAX_DOWNLOAD_CHUNK_SIZE_MB,
   MAX_UPLOAD_CHUNK_SIZE_MB,
@@ -210,6 +211,8 @@ export async function PATCH(request: NextRequest) {
       defaultAllowClientUploadFiles,
       defaultAllowAuthenticatedProjectSwitching,
       defaultMaxClientUploadAllocationMB,
+      clientUploadCategories,
+      clientUploadCustomExtensions,
       autoApproveProject,
       autoDeletePreviewsOnClose,
       excludeInternalIpsFromAnalytics,
@@ -382,6 +385,32 @@ export async function PATCH(request: NextRequest) {
         })
       }
       aiPortfolioJson = JSON.stringify(normalized)
+    }
+
+    // Client upload type policy. The extension blocklist is not overridable from the UI:
+    // a dangerous extension typed into the custom box fails the save outright.
+    let clientUploadCategoriesJson: string | undefined
+    if (clientUploadCategories !== undefined) {
+      if (!Array.isArray(clientUploadCategories)) {
+        return NextResponse.json({ error: 'clientUploadCategories must be an array.' }, { status: 400 })
+      }
+      clientUploadCategoriesJson = JSON.stringify(normalizeUploadCategories(clientUploadCategories))
+    }
+
+    let clientUploadCustomExtensionsJson: string | undefined
+    if (clientUploadCustomExtensions !== undefined) {
+      const parsed = parseCustomExtensions(clientUploadCustomExtensions)
+      if (parsed.blocked.length > 0) {
+        return NextResponse.json(
+          {
+            error: `These file types cannot be allowed for security reasons: ${parsed.blocked
+              .map((e) => `.${e}`)
+              .join(', ')}`,
+          },
+          { status: 400 }
+        )
+      }
+      clientUploadCustomExtensionsJson = JSON.stringify(parsed.extensions)
     }
 
     // SECURITY: Validate auto-close settings
@@ -606,6 +635,8 @@ export async function PATCH(request: NextRequest) {
       defaultAllowClientUploadFiles,
       defaultAllowAuthenticatedProjectSwitching,
       defaultMaxClientUploadAllocationMB,
+      clientUploadCategories: clientUploadCategoriesJson,
+      clientUploadCustomExtensions: clientUploadCustomExtensionsJson,
       autoApproveProject,
       uploadChunkSizeMB: uploadChunkSizeMB !== undefined ? normalizeUploadChunkSizeMB(uploadChunkSizeMB) : undefined,
       downloadChunkSizeMB: downloadChunkSizeMB !== undefined ? normalizeDownloadChunkSizeMB(downloadChunkSizeMB) : undefined,
@@ -702,6 +733,8 @@ export async function PATCH(request: NextRequest) {
         defaultEnableClientUploads,
         defaultAllowClientUploadFiles,
         defaultAllowAuthenticatedProjectSwitching,
+        clientUploadCategories: clientUploadCategoriesJson,
+        clientUploadCustomExtensions: clientUploadCustomExtensionsJson,
         autoApproveProject,
         uploadChunkSizeMB: normalizeUploadChunkSizeMB(uploadChunkSizeMB),
         downloadChunkSizeMB: normalizeDownloadChunkSizeMB(downloadChunkSizeMB),

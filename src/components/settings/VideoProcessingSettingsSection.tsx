@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
+import { UPLOAD_CATEGORIES, getCategoryExtensions, parseCustomExtensions } from '@/lib/upload-policy'
 
 const RESOLUTION_OPTIONS = [
   { value: '480p', label: '480p (854×480 or 480×854 for vertical)' },
@@ -24,6 +25,11 @@ interface VideoProcessingSettingsSectionProps {
   setDefaultAllowAuthenticatedProjectSwitching: (value: boolean) => void
   defaultMaxClientUploadAllocationMB: number | ''
   setDefaultMaxClientUploadAllocationMB: (value: number | '') => void
+  clientUploadCategories: string[]
+  setClientUploadCategories: (value: string[]) => void
+  /** Raw text as typed; parsed into extensions on save. */
+  clientUploadCustomExtensions: string
+  setClientUploadCustomExtensions: (value: string) => void
 
   // Default client notification schedule for new projects
   defaultClientNotificationSchedule: string
@@ -55,6 +61,10 @@ export function VideoProcessingSettingsSection({
   setDefaultAllowAuthenticatedProjectSwitching,
   defaultMaxClientUploadAllocationMB,
   setDefaultMaxClientUploadAllocationMB,
+  clientUploadCategories,
+  setClientUploadCategories,
+  clientUploadCustomExtensions,
+  setClientUploadCustomExtensions,
   defaultClientNotificationSchedule,
   setDefaultClientNotificationSchedule,
   defaultClientNotificationTime,
@@ -67,6 +77,17 @@ export function VideoProcessingSettingsSection({
   setShow,
   hideCollapse,
 }: VideoProcessingSettingsSectionProps) {
+
+  const { extensions: parsedCustomExtensions, blocked: blockedCustomExtensions } =
+    parseCustomExtensions(clientUploadCustomExtensions)
+
+  function toggleUploadCategory(category: string) {
+    if (clientUploadCategories.includes(category)) {
+      setClientUploadCategories(clientUploadCategories.filter(c => c !== category))
+    } else {
+      setClientUploadCategories([...clientUploadCategories, category])
+    }
+  }
 
   function toggleResolution(resolution: string) {
     if (defaultPreviewResolutions.includes(resolution)) {
@@ -156,7 +177,7 @@ export function VideoProcessingSettingsSection({
               <div className="space-y-0.5">
                 <Label htmlFor="defaultAllowClientUploadFiles">Allow clients to upload files to Projects</Label>
                 <p className="text-xs text-muted-foreground">
-                  Authenticated clients can upload files with comments on the Share page and to the UPLOADS directory (if enabled). Supported types: Images (JPG, PNG, GIF, WebP, TIFF, SVG, PSD, PSB, AI) • Videos (MP4, MOV, M4V, WEBM, MKV, AVI) • Audio (MP3, WAV, AAC, FLAC, OGG, M4A, AIFF, WMA) • Project Files (PRPROJ, AEP, DRP, DRA, DRT) • Documents (PDF, Word, Excel, PowerPoint) • Fonts (TTF, OTF, WOFF, WOFF2) • Archives (ZIP, RAR, 7Z, GZ, TAR).
+                  Authenticated clients can upload files with comments on the Share page and to the UPLOADS directory (if enabled).
                 </p>
               </div>
               <Switch
@@ -164,6 +185,56 @@ export function VideoProcessingSettingsSection({
                 checked={defaultAllowClientUploadFiles}
                 onCheckedChange={setDefaultAllowClientUploadFiles}
               />
+            </div>
+
+            <div className="space-y-2 pt-3 mt-3 border-t border-border">
+              <Label>Supported file types for client uploads</Label>
+              <p className="text-xs text-muted-foreground">
+                Applies to every project immediately — this is a system-wide restriction, not a per-project default. Admin uploads and client voice notes are never restricted by it.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 pt-1">
+                {UPLOAD_CATEGORIES.map(cat => (
+                  <label key={cat.key} className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={clientUploadCategories.includes(cat.key)}
+                      onChange={() => toggleUploadCategory(cat.key)}
+                      className="rounded border-border accent-primary mt-0.5"
+                    />
+                    <span className="min-w-0">
+                      <span className="text-sm">{cat.label}</span>
+                      <span className="block text-xs text-muted-foreground break-words">
+                        {getCategoryExtensions(cat.key).join(', ').toUpperCase()}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="space-y-1 pt-2">
+                <Label htmlFor="clientUploadCustomExtensions">Custom file extensions</Label>
+                <Input
+                  id="clientUploadCustomExtensions"
+                  type="text"
+                  value={clientUploadCustomExtensions}
+                  onChange={(e) => setClientUploadCustomExtensions(e.target.value)}
+                  placeholder="e.g. fcpxml, blend, obj"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Comma-separated, in addition to the categories above. Executable and script types (EXE, JS, PS1, BAT, and similar) are always blocked and will be rejected when you save.
+                </p>
+                {blockedCustomExtensions.length > 0 && (
+                  <p className="text-xs text-destructive">
+                    Not allowed for security reasons: {blockedCustomExtensions.map(e => `.${e}`).join(', ')}
+                  </p>
+                )}
+              </div>
+
+              {clientUploadCategories.length === 0 && parsedCustomExtensions.length === 0 && (
+                <p className="text-xs text-destructive">
+                  No file types are selected — clients will not be able to upload anything, even where the toggle above is on.
+                </p>
+              )}
             </div>
 
             <div className="flex items-center justify-between gap-4 pt-3 mt-3 border-t border-border">

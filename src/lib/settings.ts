@@ -6,6 +6,11 @@ import {
   normalizeDownloadChunkSizeMB,
   normalizeUploadChunkSizeMB,
 } from './transfer-tuning'
+import {
+  DEFAULT_CLIENT_UPLOAD_POLICY,
+  parseClientUploadPolicy,
+  type ClientUploadPolicy,
+} from './upload-policy'
 
 // Simple in-memory cache for frequently read settings to avoid repeated DB hits
 const SETTINGS_CACHE_TTL_MS = 60_000
@@ -20,6 +25,10 @@ const cachedSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0
 const cachedSmtpConfigured: CachedValue<boolean> = { value: false, expiresAt: 0 }
 const cachedAutoApproveProject: CachedValue<boolean> = { value: true, expiresAt: 0 }
 const cachedExcludeInternalIpsFromAnalytics: CachedValue<boolean> = { value: true, expiresAt: 0 }
+const cachedClientUploadPolicy: CachedValue<ClientUploadPolicy> = {
+  value: DEFAULT_CLIENT_UPLOAD_POLICY,
+  expiresAt: 0,
+}
 type BrandingSettingsSnapshot = {
   companyName: string | null
   companyFaviconMode: string | null
@@ -85,6 +94,36 @@ export function invalidateSettingsCaches() {
   cachedExcludeInternalIpsFromAnalytics.expiresAt = 0
   cachedBrandingSettings.expiresAt = 0
   cachedTransferTuning.expiresAt = 0
+  cachedClientUploadPolicy.expiresAt = 0
+}
+
+/**
+ * System-wide policy for which file types clients may upload (share-page comment attachments
+ * and the share UPLOADS directory). Admin-originated uploads are not restricted by it.
+ */
+export async function getClientUploadPolicy(): Promise<ClientUploadPolicy> {
+  const now = Date.now()
+  if (cachedClientUploadPolicy.expiresAt > now) {
+    return cachedClientUploadPolicy.value
+  }
+
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { clientUploadCategories: true, clientUploadCustomExtensions: true },
+    })
+
+    const value = parseClientUploadPolicy(
+      settings?.clientUploadCategories,
+      settings?.clientUploadCustomExtensions,
+    )
+    cachedClientUploadPolicy.value = value
+    cachedClientUploadPolicy.expiresAt = now + SETTINGS_CACHE_TTL_MS
+    return value
+  } catch (error) {
+    console.error('Error fetching client upload policy:', error)
+    return cachedClientUploadPolicy.value
+  }
 }
 
 export async function getBrandingSettingsSnapshot(): Promise<BrandingSettingsSnapshot | null> {

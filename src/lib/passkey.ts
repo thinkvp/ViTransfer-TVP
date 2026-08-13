@@ -536,15 +536,19 @@ export async function getUserPasskeys(userId: string) {
 /**
  * Delete a passkey
  *
- * SECURITY: Users can only delete their own passkeys
+ * SECURITY: Users can only delete their own passkeys, unless the caller has been
+ * verified as a user administrator (`allowCrossUser`) — used by the Edit User page
+ * so an admin can revoke a lost/compromised passkey belonging to another user.
  *
- * @param userId - User ID
+ * @param userId - User ID of the caller
  * @param credentialId - Credential ID to delete
+ * @param options.allowCrossUser - Caller is permitted to revoke other users' passkeys
  * @returns Success status
  */
 export async function deletePasskey(
   userId: string,
-  credentialId: string
+  credentialId: string,
+  options?: { allowCrossUser?: boolean }
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // Verify ownership
@@ -561,7 +565,9 @@ export async function deletePasskey(
       return { success: false, error: 'PassKey not found' }
     }
 
-    if (credential.userId !== userId) {
+    const crossUser = credential.userId !== userId
+
+    if (crossUser && !options?.allowCrossUser) {
       // Log unauthorized deletion attempt
       await logSecurityEvent({
         type: 'PASSKEY_DELETE_UNAUTHORIZED',
@@ -582,12 +588,13 @@ export async function deletePasskey(
     // Log successful deletion
     await logSecurityEvent({
       type: 'PASSKEY_DELETED',
-      severity: 'INFO',
+      severity: crossUser ? 'WARNING' : 'INFO',
       details: {
-        userId,
+        userId: credential.userId,
         credentialId,
         deviceType: credential.deviceType,
         credentialName: credential.credentialName,
+        ...(crossUser ? { revokedByAdminId: userId } : {}),
       },
     })
 

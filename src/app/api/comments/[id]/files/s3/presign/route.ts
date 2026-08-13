@@ -12,6 +12,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { isS3Mode, s3InitiateMultipartUpload, s3GetPresignedPartUrl, S3_PRESIGNED_PART_EXPIRES_SECONDS } from '@/lib/s3-storage'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
+import { getClientUploadPolicy } from '@/lib/settings'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
 import { prisma } from '@/lib/db'
@@ -124,7 +125,14 @@ export async function POST(
     ? contentType.trim()
     : 'application/octet-stream'
 
-  const validation = validateCommentFile(fileName, mimeType, fileSize)
+  // Client attachments are restricted by the system-wide type policy; voice notes and admin
+  // uploads are not.
+  const validation = validateCommentFile(
+    fileName,
+    mimeType,
+    fileSize,
+    isClient && !isVoiceNoteUpload ? await getClientUploadPolicy() : undefined,
+  )
   if (!validation.valid) {
     return NextResponse.json({ error: validation.error }, { status: 400 })
   }

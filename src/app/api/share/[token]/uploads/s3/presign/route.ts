@@ -7,6 +7,7 @@ import {
 } from '@/lib/s3-storage'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile } from '@/lib/fileUpload'
+import { getClientUploadPolicy } from '@/lib/settings'
 import { resolveProjectStoragePath, resolveShareUploadAccess } from '@/lib/share-uploads'
 import {
   allocateUniqueUploadFileName,
@@ -77,7 +78,13 @@ export async function POST(
     return NextResponse.json({ error: 'fileSize must be a positive number' }, { status: 400 })
   }
 
-  const validation = validateCommentFile(fileName, contentType, fileSize)
+  // Client uploads are restricted by the system-wide type policy; admin uploads are not.
+  const validation = validateCommentFile(
+    fileName,
+    contentType,
+    fileSize,
+    access.isAdmin ? undefined : await getClientUploadPolicy(),
+  )
   if (!validation.valid) {
     return NextResponse.json({ error: validation.error || 'File type is not allowed' }, { status: 400 })
   }

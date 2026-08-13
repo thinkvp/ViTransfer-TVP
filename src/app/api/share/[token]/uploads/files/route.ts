@@ -3,6 +3,7 @@ import path from 'path'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile } from '@/lib/fileUpload'
+import { getClientUploadPolicy } from '@/lib/settings'
 import { uploadFile } from '@/lib/storage'
 import {
   allocateUniqueUploadFileName,
@@ -76,7 +77,14 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid file payload' }, { status: 400 })
   }
 
-  const validation = validateCommentFile(fileName, mimeType, fileSize)
+  // The system-wide client upload type policy governs client uploads only; admins uploading
+  // through the share page keep the full built-in list.
+  const validation = validateCommentFile(
+    fileName,
+    mimeType,
+    fileSize,
+    access.isAdmin ? undefined : await getClientUploadPolicy(),
+  )
   if (!validation.valid) {
     return NextResponse.json({ error: validation.error || 'File type is not allowed' }, { status: 400 })
   }

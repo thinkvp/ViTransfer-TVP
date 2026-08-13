@@ -26,6 +26,7 @@ import {
   MIN_DOWNLOAD_CHUNK_SIZE_MB,
   MIN_UPLOAD_CHUNK_SIZE_MB,
 } from '@/lib/transfer-tuning'
+import { DEFAULT_CLIENT_UPLOAD_POLICY, parseClientUploadPolicy } from '@/lib/upload-policy'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
@@ -51,6 +52,8 @@ interface Settings {
   defaultAllowClientUploadFiles: boolean | null
   defaultAllowAuthenticatedProjectSwitching: boolean | null
   defaultMaxClientUploadAllocationMB: number | null
+  clientUploadCategories?: string | null
+  clientUploadCustomExtensions?: string | null
   autoApproveProject: boolean | null
   autoCloseApprovedProjectsEnabled?: boolean | null
   autoCloseApprovedProjectsAfterDays?: number | null
@@ -195,6 +198,16 @@ export default function GlobalSettingsPage() {
   const [defaultAllowClientUploadFiles, setDefaultAllowClientUploadFiles] = useState(false)
   const [defaultAllowAuthenticatedProjectSwitching, setDefaultAllowAuthenticatedProjectSwitching] = useState(true)
   const [defaultMaxClientUploadAllocationMB, setDefaultMaxClientUploadAllocationMB] = useState<number | ''>(1000)
+  const [clientUploadCategories, setClientUploadCategories] = useState<string[]>([...DEFAULT_CLIENT_UPLOAD_POLICY.categories])
+  const [clientUploadCustomExtensions, setClientUploadCustomExtensions] = useState('')
+
+  // Both columns are JSON string arrays; a null or unparseable value means "everything allowed",
+  // which is how every install behaved before this setting existed.
+  function applyClientUploadPolicy(categoriesJson?: string | null, customExtensionsJson?: string | null) {
+    const policy = parseClientUploadPolicy(categoriesJson, customExtensionsJson)
+    setClientUploadCategories(policy.categories)
+    setClientUploadCustomExtensions(policy.customExtensions.join(', '))
+  }
   const [autoApproveProject, setAutoApproveProject] = useState(true)
   const [autoDeletePreviewsOnClose, setAutoDeletePreviewsOnClose] = useState(false)
   const [excludeInternalIpsFromAnalytics, setExcludeInternalIpsFromAnalytics] = useState(true)
@@ -334,6 +347,7 @@ export default function GlobalSettingsPage() {
     emailCustomFooterText, smtpFromAddress, smtpSecure, appDomain, mainCompanyDomain,
     defaultPreviewResolutions, defaultAllowClientDeleteComments, defaultAllowClientUploadFiles,
     defaultAllowAuthenticatedProjectSwitching, defaultMaxClientUploadAllocationMB,
+    clientUploadCategories, clientUploadCustomExtensions,
     autoApproveProject, autoDeletePreviewsOnClose, excludeInternalIpsFromAnalytics,
     uploadChunkSizeMB, downloadChunkSizeMB, autoCloseApprovedProjectsEnabled,
     autoCloseApprovedProjectsAfterDays, adminNotificationSchedule, adminNotificationTime,
@@ -441,6 +455,7 @@ export default function GlobalSettingsPage() {
         setDefaultAllowClientUploadFiles(data.defaultAllowClientUploadFiles ?? false)
         setDefaultAllowAuthenticatedProjectSwitching(data.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(data.defaultMaxClientUploadAllocationMB ?? 1000)
+        applyClientUploadPolicy(data.clientUploadCategories, data.clientUploadCustomExtensions)
         setAutoApproveProject(data.autoApproveProject ?? true)
         setAutoDeletePreviewsOnClose(data.autoDeletePreviewsOnClose ?? false)
         setExcludeInternalIpsFromAnalytics(data.excludeInternalIpsFromAnalytics ?? true)
@@ -775,6 +790,8 @@ export default function GlobalSettingsPage() {
         defaultMaxClientUploadAllocationMB: typeof defaultMaxClientUploadAllocationMB === 'number'
           ? defaultMaxClientUploadAllocationMB
           : parseInt(String(defaultMaxClientUploadAllocationMB), 10) || 0,
+        clientUploadCategories,
+        clientUploadCustomExtensions,
         autoApproveProject: autoApproveProject,
         autoDeletePreviewsOnClose: autoDeletePreviewsOnClose,
         excludeInternalIpsFromAnalytics,
@@ -958,6 +975,7 @@ export default function GlobalSettingsPage() {
         setDefaultAllowClientUploadFiles(refreshedData.defaultAllowClientUploadFiles ?? false)
         setDefaultAllowAuthenticatedProjectSwitching(refreshedData.defaultAllowAuthenticatedProjectSwitching ?? true)
         setDefaultMaxClientUploadAllocationMB(refreshedData.defaultMaxClientUploadAllocationMB ?? 1000)
+        applyClientUploadPolicy(refreshedData.clientUploadCategories, refreshedData.clientUploadCustomExtensions)
         setAutoApproveProject(refreshedData.autoApproveProject ?? true)
         setExcludeInternalIpsFromAnalytics(refreshedData.excludeInternalIpsFromAnalytics ?? true)
         setUploadChunkSizeMB(refreshedData.uploadChunkSizeMB ?? DEFAULT_UPLOAD_CHUNK_SIZE_MB)
@@ -1367,6 +1385,10 @@ export default function GlobalSettingsPage() {
             setDefaultAllowAuthenticatedProjectSwitching={setDefaultAllowAuthenticatedProjectSwitching}
             defaultMaxClientUploadAllocationMB={defaultMaxClientUploadAllocationMB}
             setDefaultMaxClientUploadAllocationMB={setDefaultMaxClientUploadAllocationMB}
+            clientUploadCategories={clientUploadCategories}
+            setClientUploadCategories={setClientUploadCategories}
+            clientUploadCustomExtensions={clientUploadCustomExtensions}
+            setClientUploadCustomExtensions={setClientUploadCustomExtensions}
             defaultClientNotificationSchedule={defaultClientNotificationSchedule}
             setDefaultClientNotificationSchedule={setDefaultClientNotificationSchedule}
             defaultClientNotificationTime={defaultClientNotificationTime}
@@ -1768,6 +1790,10 @@ export default function GlobalSettingsPage() {
                 setDefaultAllowAuthenticatedProjectSwitching={setDefaultAllowAuthenticatedProjectSwitching}
                 defaultMaxClientUploadAllocationMB={defaultMaxClientUploadAllocationMB}
                 setDefaultMaxClientUploadAllocationMB={setDefaultMaxClientUploadAllocationMB}
+                clientUploadCategories={clientUploadCategories}
+                setClientUploadCategories={setClientUploadCategories}
+                clientUploadCustomExtensions={clientUploadCustomExtensions}
+                setClientUploadCustomExtensions={setClientUploadCustomExtensions}
                 defaultClientNotificationSchedule={defaultClientNotificationSchedule}
                 setDefaultClientNotificationSchedule={setDefaultClientNotificationSchedule}
                 defaultClientNotificationTime={defaultClientNotificationTime}

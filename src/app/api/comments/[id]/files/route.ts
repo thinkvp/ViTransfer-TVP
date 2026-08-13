@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { validateCommentFile, generateCommentFilePath, MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
+import { getClientUploadPolicy } from '@/lib/settings'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
 import { checkProjectUploadQuota } from '@/lib/project-upload-quota'
@@ -107,7 +108,14 @@ export async function POST(
     const mimeType = file.type
     const fileName = file.name
 
-    const validation = validateCommentFile(fileName, mimeType, fileSize)
+    // The system-wide client upload type policy applies to client attachments only. Voice
+    // notes are exempt for the same reason they bypass allowClientUploadFiles.
+    const validation = validateCommentFile(
+      fileName,
+      mimeType,
+      fileSize,
+      isClient && !isVoiceNoteUpload ? await getClientUploadPolicy() : undefined,
+    )
     if (!validation.valid) {
       return NextResponse.json(
         { error: validation.error },

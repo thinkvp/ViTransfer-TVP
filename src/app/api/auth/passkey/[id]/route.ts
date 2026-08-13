@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireApiUser } from '@/lib/auth'
 import { deletePasskey, updatePasskeyName } from '@/lib/passkey'
-import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { getUserPermissions, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
+import { canDoAction, canSeeMenu } from '@/lib/rbac'
 import { rateLimit } from '@/lib/rate-limit'
 export const runtime = 'nodejs'
 
@@ -15,7 +16,8 @@ export const runtime = 'nodejs'
  *
  * SECURITY:
  * - Requires admin authentication (JWT)
- * - Users can only delete their own passkeys
+ * - Users can only delete their own passkeys, unless they hold the Users menu +
+ *   manageUsers action (admin revocation of another user's passkey)
  * - Ownership verified in deletePasskey function
  */
 export async function DELETE(
@@ -27,11 +29,16 @@ export async function DELETE(
     const user = await requireApiUser(request)
     if (user instanceof Response) return user
 
-    const forbiddenMenu = requireMenuAccess(user, 'settings')
-    if (forbiddenMenu) return forbiddenMenu
+    const permissions = getUserPermissions(user)
+    const isUserAdmin = canSeeMenu(permissions, 'users') && canDoAction(permissions, 'manageUsers')
 
-    const forbiddenAction = requireActionAccess(user, 'changeSettings')
-    if (forbiddenAction) return forbiddenAction
+    if (!isUserAdmin) {
+      const forbiddenMenu = requireMenuAccess(user, 'settings')
+      if (forbiddenMenu) return forbiddenMenu
+
+      const forbiddenAction = requireActionAccess(user, 'changeSettings')
+      if (forbiddenAction) return forbiddenAction
+    }
 
     const limited = await rateLimit(request, { maxRequests: 20, windowMs: 60_000 }, 'passkey-manage')
     if (limited) return limited
@@ -42,8 +49,8 @@ export async function DELETE(
       return NextResponse.json({ error: 'Credential ID required' }, { status: 400 })
     }
 
-    // Delete passkey (ownership verified inside)
-    const result = await deletePasskey(user.id, credentialId)
+    // Delete passkey (ownership verified inside; user admins may revoke others')
+    const result = await deletePasskey(user.id, credentialId, { allowCrossUser: isUserAdmin })
 
     if (!result.success) {
       return NextResponse.json(

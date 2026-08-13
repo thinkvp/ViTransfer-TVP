@@ -461,7 +461,7 @@ export default function NotificationsBell() {
             </div>
           ) : null}
 
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
             {loading ? (
               <div className="p-4 text-sm text-muted-foreground">Loading…</div>
             ) : loadError ? (

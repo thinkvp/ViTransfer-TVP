@@ -9,6 +9,7 @@ import { secondsToTimecode } from '@/lib/timecode'
 import { MAX_FILES_PER_COMMENT, validateCommentFile } from '@/lib/fileUpload'
 import { getAccessToken } from '@/lib/token-store'
 import { isS3Mode } from '@/lib/storage-provider-client'
+import { useUploadPolicy } from '@/hooks/useUploadPolicy'
 import { toast } from 'sonner'
 
 type CommentWithReplies = Comment & {
@@ -65,6 +66,7 @@ export function useCommentManagement({
   allowClientUploadFiles = false,
 }: UseCommentManagementProps) {
   const router = useRouter()
+  const uploadPolicy = useUploadPolicy()
 
   // State
   const [optimisticComments, setOptimisticComments] = useState<CommentWithReplies[]>([])
@@ -1042,7 +1044,13 @@ export function useCommentManagement({
     }
 
     const validated = files.map((file) => {
-      const validation = validateCommentFile(file.name, file.type, file.size)
+      // Admins are not subject to the client upload type policy, matching the server.
+      const validation = validateCommentFile(
+        file.name,
+        file.type,
+        file.size,
+        useAdminAuth ? undefined : uploadPolicy,
+      )
       if (!validation.valid) {
         throw new Error(validation.error || 'File is not allowed')
       }

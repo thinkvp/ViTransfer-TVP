@@ -81,6 +81,10 @@ export default function EditUserPage() {
   const [passkeyLoading, setPasskeyLoading] = useState(false)
   const [passkeyError, setPasskeyError] = useState('')
 
+  // PassKeys are device-bound: only the signed-in user can register one for themselves.
+  // Viewing another user's page lists THEIR passkeys, read-only apart from revocation.
+  const isSelf = !!sessionUser?.id && sessionUser.id === userId
+
   const fetchUser = useCallback(async () => {
     try {
       const res = await apiFetch(`/api/users/${userId}`)
@@ -107,11 +111,26 @@ export default function EditUserPage() {
     }
   }, [userId])
 
+  const fetchPasskeys = useCallback(async () => {
+    if (!userId) return
+    try {
+      const res = await apiFetch(`/api/auth/passkey/list?userId=${encodeURIComponent(userId)}`)
+      if (res.ok) {
+        const data = await res.json()
+        setPasskeys(data.passkeys || [])
+      } else {
+        setPasskeys([])
+      }
+    } catch (err) {
+      // Silently fail
+    }
+  }, [userId])
+
   useEffect(() => {
     fetchUser()
     fetchPasskeyStatus()
     fetchPasskeys()
-  }, [fetchUser])
+  }, [fetchUser, fetchPasskeys])
 
   useEffect(() => {
     const loadRoles = async () => {
@@ -142,19 +161,9 @@ export default function EditUserPage() {
     }
   }
 
-  const fetchPasskeys = async () => {
-    try {
-      const res = await apiFetch('/api/auth/passkey/list')
-      if (res.ok) {
-        const data = await res.json()
-        setPasskeys(data.passkeys || [])
-      }
-    } catch (err) {
-      // Silently fail
-    }
-  }
-
   const handleRegisterPasskey = async () => {
+    if (!isSelf) return
+
     setPasskeyError('')
     setPasskeyLoading(true)
 
@@ -632,7 +641,9 @@ export default function EditUserPage() {
                     PassKey Authentication
                   </h3>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Passwordless login using biometrics or security keys
+                    {isSelf
+                      ? 'Passwordless login using biometrics or security keys'
+                      : "PassKeys registered by this user — they can only be added on the user's own device"}
                   </p>
                 </div>
               </div>
@@ -659,20 +670,26 @@ export default function EditUserPage() {
                         {passkeys.length === 0 ? 'No passkeys registered' : `${passkeys.length} passkey(s)`}
                       </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {passkeys.length === 0 ? 'Register your first passkey' : 'Manage your passkeys'}
+                        {isSelf
+                          ? (passkeys.length === 0 ? 'Register your first passkey' : 'Manage your passkeys')
+                          : (passkeys.length === 0
+                              ? 'This user has not registered a passkey'
+                              : 'You can revoke a passkey, but only this user can add one')}
                       </p>
                     </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="w-full sm:w-auto shrink-0"
-                      onClick={handleRegisterPasskey}
-                      disabled={passkeyLoading}
-                    >
-                      <Plus className="w-4 h-4 mr-2" />
-                      Add PassKey
-                    </Button>
+                    {isSelf && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full sm:w-auto shrink-0"
+                        onClick={handleRegisterPasskey}
+                        disabled={passkeyLoading}
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add PassKey
+                      </Button>
+                    )}
                   </div>
 
                   {passkeys.length > 0 && (
@@ -752,8 +769,10 @@ export default function EditUserPage() {
       <ConfirmDialog
         open={pendingDeletePasskeyId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeletePasskeyId(null) }}
-        title="Delete PassKey?"
-        description="This PassKey will be permanently removed."
+        title={isSelf ? 'Delete PassKey?' : 'Revoke PassKey?'}
+        description={isSelf
+          ? 'This PassKey will be permanently removed.'
+          : `This PassKey will be permanently removed from ${currentUser?.name || currentUser?.email || 'this user'}'s account.`}
         confirmLabel="Delete"
         onConfirm={confirmDeletePasskey}
       />
