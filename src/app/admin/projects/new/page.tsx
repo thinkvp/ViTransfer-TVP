@@ -250,6 +250,7 @@ export default function NewProjectPage() {
       recipients: recipients.map((r) => ({
         name: r.name?.trim() ? r.name.trim() : null,
         email: r.email?.trim() ? r.email.trim() : null,
+        phone: r.phone?.trim() ? r.phone.trim() : null,
         displayColor: r.displayColor ?? null,
         isPrimary: Boolean(r.isPrimary),
         receiveNotifications: Boolean(r.receiveNotifications),
@@ -289,6 +290,7 @@ export default function NewProjectPage() {
         recipients: newClientRecipients.map((r) => ({
           name: r.name?.trim() ? r.name.trim() : null,
           email: r.email?.trim() ? r.email.trim() : null,
+          phone: r.phone?.trim() ? r.phone.trim() : null,
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: Boolean(r.receiveNotifications),
@@ -471,6 +473,7 @@ export default function NewProjectPage() {
                                     merged.push({
                                       name: r?.name ?? null,
                                       email: r?.email ?? null,
+                                      phone: typeof r?.phone === 'string' ? r.phone : null,
                                       displayColor: typeof r?.displayColor === 'string' ? r.displayColor : null,
                                       isPrimary: Boolean(r?.isPrimary),
                                       receiveNotifications: r?.receiveNotifications !== false,

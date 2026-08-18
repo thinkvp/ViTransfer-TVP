@@ -515,10 +515,10 @@ export async function PATCH(request: NextRequest) {
 
     // SECURITY: Validate notification schedule
     if (adminNotificationSchedule !== undefined) {
-      const validSchedules = ['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']
+      const validSchedules = ['HOURLY', 'DAILY', 'NONE']
       if (!validSchedules.includes(adminNotificationSchedule)) {
         return NextResponse.json(
-          { error: 'Invalid notification schedule. Must be IMMEDIATE, HOURLY, DAILY, or NONE.' },
+          { error: 'Invalid notification schedule. Must be HOURLY, DAILY, or NONE.' },
           { status: 400 }
         )
       }
@@ -526,10 +526,10 @@ export async function PATCH(request: NextRequest) {
 
     // SECURITY: Validate defaultClientNotificationSchedule
     if (defaultClientNotificationSchedule !== undefined) {
-      const validSchedules = ['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']
+      const validSchedules = ['HOURLY', 'DAILY', 'NONE']
       if (!validSchedules.includes(defaultClientNotificationSchedule)) {
         return NextResponse.json(
-          { error: 'Invalid defaultClientNotificationSchedule. Must be IMMEDIATE, HOURLY, DAILY, or NONE.' },
+          { error: 'Invalid defaultClientNotificationSchedule. Must be HOURLY, DAILY, or NONE.' },
           { status: 400 }
         )
       }
@@ -744,7 +744,7 @@ export async function PATCH(request: NextRequest) {
         excludeInternalIpsFromAnalytics: typeof excludeInternalIpsFromAnalytics === 'boolean' ? excludeInternalIpsFromAnalytics : true,
         autoCloseApprovedProjectsEnabled,
         autoCloseApprovedProjectsAfterDays,
-        adminNotificationSchedule: adminNotificationSchedule || 'IMMEDIATE',
+        adminNotificationSchedule: adminNotificationSchedule || 'HOURLY',
         adminNotificationTime,
         adminNotificationDay: adminNotificationDay !== undefined ? adminNotificationDay : null,
       },

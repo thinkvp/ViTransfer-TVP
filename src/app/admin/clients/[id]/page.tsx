@@ -44,6 +44,7 @@ type ClientResponse = {
     id: string
     name: string | null
     email: string | null
+    phone: string | null
     displayColor: string | null
     isPrimary: boolean
     receiveNotifications: boolean
@@ -212,6 +213,7 @@ export default function ClientDetailPage() {
           id: r.id,
           name: r.name,
           email: r.email,
+          phone: r.phone ?? null,
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: r.receiveNotifications !== false,
@@ -521,6 +523,7 @@ export default function ClientDetailPage() {
           id: r.id,
           name: r.name?.trim() ? r.name.trim() : null,
           email: r.email?.trim() ? r.email.trim() : null,
+          phone: r.phone?.trim() ? r.phone.trim() : null,
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: Boolean(r.receiveNotifications),

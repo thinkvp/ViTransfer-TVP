@@ -3,6 +3,7 @@ import { secondsToTimecode, parseTimecodeInput, isValidTimecode } from '../lib/t
 import { getRedis } from '../lib/redis'
 import { redactEmailForLogs } from '../lib/log-sanitization'
 import { createHash } from 'crypto'
+import { REACTION_EMOJIS } from '../lib/comment-reactions'
 
 const MAX_ATTEMPTS = 3
 
@@ -79,6 +80,46 @@ export function shouldSendNow(
 
   // Last sent was before this target - send now
   return true
+}
+
+/**
+ * Attach each comment's current reaction tally to its queued payload, so a digest shows
+ * acknowledgement state inline under the comment body.
+ *
+ * Deliberately reads live counts rather than a snapshot taken at queue time: by the moment
+ * the digest goes out, the tally the reader cares about is the one on screen now. Reaction
+ * entries themselves are skipped — they already name their own emoji.
+ */
+export async function attachReactionTallies(notifications: any[]): Promise<any[]> {
+  const commentIds = [...new Set(
+    notifications
+      .filter((n) => n?.type !== 'COMMENT_REACTION' && typeof n?.commentId === 'string')
+      .map((n) => n.commentId as string),
+  )]
+  if (commentIds.length === 0) return notifications
+
+  const grouped = await prisma.commentReaction.groupBy({
+    by: ['commentId', 'emoji'],
+    where: { commentId: { in: commentIds } },
+    _count: { _all: true },
+  })
+  if (grouped.length === 0) return notifications
+
+  const byComment = new Map<string, Array<{ emoji: string; count: number }>>()
+  for (const row of grouped) {
+    const list = byComment.get(row.commentId) || []
+    list.push({ emoji: row.emoji, count: row._count._all })
+    byComment.set(row.commentId, list)
+  }
+
+  // Stable display order, matching the share page's allowlist ordering.
+  for (const list of byComment.values()) {
+    list.sort((a, b) => REACTION_EMOJIS.indexOf(a.emoji as any) - REACTION_EMOJIS.indexOf(b.emoji as any))
+  }
+
+  return notifications.map((n) =>
+    n?.commentId && byComment.has(n.commentId) ? { ...n, reactions: byComment.get(n.commentId) } : n,
+  )
 }
 
 /**

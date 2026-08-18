@@ -5,6 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { publishProjectEvent } from '@/lib/project-events'
+import { queueReactionNotification, cancelReactionNotification } from '@/lib/notifications'
 import {
   buildReactionSummaries,
   isAllowedReactionEmoji,
@@ -34,8 +35,29 @@ export const dynamic = 'force-dynamic'
 
 const RATE_LIMIT = { windowMs: 60 * 1000, maxRequests: 60, message: 'Too many requests. Please slow down.' }
 
+type ReactedComment = {
+  id: string
+  projectId: string
+  videoId: string
+  content: string
+  timecode: string | null
+  authorName: string | null
+  userId: string | null
+  recipientId: string | null
+}
+
 type ReactionContext =
-  | { ok: true; commentId: string; projectId: string; userId: string | null; recipientId: string | null; isAdmin: boolean }
+  | {
+      ok: true
+      commentId: string
+      projectId: string
+      userId: string | null
+      recipientId: string | null
+      isAdmin: boolean
+      reactorName: string
+      reactorEmail: string | null
+      comment: ReactedComment
+    }
   | { ok: false; response: NextResponse }
 
 async function resolveReactionContext(
@@ -50,6 +72,13 @@ async function resolveReactionContext(
       isInternal: true,
       lockedAt: true,
       projectId: true,
+      // Carried through so the notification can quote the comment and skip self-reactions.
+      videoId: true,
+      content: true,
+      timecode: true,
+      authorName: true,
+      userId: true,
+      recipientId: true,
       project: {
         select: {
           id: true,
@@ -108,6 +137,9 @@ async function resolveReactionContext(
       userId: currentUser.id,
       recipientId: null,
       isAdmin: true,
+      reactorName: currentUser.name || currentUser.email || 'Admin',
+      reactorEmail: currentUser.email || null,
+      comment,
     }
   }
 
@@ -133,12 +165,19 @@ async function resolveReactionContext(
   // confirming it belongs to this project — the share page sends one because a viewer can
   // pick their identity after the token was issued.
   let recipientId = accessCheck.shareRecipientId || null
-  if (!recipientId && typeof bodyRecipientId === 'string' && bodyRecipientId.trim()) {
-    const recipient = await prisma.projectRecipient.findFirst({
+  let recipientRecord: { id: string; name: string | null; email: string | null } | null = null
+  if (typeof bodyRecipientId === 'string' && bodyRecipientId.trim() && !recipientId) {
+    recipientRecord = await prisma.projectRecipient.findFirst({
       where: { id: bodyRecipientId.trim(), projectId: comment.projectId },
-      select: { id: true },
+      select: { id: true, name: true, email: true },
     })
-    recipientId = recipient?.id || null
+    recipientId = recipientRecord?.id || null
+  } else if (recipientId) {
+    recipientRecord = await prisma.projectRecipient.findFirst({
+      where: { id: recipientId, projectId: comment.projectId },
+      select: { id: true, name: true, email: true },
+    })
+    recipientId = recipientRecord?.id || null
   }
 
   if (!recipientId) {
@@ -159,6 +198,9 @@ async function resolveReactionContext(
     userId: null,
     recipientId,
     isAdmin: false,
+    reactorName: recipientRecord?.name || recipientRecord?.email || 'Client',
+    reactorEmail: recipientRecord?.email || null,
+    comment,
   }
 }
 
@@ -200,18 +242,39 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const context = await resolveReactionContext(request, id, (body as any)?.recipientId)
     if (!context.ok) return context.response
 
+    let created: { id: string } | null = null
     try {
-      await prisma.commentReaction.create({
+      created = await prisma.commentReaction.create({
         data: {
           commentId: context.commentId,
           emoji,
           userId: context.userId,
           recipientId: context.recipientId,
         },
+        select: { id: true },
       })
     } catch (error: any) {
       // P2002 = the identity already reacted with this emoji. Idempotent by design.
       if (error?.code !== 'P2002') throw error
+    }
+
+    // Only a genuinely new reaction is worth an email — a repeat click lands here as P2002
+    // and must not enqueue a second notification.
+    if (created) {
+      try {
+        await queueReactionNotification({
+          reactionId: created.id,
+          emoji,
+          comment: context.comment,
+          reactorName: context.reactorName,
+          reactorEmail: context.reactorEmail,
+          reactorUserId: context.userId,
+          reactorRecipientId: context.recipientId,
+        })
+      } catch (error) {
+        // Never fail the reaction because its notification could not be queued.
+        console.error('[REACTION] Failed to queue notification:', error)
+      }
     }
 
     await publishProjectEvent(context.projectId, 'comment')
@@ -243,13 +306,29 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
     // Scoped to the caller's own identity — a viewer can never clear someone else's
     // reaction, including admins, who have no moderation path here by design.
-    await prisma.commentReaction.deleteMany({
+    const removed = await prisma.commentReaction.deleteMany({
       where: {
         commentId: context.commentId,
         emoji,
         ...(context.userId ? { userId: context.userId } : { recipientId: context.recipientId }),
       },
     })
+
+    // Un-reacting before the digest goes out should retract the pending notification,
+    // otherwise "Sarah reacted 👍" arrives for a reaction that no longer exists. Only the
+    // caller's own queued row for this emoji is dropped; other people's stay.
+    if (removed.count > 0) {
+      try {
+        await cancelReactionNotification({
+          commentId: context.commentId,
+          emoji,
+          userId: context.userId,
+          recipientId: context.recipientId,
+        })
+      } catch (error) {
+        console.error('[REACTION] Failed to cancel queued notification:', error)
+      }
+    }
 
     await publishProjectEvent(context.projectId, 'comment')
 

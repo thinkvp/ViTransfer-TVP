@@ -11,6 +11,7 @@ import {
   replaceStoredStoragePathPrefix,
 } from '@/lib/project-storage-paths'
 import { z } from 'zod'
+import { normalizeContactPhone } from '@/lib/contact-phone'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,7 @@ const recipientSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().max(200).nullable().optional(),
   email: z.string().trim().max(320).email().nullable().optional(),
+  phone: z.string().trim().max(20, 'Phone number must be 20 characters or fewer').regex(/^[0-9+ ]*$/, 'Phone number may only contain numbers, spaces and +').nullable().optional(),
   displayColor: z.string().trim().max(7).nullable().optional(),
   isPrimary: z.boolean().optional(),
   receiveNotifications: z.boolean().optional(),
@@ -75,6 +77,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           id: true,
           name: true,
           email: true,
+          phone: true,
           displayColor: true,
           isPrimary: true,
           receiveNotifications: true,
@@ -198,6 +201,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
           id: r.id ? String(r.id) : undefined,
           name: r.name ?? null,
           email: normalizeEmail(r.email),
+          phone: normalizeContactPhone(r.phone),
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: r.receiveNotifications !== false,
@@ -291,6 +295,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
               data: {
                 name: r.name ?? null,
                 email: r.email ?? null,
+                phone: r.phone ?? null,
                 displayColor: r.displayColor ?? null,
                 isPrimary: Boolean(r.isPrimary),
                 receiveNotifications: r.receiveNotifications !== false,
@@ -302,6 +307,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
               clientId: id,
               name: r.name ?? null,
               email: r.email ?? null,
+              phone: r.phone ?? null,
               displayColor: r.displayColor ?? null,
               isPrimary: Boolean(r.isPrimary),
               receiveNotifications: r.receiveNotifications !== false,
@@ -342,18 +348,19 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
         // Prefer stable linkage by clientRecipientId; best-effort fallback by email.
         const updatedRecipients = await tx.clientRecipient.findMany({
           where: { clientId: id },
-          select: { id: true, email: true, name: true, displayColor: true },
+          select: { id: true, email: true, name: true, phone: true, displayColor: true },
         })
 
         for (const r of updatedRecipients as any[]) {
           const clientRecipientId = String(r.id)
           const email = normalizeEmail(r.email)
           const name = r.name ?? null
+          const phone = r.phone ?? null
           const displayColor = r.displayColor ?? null
 
           await tx.projectRecipient.updateMany({
             where: { clientRecipientId },
-            data: { email, name, displayColor } as any,
+            data: { email, name, phone, displayColor } as any,
           } as any).catch(() => null)
 
           if (email) {
@@ -363,7 +370,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
                 clientRecipientId: null,
                 email,
               } as any,
-              data: { clientRecipientId, name, displayColor } as any,
+              data: { clientRecipientId, name, phone, displayColor } as any,
             } as any).catch(() => null)
           }
         }

@@ -17,7 +17,7 @@ export async function processInternalCommentNotifications() {
       },
     })
 
-    if (!settings || settings.adminNotificationSchedule === 'IMMEDIATE' || settings.adminNotificationSchedule === 'NONE') {
+    if (!settings || settings.adminNotificationSchedule === 'NONE') {
       return
     }
 

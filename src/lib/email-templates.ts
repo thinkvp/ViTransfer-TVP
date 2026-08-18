@@ -7,7 +7,7 @@ import { EMAIL_THEME, emailCardStyle, emailCardTitleStyle, emailPrimaryButtonSty
 import { formatTimecodeDisplay } from './timecode'
 
 interface NotificationData {
-  type: 'CLIENT_COMMENT' | 'ADMIN_REPLY' | 'VIDEO_APPROVED' | 'VIDEO_UNAPPROVED' | 'PROJECT_APPROVED'
+  type: 'CLIENT_COMMENT' | 'ADMIN_REPLY' | 'VIDEO_APPROVED' | 'VIDEO_UNAPPROVED' | 'PROJECT_APPROVED' | 'COMMENT_REACTION'
   videoName: string
   videoLabel?: string
   authorName: string
@@ -23,6 +23,19 @@ interface NotificationData {
     content: string
     timecode?: string | null
   }
+  /** COMMENT_REACTION only: the emoji that was left. */
+  emoji?: string
+  /** COMMENT_REACTION only: the comment it was left on, quoted in the email. */
+  reactedTo?: {
+    authorName: string
+    content: string
+    timecode?: string | null
+  }
+  /**
+   * Current reaction tally on this comment, rendered inline under the body so a digest
+   * shows acknowledgement state even for comments whose reactions arrived separately.
+   */
+  reactions?: Array<{ emoji: string; count: number }>
   createdAt: string
 }
 
@@ -113,6 +126,60 @@ function renderParentCommentQuote(n: NotificationData, useFullTimecode: boolean)
 }
 
 /**
+ * Quoted block for the comment an emoji was left on. Mirrors renderParentCommentQuote so a
+ * reaction and a reply read the same way down the page.
+ */
+function renderReactedToQuote(n: NotificationData, useFullTimecode: boolean): string {
+  if (!n.reactedTo) return ''
+  const tc = n.reactedTo.timecode ? formatTimecodeForEmail(n.reactedTo.timecode, useFullTimecode) : ''
+  return `
+    <div style="margin:0; padding:8px 12px; background:#f3f4f6; border-left:3px solid #9ca3af; border-radius:0 6px 6px 0;">
+      <div style="font-size:12px; color:#6b7280; margin-bottom:3px;">${escapeHtml(n.reactedTo.authorName)}${tc ? ` &bull; ${escapeHtml(tc)}` : ''}</div>
+      <div style="font-size:13px; color:#4b5563; line-height:1.5; white-space:pre-wrap;">${escapeHtml(truncateAtWordBoundary(n.reactedTo.content, PARENT_QUOTE_MAX_CHARS))}</div>
+    </div>
+  `
+}
+
+/**
+ * Inline reaction tally under a comment body, e.g. "👍 2   👀 1".
+ *
+ * Emoji are plain text rather than images: every mail client renders them from the system
+ * font, and an <img> fallback would be blocked by default in most of them.
+ */
+function renderReactionTally(reactions?: Array<{ emoji: string; count: number }>): string {
+  if (!reactions || reactions.length === 0) return ''
+  const pills = reactions
+    .filter((r) => r.count > 0)
+    .map((r) => `<span style="display:inline-block; padding:2px 8px; margin:0 4px 0 0; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:999px; font-size:12px; color:#4b5563;">${escapeHtml(r.emoji)}&nbsp;${r.count}</span>`)
+    .join('')
+  if (!pills) return ''
+  return `<div style="margin-top:8px;">${pills}</div>`
+}
+
+/**
+ * A reaction entry: who reacted, with what, on which comment.
+ */
+function renderReactionItem(
+  n: NotificationData,
+  useFullTimecode: boolean,
+  accentColor?: string,
+  accentTextMode?: string,
+): string {
+  return `
+    <div style="padding:10px 0;">
+      <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
+        ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, accentColor, accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, useFullTimecode)}` : ''}
+      </div>
+      <div style="font-size:14px; color:#111827; margin-bottom:6px;">
+        <span style="font-size:16px;">${escapeHtml(n.emoji || '')}</span>
+        <span style="font-weight:700;">${escapeHtml(n.authorName)}</span> reacted
+      </div>
+      ${renderReactedToQuote(n, useFullTimecode)}
+    </div>
+  `
+}
+
+/**
  * Client notification summary
  */
 export function generateNotificationSummaryEmail(data: NotificationSummaryData): string {
@@ -123,11 +190,13 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
 
   // Count notification types
   const commentCount = data.notifications.filter(n => n.type === 'CLIENT_COMMENT' || n.type === 'ADMIN_REPLY').length
+  const reactionCount = data.notifications.filter(n => n.type === 'COMMENT_REACTION').length
   const approvedCount = data.notifications.filter(n => n.type === 'VIDEO_APPROVED' || n.type === 'PROJECT_APPROVED').length
   const unapprovedCount = data.notifications.filter(n => n.type === 'VIDEO_UNAPPROVED').length
 
   const summaryParts = []
   if (commentCount > 0) summaryParts.push(`${commentCount} new ${commentCount === 1 ? 'comment' : 'comments'}`)
+  if (reactionCount > 0) summaryParts.push(`${reactionCount} ${reactionCount === 1 ? 'reaction' : 'reactions'}`)
   if (approvedCount > 0) summaryParts.push(`${approvedCount} ${approvedCount === 1 ? 'approval' : 'approvals'}`)
   if (unapprovedCount > 0) summaryParts.push(`${unapprovedCount} unapproved`)
   const summaryText = summaryParts.join(', ') || 'Latest activity'
@@ -152,6 +221,10 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       `
     }
 
+    if (n.type === 'COMMENT_REACTION') {
+      return renderReactionItem(n, data.useFullTimecode, data.accentColor, data.accentTextMode)
+    }
+
     const parentQuote = renderParentCommentQuote(n, data.useFullTimecode)
     return `
       <div style="padding:10px 0;">
@@ -161,6 +234,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
         <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:${parentQuote ? '6px' : '2px'};">${escapeHtml(n.authorName)}</div>
         ${parentQuote}
         <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
+        ${renderReactionTally(n.reactions)}
       </div>
     `
   }).join('<div style="height:1px; background:#e5e7eb; margin:6px 0;"></div>')
@@ -212,14 +286,27 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
 export function generateAdminSummaryEmail(data: AdminSummaryData): string {
   const rawGreeting = data.adminName ? data.adminName : 'there'
   const greeting = firstWordName(rawGreeting) || rawGreeting
-  const totalComments = data.projects.reduce((sum, p) => sum + p.notifications.length, 0)
+  const allNotifications = data.projects.flatMap((p) => p.notifications)
+  const totalComments = allNotifications.filter((n) => n.type !== 'COMMENT_REACTION').length
+  const totalReactions = allNotifications.filter((n) => n.type === 'COMMENT_REACTION').length
   const projectCount = data.projects.length
+
+  const headlineParts: string[] = []
+  if (totalComments > 0) headlineParts.push(`${totalComments} ${totalComments === 1 ? 'comment' : 'comments'}`)
+  if (totalReactions > 0) headlineParts.push(`${totalReactions} ${totalReactions === 1 ? 'reaction' : 'reactions'}`)
+  const headline = headlineParts.join(' and ') || 'No new activity'
 
   const projectsHtml = data.projects.map((project) => {
     const items = project.notifications.map((n, index) => {
+      const divider = index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''
+
+      if (n.type === 'COMMENT_REACTION') {
+        return `<div style="${divider}">${renderReactionItem(n, project.useFullTimecode, data.accentColor, data.accentTextMode)}</div>`
+      }
+
       const parentQuote = renderParentCommentQuote(n, project.useFullTimecode)
       return `
-      <div style="padding:10px 0;${index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''}">
+      <div style="padding:10px 0;${divider}">
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
           ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, project.useFullTimecode, n.timecodeEnd)}` : ''}
         </div>
@@ -229,6 +316,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
         </div>
         ${parentQuote}
         <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
+        ${renderReactionTally(n.reactions)}
       </div>
     `}).join('')
 
@@ -253,7 +341,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
     headerGradient: data.emailHeaderColor || EMAIL_THEME.headerBackground,
     headerTextColor: (data.emailHeaderTextMode || 'LIGHT') === 'DARK' ? '#111827' : '#ffffff',
     title: 'Client Activity Summary',
-    subtitle: `${totalComments} ${totalComments === 1 ? 'comment' : 'comments'} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
+    subtitle: `${headline} across ${projectCount} ${projectCount === 1 ? 'project' : 'projects'} ${data.period}`,
     mainCompanyDomain: data.mainCompanyDomain,
     footerNote: data.companyName,
     bodyContent: `
@@ -261,7 +349,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
         Hi <strong>${escapeHtml(greeting)}</strong>,
       </p>
       <p style="margin:0 0 24px; font-size:15px;">
-        Here are the latest client comments:
+        Here is the latest client activity:
       </p>
       ${projectsHtml}
       <div style="text-align:center; margin:32px 0;">

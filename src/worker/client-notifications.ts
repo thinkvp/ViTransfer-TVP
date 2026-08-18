@@ -6,7 +6,7 @@ import { getProjectRecipients } from '../lib/recipients'
 import { buildUnsubscribeUrl } from '../lib/unsubscribe'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
-import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, normalizeNotificationDataTimecode } from './notification-helpers'
+import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, normalizeNotificationDataTimecode, attachReactionTallies } from './notification-helpers'
 import { redactEmailForLogs } from '../lib/log-sanitization'
 
 /**
@@ -42,7 +42,8 @@ export async function processClientNotifications() {
         lastClientNotificationSent: true,
         notificationQueue: {
           where: {
-            type: 'ADMIN_REPLY',
+            // Clients hear about admin replies and about reactions left on their comments.
+            type: { in: ['ADMIN_REPLY', 'COMMENT_REACTION'] },
             sentToClients: false,
             clientFailed: false,
             clientAttempts: { lt: 3 },
@@ -64,8 +65,8 @@ export async function processClientNotifications() {
       const pending = project.notificationQueue.length
       console.log(`[CLIENT] "${project.title}": ${project.clientNotificationSchedule} at ${project.clientNotificationTime || 'N/A'} (${pending} pending)`)
 
-      if (project.clientNotificationSchedule === 'IMMEDIATE' || project.clientNotificationSchedule === 'NONE') {
-        console.log('[CLIENT]   Skip - IMMEDIATE or NONE, not a batch schedule')
+      if (project.clientNotificationSchedule === 'NONE') {
+        console.log('[CLIENT]   Skip - schedule is NONE')
         continue
       }
 
@@ -167,8 +168,8 @@ export async function processClientNotifications() {
         isClientNotification: true,
         logPrefix: '[CLIENT]  ',
         onSuccess: async () => {
-          const notifications = validNotifications.map(n =>
-            normalizeNotificationDataTimecode(n.data as any)
+          const notifications = await attachReactionTallies(
+            validNotifications.map(n => normalizeNotificationDataTimecode(n.data as any))
           )
 
           const emailSettings = await getEmailSettings()

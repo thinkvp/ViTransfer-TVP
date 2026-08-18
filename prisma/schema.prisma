@@ -167,6 +167,7 @@ model ClientRecipient {
   client               Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
   email                String?
   name                 String?
+  phone                String?  @db.VarChar(20) // Optional contact phone (digits, spaces and '+' only) — admin-only
   displayColor         String?  @db.VarChar(7)
   isPrimary            Boolean  @default(false)
   receiveNotifications Boolean  @default(true)
@@ -295,7 +296,7 @@ model Project {
 
   // Client notification settings (per-project)
   // Note: Approval emails are always IMMEDIATE regardless of this setting
-  clientNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
+  clientNotificationSchedule String    @default("HOURLY") // HOURLY, DAILY, NONE (comment activity is always batched)
   clientNotificationTime     String? // "09:00" for daily
   clientNotificationDay      Int? // Day-of-week index (1=Mon…7=Sun) for daily client notification schedule
   lastClientNotificationSent DateTime?
@@ -763,6 +764,7 @@ model ProjectRecipient {
   clientRecipient      ClientRecipient? @relation(fields: [clientRecipientId], references: [id], onDelete: SetNull)
   email                String?
   name                 String?
+  phone                String?  @db.VarChar(20) // Optional contact phone (digits, spaces and '+' only) — admin-only
   displayColor         String?  @db.VarChar(7) // Hex color (#RRGGBB) used for comment/timeline highlights
   isPrimary            Boolean  @default(false)
   receiveNotifications Boolean  @default(true) // Per-recipient notification toggle
@@ -1168,7 +1170,7 @@ model Settings {
 
   // Admin notification settings (global)
   // Note: Approval emails and manual admin notifications are always IMMEDIATE regardless of this setting
-  adminNotificationSchedule String    @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
+  adminNotificationSchedule String    @default("HOURLY") // HOURLY, DAILY, NONE (comment activity is always batched)
   adminNotificationTime     String? // "09:00" for daily
   adminNotificationDay      Int? // unused, kept for migration safety
   lastAdminNotificationSent DateTime?
@@ -1183,7 +1185,7 @@ model Settings {
   adminEmailUserKeyDates     Boolean @default(true) // Personal / user key date reminders
 
   // Default client notification settings for newly created projects
-  defaultClientNotificationSchedule String  @default("HOURLY") // IMMEDIATE, HOURLY, DAILY, NONE
+  defaultClientNotificationSchedule String  @default("HOURLY") // HOURLY, DAILY, NONE (comment activity is always batched)
   defaultClientNotificationTime     String? // "09:00" for daily
   defaultClientNotificationDay      Int?    // Day-of-week index (1=Mon…7=Sun) for daily notification default
 
@@ -1282,6 +1284,9 @@ enum NotificationQueueType {
   ADMIN_REPLY
   INTERNAL_COMMENT
   TASK_COMMENT
+  // An emoji reaction on a share-page comment. Carries no comment body of its own — the
+  // payload quotes the comment that was reacted to.
+  COMMENT_REACTION
 }
 
 enum CompanyLogoMode {

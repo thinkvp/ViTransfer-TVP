@@ -13,6 +13,7 @@ export const runtime = 'nodejs'
 const addRecipientSchema = z.object({
   email: z.string().email('Invalid email format').nullable().optional(),
   name: z.string().nullable().optional(),
+  phone: z.string().trim().max(20, 'Phone number must be 20 characters or fewer').regex(/^[0-9+ ]*$/, 'Phone number may only contain numbers, spaces and +').nullable().optional(),
   clientRecipientId: z.string().nullable().optional(),
   displayColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid display colour').nullable().optional(),
   alsoAddToClient: z.boolean().optional(),
@@ -109,10 +110,10 @@ export async function POST(
       )
     }
 
-    const { email, name = null, isPrimary = false, displayColor = null, alsoAddToClient = false, clientRecipientId = null } = validation.data
+    const { email, name = null, phone = null, isPrimary = false, displayColor = null, alsoAddToClient = false, clientRecipientId = null } = validation.data
 
     // Add recipient
-    const recipient = await addRecipient(projectId, email, name, isPrimary, displayColor, alsoAddToClient, clientRecipientId)
+    const recipient = await addRecipient(projectId, email, name, isPrimary, displayColor, alsoAddToClient, clientRecipientId, phone)
 
     return NextResponse.json({ recipient }, { status: 201 })
   } catch (error: any) {

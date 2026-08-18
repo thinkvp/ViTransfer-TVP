@@ -92,7 +92,7 @@ const updateProjectSchema = z.object({
   enableVideos: z.boolean().optional(),
   enablePhotos: z.boolean().optional(),
   enableUploads: z.boolean().optional(),
-  clientNotificationSchedule: z.enum(['IMMEDIATE', 'HOURLY', 'DAILY', 'NONE']).optional(),
+  clientNotificationSchedule: z.enum(['HOURLY', 'DAILY', 'NONE']).optional(),
   clientNotificationTime: z.string().regex(/^([0-1][0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
   clientNotificationDay: z.number().int().min(0).max(6).nullable().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),

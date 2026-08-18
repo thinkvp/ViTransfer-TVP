@@ -83,7 +83,7 @@ export default function ProjectPage() {
   const [salesRollup, setSalesRollup] = useState<SalesRollupResponse | null>(null)
 
   const [editableRecipients, setEditableRecipients] = useState<EditableRecipient[]>([])
-  const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; displayColor?: string | null }>>([])
+  const [clientRecipients, setClientRecipients] = useState<Array<{ id?: string; name: string | null; email: string | null; phone?: string | null; displayColor?: string | null }>>([])
   const [projectClientName, setProjectClientName] = useState<string | null>(null)
 
   const { visibility: sectionVisibility, setVisibility: setSectionVisibility, isLoading: sectionVisibilityLoading } = useProjectSectionVisibility(id)
@@ -221,6 +221,7 @@ export default function ProjectPage() {
           id: String(r?.id || ''),
           name: r?.name ?? null,
           email: r?.email ?? null,
+          phone: r?.phone ?? null,
           displayColor: r?.displayColor ?? null,
           isPrimary: Boolean(r?.isPrimary),
           receiveNotifications: r?.receiveNotifications !== false,
@@ -329,6 +330,7 @@ export default function ProjectPage() {
             return apiPatch(`/api/projects/${id}/recipients/${rid}`, {
               name: r.name?.trim() ? r.name.trim() : null,
               email: r.email?.trim() ? r.email.trim() : null,
+              phone: r.phone?.trim() ? r.phone.trim() : null,
               displayColor: r.displayColor ?? null,
               isPrimary: Boolean(r.isPrimary),
               receiveNotifications: Boolean(r.receiveNotifications),
@@ -344,6 +346,7 @@ export default function ProjectPage() {
           await apiPost(`/api/projects/${id}/recipients`, {
             name: r.name?.trim() ? r.name.trim() : null,
             email: r.email?.trim() ? r.email.trim() : null,
+            phone: r.phone?.trim() ? r.phone.trim() : null,
             displayColor: r.displayColor ?? null,
             isPrimary: Boolean(r.isPrimary),
             receiveNotifications: Boolean(r.receiveNotifications),

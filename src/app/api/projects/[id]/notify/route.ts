@@ -494,7 +494,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
                 where: { id: 'default' },
                 select: { adminNotificationSchedule: true },
               })
-              const period = getPeriodString(globalSettings?.adminNotificationSchedule || 'IMMEDIATE')
+              const period = getPeriodString(globalSettings?.adminNotificationSchedule || 'HOURLY')
               const adminNotifications = adminPending.map((n) => normalizeNotificationDataTimecode(n.data as any))
 
               const adminResult = await sendNotificationsWithRetry({

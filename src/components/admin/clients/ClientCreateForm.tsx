@@ -55,6 +55,7 @@ export function ClientCreateForm({ onCreated, onCancel, idPrefix = 'client' }: P
         recipients: recipients.map((r) => ({
           name: r.name?.trim() ? r.name.trim() : null,
           email: r.email?.trim() ? r.email.trim() : null,
+          phone: r.phone?.trim() ? r.phone.trim() : null,
           displayColor: r.displayColor ?? null,
           isPrimary: Boolean(r.isPrimary),
           receiveNotifications: Boolean(r.receiveNotifications),

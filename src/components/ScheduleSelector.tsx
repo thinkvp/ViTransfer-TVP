@@ -2,7 +2,7 @@
 
 import { Label } from './ui/label'
 import { Input } from './ui/input'
-import { Zap, Clock, Calendar, BellOff, Check } from 'lucide-react'
+import { Clock, Calendar, BellOff, Check } from 'lucide-react'
 
 interface ScheduleSelectorProps {
   schedule: string
@@ -15,13 +15,9 @@ interface ScheduleSelectorProps {
   description?: string
 }
 
+// Comment activity is always batched — there is no per-event option. Approvals and
+// revision requests are unaffected and still send the moment they happen.
 const scheduleOptions = [
-  {
-    value: 'IMMEDIATE',
-    title: 'Immediate',
-    description: 'Send instantly when activity occurs',
-    icon: Zap
-  },
   {
     value: 'HOURLY',
     title: 'Hourly',
@@ -59,8 +55,8 @@ export function ScheduleSelector({
         <p className="text-xs text-muted-foreground mb-4">{description}</p>
       </div>
 
-      {/* Schedule Options - Card Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {/* Schedule Options - one row of three on desktop, stacked on mobile */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {scheduleOptions.map((option) => {
           const IconComponent = option.icon
           return (

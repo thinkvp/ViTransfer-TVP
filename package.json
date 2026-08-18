@@ -1,6 +1,6 @@
 {
   "name": "vitransfer",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "private": true,
   "engines": {
     "node": ">=24",
@@ -101,6 +101,7 @@
     "mailparser": {
       "nodemailer": "$nodemailer"
     },
+    "deepmerge-ts": "8.0.1",
     "next": {
       "postcss": ">=8.5.18"
     },

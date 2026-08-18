@@ -32,197 +32,163 @@ interface ApprovalNotificationContext {
 }
 
 /**
- * Send immediate notification (when schedule is IMMEDIATE)
- * @param target - 'client' to send to client recipients, 'admin' to send to internal users
+ * Queue an emoji reaction for the next batched summary.
+ *
+ * A reaction is the lightest possible signal that someone read a comment, so it never
+ * sends on its own schedule — it rides whichever digest goes out next. That is also why
+ * reactions were the deciding case for dropping the IMMEDIATE schedule: one email per
+ * emoji click would have been unusable.
+ *
+ * Routing mirrors comments: a reaction from an internal user notifies the client side, a
+ * reaction from a recipient notifies the admin side. The reactor is never notified, and
+ * reacting to your own comment notifies nobody (it carries no information for anyone else).
+ *
+ * Call only when a reaction row was actually created — the route's POST is idempotent, so
+ * a repeat click must not enqueue a second notification.
  */
-export async function sendImmediateNotification(context: NotificationContext, target: 'client' | 'admin' = 'client') {
-  const { comment, project, video } = context
-
-  // Check if notification was cancelled (comment deleted)
-  const redis = getRedis()
-  const cancelled = await redis.get(`comment_cancelled:${comment.id}`)
-
-  if (cancelled) {
-    console.log(`[IMMEDIATE] Comment ${comment.id} notification was cancelled, skipping send`)
-    return
+export async function queueReactionNotification(params: {
+  reactionId: string
+  emoji: string
+  comment: {
+    id: string
+    projectId: string
+    videoId: string
+    content: string
+    timecode: string | null
+    authorName: string | null
+    userId: string | null
+    recipientId: string | null
   }
+  reactorName: string
+  reactorEmail: string | null
+  /** Exactly one of these is set — an internal user, or a project recipient. */
+  reactorUserId: string | null
+  reactorRecipientId: string | null
+}) {
+  const { reactionId, emoji, comment, reactorName, reactorEmail, reactorUserId, reactorRecipientId } = params
 
-  const shareUrl = await generateShareUrl(project.slug)
-  const videoName = video?.name || 'Unknown Video'
-  const versionLabel = video?.versionLabel || 'Unknown Version'
-  const authorEmail = comment.authorEmail?.toLowerCase() ?? null
-  const authorLabel = comment.authorName || (comment.isInternal ? 'Admin' : 'Client')
+  const reactorIsAdmin = !!reactorUserId
 
-  if (target === 'client') {
-    // → notify client recipients (skip the comment author)
-    const allRecipients = await getProjectRecipients(comment.projectId)
-    const recipients = allRecipients.filter(r =>
-      r.receiveNotifications && r.email &&
-      r.email.toLowerCase() !== authorEmail
-    )
+  // Reacting to your own comment tells nobody anything. Compared strictly so a null
+  // reactor id can't match a null author column and swallow a real notification.
+  const ownComment =
+    (!!reactorUserId && comment.userId === reactorUserId) ||
+    (!!reactorRecipientId && comment.recipientId === reactorRecipientId)
+  if (ownComment) return
 
-    if (recipients.length === 0) {
-      console.log(`[IMMEDIATE→CLIENT] Skipped - no recipients for project "${project.title}"`)
-      return
-    }
+  const [project, settings, video] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: comment.projectId },
+      select: { id: true, title: true, clientNotificationSchedule: true },
+    }),
+    prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { adminNotificationSchedule: true },
+    }),
+    prisma.video.findUnique({
+      where: { id: comment.videoId },
+      select: { name: true, versionLabel: true },
+    }),
+  ])
 
-    const emailSettings = await getEmailSettings()
-    const trackingPixelsEnabled = emailSettings.emailTrackingPixelsEnabled ?? true
-    let appDomain = new URL(shareUrl).origin
-    if (emailSettings.appDomain) {
-      try {
-        const parsed = new URL(emailSettings.appDomain)
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-          appDomain = parsed.origin
-        }
-      } catch {
-        // Fallback to shareUrl origin
-      }
-    }
+  if (!project) return
 
-    console.log(`[IMMEDIATE→CLIENT] Sending to ${recipients.length} recipient(s) for "${project.title}"`)
-    console.log(`[IMMEDIATE→CLIENT]   Video: ${videoName} (${versionLabel})`)
-    console.log(`[IMMEDIATE→CLIENT]   Author: ${authorLabel}`)
+  const adminNone = (settings?.adminNotificationSchedule || 'HOURLY') === 'NONE'
+  const clientNone = project.clientNotificationSchedule === 'NONE'
 
-    const emailPromises = recipients.map(async (recipient) => {
-      const recipientEmail = recipient.email!
-      const unsubscribeUrl = recipient.id
-        ? buildUnsubscribeUrl(appDomain, project.id, recipient.id)
-        : undefined
+  // Only the opposite side hears about it; the side the reactor belongs to is pre-marked
+  // as sent so the row can't linger in the backlog as forever-pending.
+  const notifyClients = reactorIsAdmin && !clientNone
+  const notifyAdmins = !reactorIsAdmin && !adminNone
+  if (!notifyClients && !notifyAdmins) return
 
-      const trackingToken = trackingPixelsEnabled
-        ? await prisma.emailTracking.upsert({
-            where: {
-              token: createHash('sha256')
-                .update(`NEW_COMMENT|${project.id}|${comment.id}|${recipientEmail.toLowerCase()}`)
-                .digest('hex')
-                .slice(0, 32),
-            },
-            update: {
-              sentAt: new Date(),
-            },
-            create: {
-              token: createHash('sha256')
-                .update(`NEW_COMMENT|${project.id}|${comment.id}|${recipientEmail.toLowerCase()}`)
-                .digest('hex')
-                .slice(0, 32),
-              projectId: project.id,
-              type: 'NEW_COMMENT',
-              videoId: comment.videoId,
-              recipientEmail: recipientEmail.toLowerCase(),
-            },
-          })
-        : null
-
-      const result = await sendCommentNotificationEmail({
-        clientEmail: recipientEmail,
-        clientName: recipient.name || 'Client',
-        projectTitle: project.title,
-        videoName,
-        versionLabel,
-        authorName: authorLabel,
-        commentContent: comment.content,
+  const now = new Date()
+  await prisma.notificationQueue.create({
+    data: {
+      projectId: comment.projectId,
+      type: 'COMMENT_REACTION',
+      sentToClients: !notifyClients,
+      clientSentAt: notifyClients ? undefined : now,
+      sentToAdmins: !notifyAdmins,
+      adminSentAt: notifyAdmins ? undefined : now,
+      data: {
+        type: 'COMMENT_REACTION',
+        reactionId,
+        emoji,
+        // commentId drives the existing `comment_cancelled:` filter in both workers, so a
+        // reaction whose comment is deleted before the digest goes out is dropped with it.
+        commentId: comment.id,
+        videoId: comment.videoId,
+        videoName: video?.name || 'Unknown Video',
+        videoLabel: video?.versionLabel,
+        authorName: reactorName,
+        authorEmail: reactorEmail,
+        // Reactor identity, so un-reacting can find and retract exactly this row.
+        reactorUserId,
+        reactorRecipientId,
         timecode: comment.timecode,
-        shareUrl,
-        displayColor: comment.user?.displayColor || null,
-        trackingToken: trackingToken?.token,
-        unsubscribeUrl,
-      })
-
-      if (result.success) {
-        console.log(`[IMMEDIATE→CLIENT]   Sent to ${redactEmailForLogs(recipientEmail)}`)
-      } else {
-        console.error(
-          `[IMMEDIATE→CLIENT]   Failed to ${redactEmailForLogs(recipientEmail)}: ${result.error}`
-        )
-      }
-
-      return { recipientEmail: recipientEmail.toLowerCase(), success: result.success }
-    })
-
-    const results = await Promise.allSettled(emailPromises)
-    const successfulRecipientEmails: string[] = []
-    results.forEach((r) => {
-      if (r.status === 'fulfilled' && r.value.success) {
-        successfulRecipientEmails.push(r.value.recipientEmail)
-      }
-    })
-
-    if (successfulRecipientEmails.length > 0) {
-      try {
-        await prisma.projectEmailEvent.create({
-          data: {
-            projectId: project.id,
-            type: 'NEW_COMMENT',
-            dedupeKey: `NEW_COMMENT:${comment.id}`,
-            videoId: comment.videoId,
-            recipientEmails: JSON.stringify(successfulRecipientEmails),
-          },
-        })
-      } catch (e: any) {
-        // Ignore unique constraint violations (already logged)
-        if (e?.code !== 'P2002') {
-          console.error('[IMMEDIATE→CLIENT]   Failed to log ProjectEmailEvent:', e)
-        }
-      }
-    }
-  } else {
-    // → notify internal users (skip the comment author)
-    const internalUsers = await prisma.projectUser.findMany({
-      where: { projectId: comment.projectId, receiveNotifications: true },
-      select: {
-        user: {
-          select: {
-            email: true,
-            name: true,
-            appRole: { select: { permissions: true, name: true, isSystemAdmin: true } },
-          },
+        // The comment being reacted to, quoted in the email the same way a reply quotes
+        // its parent.
+        reactedTo: {
+          authorName: comment.authorName || 'Client',
+          content: comment.content,
+          timecode: comment.timecode,
         },
+        createdAt: now.toISOString(),
       },
-    })
-    const targetAdmins = internalUsers
-      .filter((r) => {
-        const role = r.user.appRole
-        const isAdminRole = role?.isSystemAdmin === true || (typeof role?.name === 'string' && role.name.trim().toLowerCase() === 'admin')
-        if (isAdminRole) return true
-        const permissions = normalizeRolePermissions(role?.permissions)
-        return canDoAction(permissions, 'accessSharePage')
-      })
-      .map((r) => r.user.email)
-      .filter((e): e is string => !!e && e.toLowerCase() !== authorEmail)
+    },
+  })
 
-    if (targetAdmins.length === 0) {
-      console.log(`[IMMEDIATE→ADMIN] Skipped - no internal users to notify for "${project.title}"`)
-      return
-    }
-
-    console.log(`[IMMEDIATE→ADMIN] Sending to ${targetAdmins.length} internal user(s) for "${project.title}"`)
-    console.log(`[IMMEDIATE→ADMIN]   Video: ${videoName} (${versionLabel})`)
-    console.log(`[IMMEDIATE→ADMIN]   Author: ${authorLabel}`)
-
-    const result = await sendAdminCommentNotificationEmail({
-      adminEmails: targetAdmins,
-      clientName: authorLabel,
-      clientEmail: comment.authorEmail,
-      projectTitle: project.title,
-      videoName,
-      versionLabel,
-      commentContent: comment.content,
-      timecode: comment.timecode,
-      shareUrl,
-      displayColor: comment.recipient?.displayColor || null,
-    })
-
-    if (result.success) {
-      console.log(`[IMMEDIATE→ADMIN]   ${result.message}`)
-    } else {
-      console.error(`[IMMEDIATE→ADMIN]   Failed: ${result.message}`)
-    }
-  }
+  console.log(`[QUEUE] Reaction ${emoji} by ${reactorName} on comment ${comment.id} ("${project.title}")`)
 }
 
 /**
- * Queue notification for later batch sending (when schedule is not IMMEDIATE)
+ * Retract a queued reaction notification when the reactor removes the reaction before the
+ * digest goes out.
+ *
+ * Matches on the reaction's own coordinates (comment + emoji + reactor) rather than the
+ * reaction row id, because the row is already gone by the time this runs. Only rows still
+ * pending delivery are dropped — an already-sent summary can't be unsent, and deleting its
+ * row would corrupt the backlog's history.
+ */
+export async function cancelReactionNotification(params: {
+  commentId: string
+  emoji: string
+  userId: string | null
+  recipientId: string | null
+}) {
+  const { commentId, emoji, userId, recipientId } = params
+
+  // Reaction rows are few per project, so filtering the candidates in JS is cheaper than
+  // reaching for JSON path predicates — and far easier to keep correct.
+  const pending = await prisma.notificationQueue.findMany({
+    where: {
+      type: 'COMMENT_REACTION',
+      OR: [{ sentToClients: false }, { sentToAdmins: false }],
+    },
+    select: { id: true, data: true },
+  })
+
+  const doomed = pending
+    .filter((row) => {
+      const data = row.data as any
+      if (data?.commentId !== commentId || data?.emoji !== emoji) return false
+      return userId
+        ? data?.reactorUserId === userId
+        : data?.reactorRecipientId === recipientId
+    })
+    .map((row) => row.id)
+
+  if (doomed.length === 0) return
+
+  await prisma.notificationQueue.deleteMany({ where: { id: { in: doomed } } })
+  console.log(`[QUEUE] Retracted ${doomed.length} pending reaction notification(s) for comment ${commentId}`)
+}
+
+/**
+ * Queue a comment notification for the next batched summary.
+ *
+ * Comment activity is never sent per-event: the only schedules are HOURLY, DAILY and NONE.
  */
 export async function queueNotification(context: NotificationContext, alreadySentTo?: { admins?: boolean; clients?: boolean }) {
   const { comment, project, video, isReply } = context

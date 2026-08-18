@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch'
 import { Plus, Star, Trash2, Bell, BellOff, Pencil, Check, X, DollarSign } from 'lucide-react'
 import type { ButtonProps } from '@/components/ui/button'
 import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from '@/lib/display-color'
+import { CONTACT_PHONE_MAX_LENGTH, sanitizeContactPhoneInput } from '@/lib/contact-phone'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { toast } from 'sonner'
 
@@ -17,6 +18,7 @@ export interface EditableRecipient {
   id?: string
   email: string | null
   name: string | null
+  phone?: string | null
   displayColor?: string | null
   alsoAddToClient?: boolean
   isPrimary: boolean
@@ -28,6 +30,7 @@ export interface ClientRecipientPickItem {
   id?: string
   email: string | null
   name: string | null
+  phone?: string | null
   displayColor?: string | null
 }
 
@@ -78,6 +81,7 @@ export function RecipientsEditor({
   const [showAddForm, setShowAddForm] = useState(false)
   const [newName, setNewName] = useState('')
   const [newEmail, setNewEmail] = useState('')
+  const [newPhone, setNewPhone] = useState('')
   const [newDisplayColor, setNewDisplayColor] = useState(() => generateRandomHexDisplayColor())
   const [newAlsoAddToClient, setNewAlsoAddToClient] = useState(false)
 
@@ -88,6 +92,7 @@ export function RecipientsEditor({
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [editEmail, setEditEmail] = useState('')
+  const [editPhone, setEditPhone] = useState('')
   const [editDisplayColor, setEditDisplayColor] = useState<string>('')
 
   useEffect(() => {
@@ -163,6 +168,7 @@ export function RecipientsEditor({
   const addRecipient = () => {
     const name = newName.trim()
     const email = newEmail.trim()
+    const phone = sanitizeContactPhoneInput(newPhone).trim()
 
     if (!name && !email) {
       toast.error('Please enter at least a name or email address')
@@ -185,6 +191,7 @@ export function RecipientsEditor({
       {
         name: name || null,
         email: email || null,
+        phone: phone || null,
         displayColor: showDisplayColor ? (normalizeHexDisplayColor(newDisplayColor) || newDisplayColor || generateRandomHexDisplayColor()) : null,
         ...(showAlsoAddToClient ? { alsoAddToClient: newAlsoAddToClient } : {}),
         isPrimary: recipients.length === 0,
@@ -195,6 +202,7 @@ export function RecipientsEditor({
     onChange(next)
     setNewName('')
     setNewEmail('')
+    setNewPhone('')
     setNewDisplayColor(generateRandomHexDisplayColor())
     setNewAlsoAddToClient(false)
     setShowAddForm(false)
@@ -202,6 +210,7 @@ export function RecipientsEditor({
 
   const cancelAdd = () => {
     setShowAddForm(false)
+    setNewPhone('')
     setNewAlsoAddToClient(false)
   }
 
@@ -237,6 +246,7 @@ export function RecipientsEditor({
       next.push({
         name: item.recipient.name ?? null,
         email: item.recipient.email ?? null,
+        phone: item.recipient.phone ?? null,
         displayColor,
         isPrimary: false,
         receiveNotifications: true,
@@ -253,6 +263,7 @@ export function RecipientsEditor({
     setEditingIdx(idx)
     setEditName(String(r?.name || ''))
     setEditEmail(String(r?.email || ''))
+    setEditPhone(String(r?.phone || ''))
     setEditDisplayColor(String(r?.displayColor || generateRandomHexDisplayColor()))
   }
 
@@ -260,6 +271,7 @@ export function RecipientsEditor({
     setEditingIdx(null)
     setEditName('')
     setEditEmail('')
+    setEditPhone('')
     setEditDisplayColor('')
   }
 
@@ -268,6 +280,7 @@ export function RecipientsEditor({
 
     const name = editName.trim()
     const email = editEmail.trim()
+    const phone = sanitizeContactPhoneInput(editPhone).trim()
     if (!name && !email) {
       toast.error('Please enter at least a name or email address')
       return
@@ -304,6 +317,7 @@ export function RecipientsEditor({
         ...r,
         name: name || null,
         email: email || null,
+        phone: phone || null,
         displayColor: showDisplayColor ? nextColor : (r.displayColor ?? null),
       }
     })
@@ -388,9 +402,11 @@ export function RecipientsEditor({
                       </span>
                     )}
                   </div>
-                  {recipient.name && recipient.email && (
-                    <div className="text-xs text-muted-foreground truncate">{recipient.email}</div>
-                  )}
+                  {(() => {
+                    const details = [recipient.name && recipient.email ? recipient.email : null, recipient.phone || null].filter(Boolean)
+                    if (details.length === 0) return null
+                    return <div className="text-xs text-muted-foreground truncate">{details.join(' · ')}</div>
+                  })()}
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
@@ -515,6 +531,19 @@ export function RecipientsEditor({
                         </div>
                       </div>
                     )}
+
+                    <div className="space-y-1">
+                      <Label htmlFor={`edit-recipient-phone-${idx}`}>Contact Phone</Label>
+                      <Input
+                        id={`edit-recipient-phone-${idx}`}
+                        type="tel"
+                        inputMode="tel"
+                        value={editPhone}
+                        onChange={(e) => setEditPhone(sanitizeContactPhoneInput(e.target.value))}
+                        placeholder="e.g., +61 400 000 000"
+                        maxLength={CONTACT_PHONE_MAX_LENGTH}
+                      />
+                    </div>
 
                     {showDisplayColor && showClientInfo && (
                       <div className="space-y-1">
@@ -646,6 +675,19 @@ export function RecipientsEditor({
                   </div>
                 )}
 
+                <div className="space-y-2">
+                  <Label htmlFor="new-recipient-phone">Contact Phone</Label>
+                  <Input
+                    id="new-recipient-phone"
+                    type="tel"
+                    inputMode="tel"
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(sanitizeContactPhoneInput(e.target.value))}
+                    placeholder="e.g., +61 400 000 000"
+                    maxLength={CONTACT_PHONE_MAX_LENGTH}
+                  />
+                </div>
+
                 {showAlsoAddToClient && (
                   <div className="space-y-2">
                     <Label>Also add to Client?</Label>
@@ -724,6 +766,19 @@ export function RecipientsEditor({
                 </div>
               </div>
             )}
+
+            <div className="space-y-2">
+              <Label htmlFor="new-recipient-phone-inline">Contact Phone</Label>
+              <Input
+                id="new-recipient-phone-inline"
+                type="tel"
+                inputMode="tel"
+                value={newPhone}
+                onChange={(e) => setNewPhone(sanitizeContactPhoneInput(e.target.value))}
+                placeholder="e.g., +61 400 000 000"
+                maxLength={CONTACT_PHONE_MAX_LENGTH}
+              />
+            </div>
 
             {showAlsoAddToClient && (
               <div className="space-y-2">

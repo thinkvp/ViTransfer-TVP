@@ -6,6 +6,7 @@ import { requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { validateAssetFile } from '@/lib/file-validation'
 import { checkBodySize } from '@/lib/api-guard'
 import { z } from 'zod'
+import { normalizeContactPhone } from '@/lib/contact-phone'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -13,6 +14,7 @@ export const dynamic = 'force-dynamic'
 const recipientSchema = z.object({
   name: z.string().trim().max(200).nullable().optional(),
   email: z.string().trim().max(320).email().nullable().optional(),
+  phone: z.string().trim().max(20, 'Phone number must be 20 characters or fewer').regex(/^[0-9+ ]*$/, 'Phone number may only contain numbers, spaces and +').nullable().optional(),
   displayColor: z.string().trim().max(7).nullable().optional(),
   isPrimary: z.boolean().optional(),
   receiveNotifications: z.boolean().optional(),
@@ -111,6 +113,7 @@ export async function GET(request: NextRequest) {
                 id: true,
                 name: true,
                 email: true,
+                phone: true,
                 displayColor: true,
                 isPrimary: true,
                 receiveNotifications: true,
@@ -191,6 +194,7 @@ export async function POST(request: NextRequest) {
     const recipients = (parsed.data.recipients || []).map((r) => ({
       name: r.name ?? null,
       email: r.email ?? null,
+      phone: normalizeContactPhone(r.phone),
       displayColor: r.displayColor ?? null,
       isPrimary: Boolean(r.isPrimary),
       receiveNotifications: r.receiveNotifications !== false,

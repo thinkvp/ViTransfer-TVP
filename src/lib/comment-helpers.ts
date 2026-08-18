@@ -3,7 +3,7 @@ import { getPrimaryRecipient } from '@/lib/recipients'
 import { isSmtpConfigured } from '@/lib/settings'
 import { getRedis } from '@/lib/redis'
 import { validateCommentLength, containsSuspiciousPatterns, sanitizeCommentHtml } from '@/lib/security/html-sanitization'
-import { sendImmediateNotification, queueNotification } from '@/lib/notifications'
+import { queueNotification } from '@/lib/notifications'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { canDoAction, isProjectStatusVisible, normalizeRolePermissions } from '@/lib/rbac'
 import {
@@ -397,14 +397,14 @@ export async function handleCommentNotifications(params: {
 
     // Each side has its own schedule. Evaluate both independently so all
     // non-author recipients on both sides are always notified.
-    const adminSchedule = settings?.adminNotificationSchedule || 'IMMEDIATE'
+    //
+    // Comment activity is always batched — the only choice is the cadence (HOURLY/DAILY)
+    // or NONE. Approvals and revision requests do not come through here and still send the
+    // moment they happen.
+    const adminSchedule = settings?.adminNotificationSchedule || 'HOURLY'
     const clientSchedule = project.clientNotificationSchedule
     const adminNone = adminSchedule === 'NONE'
     const clientNone = clientSchedule === 'NONE'
-    const adminImmediate = !adminNone && adminSchedule === 'IMMEDIATE'
-    const clientImmediate = !clientNone && clientSchedule === 'IMMEDIATE'
-    const adminBatch = !adminNone && !adminImmediate
-    const clientBatch = !clientNone && !clientImmediate
 
     console.log(`[COMMENT-NOTIFICATION] Comment type: ${isAdminAuthored ? 'ADMIN' : 'CLIENT'}, Admin schedule: ${adminSchedule}, Client schedule: ${clientSchedule}`)
 
@@ -415,20 +415,10 @@ export async function handleCommentNotifications(params: {
       isReply: !!parentId
     }
 
-    // Send/queue for client recipients
-    if (clientImmediate) {
-      console.log('[COMMENT-NOTIFICATION] Client path: sending immediately...')
-      await sendImmediateNotification(context, 'client')
-    }
-    // Send/queue for admin/internal recipients
-    if (adminImmediate) {
-      console.log('[COMMENT-NOTIFICATION] Admin path: sending immediately...')
-      await sendImmediateNotification(context, 'admin')
-    }
-    // Queue once if either side needs batched delivery (NONE sides are pre-marked as sent).
-    if (adminBatch || clientBatch) {
+    // Queue once if either side wants notifications (NONE sides are pre-marked as sent).
+    if (!adminNone || !clientNone) {
       console.log(`[COMMENT-NOTIFICATION] Queuing for batched delivery (admin: ${adminSchedule}, client: ${clientSchedule})...`)
-      await queueNotification(context, { admins: adminImmediate || adminNone, clients: clientImmediate || clientNone })
+      await queueNotification(context, { admins: adminNone, clients: clientNone })
     }
   } catch (emailError) {
     // Don't fail the request if notification processing fails

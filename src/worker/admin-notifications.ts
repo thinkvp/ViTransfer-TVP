@@ -4,7 +4,7 @@ import { generateAdminSummaryEmail } from '../lib/email-templates'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
 import { redactEmailForLogs } from '../lib/log-sanitization'
-import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, ADMIN_SEND_LOCK_KEY, normalizeNotificationDataTimecode } from './notification-helpers'
+import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, ADMIN_SEND_LOCK_KEY, normalizeNotificationDataTimecode, attachReactionTallies } from './notification-helpers'
 import { canDoAction, normalizeRolePermissions } from '../lib/rbac'
 
 /**
@@ -24,8 +24,8 @@ export async function processAdminNotifications() {
       }
     })
 
-    if (!settings || settings.adminNotificationSchedule === 'IMMEDIATE' || settings.adminNotificationSchedule === 'NONE') {
-      console.log('[ADMIN] Admin schedule is IMMEDIATE or NONE - no batched notifications')
+    if (!settings || settings.adminNotificationSchedule === 'NONE') {
+      console.log('[ADMIN] Admin schedule is NONE - no notifications')
       return
     }
 
@@ -56,7 +56,7 @@ export async function processAdminNotifications() {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     const pendingNotifications = await prisma.notificationQueue.findMany({
       where: {
-        type: { in: ['CLIENT_COMMENT', 'ADMIN_REPLY'] },
+        type: { in: ['CLIENT_COMMENT', 'ADMIN_REPLY', 'COMMENT_REACTION'] },
         sentToAdmins: false,
         adminFailed: false,
         adminAttempts: { lt: 3 },
@@ -124,6 +124,11 @@ export async function processAdminNotifications() {
       projectGroups[projectId].notifications.push(
         normalizeNotificationDataTimecode(notification.data)
       )
+    }
+
+    // Live reaction tallies for every comment in the digest, one query for all projects.
+    for (const group of Object.values(projectGroups)) {
+      group.notifications = await attachReactionTallies(group.notifications)
     }
 
     const projectIds = Object.keys(projectGroups)

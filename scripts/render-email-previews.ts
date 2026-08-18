@@ -223,6 +223,24 @@ async function main() {
 					authorName: 'Studio Team',
 					content: 'Please review the updated audio mix.',
 					timecode: '00:00:12:00',
+					reactions: [
+						{ emoji: '👍', count: 2 },
+						{ emoji: '👀', count: 1 },
+					],
+					createdAt: new Date().toISOString(),
+				},
+				{
+					type: 'COMMENT_REACTION',
+					videoName: 'Cut A',
+					videoLabel: 'v3',
+					authorName: 'Studio Team',
+					emoji: '👍',
+					timecode: '00:01:10:00',
+					reactedTo: {
+						authorName: 'Alex',
+						content: 'Looks great overall! One thing though — the logo shot at 01:10 feels a bit dark on my screen.',
+						timecode: '00:01:10:00',
+					},
 					createdAt: new Date().toISOString(),
 				},
 				{
@@ -277,6 +295,22 @@ async function main() {
 							authorEmail: 'alex@example.com',
 							content: 'Looks good, just one tweak at 01:10.',
 							timecode: '00:01:10:00',
+							reactions: [{ emoji: '🎉', count: 3 }],
+							createdAt: new Date().toISOString(),
+						},
+						{
+							type: 'COMMENT_REACTION',
+							videoName: 'Cut A',
+							videoLabel: 'v3',
+							authorName: 'Alex',
+							authorEmail: 'alex@example.com',
+							emoji: '❤️',
+							timecode: '00:00:12:00',
+							reactedTo: {
+								authorName: 'Studio Team',
+								content: 'New grade is up — let us know if the warmth reads right on your monitor.',
+								timecode: '00:00:12:00',
+							},
 							createdAt: new Date().toISOString(),
 						},
 						{

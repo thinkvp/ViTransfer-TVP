@@ -13,6 +13,7 @@ export const runtime = 'nodejs'
 const updateRecipientSchema = z.object({
   name: z.string().nullable().optional(),
   email: z.string().email('Invalid email format').nullable().optional(),
+  phone: z.string().trim().max(20, 'Phone number must be 20 characters or fewer').regex(/^[0-9+ ]*$/, 'Phone number may only contain numbers, spaces and +').nullable().optional(),
   clientRecipientId: z.string().nullable().optional(),
   displayColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Invalid display colour').nullable().optional(),
   isPrimary: z.boolean().optional(),

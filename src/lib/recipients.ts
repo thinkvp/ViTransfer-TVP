@@ -1,4 +1,5 @@
 import { prisma } from './db'
+import { normalizeContactPhone } from './contact-phone'
 import { generateRandomHexDisplayColor, normalizeHexDisplayColor } from './display-color'
 import { getSafeguardLimits } from './settings'
 
@@ -7,6 +8,7 @@ export interface Recipient {
   clientRecipientId?: string | null
   email: string | null
   name: string | null
+  phone?: string | null
   displayColor?: string | null
   isPrimary: boolean
   receiveNotifications: boolean
@@ -33,6 +35,7 @@ export async function getProjectRecipients(projectId: string): Promise<Recipient
     clientRecipientId: r.clientRecipientId ?? null,
     email: r.email,
     name: r.name,
+    phone: r.phone ?? null,
     displayColor: r.displayColor,
     isPrimary: r.isPrimary,
     receiveNotifications: r.receiveNotifications
@@ -54,6 +57,7 @@ export async function getPrimaryRecipient(projectId: string): Promise<Recipient 
       id: primary.id,
       email: primary.email,
       name: primary.name,
+      phone: primary.phone ?? null,
       displayColor: primary.displayColor,
       isPrimary: primary.isPrimary,
       receiveNotifications: primary.receiveNotifications
@@ -74,6 +78,7 @@ export async function getPrimaryRecipient(projectId: string): Promise<Recipient 
     id: fallback.id,
     email: fallback.email,
     name: fallback.name,
+    phone: fallback.phone ?? null,
     displayColor: fallback.displayColor,
     isPrimary: fallback.isPrimary,
     receiveNotifications: fallback.receiveNotifications
@@ -90,7 +95,8 @@ export async function addRecipient(
   isPrimary: boolean = false,
   displayColor?: string | null,
   alsoAddToClient?: boolean,
-  clientRecipientId?: string | null
+  clientRecipientId?: string | null,
+  phone?: string | null
 ): Promise<Recipient> {
   const { maxProjectRecipients } = await getSafeguardLimits()
   const currentCount = await prisma.projectRecipient.count({ where: { projectId } })
@@ -109,6 +115,8 @@ export async function addRecipient(
   const normalizedColor = displayColor === undefined
     ? null
     : (displayColor === null ? null : (normalizeHexDisplayColor(displayColor) || null))
+
+  const normalizedPhone = normalizeContactPhone(phone)
 
   const recipient = await prisma.$transaction(async (tx) => {
     const project = await tx.project.findUnique({
@@ -149,6 +157,7 @@ export async function addRecipient(
                 clientId,
                 email: emailKey,
                 name,
+                phone: normalizedPhone,
                 displayColor: normalizedColor ?? generateRandomHexDisplayColor(),
                 isPrimary: false,
                 receiveNotifications: true,
@@ -168,6 +177,7 @@ export async function addRecipient(
         ...(resolvedClientRecipientId ? { clientRecipientId: resolvedClientRecipientId } : {}),
         email,
         name,
+        phone: normalizedPhone,
         isPrimary,
         displayColor: normalizedColor ?? generateRandomHexDisplayColor(),
       },
@@ -181,6 +191,7 @@ export async function addRecipient(
           data: {
             ...(email ? { email: normalizeEmail(email) } : {}),
             ...(name !== null && name !== undefined ? { name } : {}),
+            ...(normalizedPhone ? { phone: normalizedPhone } : {}),
             ...(Object.prototype.hasOwnProperty.call(createdProjectRecipient, 'displayColor')
               ? { displayColor: createdProjectRecipient.displayColor ?? null }
               : {}),
@@ -199,6 +210,7 @@ export async function addRecipient(
     clientRecipientId: recipient.clientRecipientId ?? null,
     email: recipient.email,
     name: recipient.name,
+    phone: recipient.phone ?? null,
     displayColor: recipient.displayColor,
     isPrimary: recipient.isPrimary,
     receiveNotifications: recipient.receiveNotifications
@@ -211,7 +223,7 @@ export async function addRecipient(
 export async function updateRecipient(
   recipientId: string,
   projectId: string,
-  data: { name?: string | null; email?: string | null; displayColor?: string | null; isPrimary?: boolean; receiveNotifications?: boolean; clientRecipientId?: string | null }
+  data: { name?: string | null; email?: string | null; phone?: string | null; displayColor?: string | null; isPrimary?: boolean; receiveNotifications?: boolean; clientRecipientId?: string | null }
 ): Promise<Recipient> {
   // If setting as primary, get projectId and unset other primaries
   if (data.isPrimary) {
@@ -233,6 +245,9 @@ export async function updateRecipient(
   }
 
   const updateData: any = { ...data }
+  if (Object.prototype.hasOwnProperty.call(data, 'phone')) {
+    updateData.phone = normalizeContactPhone(data.phone)
+  }
   if (Object.prototype.hasOwnProperty.call(data, 'displayColor')) {
     if (data.displayColor === null || data.displayColor === '') {
       updateData.displayColor = null
@@ -305,6 +320,10 @@ export async function updateRecipient(
           ? (updateData.name ?? null)
           : (recipient.name ?? null)
 
+        const nextPhone = Object.prototype.hasOwnProperty.call(updateData, 'phone')
+          ? (updateData.phone ?? null)
+          : (recipient.phone ?? null)
+
         const nextColor = Object.prototype.hasOwnProperty.call(updateData, 'displayColor')
           ? (recipient.displayColor ?? null)
           : undefined
@@ -314,6 +333,7 @@ export async function updateRecipient(
           data: {
             ...(Object.prototype.hasOwnProperty.call(updateData, 'email') ? { email: nextEmail } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'name') ? { name: nextName } : {}),
+            ...(Object.prototype.hasOwnProperty.call(updateData, 'phone') ? { phone: nextPhone } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'displayColor') ? { displayColor: nextColor } : {}),
           },
         }).catch(() => null)
@@ -324,6 +344,7 @@ export async function updateRecipient(
           data: {
             ...(Object.prototype.hasOwnProperty.call(updateData, 'email') ? { email: nextEmail } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'name') ? { name: nextName } : {}),
+            ...(Object.prototype.hasOwnProperty.call(updateData, 'phone') ? { phone: nextPhone } : {}),
             ...(Object.prototype.hasOwnProperty.call(updateData, 'displayColor') ? { displayColor: nextColor } : {}),
           },
         }).catch(() => null)
@@ -338,6 +359,7 @@ export async function updateRecipient(
     clientRecipientId: recipient.clientRecipientId ?? null,
     email: recipient.email,
     name: recipient.name,
+    phone: recipient.phone ?? null,
     displayColor: recipient.displayColor,
     isPrimary: recipient.isPrimary,
     receiveNotifications: recipient.receiveNotifications

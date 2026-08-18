@@ -1134,7 +1134,7 @@ async function main() {
   console.log('Notification worker started')
   console.log('  → Checks on the hour for scheduled summaries')
   console.log('  → Retries every 2 minutes when sends fail (max 3 attempts)')
-  console.log('  → IMMEDIATE notifications sent instantly (not in batches)')
+  console.log('  → Approvals and revision requests bypass the schedule and send instantly')
 
   // Recover videos stuck in QUEUED/PROCESSING with no backing queue job (worker
   // killed mid-transcode). These are otherwise a UI dead zone; flip them to ERROR

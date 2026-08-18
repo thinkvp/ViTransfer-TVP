@@ -11,6 +11,7 @@ import { getRawStoragePath } from '@/lib/storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, getStoragePathBasename } from '@/lib/project-storage-paths'
 import { parseProjectStartDateInput } from '@/lib/project-start-date'
 import { generateRandomHexDisplayColor } from '@/lib/display-color'
+import { normalizeContactPhone } from '@/lib/contact-phone'
 import { sendPushNotification } from '@/lib/push-notifications'
 import * as fs from 'fs'
 export const runtime = 'nodejs'
@@ -383,6 +384,7 @@ export async function POST(request: NextRequest) {
         .map((r: any) => ({
           email: normalizeEmail(r?.email),
           name: normalizeName(r?.name),
+          phone: normalizeContactPhone(r?.phone),
           displayColor: normalizeDisplayColor(r?.displayColor),
           alsoAddToClient: Boolean(r?.alsoAddToClient),
           clientRecipientId: typeof r?.clientRecipientId === 'string' && r.clientRecipientId ? r.clientRecipientId : null,
@@ -546,6 +548,7 @@ export async function POST(request: NextRequest) {
                 clientId,
                 email,
                 name: r.name,
+                phone: r.phone,
                 displayColor: r.displayColor ?? generateRandomHexDisplayColor(),
                 isPrimary: false,
                 receiveNotifications: true,
@@ -559,12 +562,13 @@ export async function POST(request: NextRequest) {
           // actually supplied. Writing `displayColor: null` unconditionally used to wipe
           // an existing contact's colour whenever the caller sent none.
           for (const r of toAdd) {
-            if (!r.displayColor && !r.name) continue
+            if (!r.displayColor && !r.name && !r.phone) continue
             await tx.clientRecipient.updateMany({
               where: { clientId, email: String(r.email).trim() },
               data: {
                 ...(r.displayColor ? { displayColor: r.displayColor } : {}),
                 ...(r.name ? { name: r.name } : {}),
+                ...(r.phone ? { phone: r.phone } : {}),
               },
             })
           }
@@ -586,6 +590,7 @@ export async function POST(request: NextRequest) {
             clientRecipientId: clientRecipientIdByIndex.get(i) ?? null,
             email: r.email,
             name: r.name,
+            phone: r.phone,
             displayColor: r.displayColor ?? null,
             isPrimary: r.isPrimary,
             receiveNotifications: r.receiveNotifications,
