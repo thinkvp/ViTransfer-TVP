@@ -296,6 +296,7 @@ export default function GlobalSettingsPage() {
   const [pushNotifySuccessfulShareAccess, setPushNotifySuccessfulShareAccess] = useState(true)
   const [pushNotifyGuestVideoLinkAccess, setPushNotifyGuestVideoLinkAccess] = useState(true)
   const [pushNotifyClientComments, setPushNotifyClientComments] = useState(true)
+  const [pushNotifyCommentReactions, setPushNotifyCommentReactions] = useState(true)
   const [pushNotifyInternalComments, setPushNotifyInternalComments] = useState(true)
   const [pushNotifyTaskComments, setPushNotifyTaskComments] = useState(true)
   const [pushNotifyVideoApproval, setPushNotifyVideoApproval] = useState(true)
@@ -538,6 +539,7 @@ export default function GlobalSettingsPage() {
           setPushNotifySuccessfulShareAccess(pushData.notifySuccessfulShareAccess ?? true)
           setPushNotifyGuestVideoLinkAccess(pushData.notifyGuestVideoLinkAccess ?? true)
           setPushNotifyClientComments(pushData.notifyClientComments ?? true)
+          setPushNotifyCommentReactions(pushData.notifyCommentReactions ?? true)
           setPushNotifyInternalComments(pushData.notifyInternalComments ?? true)
           setPushNotifyTaskComments(pushData.notifyTaskComments ?? true)
           setPushNotifyVideoApproval(pushData.notifyVideoApproval ?? true)
@@ -882,6 +884,7 @@ export default function GlobalSettingsPage() {
         notifySuccessfulShareAccess: pushNotifySuccessfulShareAccess,
         notifyGuestVideoLinkAccess: pushNotifyGuestVideoLinkAccess,
         notifyClientComments: pushNotifyClientComments,
+        notifyCommentReactions: pushNotifyCommentReactions,
         notifyInternalComments: pushNotifyInternalComments,
         notifyTaskComments: pushNotifyTaskComments,
         notifyVideoApproval: pushNotifyVideoApproval,
@@ -1446,6 +1449,8 @@ export default function GlobalSettingsPage() {
             notifyGuestVideoLinkAccess={pushNotifyGuestVideoLinkAccess}
             setNotifyGuestVideoLinkAccess={setPushNotifyGuestVideoLinkAccess}
             notifyClientComments={pushNotifyClientComments}
+            setNotifyCommentReactions={setPushNotifyCommentReactions}
+            notifyCommentReactions={pushNotifyCommentReactions}
             setNotifyClientComments={setPushNotifyClientComments}
             notifyInternalComments={pushNotifyInternalComments}
             setNotifyInternalComments={setPushNotifyInternalComments}
@@ -1862,6 +1867,8 @@ export default function GlobalSettingsPage() {
                 notifyGuestVideoLinkAccess={pushNotifyGuestVideoLinkAccess}
                 setNotifyGuestVideoLinkAccess={setPushNotifyGuestVideoLinkAccess}
                 notifyClientComments={pushNotifyClientComments}
+                setNotifyCommentReactions={setPushNotifyCommentReactions}
+                notifyCommentReactions={pushNotifyCommentReactions}
                 setNotifyClientComments={setPushNotifyClientComments}
                 notifyInternalComments={pushNotifyInternalComments}
                 setNotifyInternalComments={setPushNotifyInternalComments}

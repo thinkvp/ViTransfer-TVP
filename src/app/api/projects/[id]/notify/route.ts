@@ -265,7 +265,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const allPending = await prisma.notificationQueue.findMany({
         where: {
           projectId,
-          type: { in: ['ADMIN_REPLY', 'CLIENT_COMMENT'] },
+          type: { in: ['ADMIN_REPLY', 'CLIENT_COMMENT', 'COMMENT_REACTION'] },
           createdAt: { gte: sevenDaysAgo },
           OR: [
             { sentToClients: false, clientFailed: false, clientAttempts: { lt: 3 } },

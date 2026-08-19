@@ -11,6 +11,7 @@ export interface PushNotificationPayload {
     | 'GUEST_VIDEO_LINK_ACCESS'
     | 'CLIENT_COMMENT'
     | 'ADMIN_SHARE_COMMENT'
+    | 'COMMENT_REACTION'
     | 'VIDEO_APPROVAL'
     | 'INTERNAL_COMMENT'
     | 'TASK_COMMENT'
@@ -87,6 +88,7 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       | 'notifySuccessfulShareAccess'
       | 'notifyGuestVideoLinkAccess'
       | 'notifyClientComments'
+      | 'notifyCommentReactions'
       | 'notifyInternalComments'
       | 'notifyTaskComments'
       | 'notifyVideoApproval'
@@ -108,6 +110,7 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'GUEST_VIDEO_LINK_ACCESS': 'notifyGuestVideoLinkAccess',
       'CLIENT_COMMENT': 'notifyClientComments',
       'ADMIN_SHARE_COMMENT': 'notifyClientComments',
+      'COMMENT_REACTION': 'notifyCommentReactions',
       'INTERNAL_COMMENT': 'notifyInternalComments',
       'TASK_COMMENT': 'notifyTaskComments',
       'VIDEO_APPROVAL': 'notifyVideoApproval',

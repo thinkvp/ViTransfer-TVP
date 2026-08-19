@@ -24,7 +24,10 @@ export async function processClientNotifications() {
       where: {
         notificationQueue: {
           some: {
-            type: 'ADMIN_REPLY',
+            // MUST stay in step with the inner `notificationQueue` select below: this
+            // clause decides whether the project is picked up at all, so a type listed
+            // there but missing here is silently never delivered.
+            type: { in: ['ADMIN_REPLY', 'COMMENT_REACTION'] },
             sentToClients: false,
             clientFailed: false,
             clientAttempts: { lt: 3 }

@@ -39,6 +39,7 @@ type ReactedComment = {
   id: string
   projectId: string
   videoId: string
+  videoVersion: number | null
   content: string
   timecode: string | null
   authorName: string | null
@@ -74,6 +75,7 @@ async function resolveReactionContext(
       projectId: true,
       // Carried through so the notification can quote the comment and skip self-reactions.
       videoId: true,
+      videoVersion: true,
       content: true,
       timecode: true,
       authorName: true,

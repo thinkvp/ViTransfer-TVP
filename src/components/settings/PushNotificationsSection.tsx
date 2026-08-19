@@ -23,6 +23,8 @@ interface PushNotificationsSectionProps {
   setNotifyGuestVideoLinkAccess: (value: boolean) => void
   notifyClientComments: boolean
   setNotifyClientComments: (value: boolean) => void
+  notifyCommentReactions: boolean
+  setNotifyCommentReactions: (value: boolean) => void
   notifyInternalComments: boolean
   setNotifyInternalComments: (value: boolean) => void
   notifyTaskComments: boolean
@@ -67,6 +69,8 @@ export function PushNotificationsSection({
   setNotifyGuestVideoLinkAccess,
   notifyClientComments,
   setNotifyClientComments,
+  notifyCommentReactions,
+  setNotifyCommentReactions,
   notifyInternalComments,
   setNotifyInternalComments,
   notifyTaskComments,
@@ -257,6 +261,22 @@ export function PushNotificationsSection({
                       id="notifyClientComments"
                       checked={notifyClientComments}
                       onCheckedChange={setNotifyClientComments}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="notifyCommentReactions" className="text-sm font-normal">
+                        Comment Reactions
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        When someone leaves an emoji reaction on a share page comment. One notification per person per project every 10 minutes, however many they leave.
+                      </p>
+                    </div>
+                    <Switch
+                      id="notifyCommentReactions"
+                      checked={notifyCommentReactions}
+                      onCheckedChange={setNotifyCommentReactions}
                     />
                   </div>
 

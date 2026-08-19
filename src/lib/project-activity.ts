@@ -21,6 +21,7 @@ export type ProjectActivityEventType =
   | 'REVISION_REQUESTED'
   | 'SUBTITLES_EDITED'
   | 'COMMENT_ADDED'
+  | 'COMMENT_REACTION'
   | 'ALBUM_ADDED'
   | 'PHOTOS_ADDED'
   | 'UPLOADS_ADDED'
@@ -57,8 +58,10 @@ export interface ProjectActivityEvent {
     albumName?: string
     folderPath?: string
     sampleFileNames?: string[]
-    /** Single-line truncated preview of a comment's text (COMMENT_ADDED only). */
+    /** Single-line truncated preview of a comment's text (COMMENT_ADDED / COMMENT_REACTION). */
     commentPreview?: string
+    /** COMMENT_REACTION only: the distinct emoji in this bucket, newest first. */
+    reactionEmojis?: string[]
   }
 }
 
@@ -96,6 +99,26 @@ interface RawActorRef {
   recipientId: string | null
   name: string | null
   color?: string | null
+}
+
+/**
+ * Shape of a fetched reaction row. Spelled out rather than inferred because the query sits
+ * behind an `includeComments` conditional whose empty branch would otherwise widen the row
+ * type to `never` and make the grouping map unusable.
+ */
+interface RawReactionRow {
+  id: string
+  emoji: string
+  createdAt: Date
+  userId: string | null
+  recipientId: string | null
+  user: { name: string | null; displayColor: string | null } | null
+  recipient: { name: string | null; displayColor: string | null } | null
+  comment: {
+    id: string
+    content: string
+    video: { id: string; name: string; versionLabel: string } | null
+  } | null
 }
 
 /**
@@ -172,7 +195,7 @@ export async function buildProjectActivity(
   const limit = Math.max(1, options.limit ?? DEFAULT_LIMIT)
   const clientVisible = audience !== 'admin'
 
-  const [videos, comments, albums, albumPhotos, uploadFiles, uploadFolders] = await Promise.all([
+  const [videos, comments, reactions, albums, albumPhotos, uploadFiles, uploadFolders] = await Promise.all([
     prisma.video.findMany({
       where: {
         projectId,
@@ -231,6 +254,37 @@ export async function buildProjectActivity(
           },
         })
       : Promise.resolve([] as never[]),
+    // Reactions ride the same gate as comments: if feedback is hidden from this audience,
+    // so is the fact that someone reacted. The client filter reaches through the relation
+    // so a reaction on an internal comment (or a not-yet-READY video) can never surface.
+    includeComments
+      ? prisma.commentReaction.findMany({
+          where: {
+            comment: {
+              projectId,
+              ...(clientVisible ? { isInternal: false, video: { status: 'READY' as const } } : {}),
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: RAW_TAKE,
+          select: {
+            id: true,
+            emoji: true,
+            createdAt: true,
+            userId: true,
+            recipientId: true,
+            user: { select: { name: true, displayColor: true } },
+            recipient: { select: { name: true, displayColor: true } },
+            comment: {
+              select: {
+                id: true,
+                content: true,
+                video: { select: { id: true, name: true, versionLabel: true } },
+              },
+            },
+          },
+        })
+      : Promise.resolve([] as RawReactionRow[]),
     prisma.album.findMany({
       where: {
         projectId,
@@ -426,6 +480,54 @@ export async function buildProjectActivity(
         commentPreview: commentPreview(comment.content),
       },
     })
+  }
+
+  // --- Comment reactions: grouped by reactor + time window ---------------------------
+  // One person working through a video and reacting to six comments is one act of
+  // reviewing, not six events — grouped the same way bulk uploads are, so the feed shows
+  // "reacted to 6 comments" instead of burying everything else.
+  {
+    const byActor = new Map<string, RawReactionRow[]>()
+    for (const reaction of reactions) {
+      const key = actorGroupKey({
+        userId: reaction.userId,
+        recipientId: reaction.recipientId,
+        name: reaction.user?.name || reaction.recipient?.name || null,
+      })
+      const list = byActor.get(key)
+      if (list) list.push(reaction)
+      else byActor.set(key, [reaction])
+    }
+
+    for (const list of byActor.values()) {
+      const asc = [...list].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      for (const bucket of bucketByGap(asc)) {
+        const last = bucket[bucket.length - 1]
+        const raw: RawActorRef = {
+          userId: last.userId,
+          recipientId: last.recipientId,
+          name: last.user?.name || last.recipient?.name || null,
+          color: last.user?.displayColor || last.recipient?.displayColor || null,
+        }
+        // Newest first, de-duplicated: six 👍 read as one emoji, not six.
+        const emojis = [...new Set([...bucket].reverse().map((r) => r.emoji))]
+        events.push({
+          id: `reaction:${last.id}`,
+          type: 'COMMENT_REACTION',
+          timestamp: last.createdAt.toISOString(),
+          actor: resolveActor(raw, audience),
+          count: bucket.length,
+          target: {
+            videoId: last.comment?.video?.id,
+            videoName: last.comment?.video?.name,
+            versionLabel: last.comment?.video?.versionLabel,
+            // Only meaningful for a single reaction; a bucket spans several comments.
+            commentPreview: bucket.length === 1 ? commentPreview(last.comment?.content || '') : undefined,
+            reactionEmojis: emojis,
+          },
+        })
+      }
+    }
   }
 
   // --- Albums -----------------------------------------------------------------------

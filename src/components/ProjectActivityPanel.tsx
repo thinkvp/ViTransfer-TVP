@@ -5,6 +5,7 @@ import {
   Video,
   FilePlus2,
   MessageSquare,
+  SmilePlus,
   Images,
   Image as ImageIcon,
   FolderUp,
@@ -28,6 +29,7 @@ type ActivityEventType =
   | 'REVISION_REQUESTED'
   | 'SUBTITLES_EDITED'
   | 'COMMENT_ADDED'
+  | 'COMMENT_REACTION'
   | 'ALBUM_ADDED'
   | 'PHOTOS_ADDED'
   | 'UPLOADS_ADDED'
@@ -54,6 +56,7 @@ interface ActivityEvent {
     folderPath?: string
     sampleFileNames?: string[]
     commentPreview?: string
+    reactionEmojis?: string[]
   }
 }
 
@@ -82,6 +85,7 @@ const EVENT_ICONS: Record<ActivityEventType, typeof Video> = {
   REVISION_REQUESTED: FileClock,
   SUBTITLES_EDITED: Captions,
   COMMENT_ADDED: MessageSquare,
+  COMMENT_REACTION: SmilePlus,
   ALBUM_ADDED: ImageIcon,
   PHOTOS_ADDED: Images,
   UPLOADS_ADDED: FolderUp,
@@ -152,6 +156,18 @@ function eventDescription(event: ActivityEvent): ReactNode {
       return <>edited subtitles on {videoTarget(event)}</>
     case 'COMMENT_ADDED':
       return <>commented on {videoTarget(event)}</>
+    case 'COMMENT_REACTION': {
+      const count = event.count || 1
+      const emojis = event.target.reactionEmojis || []
+      // A single reaction names the video it was on; a bucket spans several comments, so
+      // the count carries the meaning instead.
+      return (
+        <>
+          reacted{emojis.length > 0 ? <> <span aria-hidden="true">{emojis.slice(0, 3).join(' ')}</span></> : null}
+          {count === 1 ? <> on {videoTarget(event)}</> : <> to {count} comments</>}
+        </>
+      )
+    }
     case 'ALBUM_ADDED':
       return <>added album <Name>{event.target.albumName || ''}</Name></>
     case 'PHOTOS_ADDED': {
@@ -416,7 +432,7 @@ export function ProjectActivityPanel({ fetchUrl, authToken, className, onOpenTar
                           <span className="font-medium">{event.actor.name}</span>{' '}
                           <span className="text-foreground/90">{eventDescription(event)}</span>
                         </p>
-                        {event.type === 'COMMENT_ADDED' && event.target.commentPreview && (
+                        {(event.type === 'COMMENT_ADDED' || event.type === 'COMMENT_REACTION') && event.target.commentPreview && (
                           <p
                             className="text-xs text-foreground mt-1.5 rounded-md border border-border bg-accent px-2.5 py-1.5 shadow-sm line-clamp-3"
                             title={event.target.commentPreview}

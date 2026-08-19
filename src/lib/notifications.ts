@@ -32,6 +32,92 @@ interface ApprovalNotificationContext {
 }
 
 /**
+ * How long one person's reactions on a project collapse into a single push/bell entry.
+ *
+ * Reactions are one click each, and unlike the email digest there is no batching layer in
+ * front of push — every call is an immediate notification. Without this, someone working
+ * through a video and reacting to a dozen comments would fire a dozen pushes, and toggling
+ * a reaction off and on again would re-fire it each time. The first notification already
+ * carries the signal ("they're going through the feedback"); the share page has the detail.
+ *
+ * Deliberately keyed per reactor per project rather than per comment, because the noise
+ * comes from one person reacting across many comments, not from many people reacting to one.
+ */
+const REACTION_PUSH_COALESCE_SECONDS = 10 * 60
+
+/**
+ * Raise a bell entry (and browser push, if enabled) for a new reaction.
+ *
+ * Push here is admin-facing only — there is no client push channel — so both a client's
+ * reaction and another admin's reaction land with the internal team. Per-user eligibility
+ * (project assignment, share-page permission) is applied downstream by
+ * sendBrowserPushToEligibleUsers; an admin reactor excludes themselves via __meta.authorUserId.
+ */
+async function emitReactionPush(params: {
+  emoji: string
+  comment: { id: string; videoId: string; videoVersion: number | null; content: string; authorName: string | null; timecode: string | null }
+  project: { id: string; title: string }
+  video: { name: string; versionLabel: string | null } | null
+  reactorName: string
+  reactorUserId: string | null
+  reactorRecipientId: string | null
+}) {
+  const { emoji, comment, project, video, reactorName, reactorUserId, reactorRecipientId } = params
+
+  try {
+    // Coalesce: first reaction in the window notifies, the rest stay silent. SET NX means
+    // only the caller that actually creates the key proceeds, so concurrent clicks can't
+    // both slip through.
+    // Keyed on the reactor's id, never their display name — two recipients can share a
+    // name, and one would then silence the other.
+    const reactorKey = reactorUserId ? `user:${reactorUserId}` : `recipient:${reactorRecipientId}`
+    const guardKey = `reaction_push:${project.id}:${reactorKey}`
+    const acquired = await getRedis().set(guardKey, '1', 'EX', REACTION_PUSH_COALESCE_SECONDS, 'NX')
+    if (acquired !== 'OK') {
+      console.log(`[REACTION-PUSH] Coalesced — ${reactorName} already notified for "${project.title}" within the window`)
+      return
+    }
+  } catch {
+    // Redis unavailable: fall through and notify rather than swallowing the signal. A
+    // duplicate push is a far smaller problem than a silently dropped one.
+  }
+
+  try {
+    const shareUrl = video?.name && Number.isFinite(comment.videoVersion ?? NaN)
+      ? `/admin/projects/${encodeURIComponent(project.id)}/share?video=${encodeURIComponent(video.name)}&version=${encodeURIComponent(String(comment.videoVersion))}`
+      : `/admin/projects/${encodeURIComponent(project.id)}`
+
+    await sendPushNotification({
+      type: 'COMMENT_REACTION',
+      projectId: project.id,
+      projectName: project.title,
+      title: 'New reaction',
+      message: `${reactorName} reacted ${emoji}`,
+      details: {
+        __meta: {
+          // Present only for an admin reactor, so they are excluded from their own push.
+          ...(reactorUserId ? { authorUserId: String(reactorUserId) } : {}),
+          commentId: String(comment.id),
+          videoId: comment.videoId,
+          videoVersion: comment.videoVersion,
+          videoName: video?.name,
+        },
+        __link: { href: shareUrl },
+        'Project': project.title,
+        'Video': video?.name || 'N/A',
+        'Timecode': comment.timecode,
+        'Reaction': emoji,
+        'By': reactorName,
+        'On comment': comment.content.substring(0, 200) + (comment.content.length > 200 ? '...' : ''),
+        'Comment by': comment.authorName || 'Client',
+      },
+    })
+  } catch {
+    console.warn('[REACTION-PUSH] Failed to emit reaction push event')
+  }
+}
+
+/**
  * Queue an emoji reaction for the next batched summary.
  *
  * A reaction is the lightest possible signal that someone read a comment, so it never
@@ -53,6 +139,7 @@ export async function queueReactionNotification(params: {
     id: string
     projectId: string
     videoId: string
+    videoVersion: number | null
     content: string
     timecode: string | null
     authorName: string | null
@@ -92,6 +179,20 @@ export async function queueReactionNotification(params: {
   ])
 
   if (!project) return
+
+  // --- Bell / browser push ---
+  // Runs before the email-schedule check on purpose: push has its own master switch and
+  // per-event toggle, so a project whose EMAIL schedule is NONE should still raise a bell
+  // entry. The two channels are configured separately and must gate separately.
+  await emitReactionPush({
+    emoji,
+    comment,
+    project: { id: project.id, title: project.title },
+    video,
+    reactorName,
+    reactorUserId,
+    reactorRecipientId,
+  })
 
   const adminNone = (settings?.adminNotificationSchedule || 'HOURLY') === 'NONE'
   const clientNone = project.clientNotificationSchedule === 'NONE'

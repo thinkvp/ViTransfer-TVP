@@ -1792,6 +1792,7 @@ model PushNotificationSettings {
   notifySuccessfulShareAccess      Boolean @default(true)
   notifyGuestVideoLinkAccess       Boolean @default(true)
   notifyClientComments             Boolean @default(true)
+  notifyCommentReactions           Boolean @default(true)
   notifyInternalComments           Boolean @default(true)
   notifyTaskComments               Boolean @default(true)
   notifyVideoApproval              Boolean @default(true)

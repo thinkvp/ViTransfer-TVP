@@ -55,14 +55,16 @@ async function hasRetriableNotificationFailures(): Promise<boolean> {
     where: {
       OR: [
         {
-          type: { in: ['CLIENT_COMMENT', 'INTERNAL_COMMENT', 'TASK_COMMENT'] },
+          // COMMENT_REACTION appears in both branches: a reaction targets whichever side
+          // the reactor does not belong to, so it can be pending on either.
+          type: { in: ['CLIENT_COMMENT', 'INTERNAL_COMMENT', 'TASK_COMMENT', 'COMMENT_REACTION'] },
           sentToAdmins: false,
           adminFailed: false,
           adminAttempts: { lt: 3 },
           lastError: { not: null },
         },
         {
-          type: 'ADMIN_REPLY',
+          type: { in: ['ADMIN_REPLY', 'COMMENT_REACTION'] },
           sentToClients: false,
           clientFailed: false,
           clientAttempts: { lt: 3 },

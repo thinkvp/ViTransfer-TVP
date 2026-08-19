@@ -263,6 +263,41 @@ async function main() {
     assert(uploadsRoute.includes('canUpload'), 'uploads route lost its canUpload gate')
   })
 
+  await check('every notification type the client worker renders is also selectable', async () => {
+    // The project query has TWO type filters: an outer `some` that decides whether a
+    // project is picked up at all, and an inner select that decides which rows are
+    // rendered. A type present only in the inner one is silently never delivered — that
+    // is exactly how COMMENT_REACTION emails went missing.
+    const src = await readSource('src/worker/client-notifications.ts')
+    const filters = [...src.matchAll(/type:\s*\{\s*in:\s*\[([^\]]*)\]/g)].map((m) =>
+      m[1]
+        .split(',')
+        .map((t) => t.trim().replace(/['"]/g, ''))
+        .filter(Boolean)
+        .sort()
+        .join('|'),
+    )
+    assert(filters.length >= 2, 'expected both an outer and inner type filter in the client worker')
+    assert(
+      new Set(filters).size === 1,
+      `client worker type filters disagree: ${filters.join('  vs  ')}`,
+    )
+  })
+
+  await check('reaction notifications are deliverable on every path', async () => {
+    // A queued COMMENT_REACTION is useless if the path that sends it filters the type out.
+    const spots = [
+      'src/worker/client-notifications.ts',
+      'src/worker/admin-notifications.ts',
+      'src/app/api/projects/[id]/notify/route.ts',
+      'src/worker/index.ts',
+    ]
+    for (const spot of spots) {
+      const src = await readSource(spot)
+      assert(src.includes('COMMENT_REACTION'), `${spot} cannot deliver COMMENT_REACTION rows`)
+    }
+  })
+
   await check('admin seeding still registered at server startup', async () => {
     const src = await readSource('src/instrumentation.ts')
     assert(src.includes('register'), 'instrumentation register() missing')
