@@ -11,7 +11,7 @@ import AdminAlbumManager from '@/components/AdminAlbumManager'
 import AdminUploadManager from '@/components/AdminUploadManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
-import { ArrowLeft, Settings, Check, FolderKanban, Pencil, Video, Images, Upload, X } from 'lucide-react'
+import { ArrowLeft, Settings, Check, FolderKanban, Pencil, Plus, Video, Images, Upload, X } from 'lucide-react'
 import { apiDelete, apiFetch, apiPatch, apiPost, attemptRefresh } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
@@ -99,6 +99,7 @@ export default function ProjectPage() {
   const canAccessPhotoVideo = canDoAction(permissions, 'projectsPhotoVideoUploads')
   const canFullProjectControl = canDoAction(permissions, 'projectsFullControl')
   const canDeleteInternalFiles = canDoAction(permissions, 'projectsFullControl')
+  const canManageSales = canDoAction(permissions, 'manageSales')
 
   const bumpProjectStorageRefresh = useCallback(() => {
     setProjectStorageRefresh((v) => v + 1)
@@ -195,6 +196,14 @@ export default function ProjectPage() {
     },
     [nowIso, projectPayments, salesRollup?.invoiceRollupById, taxRatePercent]
   )
+
+  // Deep-link suffix for the sales "Create quote"/"Create invoice" buttons, so a
+  // new document lands with this client + project already selected. Without a
+  // client the new-document pages cannot resolve the project, so send neither.
+  const salesCreateQuery =
+    project?.id && project?.clientId
+      ? `?${new URLSearchParams({ clientId: project.clientId, projectId: project.id }).toString()}`
+      : ''
 
   // Bumped by live SSE events to reload the internal-comments panel.
   const [internalCommentsRefresh, setInternalCommentsRefresh] = useState(0)
@@ -738,16 +747,22 @@ export default function ProjectPage() {
               </CardContent>
             </Card>
 
-            {(projectQuotes.length > 0 || projectInvoices.length > 0) && sectionVisibility.sales && (
+            {(canManageSales || projectQuotes.length > 0 || projectInvoices.length > 0) && sectionVisibility.sales && (
               <Card>
                 <CardContent className="pt-6 max-sm:pt-3 space-y-4">
-                  {salesLoading && projectQuotes.length === 0 && projectInvoices.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">Loading sales…</div>
-                  ) : null}
-
                   <div className="grid gap-6 md:grid-cols-2">
                     <div className="space-y-2 min-w-0">
-                      <div className="text-sm font-medium">Quotes</div>
+                      <div className="flex items-center justify-between gap-2 min-h-8">
+                        <div className="text-sm font-medium">Quotes</div>
+                        {canManageSales && (
+                          <Link href={`/admin/sales/quotes/new${salesCreateQuery}`}>
+                            <Button variant="outline" size="sm" className="h-8">
+                              <Plus className="w-3.5 h-3.5 mr-1" />
+                              Create quote
+                            </Button>
+                          </Link>
+                        )}
+                      </div>
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead className="bg-muted/30 text-xs text-muted-foreground">
@@ -793,7 +808,17 @@ export default function ProjectPage() {
                     </div>
 
                     <div className="space-y-2 min-w-0">
-                      <div className="text-sm font-medium">Invoices</div>
+                      <div className="flex items-center justify-between gap-2 min-h-8">
+                        <div className="text-sm font-medium">Invoices</div>
+                        {canManageSales && (
+                          <Link href={`/admin/sales/invoices/new${salesCreateQuery}`}>
+                            <Button variant="outline" size="sm" className="h-8">
+                              <Plus className="w-3.5 h-3.5 mr-1" />
+                              Create invoice
+                            </Button>
+                          </Link>
+                        )}
+                      </div>
                       <div className="rounded-lg border overflow-hidden">
                         <table className="w-full text-sm">
                           <thead className="bg-muted/30 text-xs text-muted-foreground">

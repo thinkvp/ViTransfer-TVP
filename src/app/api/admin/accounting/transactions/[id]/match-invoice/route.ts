@@ -7,6 +7,7 @@ import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getAccountingSettings } from '@/lib/accounting/settings'
+import { reconciledBankDepositPaymentWhere } from '@/lib/accounting/stripe-reconcile'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -82,6 +83,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (!['OPEN', 'SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(invoice.status)) {
         return NextResponse.json({ error: `Invoice ${invoice.invoiceNumber} status is ${invoice.status} — only open invoices can be matched` }, { status: 409 })
       }
+    }
+  }
+
+  // For reconcile mode: refuse an invoice that already has a bank deposit reconciled against
+  // it. The Match-to-Invoice list hides these (/api/admin/accounting/open-invoices), but a
+  // stale dialog or a second admin working concurrently can still submit one, which would
+  // leave two bank deposits both claiming the same invoice. Revenue totals would survive
+  // (both payments are excludeFromInvoiceBalance) but the audit trail would not.
+  if (reconcile) {
+    const invoice = invoices[0]
+    const alreadyReconciled = await prisma.salesPayment.findFirst({
+      where: { invoiceId: invoice.id, ...reconciledBankDepositPaymentWhere() },
+      select: { id: true },
+    })
+    if (alreadyReconciled) {
+      return NextResponse.json({ error: `Invoice ${invoice.invoiceNumber} has already been reconciled against a bank deposit` }, { status: 409 })
     }
   }
 

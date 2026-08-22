@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { expireCurrentWindowSession, getAccessToken, isCurrentWindowSessionTimedOut, subscribe } from '@/lib/token-store'
 import { attemptRefresh } from '@/lib/api-client'
+import { useUploadManagerActionsOptional } from '@/components/UploadManagerProvider'
 
 const INACTIVITY_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
@@ -27,6 +28,15 @@ export default function SessionMonitor() {
   const [timeRemaining, setTimeRemaining] = useState(0)
   const lastActivityRef = useRef<number>(0)
   const didExpireRef = useRef(false)
+
+  // Mirrored in a ref so the inactivity interval can read the current uploads
+  // without listing the actions object as an effect dependency (re-running that
+  // effect would restart the inactivity countdown).
+  const uploadActions = useUploadManagerActionsOptional()
+  const uploadActionsRef = useRef(uploadActions)
+  useEffect(() => {
+    uploadActionsRef.current = uploadActions
+  }, [uploadActions])
 
   const handleTimeout = useCallback(() => {
     if (didExpireRef.current) return
@@ -88,6 +98,17 @@ export default function SessionMonitor() {
     })
 
     const inactivityTimer = setInterval(() => {
+      // An upload in flight is work in progress even when nobody is touching the
+      // machine, and it only survives while this page stays mounted — logging out
+      // navigates to /login, unmounts UploadManagerProvider and silently abandons
+      // the transfer. Count uploading as activity; the normal 30-minute countdown
+      // restarts from scratch once the queue drains.
+      if ((uploadActionsRef.current?.getActiveUploads().length ?? 0) > 0) {
+        lastActivityRef.current = Date.now()
+        setShowWarning(false)
+        return
+      }
+
       const timeSinceActivity = Date.now() - lastActivityRef.current
       const timeUntilLogout = INACTIVITY_TIMEOUT - timeSinceActivity
 

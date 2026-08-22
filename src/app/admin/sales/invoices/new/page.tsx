@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GripVertical, Plus, Tag, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -79,9 +80,11 @@ export default function NewInvoicePage() {
   const [projectId, setProjectId] = useState<string>('')
   const [issueDate, setIssueDate] = useState<string>(() => getTodayYmdLocal())
   const [dueDate, setDueDate] = useState<string>('')
-  // Holds a prefilled projectId (from Duplicate/re-issue) so the client-change
-  // effect can re-apply it after that client's projects load, instead of clearing it.
-  const prefillProjectIdRef = useRef<string | null>(null)
+  // Holds a prefilled project from the Duplicate button (sessionStorage) so the
+  // client-change effect can select it once that client's projects have loaded.
+  const dupPrefillRef = useRef<{ clientId: string; projectId: string } | null>(null)
+  const linkPrefillAppliedRef = useRef(false)
+  const searchParams = useSearchParams()
 
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
@@ -138,8 +141,9 @@ export default function NewInvoicePage() {
       sessionStorage.removeItem('sales_invoice_prefill')
       const prefill = JSON.parse(raw) as { clientId?: string; projectId?: string; dueDate?: string; notes?: string; terms?: string; items?: SalesLineItem[] }
       if (prefill.clientId) setClientId(prefill.clientId)
-      // Stash the project for the client-change effect to re-apply once projects load.
-      prefillProjectIdRef.current = prefill.projectId || null
+      if (prefill.clientId && prefill.projectId) {
+        dupPrefillRef.current = { clientId: prefill.clientId, projectId: prefill.projectId }
+      }
       if (prefill.dueDate) setDueDate(prefill.dueDate)
       if (prefill.notes !== undefined) setNotes(prefill.notes)
       if (prefill.terms !== undefined) setTerms(prefill.terms)
@@ -153,6 +157,16 @@ export default function NewInvoicePage() {
       // ignore parse/storage errors
     }
   }, [])
+
+  // Prefill client from a deep link (the project page's "Create invoice").
+  // The project is resolved later by the [clientId] effect reading the URL
+  // directly — no ref relay needed.
+  useEffect(() => {
+    const linkClientId = searchParams?.get('clientId') || ''
+    if (!linkClientId || linkPrefillAppliedRef.current) return
+    linkPrefillAppliedRef.current = true
+    setClientId(linkClientId)
+  }, [searchParams])
 
   useEffect(() => {
     let cancelled = false
@@ -213,7 +227,9 @@ export default function NewInvoicePage() {
       if (!clientId) {
         setProjects([])
         setProjectId('')
-        prefillProjectIdRef.current = null
+        // The prefill is NOT cleared here. This branch also runs on the very
+        // first mount, in the same commit as the effects that set the prefill,
+        // so clearing it would discard the selection before it is ever read.
         return
       }
 
@@ -221,11 +237,38 @@ export default function NewInvoicePage() {
       try {
         const p = await fetchProjectOptionsForClient(clientId)
         setProjects(p)
-        // Re-apply a prefilled project (from re-issue) if it belongs to this client;
-        // otherwise reset the selection.
-        const desired = prefillProjectIdRef.current
-        prefillProjectIdRef.current = null
-        setProjectId(desired && p.some((x) => x.id === desired) ? desired : '')
+
+        // Resolve a prefilled project from two possible sources:
+        // 1. URL query params (deep link from the project page) — read directly
+        //    from window.location so there is zero timing dependency on other
+        //    effects having run first.
+        // 2. Duplicate-button ref (sessionStorage → dupPrefillRef).
+        let desiredId = ''
+        let seedDescription = false
+        if (typeof window !== 'undefined') {
+          const url = new URLSearchParams(window.location.search)
+          const urlClient = url.get('clientId') || ''
+          const urlProject = url.get('projectId') || ''
+          if (urlClient === clientId && urlProject) {
+            desiredId = urlProject
+            seedDescription = true
+          }
+        }
+        if (!desiredId) {
+          const dup = dupPrefillRef.current
+          if (dup && dup.clientId === clientId) desiredId = dup.projectId
+        }
+
+        const matched = desiredId ? p.find((x) => x.id === desiredId) : undefined
+        setProjectId(matched ? matched.id : '')
+
+        if (matched && seedDescription) {
+          setItems((prev) =>
+            prev.length === 1 && !prev[0].description.trim()
+              ? [{ ...prev[0], description: matched.title }]
+              : prev
+          )
+        }
       } finally {
         setLoadingProjects(false)
       }

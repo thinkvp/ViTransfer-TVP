@@ -4,6 +4,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
+import { reconciledBankDepositPaymentWhere } from '@/lib/accounting/stripe-reconcile'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -156,12 +157,7 @@ export async function GET(request: NextRequest) {
         status: 'PAID',
         id: { in: stripeInvoiceIds },
         // Exclude invoices that already have a reconciled bank deposit linked
-        payments: {
-          none: {
-            excludeFromInvoiceBalance: true,
-            bankTransaction: { isNot: null },
-          },
-        },
+        payments: { none: reconciledBankDepositPaymentWhere() },
         ...searchFilter,
       },
       include: {

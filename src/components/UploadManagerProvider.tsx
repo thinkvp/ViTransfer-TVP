@@ -246,11 +246,17 @@ export type UploadManagerContextType = {
   clearRunningJob: (target: ClearRunningJobTarget) => Promise<void>
   /** Notify the provider when the Running Jobs dropdown opens/closes (adjusts poll rate). */
   setDropdownOpen: (open: boolean) => void
+  /**
+   * Snapshot of the uploads that would be lost if this page went away
+   * (queued / uploading / paused). Reads the internal ref, so callers can poll it
+   * without re-rendering on every progress tick.
+   */
+  getActiveUploads: () => UploadJob[]
 }
 
 type UploadManagerActionsContextType = Pick<
   UploadManagerContextType,
-  'addUpload' | 'cancelUpload' | 'pauseUpload' | 'resumeUpload' | 'dismissUpload' | 'dismissCompletedJob' | 'clearRunningJob' | 'setDropdownOpen'
+  'addUpload' | 'cancelUpload' | 'pauseUpload' | 'resumeUpload' | 'dismissUpload' | 'dismissCompletedJob' | 'clearRunningJob' | 'setDropdownOpen' | 'getActiveUploads'
 >
 
 // ---------------------------------------------------------------------------
@@ -294,6 +300,24 @@ export function useUploadManagerActions() {
  */
 export function useUploadManagerOptional(): UploadManagerContextType | null {
   return useContext(UploadManagerContext)
+}
+
+/**
+ * Optional variant of useUploadManagerActions — returns null outside the provider.
+ * The actions object is referentially stable, so consumers do not re-render while
+ * an upload reports progress.
+ */
+export function useUploadManagerActionsOptional(): UploadManagerActionsContextType | null {
+  return useContext(UploadManagerActionsContext)
+}
+
+/**
+ * True while a job still has bytes to send. These jobs die with the page: the S3
+ * upload runs entirely in the browser, and the server only learns the upload
+ * happened when /api/upload-s3/complete is called at the end.
+ */
+export function isUnfinishedUpload(job: Pick<UploadJob, 'status'>): boolean {
+  return job.status === 'queued' || job.status === 'uploading' || job.status === 'paused'
 }
 
 // ---------------------------------------------------------------------------
@@ -354,26 +378,40 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   // ------ helpers ------
 
+  /** Strip the non-serialisable internals (File / TUS / abort refs) off a job. */
+  const toPublicJob = useCallback(
+    (j: InternalJob): UploadJob => ({
+      id: j.id,
+      projectId: j.projectId,
+      videoId: j.videoId,
+      videoName: j.videoName,
+      versionLabel: j.versionLabel,
+      fileName: j.fileName,
+      fileSize: j.fileSize,
+      progress: j.progress,
+      speed: j.speed,
+      status: j.status,
+      error: j.error,
+      createdAt: j.createdAt,
+      completedAt: j.completedAt,
+    }),
+    [],
+  )
+
   /** Push internal list → React state. */
   const syncState = useCallback(() => {
-    setUploads(
-      jobsRef.current.map((j) => ({
-        id: j.id,
-        projectId: j.projectId,
-        videoId: j.videoId,
-        videoName: j.videoName,
-        versionLabel: j.versionLabel,
-        fileName: j.fileName,
-        fileSize: j.fileSize,
-        progress: j.progress,
-        speed: j.speed,
-        status: j.status,
-        error: j.error,
-        createdAt: j.createdAt,
-        completedAt: j.completedAt,
-      })),
-    )
-  }, [])
+    setUploads(jobsRef.current.map(toPublicJob))
+  }, [toPublicJob])
+
+  /**
+   * Read the in-flight uploads without subscribing to progress updates. Used by the
+   * navigation / session guards, which need the current answer at the moment the
+   * user tries to leave rather than a value refreshed twice a second.
+   */
+  const getActiveUploads = useCallback(
+    () => jobsRef.current.filter(isUnfinishedUpload).map(toPublicJob),
+    [toPublicJob],
+  )
 
   const patchJob = useCallback(
     (id: string, patch: Partial<InternalJob>) => {
@@ -722,9 +760,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      const hasActive = jobsRef.current.some(
-        (j) => j.status === 'queued' || j.status === 'uploading' || j.status === 'paused',
-      )
+      const hasActive = jobsRef.current.some(isUnfinishedUpload)
       if (hasActive) {
         e.preventDefault()
         e.returnValue = ''
@@ -1371,7 +1407,8 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     dismissCompletedJob,
     clearRunningJob,
     setDropdownOpen,
-  }), [addUpload, cancelUpload, clearRunningJob, dismissCompletedJob, dismissUpload, pauseUpload, resumeUpload])
+    getActiveUploads,
+  }), [addUpload, cancelUpload, clearRunningJob, dismissCompletedJob, dismissUpload, getActiveUploads, pauseUpload, resumeUpload])
 
   const contextValue = useMemo<UploadManagerContextType>(() => ({
     uploads,
@@ -1394,6 +1431,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     dismissCompletedJob,
     clearRunningJob,
     setDropdownOpen,
+    getActiveUploads,
   }), [
     uploads,
     processingJobs,
@@ -1414,6 +1452,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
     dismissUpload,
     dismissCompletedJob,
     clearRunningJob,
+    getActiveUploads,
   ])
 
   return (

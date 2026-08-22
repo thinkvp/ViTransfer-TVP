@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GripVertical, Plus, Tag, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -79,6 +80,8 @@ export default function NewQuotePage() {
   const [projectId, setProjectId] = useState<string>('')
   const [issueDate, setIssueDate] = useState<string>(() => getTodayYmdLocal())
   const [validUntil, setValidUntil] = useState<string>('')
+  const linkPrefillAppliedRef = useRef(false)
+  const searchParams = useSearchParams()
 
   const [settings, setSettings] = useState<SalesSettings>({
     businessName: '',
@@ -147,6 +150,16 @@ export default function NewQuotePage() {
     }
   }, [])
 
+  // Prefill client from a deep link (the project page's "Create quote").
+  // The project is resolved later by the [clientId] effect reading the URL
+  // directly — no ref relay needed.
+  useEffect(() => {
+    const linkClientId = searchParams?.get('clientId') || ''
+    if (!linkClientId || linkPrefillAppliedRef.current) return
+    linkPrefillAppliedRef.current = true
+    setClientId(linkClientId)
+  }, [searchParams])
+
   useEffect(() => {
     let cancelled = false
     setLoadingSettings(true)
@@ -213,7 +226,28 @@ export default function NewQuotePage() {
       try {
         const p = await fetchProjectOptionsForClient(clientId)
         setProjects(p)
-        setProjectId('')
+
+        // Resolve a prefilled project directly from the URL. Reading
+        // window.location.search means there is zero timing dependency on any
+        // other effect — the URL is always available.
+        let desiredId = ''
+        if (typeof window !== 'undefined') {
+          const url = new URLSearchParams(window.location.search)
+          const urlClient = url.get('clientId') || ''
+          const urlProject = url.get('projectId') || ''
+          if (urlClient === clientId && urlProject) desiredId = urlProject
+        }
+
+        const matched = desiredId ? p.find((x) => x.id === desiredId) : undefined
+        setProjectId(matched ? matched.id : '')
+
+        if (matched) {
+          setItems((prev) =>
+            prev.length === 1 && !prev[0].description.trim()
+              ? [{ ...prev[0], description: matched.title }]
+              : prev
+          )
+        }
       } finally {
         setLoadingProjects(false)
       }
