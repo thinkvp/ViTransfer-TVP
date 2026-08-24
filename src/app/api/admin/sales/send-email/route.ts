@@ -318,7 +318,7 @@ export async function POST(request: NextRequest) {
       </div>
 
       <p style="margin: 0; font-size: 13px; color: ${EMAIL_THEME.textMuted}; line-height: 1.6; text-align: center;">
-        If the button doesnâ€™t work, copy and paste this link into your browser:<br />
+        If the button doesn't work, copy and paste this link into your browser:<br />
         <a href="${escapeHtml(shareUrl)}" style="color: ${emailSettings.accentColor || EMAIL_THEME.accent}; text-decoration: none;">${escapeHtml(shareUrl)}</a>
       </p>
     `,

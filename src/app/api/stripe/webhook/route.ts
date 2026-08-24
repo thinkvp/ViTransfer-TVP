@@ -4,7 +4,7 @@ import Stripe from 'stripe'
 import { prisma } from '@/lib/db'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { sendAdminInvoicePaidEmail } from '@/lib/email'
-import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { adminAllPermissions, canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 
 export const runtime = 'nodejs'
@@ -235,8 +235,10 @@ export async function POST(request: NextRequest) {
         },
       }).catch(() => {})
 
-      // Email: send to all admins who can access the Sales menu.
-      // (Project assignment is not required; otherwise admins may miss invoice paid events.)
+      // Email: send to admins who have opted into Sales notifications.
+      // (Project assignment is not required; otherwise admins may miss invoice paid events.
+      // Sales *menu* access alone is not enough — that would subscribe read-only roles such
+      // as an external accountant. The role must also carry 'receiveSalesNotifications'.)
       try {
         const appDomain = (process.env.APP_DOMAIN || '').trim()
         const publicInvoiceUrl = appDomain ? `${appDomain.replace(/\/$/, '')}/sales/view/${encodeURIComponent(shareToken)}` : null
@@ -280,7 +282,7 @@ export async function POST(request: NextRequest) {
             .filter((u: any) => {
               const isSystemAdmin = u?.appRole?.isSystemAdmin === true
               const perms = isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(u?.appRole?.permissions)
-              return canSeeMenu(perms, 'sales')
+              return canDoAction(perms, 'receiveSalesNotifications')
             })
             .map((u: any) => u.email.trim())
             .filter(Boolean)

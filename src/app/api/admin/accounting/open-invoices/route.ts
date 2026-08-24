@@ -4,7 +4,7 @@ import { requireApiMenu } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
-import { reconciledBankDepositPaymentWhere } from '@/lib/accounting/stripe-reconcile'
+import { reconciledBankDepositPaymentWhere, stripeReconcileStartDate } from '@/lib/accounting/stripe-reconcile'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -141,7 +141,15 @@ export async function GET(request: NextRequest) {
 
     // SalesInvoiceStripePayment.invoiceDocId is a plain string field (no Prisma relation on
     // SalesInvoice), so we pre-fetch the distinct IDs of invoices that have stripe payments.
+    //
+    // Scoped to payments taken on or after the reconcile start date. Invoices settled before
+    // it were reconciled by other means and carry no marker payment, so they can never be
+    // filtered out by the reconciled-deposit predicate below and would otherwise sit in this
+    // picker forever. Keyed on when Stripe took the money (SalesInvoiceStripePayment.createdAt)
+    // rather than the invoice's issue date, since an invoice issued before the cutoff may well
+    // have been paid — and properly reconciled — after it.
     const stripeInvoiceIdRows = await prisma.salesInvoiceStripePayment.findMany({
+      where: { createdAt: { gte: stripeReconcileStartDate() } },
       select: { invoiceDocId: true },
       distinct: ['invoiceDocId'],
     })

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { apiFetch } from '@/lib/api-client'
-import { formatFileSize } from '@/lib/utils'
+import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
 import { toast } from 'sonner'
 
 type AttachmentFile = {
@@ -10,6 +10,7 @@ type AttachmentFile = {
   fileName: string
   fileSize: string
   uploadedByName?: string | null
+  createdAt?: string | null
   downloadUrl: string
 }
 
@@ -133,7 +134,10 @@ export function ProjectReadonlyAttachmentList({
             </button>
             <div className="text-xs text-muted-foreground truncate">
               {formatFileSize(Number(file.fileSize))}
-              {showUploadedBy && file.uploadedByName ? ` • Uploaded by ${file.uploadedByName}` : ''}
+              {showUploadedBy && file.uploadedByName ? ` • ${file.uploadedByName}` : ''}
+              {file.createdAt ? (
+                <> • <span title={formatDateTime(file.createdAt)}>{formatDate(file.createdAt)}</span></>
+              ) : null}
             </div>
           </div>
         </div>

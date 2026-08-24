@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { sendPushNotification } from '@/lib/push-notifications'
 import { sendAdminQuoteAcceptedEmail } from '@/lib/email'
-import { adminAllPermissions, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { adminAllPermissions, canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { salesQuoteFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 
@@ -180,7 +180,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               .filter((u: any) => {
                 const isSystemAdmin = u?.appRole?.isSystemAdmin === true
                 const perms = isSystemAdmin ? adminAllPermissions() : normalizeRolePermissions(u?.appRole?.permissions)
-                return canSeeMenu(perms, 'sales')
+                // Sales *menu* access alone must not subscribe a user to quote-accepted mail
+                // — read-only roles (e.g. an external accountant) need the explicit opt-in.
+                return canDoAction(perms, 'receiveSalesNotifications')
               })
               .map((u: any) => u.email.trim())
               .filter(Boolean)

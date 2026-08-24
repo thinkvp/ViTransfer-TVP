@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { commentHtmlToPreviewText } from '@/lib/comment-plain-text'
 
 /**
  * Project Activity feed — derived live from existing tables so deleted
@@ -158,11 +159,13 @@ function actorGroupKey(raw: RawActorRef): string {
   return raw.userId || raw.recipientId || raw.name || '?'
 }
 
-// Single-line, tag-stripped, whitespace-collapsed preview of a comment body.
+// Single-line, tag-stripped, entity-decoded, whitespace-collapsed preview of a comment body.
+// Rendered as text by the feed, so the stored escaping must be undone here — otherwise a
+// typed `&` shows up as `&amp;`.
 const COMMENT_PREVIEW_MAX = 140
 function commentPreview(content: string | null | undefined): string | undefined {
   if (!content) return undefined
-  const flat = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  const flat = commentHtmlToPreviewText(content)
   if (!flat) return undefined
   return flat.length > COMMENT_PREVIEW_MAX ? `${flat.slice(0, COMMENT_PREVIEW_MAX - 1).trimEnd()}…` : flat
 }

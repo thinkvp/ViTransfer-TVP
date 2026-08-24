@@ -32,6 +32,7 @@ import { sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml, sanitizeText, containsSuspiciousPatterns } from '@/lib/security/html-sanitization'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getCpuAllocation } from '@/lib/cpu-config'
+import { parseReconcileStartDate, DEFAULT_STRIPE_RECONCILE_START_DATE } from '@/lib/accounting/stripe-reconcile'
 import type { SalesLineItem } from '@/lib/sales/types'
 
 const root = process.cwd()
@@ -228,6 +229,43 @@ async function main() {
       alloc.maxThreadsUsedEstimate <= alloc.effectiveThreads * 2,
       `estimated usage ${alloc.maxThreadsUsedEstimate} wildly exceeds ${alloc.effectiveThreads} threads`
     )
+  })
+
+  // ── 5b. Stripe reconcile start date ───────────────────────────────
+  section('Stripe reconcile start date')
+
+  await check('a valid override parses to local midnight on that day', () => {
+    const d = parseReconcileStartDate('2026-05-06')
+    assert.strictEqual(d.getFullYear(), 2026, 'year')
+    assert.strictEqual(d.getMonth(), 4, 'month (0-indexed May)')
+    assert.strictEqual(d.getDate(), 6, 'day')
+    assert.strictEqual(d.getHours(), 0, 'must be local midnight, not UTC midnight')
+    assert.strictEqual(d.getMinutes(), 0, 'must be local midnight')
+  })
+
+  await check('unset falls back to the feature release date', () => {
+    const fallback = parseReconcileStartDate(undefined)
+    const expected = parseReconcileStartDate(DEFAULT_STRIPE_RECONCILE_START_DATE)
+    assert.strictEqual(fallback.getTime(), expected.getTime(), 'undefined must use the default')
+    assert.strictEqual(parseReconcileStartDate('').getTime(), expected.getTime(), 'empty string must use the default')
+    assert.strictEqual(parseReconcileStartDate('   ').getTime(), expected.getTime(), 'whitespace must use the default')
+  })
+
+  await check('malformed and impossible dates fall back rather than poisoning the query', () => {
+    const expected = parseReconcileStartDate(DEFAULT_STRIPE_RECONCILE_START_DATE).getTime()
+    for (const bad of ['06/05/2026', '2026-5-6', 'yesterday', '2026-05-06T00:00:00Z']) {
+      assert.strictEqual(parseReconcileStartDate(bad).getTime(), expected, `malformed "${bad}" must fall back`)
+    }
+    // Well-formed but impossible — new Date() rolls these over silently instead of erroring,
+    // so a naive NaN check would let 2026-13-45 through as 2027-02-14.
+    for (const bad of ['2026-13-01', '2026-02-30', '2026-00-10']) {
+      assert.strictEqual(parseReconcileStartDate(bad).getTime(), expected, `impossible "${bad}" must fall back`)
+    }
+  })
+
+  await check('the default is not in the future (it would hide every invoice)', () => {
+    const d = parseReconcileStartDate(DEFAULT_STRIPE_RECONCILE_START_DATE)
+    assert(d.getTime() <= Date.now(), `default ${DEFAULT_STRIPE_RECONCILE_START_DATE} must not be in the future`)
   })
 
   // ── 6. Static source checks (known regression traps) ─────────────────────

@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { decrypt, encrypt } from '@/lib/encryption'
 import type { PushNotificationPayload } from '@/lib/push-notifications'
 import { buildAdminWebPushNotification } from '@/lib/admin-web-push-templates'
-import { canDoAction, canSeeMenu, normalizeRolePermissions } from '@/lib/rbac'
+import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 
 type VapidKeys = { publicKey: string; privateKey: string }
 
@@ -298,7 +298,8 @@ export async function sendBrowserPushToEligibleUsers(payload: PushNotificationPa
     }
 
     if (isSalesType) {
-      return canSeeMenu(permissions, 'sales')
+      // Mirrors the email gate: Sales menu access grants visibility, not a subscription.
+      return canDoAction(permissions, 'receiveSalesNotifications')
     }
 
     // Security / other events: non-system-admins do not receive these.

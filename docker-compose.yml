@@ -117,6 +117,9 @@ services:
       # Stripe Checkout (optional)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      # Cutoff for the Stripe bank-deposit reconcile picker; see .env.example.
+      # Web-only — the worker never reads it.
+      STRIPE_RECONCILE_START_DATE: ${STRIPE_RECONCILE_START_DATE:-}
     ports:
       - "${APP_PORT:-4321}:4321"
     volumes:

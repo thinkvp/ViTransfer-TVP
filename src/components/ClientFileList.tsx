@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { apiDelete, apiFetch } from '@/lib/api-client'
-import { formatFileSize } from '@/lib/utils'
+import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
 import { Download, Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
@@ -128,7 +128,11 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
           <div className="min-w-0">
             <div className="text-sm font-medium truncate">{f.fileName}</div>
             <div className="text-xs text-muted-foreground truncate">
-              {formatFileSize(Number(f.fileSize))}{f.uploadedByName ? ` • Uploaded by ${f.uploadedByName}` : ''}
+              {formatFileSize(Number(f.fileSize))}
+              {f.uploadedByName ? ` • ${f.uploadedByName}` : ''}
+              {f.createdAt ? (
+                <> • <span title={formatDateTime(f.createdAt)}>{formatDate(f.createdAt)}</span></>
+              ) : null}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">

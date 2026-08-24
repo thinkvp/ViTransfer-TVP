@@ -72,6 +72,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
     label: 'Sales',
     actions: [
       { key: 'manageSales', label: 'Make changes' },
+      { key: 'receiveSalesNotifications', label: 'Receive notifications' },
     ],
   },
   {

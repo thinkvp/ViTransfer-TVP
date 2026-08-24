@@ -35,6 +35,7 @@ export type ActionKey =
   | 'viewAnalytics'
   | 'manageSales'
   | 'manageAccounting'
+  | 'receiveSalesNotifications'
 
 export interface RolePermissions {
   menuVisibility: Record<MenuKey, boolean>
@@ -75,6 +76,7 @@ const ALL_ACTIONS: ActionKey[] = [
   'viewAnalytics',
   'manageSales',
   'manageAccounting',
+  'receiveSalesNotifications',
 ]
 
 // Backwards-compatibility: historically, some areas were effectively gated by menu access only.
@@ -240,6 +242,12 @@ export function canDoAction(permissions: RolePermissions, action: ActionKey): bo
       return permissions.menuVisibility.sales === true && permissions.actions.manageSales === true
     case 'manageAccounting':
       return permissions.menuVisibility.accounting === true && permissions.actions.manageAccounting === true
+
+    // Sales notifications are opt-in: Sales menu access alone must not subscribe a user to
+    // invoice-paid / quote-accepted email and push. Deliberately NOT in
+    // FALLBACK_ACTIONS_BY_MENU — legacy roles default to off and are opted in explicitly.
+    case 'receiveSalesNotifications':
+      return permissions.menuVisibility.sales === true && permissions.actions.receiveSalesNotifications === true
 
     default:
       return permissions.actions[action] === true
