@@ -7,6 +7,8 @@
  *  3. HTML/XSS sanitization
  *  4. Storage path-traversal + header-injection defenses
  *  5. CPU allocation sanity (worker concurrency budget)
+ *  5c. S3->local backup planning helpers (prefix expansion + concurrency pool,
+ *      including the pool's exactly-once / no-abandonment guarantees)
  *  6. Static source checks for known regression traps (VOID invoice leaks,
  *     share-upload gates)
  *  7. Optional live HTTP checks against a running server (dev :3000 or
@@ -32,6 +34,7 @@ import { sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml, sanitizeText, containsSuspiciousPatterns } from '@/lib/security/html-sanitization'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getCpuAllocation } from '@/lib/cpu-config'
+import { expandDirectoryPrefixes, runPool } from '@/lib/s3-local-backup'
 import { parseReconcileStartDate, DEFAULT_STRIPE_RECONCILE_START_DATE } from '@/lib/accounting/stripe-reconcile'
 import type { SalesLineItem } from '@/lib/sales/types'
 
@@ -229,6 +232,106 @@ async function main() {
       alloc.maxThreadsUsedEstimate <= alloc.effectiveThreads * 2,
       `estimated usage ${alloc.maxThreadsUsedEstimate} wildly exceeds ${alloc.effectiveThreads} threads`
     )
+  })
+
+  // ── 5c. S3 → local backup planning ────────────────────────────────
+  section('S3 local backup planning')
+
+  await check('sprite/HLS prefixes expand from the bucket index, not per-video listings', () => {
+    const index = new Map<string, number>([
+      ['projects/p1/videos/v1/sprites/sprite-0.jpg', 10],
+      ['projects/p1/videos/v1/sprites/sprite-1.jpg', 11],
+      ['projects/p1/videos/v1/hls/master.m3u8', 1],
+      ['projects/p1/videos/v1/hls/1080p/seg-000.m4s', 99],  // nested rendition dir
+      ['projects/p1/videos/v1/original.mp4', 500],          // sibling, must NOT match
+      ['projects/p1/videos/v10/sprites/sprite-0.jpg', 12],  // v10 is not v1
+    ])
+    const found = expandDirectoryPrefixes(index, [
+      'projects/p1/videos/v1/sprites',
+      'projects/p1/videos/v1/hls',
+    ]).map((e) => e.key).sort()
+
+    assert.deepStrictEqual(found, [
+      'projects/p1/videos/v1/hls/1080p/seg-000.m4s',
+      'projects/p1/videos/v1/hls/master.m3u8',
+      'projects/p1/videos/v1/sprites/sprite-0.jpg',
+      'projects/p1/videos/v1/sprites/sprite-1.jpg',
+    ])
+  })
+
+  await check('prefix expansion is a no-op when nothing registers a directory role', () => {
+    const index = new Map<string, number>([['projects/p1/videos/v1/original.mp4', 1]])
+    assert.deepStrictEqual(expandDirectoryPrefixes(index, []), [])
+  })
+
+  await check('runPool visits every item exactly once and honours the ceiling', async () => {
+    const items = Array.from({ length: 50 }, (_, i) => i)
+    const seen: number[] = []
+    let inFlight = 0
+    let peak = 0
+
+    await runPool(items, 4, async (n) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 1))
+      seen.push(n)
+      inFlight--
+    })
+
+    assert.strictEqual(seen.length, items.length, 'every item processed')
+    assert.strictEqual(new Set(seen).size, items.length, 'no item processed twice')
+    assert(peak > 1, `pool never went parallel (peak ${peak})`)
+    assert(peak <= 4, `pool exceeded its concurrency ceiling (peak ${peak})`)
+  })
+
+  await check('runPool finishes the remaining work when one task throws, then reports', async () => {
+    const items = Array.from({ length: 20 }, (_, i) => i)
+    const seen: number[] = []
+
+    // A rejecting task must not strand the queue: letting it out of Promise.all would
+    // resolve the caller while sibling workers ran on unobserved and unclaimed items
+    // were silently dropped.
+    await assert.rejects(
+      () => runPool(items, 4, async (n) => {
+        if (n === 3) throw new Error('boom')
+        seen.push(n)
+      }),
+      /boom/,
+      'the failure must reach the caller',
+    )
+
+    assert.strictEqual(seen.length, items.length - 1, `expected 19 items processed, got ${seen.length}`)
+    assert(!seen.includes(3), 'the failing item must not count as processed')
+  })
+
+  await check('runPool reports how many tasks failed when several do', async () => {
+    await assert.rejects(
+      () => runPool([1, 2, 3, 4], 2, async (n) => { if (n % 2 === 0) throw new Error(`bad ${n}`) }),
+      /2 pool tasks failed/,
+    )
+  })
+
+  await check('backup no longer HEADs sprite directories as if they were objects', async () => {
+    const src = await readSource('src/lib/s3-local-backup.ts')
+    const table = src.slice(
+      src.indexOf('const CATEGORY_ROLE_TABLE'),
+      src.indexOf('const CATEGORY_BY_ENTITY_ROLE'),
+    )
+    // TIMELINE_SPRITES / HLS_SEGMENTS storagePaths are directory prefixes. Listing them as
+    // ordinary roles produces one guaranteed 404 per video on every run.
+    assert(!table.includes('TIMELINE_SPRITES'), 'TIMELINE_SPRITES must not be a plain role')
+    assert(!table.includes('HLS_SEGMENTS'), 'HLS_SEGMENTS must not be a plain role')
+    assert(src.includes('DIRECTORY_FILE_ROLES.has(row.fileRole)'), 'directory roles must route to prefix expansion')
+  })
+
+  await check('size comparison uses the bulk index, not a per-file HeadObject', async () => {
+    const src = await readSource('src/lib/s3-local-backup.ts')
+    // Exactly one getS3Size call site should remain, and only as the last-resort fallback
+    // after the bucket index and the cached StoredFile size.
+    const callSites = src.match(/await getS3Size\(/g) ?? []
+    assert.strictEqual(callSites.length, 1, `expected 1 getS3Size call site, found ${callSites.length}`)
+    assert(src.includes('buildS3Index'), 'bulk bucket index must be built')
+    assert(src.includes('index.get(entry.key)'), 'sizes must resolve from the index first')
   })
 
   // ── 5b. Stripe reconcile start date ───────────────────────────────

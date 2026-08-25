@@ -7,8 +7,21 @@
  * fall back to local mode transparently.
  *
  * Comparison strategy: size-based.  If the local file already exists and
- * its byte count matches the S3 object's ContentLength the file is skipped,
- * avoiding unnecessary downloads.
+ * its byte count matches the S3 object's size the file is skipped, avoiding
+ * unnecessary downloads.
+ *
+ * Performance: the expensive part of a run is *deciding* what to download, not
+ * the downloading — a mature library is nearly all already-backed-up files.  Two
+ * things keep that decision cheap and independent of file count:
+ *
+ *   1. ONE bulk ListObjectsV2 sweep of the bucket up front builds a key -> size
+ *      index (1000 keys per round trip, sizes included).  Every subsequent size
+ *      check is an in-memory lookup instead of a per-file HeadObject, which used
+ *      to cost one WAN round trip per file, serially, on every run.
+ *   2. ONE paginated pass over the StoredFile registry buckets every row into its
+ *      backup category, instead of re-scanning the whole table once per category.
+ *
+ * Local stat()s and downloads then run through small concurrency pools.
  *
  * Accounting files live under a separate root (ACCOUNTING_STORAGE_ROOT) and
  * are stored in S3 under the `accounting/` prefix.  All other files are stored
@@ -32,38 +45,7 @@ import {
 } from '@aws-sdk/client-s3'
 import { resolveAccountingFilePath, toAccountingS3Key } from '@/lib/accounting/file-storage'
 import { getAlbumZipStoragePaths } from '@/lib/album-photo-zip'
-import { getAllStoredPaths, type EntityType, type FileRole } from '@/lib/stored-file'
-
-// ---------------------------------------------------------------------------
-// StoredFile-backed key collectors
-// ---------------------------------------------------------------------------
-
-/**
- * Collect FileEntry records from StoredFile for given entity types and file roles.
- * Replaces per-entity-table queries used previously in collectKeysForCategory.
- * Paginates through StoredFile to avoid loading all rows into memory.
- */
-async function collectStoredKeys(
-  entityTypes: EntityType[],
-  fileRoles: FileRole[],
-): Promise<FileEntry[]> {
-  const entries: FileEntry[] = []
-  const etSet = new Set(entityTypes)
-  const frSet = new Set(fileRoles)
-
-  let cursor: string | undefined
-  do {
-    const page = await getAllStoredPaths({ cursor, take: 5000 })
-    for (const entry of page.items) {
-      if (!entry.storagePath || !etSet.has(entry.entityType) || !frSet.has(entry.fileRole)) continue
-      const key = normalizeKey(entry.storagePath)
-      if (key) entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
-    }
-    cursor = page.nextCursor
-  } while (cursor)
-
-  return entries
-}
+import { getAllStoredPaths, DIRECTORY_FILE_ROLES, type EntityType, type FileRole } from '@/lib/stored-file'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -109,6 +91,8 @@ export type BackupProgressFn = (info: {
   downloaded: number          // global totals
   skipped: number
   failed: number
+  /** Which half of the run is reporting: comparing sizes, or actually fetching bytes. */
+  phase?: 'checking' | 'downloading'
 }) => void | Promise<void>
 
 // ---------------------------------------------------------------------------
@@ -176,6 +160,133 @@ async function listS3Keys(
 }
 
 /**
+ * Hard ceiling on the bucket index. A key + size entry costs roughly 100 bytes, so the
+ * default cap is on the order of 100 MB of RSS. Above it we abandon the index and fall
+ * back to per-file size resolution rather than risk the worker OOM-ing.
+ */
+const S3_INDEX_MAX_KEYS = Number(process.env.S3_BACKUP_MAX_INDEX_KEYS) || 1_000_000
+
+/**
+ * Sweep the whole bucket into a `key -> size` map with one ListObjectsV2 per 1000 objects.
+ *
+ * This replaces one HeadObject per file per run. The listing is taken once, before any
+ * comparison work: R2/S3 list-after-write is strongly consistent, so the only gap is
+ * objects created *while* the run is in flight — which the previous implementation missed
+ * too (keys are collected from the DB before any of them are checked). The next daily run
+ * picks them up.
+ *
+ * Returns null if the bucket is larger than S3_INDEX_MAX_KEYS; callers must then fall back
+ * to per-entry size resolution.
+ */
+async function buildS3Index(
+  client: ReturnType<typeof getS3Client>,
+  bucket: string,
+): Promise<Map<string, number> | null> {
+  const index = new Map<string, number>()
+  let continuationToken: string | undefined
+  let pages = 0
+
+  do {
+    const resp = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      }),
+    )
+    pages++
+    for (const obj of resp.Contents ?? []) {
+      if (obj.Key) index.set(obj.Key, obj.Size ?? 0)
+    }
+    if (index.size > S3_INDEX_MAX_KEYS) {
+      console.warn(
+        `[S3-BACKUP] Bucket exceeds ${S3_INDEX_MAX_KEYS} objects — falling back to per-file size lookups`,
+      )
+      return null
+    }
+    continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  console.log(`[S3-BACKUP] Indexed ${index.size} objects from ${pages} listing request(s)`)
+  return index
+}
+
+/**
+ * How many entries are size-checked in parallel. These are local stat() calls (plus, only
+ * in the no-index fallback, an S3 HeadObject), so this can be generous.
+ */
+const CHECK_CONCURRENCY = Math.max(1, Number(process.env.S3_BACKUP_CHECK_CONCURRENCY) || 16)
+
+/**
+ * How many files download in parallel. Deliberately much lower than CHECK_CONCURRENCY —
+ * these are large media objects and the worker shares its uplink with normal traffic.
+ */
+const DOWNLOAD_CONCURRENCY = Math.max(1, Number(process.env.S3_BACKUP_DOWNLOAD_CONCURRENCY) || 4)
+
+/**
+ * Run `fn` over `items` with at most `concurrency` in flight.
+ *
+ * `fn` is expected to handle its own errors; if one escapes anyway, the pool does NOT
+ * abandon the run. Letting the rejection out of `Promise.all` would resolve the caller
+ * while sibling workers carried on unobserved and every unclaimed item was silently
+ * dropped. Instead the failure is held, the remaining items are still processed, and the
+ * first error is rethrown once every worker has finished — so nothing is skipped without
+ * the caller hearing about it.
+ *
+ * Exported so `npm run test:smoke` can assert the ceiling and the no-abandonment guarantee.
+ */
+export async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  if (items.length === 0) return
+  const limit = Math.min(concurrency, items.length)
+  let next = 0
+  let firstError: unknown
+  let errorCount = 0
+
+  const workers: Promise<void>[] = []
+  for (let i = 0; i < limit; i++) {
+    workers.push(
+      (async () => {
+        for (;;) {
+          const idx = next++
+          if (idx >= items.length) return
+          try {
+            await fn(items[idx])
+          } catch (err) {
+            errorCount++
+            if (firstError === undefined) firstError = err
+          }
+        }
+      })(),
+    )
+  }
+  await Promise.all(workers)
+
+  if (firstError !== undefined) {
+    const msg = firstError instanceof Error ? firstError.message : String(firstError)
+    throw new Error(
+      errorCount === 1
+        ? `Pool task failed: ${msg}`
+        : `${errorCount} pool tasks failed; first: ${msg}`,
+      { cause: firstError },
+    )
+  }
+}
+
+/** True when an error (possibly wrapped by stream.pipeline / AbortSignal) is a disk-full. */
+function isOutOfSpace(err: any): boolean {
+  return err?.code === 'ENOSPC' || err?.cause?.code === 'ENOSPC'
+}
+
+/** True when S3 says the object simply isn't there. */
+function isNotFound(err: any): boolean {
+  return (
+    err?.name === 'NoSuchKey' ||
+    err?.name === 'NotFound' ||
+    err?.$metadata?.httpStatusCode === 404
+  )
+}
+
+/**
  * Idle timeout for a single download: if no bytes are written to disk for this long
  * the transfer is considered stalled and aborted. Belt-and-braces on top of the S3
  * client's socket timeout — guarantees one wedged object can never hang the whole run.
@@ -227,7 +338,7 @@ async function downloadKey(
 }
 
 // ---------------------------------------------------------------------------
-// Key collection per category
+// Key collection
 // ---------------------------------------------------------------------------
 
 /** Simple file record: S3 key + local absolute path to write to. */
@@ -236,53 +347,204 @@ interface FileEntry {
   localPath: string
 }
 
-/** Accounting paths: S3 key `accounting/{rel}` → local `ACCOUNTING_STORAGE_ROOT/{rel}` */
-async function collectAccountingKeys(): Promise<FileEntry[]> {
-  const rows = await prisma.storedFile.findMany({
-    where: { entityType: 'ACCOUNTING_ATTACHMENT' as any },
-    select: { storagePath: true },
-  })
-  const entries: FileEntry[] = []
-  for (const row of rows) {
-    const rel = normalizeKey(row.storagePath)
-    if (!rel) continue
-    const s3Key = toAccountingS3Key(rel)
-    const localPath = resolveAccountingFilePath(rel)
-    entries.push({ key: s3Key, localPath })
+/**
+ * Which backup category a StoredFile row belongs to, keyed `${entityType}|${fileRole}`.
+ *
+ * Every (entityType, fileRole) pair maps to at most one category, which is what lets the
+ * entire registry be bucketed in ONE pass rather than re-scanned once per category.
+ *
+ * Directory roles (TIMELINE_SPRITES / HLS_SEGMENTS) are deliberately absent: their
+ * storagePath is a prefix, not an object. Listing them here would produce one guaranteed
+ * 404 per video on every run; they are expanded from the bucket listing instead, by
+ * expandDirectoryPrefixes().
+ */
+const CATEGORY_ROLE_TABLE: Array<{
+  category: BackupCategory
+  entityTypes: EntityType[]
+  fileRoles: FileRole[]
+}> = [
+  { category: 'originalVideosBytes', entityTypes: ['VIDEO'], fileRoles: ['ORIGINAL'] },
+  {
+    category: 'videoPreviewsBytes',
+    entityTypes: ['VIDEO', 'VIDEO_ASSET'],
+    fileRoles: [
+      'PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'PREVIEW_IMAGE',
+      'TIMELINE_VTT', 'SUBTITLES_VTT', 'WAVEFORM_PEAKS', 'TRANSCRIPTION_AUDIO',
+    ],
+  },
+  { category: 'videoAssetsBytes', entityTypes: ['VIDEO_ASSET'], fileRoles: ['ORIGINAL'] },
+  { category: 'commentAttachmentsBytes', entityTypes: ['COMMENT_FILE'], fileRoles: ['ORIGINAL'] },
+  { category: 'uploadsFilesBytes', entityTypes: ['SHARE_UPLOAD_FILE'], fileRoles: ['ORIGINAL'] },
+  { category: 'originalPhotosBytes', entityTypes: ['ALBUM_PHOTO'], fileRoles: ['ORIGINAL'] },
+  {
+    category: 'photoZipBytes',
+    entityTypes: ['ALBUM_PHOTO', 'ALBUM'],
+    fileRoles: ['SOCIAL', 'THUMBNAIL', 'ZIP_FULL', 'ZIP_SOCIAL'],
+  },
+  {
+    category: 'communicationsBytes',
+    entityTypes: ['PROJECT_EMAIL', 'PROJECT_EMAIL_ATTACHMENT'],
+    fileRoles: ['RAW_EMAIL', 'ORIGINAL'],
+  },
+  { category: 'projectFilesBytes', entityTypes: ['PROJECT_FILE'], fileRoles: ['ORIGINAL'] },
+  { category: 'clientFilesBytes', entityTypes: ['CLIENT_FILE'], fileRoles: ['ORIGINAL'] },
+  { category: 'userFilesBytes', entityTypes: ['USER_FILE'], fileRoles: ['ORIGINAL'] },
+]
+
+const CATEGORY_BY_ENTITY_ROLE: ReadonlyMap<string, BackupCategory> = (() => {
+  const map = new Map<string, BackupCategory>()
+  for (const { category, entityTypes, fileRoles } of CATEGORY_ROLE_TABLE) {
+    for (const et of entityTypes) {
+      for (const fr of fileRoles) {
+        const composite = `${et}|${fr}`
+        if (map.has(composite)) {
+          // Programming error: two categories claiming the same rows would double-process them.
+          throw new Error(`[S3-BACKUP] Duplicate category mapping for ${composite}`)
+        }
+        map.set(composite, category)
+      }
+    }
+  }
+  return map
+})()
+
+/** Entity types owned wholesale by a category, regardless of file role. */
+const CATEGORY_BY_ENTITY_TYPE: ReadonlyMap<EntityType, BackupCategory> = new Map<EntityType, BackupCategory>([
+  ['ACCOUNTING_ATTACHMENT', 'accountingFilesBytes'],
+])
+
+/**
+ * The category that owns the files *inside* the directory-prefix roles. Sprites and HLS
+ * segments are both preview-side artefacts, so they ride with video previews.
+ */
+const PREFIX_ROLE_CATEGORY: BackupCategory = 'videoPreviewsBytes'
+
+interface RegistryScan {
+  byCategory: Map<BackupCategory, FileEntry[]>
+  /** Normalized directory prefixes (no trailing slash) awaiting expansion from S3. */
+  directoryPrefixes: string[]
+}
+
+/**
+ * Walk the StoredFile registry ONCE, bucketing every row into the category that owns it.
+ *
+ * Previously each category re-read the entire table and filtered in JS, so a 12-category
+ * run shipped the whole registry across the network 13 times (the worker's Postgres is
+ * remote). Rows for categories that were not requested are dropped here rather than built.
+ */
+async function scanStoredFiles(wanted: ReadonlySet<BackupCategory>): Promise<RegistryScan> {
+  const byCategory = new Map<BackupCategory, FileEntry[]>()
+  const directoryPrefixes: string[] = []
+  const wantsPrefixRoles = wanted.has(PREFIX_ROLE_CATEGORY)
+
+  const push = (category: BackupCategory, entry: FileEntry) => {
+    const list = byCategory.get(category)
+    if (list) list.push(entry)
+    else byCategory.set(category, [entry])
   }
 
-  // Also list BAS attachment files (they may not always be in the accounting_attachment table)
-  // We handle them via the S3 prefix listing to catch any orphaned-but-present files
-  // (accounting category only lists DB-tracked files; untracked accounting files are skipped).
+  let cursor: string | undefined
+  do {
+    const page = await getAllStoredPaths({ cursor, take: 5000 })
+    for (const row of page.items) {
+      if (!row.storagePath) continue
+
+      if (DIRECTORY_FILE_ROLES.has(row.fileRole)) {
+        if (wantsPrefixRoles) {
+          const prefix = normalizeKey(row.storagePath)
+          if (prefix) directoryPrefixes.push(prefix.replace(/\/+$/, ''))
+        }
+        continue
+      }
+
+      const category =
+        CATEGORY_BY_ENTITY_ROLE.get(`${row.entityType}|${row.fileRole}`) ??
+        CATEGORY_BY_ENTITY_TYPE.get(row.entityType)
+      if (!category || !wanted.has(category)) continue
+
+      const rel = normalizeKey(row.storagePath)
+      if (!rel) continue
+
+      if (category === 'accountingFilesBytes') {
+        // Accounting lives under its own local root and the `accounting/` S3 prefix.
+        // resolveAccountingFilePath() validates against traversal and throws on bad input —
+        // skip the offending row rather than losing the whole scan.
+        try {
+          push(category, {
+            key: toAccountingS3Key(rel),
+            localPath: resolveAccountingFilePath(rel),
+          })
+        } catch {
+          // ignore unusable accounting path
+        }
+        continue
+      }
+
+      push(category, { key: rel, localPath: path.join(STORAGE_ROOT, rel) })
+    }
+    cursor = page.nextCursor
+  } while (cursor)
+
+  return { byCategory, directoryPrefixes }
+}
+
+/**
+ * Expand directory-prefix roles (sprite sheets, HLS bundles) into their actual child files
+ * (sprite-*.jpg / master.m3u8 + init.mp4 + seg-*.m4s).
+ *
+ * With the bucket index in hand this is a single in-memory pass: for each object key, walk
+ * its ancestor directories and see whether one is a registered prefix. That is O(depth) per
+ * key, versus the previous one ListObjectsV2 round trip *per video* — the single biggest
+ * cost on an HLS-heavy library.
+ *
+ * Exported so `npm run test:smoke` can assert the ancestor matching.
+ */
+export function expandDirectoryPrefixes(index: Map<string, number>, prefixes: string[]): FileEntry[] {
+  if (prefixes.length === 0) return []
+  const prefixSet = new Set(prefixes)
+  const entries: FileEntry[] = []
+
+  for (const key of index.keys()) {
+    let slash = key.lastIndexOf('/')
+    while (slash > 0) {
+      if (prefixSet.has(key.slice(0, slash))) {
+        entries.push({ key, localPath: path.join(STORAGE_ROOT, key) })
+        break
+      }
+      slash = key.lastIndexOf('/', slash - 1)
+    }
+  }
+  return entries
+}
+
+/** Fallback expansion when no bucket index is available: one listing per prefix. */
+async function expandDirectoryPrefixesViaListing(
+  client: ReturnType<typeof getS3Client>,
+  bucket: string,
+  prefixes: string[],
+): Promise<FileEntry[]> {
+  const entries: FileEntry[] = []
+  for (const prefix of prefixes) {
+    const objects = await listS3Keys(client, bucket, prefix).catch(() => [])
+    for (const obj of objects) {
+      entries.push({ key: obj.key, localPath: path.join(STORAGE_ROOT, obj.key) })
+    }
+  }
   return entries
 }
 
 /**
- * Collect S3 keys for directory-style roles (timeline sprites + the HLS bundle) from the
- * StoredFile registry. Each registers ONE row pointing at a directory prefix, so the actual
- * child files (sprite-*.jpg / index.m3u8 + init.mp4 + seg-*.m4s) must be enumerated from S3.
+ * Upload-folder markers. These are zero-byte placeholders that keep an empty folder
+ * visible; they have no StoredFile row, so they come straight from the folder table.
  */
-async function collectDirectoryPrefixKeys(client: ReturnType<typeof getS3Client>, bucket: string): Promise<FileEntry[]> {
-  const allPrefixes: string[] = []
-  let cursor: string | undefined
-  do {
-    const page = await getAllStoredPaths({ cursor, take: 5000 })
-    for (const e of page.items) {
-      if ((e.fileRole === 'TIMELINE_SPRITES' || e.fileRole === 'HLS_SEGMENTS') && e.storagePath) allPrefixes.push(e.storagePath)
-    }
-    cursor = page.nextCursor
-  } while (cursor)
+async function collectUploadFolderMarkers(): Promise<FileEntry[]> {
+  const folders = await prisma.shareUploadFolder.findMany({ select: { storagePath: true } })
   const entries: FileEntry[] = []
-  for (const spritesPath of allPrefixes) {
-    const prefix = normalizeKey(spritesPath)
-    if (!prefix) continue
-    const objects = await listS3Keys(client, bucket, prefix).catch(() => [])
-    for (const obj of objects) {
-      entries.push({
-        key: obj.key,
-        localPath: path.join(STORAGE_ROOT, obj.key),
-      })
-    }
+  for (const folder of folders) {
+    const folderKey = normalizeKey(folder.storagePath)
+    if (!folderKey) continue
+    const markerKey = normalizeKey(`${folderKey}/${UPLOAD_FOLDER_MARKER}`)
+    if (markerKey) entries.push({ key: markerKey, localPath: path.join(STORAGE_ROOT, markerKey) })
   }
   return entries
 }
@@ -322,80 +584,38 @@ async function collectAlbumZipKeys(): Promise<FileEntry[]> {
   return entries
 }
 
-async function collectKeysForCategory(
-  category: BackupCategory,
-  client: ReturnType<typeof getS3Client>,
-  bucket: string,
-): Promise<FileEntry[]> {
-  switch (category) {
-    case 'originalVideosBytes':
-      return collectStoredKeys(['VIDEO'], ['ORIGINAL'])
-
-    case 'videoPreviewsBytes': {
-      const entries = await collectStoredKeys(
-        ['VIDEO', 'VIDEO_ASSET'],
-        ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080', 'THUMBNAIL', 'PREVIEW_IMAGE', 'TIMELINE_VTT', 'TIMELINE_SPRITES', 'SUBTITLES_VTT', 'WAVEFORM_PEAKS', 'TRANSCRIPTION_AUDIO'],
-      )
-      // Sprite sheets and the HLS bundle are stored as directory prefixes (one StoredFile row
-      // each); enumerate their actual child files (incl. the HLS master.m3u8) from S3.
-      const dirPrefixEntries = await collectDirectoryPrefixKeys(client, bucket)
-      return [...entries, ...dirPrefixEntries]
-    }
-
-    case 'videoAssetsBytes':
-      return collectStoredKeys(['VIDEO_ASSET'], ['ORIGINAL'])
-
-    case 'commentAttachmentsBytes':
-      return collectStoredKeys(['COMMENT_FILE'], ['ORIGINAL'])
-
-    case 'uploadsFilesBytes': {
-      const entries = await collectStoredKeys(['SHARE_UPLOAD_FILE'], ['ORIGINAL'])
-      // Upload folder markers are not in StoredFile
-      const folders = await prisma.shareUploadFolder.findMany({ select: { storagePath: true } })
-      for (const folder of folders) {
-        const folderKey = normalizeKey(folder.storagePath)
-        if (!folderKey) continue
-        const markerKey = normalizeKey(`${folderKey}/${UPLOAD_FOLDER_MARKER}`)
-        if (markerKey) entries.push({ key: markerKey, localPath: path.join(STORAGE_ROOT, markerKey) })
-      }
-      return entries
-    }
-
-    case 'originalPhotosBytes':
-      return collectStoredKeys(['ALBUM_PHOTO'], ['ORIGINAL'])
-
-    case 'photoZipBytes': {
-      const entries = await collectStoredKeys(
-        ['ALBUM_PHOTO', 'ALBUM'],
-        ['SOCIAL', 'THUMBNAIL', 'ZIP_FULL', 'ZIP_SOCIAL'],
-      )
-      const zipEntries = await collectAlbumZipKeys()
-      return [...entries, ...zipEntries]
-    }
-
-    case 'communicationsBytes':
-      return collectStoredKeys(['PROJECT_EMAIL', 'PROJECT_EMAIL_ATTACHMENT'], ['RAW_EMAIL', 'ORIGINAL'])
-
-    case 'projectFilesBytes':
-      return collectStoredKeys(['PROJECT_FILE'], ['ORIGINAL'])
-
-    case 'clientFilesBytes':
-      return collectStoredKeys(['CLIENT_FILE'], ['ORIGINAL'])
-
-    case 'userFilesBytes':
-      return collectStoredKeys(['USER_FILE'], ['ORIGINAL'])
-
-    case 'accountingFilesBytes':
-      return collectAccountingKeys()
-
-    default:
-      return []
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Main backup runner
 // ---------------------------------------------------------------------------
+
+/**
+ * Assemble the full entry list for a category from the one-pass registry scan plus the
+ * handful of file kinds that have no StoredFile row of their own.
+ */
+async function buildCategoryEntries(
+  category: BackupCategory,
+  scan: RegistryScan,
+  prefixEntries: FileEntry[],
+): Promise<FileEntry[]> {
+  const entries = [...(scan.byCategory.get(category) ?? [])]
+
+  switch (category) {
+    case 'videoPreviewsBytes':
+      // Sprite / HLS children, already expanded from the bucket listing.
+      entries.push(...prefixEntries)
+      break
+    case 'uploadsFilesBytes':
+      entries.push(...(await collectUploadFolderMarkers()))
+      break
+    case 'photoZipBytes':
+      entries.push(...(await collectAlbumZipKeys()))
+      break
+    default:
+      break
+  }
+
+  return entries
+}
 
 /**
  * Run a backup of the specified S3 categories to local storage.
@@ -428,6 +648,7 @@ export async function runS3LocalBackup(
   const startMs = Date.now()
   const client = getS3Client()
   const bucket = getS3Bucket()
+  const wanted = new Set(categories)
 
   let totalKeys = 0
   let skipped = 0
@@ -436,88 +657,200 @@ export async function runS3LocalBackup(
   let failed = 0
   const errors: string[] = []
 
+  const recordError = (msg: string) => {
+    console.error('[S3-BACKUP]', msg)
+    if (errors.length < 100) errors.push(msg)
+  }
+
+  // ---- Phase 0: one bucket sweep + one registry pass, shared by every category ----
+
+  let index: Map<string, number> | null = null
+  try {
+    index = await buildS3Index(client, bucket)
+  } catch (err: any) {
+    // Not fatal: without the index we fall back to a per-file HeadObject, which is what
+    // this did before the index existed — slow, but it asks S3 for the truth.
+    recordError(`Bucket listing failed, falling back to per-file size lookups: ${err?.message || err}`)
+    index = null
+  }
+
+  let scan: RegistryScan
+  try {
+    scan = await scanStoredFiles(wanted)
+  } catch (err: any) {
+    const msg = `Failed to read the file registry: ${err?.message || err}`
+    console.error('[S3-BACKUP]', msg)
+    return {
+      ok: false,
+      dryRun,
+      categories,
+      totalKeys: 0,
+      skipped: 0,
+      downloaded: 0,
+      wouldDownload: 0,
+      failed: 0,
+      errors: [msg],
+      durationMs: Date.now() - startMs,
+    }
+  }
+
+  let prefixEntries: FileEntry[] = []
+  if (scan.directoryPrefixes.length > 0) {
+    try {
+      prefixEntries = index
+        ? expandDirectoryPrefixes(index, scan.directoryPrefixes)
+        : await expandDirectoryPrefixesViaListing(client, bucket, scan.directoryPrefixes)
+    } catch (err: any) {
+      recordError(`Failed to expand sprite/HLS directories: ${err?.message || err}`)
+    }
+  }
+
+  // A key is processed at most once per run even if two collectors reach for it.
+  const seen = new Set<string>()
+
+  // ---- Per-category work ----
+
   for (let catIdx = 0; catIdx < categories.length; catIdx++) {
     const category = categories[catIdx]
-    let entries: FileEntry[]
+
+    let collected: FileEntry[]
     try {
-      entries = await collectKeysForCategory(category, client, bucket)
+      collected = await buildCategoryEntries(category, scan, prefixEntries)
     } catch (err: any) {
-      const msg = `[${category}] Failed to collect keys: ${err?.message || err}`
-      console.error('[S3-BACKUP]', msg)
-      errors.push(msg)
+      recordError(`[${category}] Failed to collect keys: ${err?.message || err}`)
       continue
+    }
+
+    const entries: FileEntry[] = []
+    for (const entry of collected) {
+      const dedupeKey = `${entry.key}::${entry.localPath}`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+      entries.push(entry)
     }
 
     totalKeys += entries.length
 
-    // Notify caller that this category is starting
-    if (onProgress) {
-      await Promise.resolve(onProgress({
-        currentCategory: category,
-        categoryIndex: catIdx,
-        totalCategories: categories.length,
-        filesInCategory: entries.length,
-        filesProcessed: 0,
-        downloaded,
-        skipped,
-        failed,
-      })).catch(() => {})
-    }
+    // ---- Progress plumbing (shared by both phases of this category) ----
 
     let filesProcessed = 0
-    // Time-based throttle: at most one progress write per 3 seconds within a category
     let lastProgressMs = Date.now()
+    let progressInFlight = false
 
-    for (const entry of entries) {
+    const report = async (phase: 'checking' | 'downloading', forced = false) => {
+      if (!onProgress) return
+      const now = Date.now()
+      // Throttle to one write per 3s, and never overlap two in-flight writes: the callback
+      // persists to Postgres, which is a remote round trip from the worker.
+      if (!forced && (progressInFlight || now - lastProgressMs < 3000)) return
+      lastProgressMs = now
+      progressInFlight = true
       try {
-        const s3Size = await getS3Size(client, bucket, entry.key)
-        if (s3Size === null) {
-          // Object not found in S3 — nothing to back up, skip silently
-          totalKeys--
-          continue
-        }
+        await onProgress({
+          currentCategory: category,
+          categoryIndex: catIdx,
+          totalCategories: categories.length,
+          filesInCategory: entries.length,
+          filesProcessed,
+          downloaded,
+          skipped,
+          failed,
+          phase,
+        })
+      } catch {
+        // progress reporting must never break a backup
+      } finally {
+        progressInFlight = false
+      }
+    }
 
-        if (await localFileSizeMatches(entry.localPath, s3Size)) {
+    await report('checking', true)
+
+    // ---- Phase A: decide what needs downloading (no per-file network when indexed) ----
+
+    const toDownload: FileEntry[] = []
+    let missing = 0
+
+    await runPool(entries, CHECK_CONCURRENCY, async (entry) => {
+      try {
+        // The index is authoritative. Without it, ask S3 per file rather than trusting
+        // StoredFile.fileSize: that column is left untouched when a file is re-registered
+        // without a size (buildStoredFileUpdateData treats undefined as "no change"), so a
+        // file whose bytes changed can carry a stale count. Comparing against that would
+        // silently mark an outdated local copy as up-to-date, permanently. The fallback is
+        // rare by design, so its cost does not justify weakening the comparison.
+        const s3Size = index
+          ? index.get(entry.key) ?? null
+          : await getS3Size(client, bucket, entry.key)
+
+        if (s3Size === null) {
+          // Not present in S3 — nothing to back up, skip silently (matches prior behaviour).
+          missing++
+          filesProcessed++
+        } else if (await localFileSizeMatches(entry.localPath, s3Size)) {
           skipped++
+          filesProcessed++
         } else if (dryRun) {
           wouldDownload++
+          filesProcessed++
         } else {
-          await downloadKey(client, bucket, entry.key, entry.localPath)
-          downloaded++
+          toDownload.push(entry)
+          return // finalised in phase B
         }
       } catch (err: any) {
-        // A full disk is a whole-run fatal condition, not a per-file problem: every
-        // remaining file would fail the same way, each burning a wasted S3 HeadObject.
-        // Abort immediately with a clear message so the operator frees space and re-runs.
-        if (err?.code === 'ENOSPC') {
-          const msg = `No space left on device while writing ${entry.localPath} — backup aborted after ${downloaded} downloaded / ${skipped} up-to-date. Free disk space and re-run.`
-          console.error('[S3-BACKUP]', msg)
-          throw new Error(msg)
-        }
         failed++
-        const msg = `[${category}] ${entry.key}: ${err?.message || err}`
-        console.error('[S3-BACKUP]', msg)
-        if (errors.length < 100) errors.push(msg)
+        filesProcessed++
+        recordError(`[${category}] ${entry.key}: ${err?.message || err}`)
       }
+      await report('checking')
+    })
 
-      filesProcessed++
+    // Objects the registry knows about but S3 does not never counted towards the total.
+    totalKeys -= missing
 
-      // Throttled mid-category progress update
-      if (onProgress) {
-        const now = Date.now()
-        if (now - lastProgressMs >= 3000) {
-          lastProgressMs = now
-          await Promise.resolve(onProgress({
-            currentCategory: category,
-            categoryIndex: catIdx,
-            totalCategories: categories.length,
-            filesInCategory: entries.length,
-            filesProcessed,
-            downloaded,
-            skipped,
-            failed,
-          })).catch(() => {})
+    // ---- Phase B: fetch, at a concurrency that respects the uplink ----
+
+    if (toDownload.length > 0) {
+      await report('downloading', true)
+
+      let outOfSpace: Error | null = null
+      let vanished = 0
+
+      await runPool(toDownload, DOWNLOAD_CONCURRENCY, async (entry) => {
+        if (outOfSpace) return
+        try {
+          await downloadKey(client, bucket, entry.key, entry.localPath)
+          downloaded++
+        } catch (err: any) {
+          // A full disk is a whole-run fatal condition, not a per-file problem: every
+          // remaining file would fail the same way. Stop the pool and surface it so the
+          // operator frees space and re-runs.
+          if (isOutOfSpace(err)) {
+            outOfSpace = new Error(
+              `No space left on device while writing ${entry.localPath} — backup aborted after ${downloaded} downloaded / ${skipped} up-to-date. Free disk space and re-run.`,
+            )
+            return
+          }
+          if (isNotFound(err)) {
+            // The object is gone from S3 — it was in the index when the run started and
+            // has been deleted since. Same silent skip the size-check path gives a key that
+            // was never there, rather than a failure that would alert an operator about a
+            // file there is nothing to do about.
+            vanished++
+          } else {
+            failed++
+            recordError(`[${category}] ${entry.key}: ${err?.message || err}`)
+          }
         }
+        filesProcessed++
+        await report('downloading')
+      })
+
+      totalKeys -= vanished
+
+      if (outOfSpace) {
+        console.error('[S3-BACKUP]', (outOfSpace as Error).message)
+        throw outOfSpace
       }
     }
   }

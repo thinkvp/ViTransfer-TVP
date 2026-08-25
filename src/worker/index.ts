@@ -948,11 +948,19 @@ async function main() {
                 downloaded: number
                 skipped: number
                 failed: number
+                phase?: 'checking' | 'downloading'
               }) => {
                 const fileProgress = info.filesInCategory > 0
                   ? ` — ${info.filesProcessed}/${info.filesInCategory} files`
                   : ''
-                const verb = isDryRun ? 'Scanning' : 'Backing up'
+                // A run is two phases: compare every file's size, then fetch only the
+                // ones that differ. Naming the phase stops the UI looking stalled while
+                // a big download is in flight behind a static file counter.
+                const verb = isDryRun
+                  ? 'Scanning'
+                  : info.phase === 'downloading'
+                    ? 'Downloading'
+                    : 'Checking'
                 const text = `${verb} ${info.currentCategory} (${info.categoryIndex + 1}/${info.totalCategories})${fileProgress} — ${info.downloaded} downloaded, ${info.skipped} already up-to-date`
                 await prisma.settings.update({
                   where: { id: 'default' },
