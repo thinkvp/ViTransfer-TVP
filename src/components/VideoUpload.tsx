@@ -16,6 +16,14 @@ import {
   clearUploadMetadata,
 } from '@/lib/tus-context'
 import { useUploadManagerActions } from '@/components/UploadManagerProvider'
+import { VersionAssetCarryOver, type CarryOverSelection } from './VersionAssetCarryOver'
+import { PendingAssetPicker, type PendingAsset } from './PendingAssetPicker'
+import { enqueueAssetUploads } from '@/hooks/useAssetUploadQueue'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
+import { toast } from 'sonner'
+
+/** Module-scope constant: a fresh [] default would change identity on every render. */
+const EMPTY_SIBLINGS: string[] = []
 
 interface VideoUploadProps {
   projectId: string
@@ -30,6 +38,12 @@ interface VideoUploadProps {
 
   /** When true, show the per-version "Auto-generate subtitles" tickbox (i.e. Whisper is enabled globally). */
   transcriptionEnabled?: boolean
+
+  /**
+   * Existing versions of the video being added to. Non-empty only on the "add version"
+   * path, where their assets can be carried forward onto the new version.
+   */
+  siblingVideoIds?: string[]
 }
 
 export default function VideoUpload({
@@ -41,6 +55,7 @@ export default function VideoUpload({
   allowApproval: allowApprovalProp,
   showAllowApprovalField = true,
   transcriptionEnabled = false,
+  siblingVideoIds = EMPTY_SIBLINGS,
 }: VideoUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addUpload } = useUploadManagerActions()
@@ -53,6 +68,9 @@ export default function VideoUpload({
   const [autoGenerateSubtitles, setAutoGenerateSubtitles] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [carryOver, setCarryOver] = useState<CarryOverSelection[]>([])
+  const [pendingAssets, setPendingAssets] = useState<PendingAsset[]>([])
+  const { uploadChunkSizeBytes } = useTransferTuning()
 
   useEffect(() => {
     if (videoNotesProp !== undefined) {
@@ -102,6 +120,55 @@ export default function VideoUpload({
     } catch {
       return { valid: false, error: 'Failed to read file. Please try again.' }
     }
+  }
+
+  /**
+   * Copy the selected earlier-version assets onto the freshly created version.
+   *
+   * One request per source version, newest first: the copy API skips a filename already
+   * on the target, so ordering is what makes the newest version win a name collision.
+   * Runs after the version exists and reports on its own — the upload has already
+   * succeeded by this point and must not be reported as failed if a copy is.
+   */
+  async function copyCarryOverAssets(
+    targetVideoId: string,
+    targetLabel: string,
+    selection: CarryOverSelection[],
+  ) {
+    let copied = 0
+    const notCopied: string[] = []
+    const fromLabels: string[] = []
+
+    for (const source of selection) {
+      try {
+        const result = await apiPost<{ copiedCount?: number; results?: Array<{ fileName: string; status: string; reason?: string }> }>(
+          `/api/videos/${source.sourceVideoId}/assets/copy-to-version`,
+          { assetIds: source.assetIds, targetVideoId },
+        )
+        const fromThis = result?.copiedCount ?? 0
+        copied += fromThis
+        if (fromThis > 0) fromLabels.push(source.versionLabel)
+        for (const row of result?.results ?? []) {
+          if (row.status !== 'copied') {
+            notCopied.push(`${row.fileName}${row.reason ? ` — ${row.reason}` : ''}`)
+          }
+        }
+      } catch (err) {
+        notCopied.push(`${source.versionLabel} — ${err instanceof Error ? err.message : 'copy failed'}`)
+      }
+    }
+
+    const detail = notCopied.length > 0 ? { description: notCopied.join('\n') } : undefined
+    if (copied > 0) {
+      const from = fromLabels.length > 0 ? ` from ${fromLabels.join(', ')}` : ''
+      const suffix = notCopied.length > 0 ? ` · ${notCopied.length} not copied` : ''
+      toast.success(`${copied} ${copied === 1 ? 'asset' : 'assets'} copied to ${targetLabel}${from}${suffix}`, detail)
+    } else {
+      toast.warning(`No assets copied to ${targetLabel}`, detail)
+    }
+
+    // Surface the copies in the version list without waiting for the upload to finish.
+    onUploadComplete?.()
   }
 
   /**
@@ -185,6 +252,10 @@ export default function VideoUpload({
         videoId = res.videoId
       }
 
+      // Snapshot the selections: the form resets below, and the callback runs long after.
+      const pendingCarryOver = carryOver
+      const assetsToUpload = pendingAssets
+
       // Hand off to the global upload manager — the upload continues
       // even if the user navigates away from this page.
       addUpload({
@@ -193,7 +264,28 @@ export default function VideoUpload({
         videoId,
         videoName: trimmedVideoName,
         versionLabel: trimmedVersionLabel,
-        onComplete: () => onUploadComplete?.(),
+        onComplete: () => {
+          onUploadComplete?.()
+          // Carry the chosen assets forward only once the upload has actually landed.
+          // The version record exists from the moment it's created, but a failed upload
+          // DELETES it (UploadManagerProvider's onError), which would strand a copy
+          // mid-flight against a row that no longer exists — foreign-key failures for
+          // what's left and orphaned StoredFile rows for what already went through.
+          if (pendingCarryOver.length > 0) {
+            void copyCarryOverAssets(videoId, trimmedVersionLabel || 'the new version', pendingCarryOver)
+          }
+          if (assetsToUpload.length > 0) {
+            const queued = enqueueAssetUploads(
+              videoId,
+              assetsToUpload.map((a) => ({ file: a.file, category: a.category })),
+              { uploadChunkSizeBytes },
+            )
+            toast.success(
+              `${queued} ${queued === 1 ? 'asset' : 'assets'} queued for ${trimmedVersionLabel || 'the new version'}`,
+              { description: 'Progress shows in the version’s asset panel.' },
+            )
+          }
+        },
       })
 
       // Reset form
@@ -201,6 +293,7 @@ export default function VideoUpload({
       setVersionLabel('')
       setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
       setAllowApproval(allowApprovalProp ?? true)
+      setPendingAssets([])
 
       // Notify parent so the project page reflects the new UPLOADING record.
       onUploadComplete?.()
@@ -379,6 +472,25 @@ export default function VideoUpload({
           </p>
         )}
       </div>
+
+      {/* Carry assets forward from earlier versions. Sits below the file picker: it's a
+          step after the upload is set up, not another option about the video itself. */}
+      {siblingVideoIds.length > 0 && (
+        <VersionAssetCarryOver
+          projectId={projectId}
+          siblingVideoIds={siblingVideoIds}
+          disabled={submitting}
+          onChange={setCarryOver}
+        />
+      )}
+
+      {/* Brand-new assets to upload alongside this version. Queued, like the copies,
+          only once the video's own upload has landed. */}
+      <PendingAssetPicker
+        assets={pendingAssets}
+        onChange={setPendingAssets}
+        disabled={submitting}
+      />
     </div>
   )
 }

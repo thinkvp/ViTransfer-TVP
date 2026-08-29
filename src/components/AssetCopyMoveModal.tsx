@@ -5,6 +5,7 @@ import { X, Copy, FileIcon, Loader2 } from 'lucide-react'
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiPost } from '@/lib/api-client'
+import { toast } from 'sonner'
 
 interface VideoAsset {
   id: string
@@ -20,6 +21,20 @@ interface Video {
   name: string
   version: number
   versionLabel: string
+}
+
+interface CopyOutcome {
+  fileName: string
+  status: 'copied' | 'skipped' | 'failed'
+  reason?: string
+}
+
+interface CopyResponse {
+  success: boolean
+  copiedCount: number
+  skippedCount: number
+  failedCount: number
+  results: CopyOutcome[]
 }
 
 interface AssetCopyMoveModalProps {
@@ -48,7 +63,6 @@ export function AssetCopyMoveModal({
   const [loading, setLoading] = useState(true)
   const [copying, setCopying] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
 
 
   const fetchData = useCallback(async () => {
@@ -83,6 +97,9 @@ export function AssetCopyMoveModal({
 
   useEffect(() => {
     if (isOpen) {
+      // Clear the previous run's error — a stale banner would otherwise contradict
+      // whatever this run reports.
+      setError(null)
       fetchData()
     }
   }, [isOpen, fetchData])
@@ -108,24 +125,46 @@ export function AssetCopyMoveModal({
   const handleCopyAssets = async () => {
     if (selectedAssets.size === 0 || !targetVideoId) return
 
+    const targetLabel = videos.find((v) => v.id === targetVideoId)?.versionLabel || 'the selected version'
+
     setCopying(true)
     setError(null)
-    setSuccess(null)
 
     // Copy assets in background without blocking UI
-    apiPost(`/api/videos/${currentVideoId}/assets/copy-to-version`, {
+    apiPost<CopyResponse>(`/api/videos/${currentVideoId}/assets/copy-to-version`, {
       assetIds: Array.from(selectedAssets),
       targetVideoId,
     })
       .then((response) => {
-        setSuccess(`Successfully copied ${selectedAssets.size} asset(s) to the selected version`)
-        setSelectedAssets(new Set())
+        // Report what the server actually did: it skips assets that are already on the
+        // target, have no registered file, or (subtitles) have no cues, and it isolates
+        // per-asset failures — so the selection size is not the copied count.
+        //
+        // The outcome goes to a toast rather than a banner in here: onComplete() closes
+        // this modal, so anything rendered inside it would be unmounted before it could
+        // be read.
+        const copied = response?.copiedCount ?? 0
+        const notCopied = (response?.results ?? []).filter((r) => r.status !== 'copied')
+        const detail = notCopied.length > 0
+          ? { description: notCopied.map((r) => `${r.fileName}${r.reason ? ` — ${r.reason}` : ''}`).join('\n') }
+          : undefined
+
+        if (copied > 0) {
+          setSelectedAssets(new Set())
+          const headline = notCopied.length > 0
+            ? `Copied ${copied} asset(s) to ${targetLabel} · ${notCopied.length} not copied`
+            : `Copied ${copied} asset(s) to ${targetLabel}`
+          toast.success(headline, detail)
+        } else {
+          toast.warning(`Nothing copied to ${targetLabel}`, detail)
+        }
 
         if (onComplete) {
           onComplete()
         }
       })
       .catch((err) => {
+        // Hard failure leaves the modal open so the selection isn't lost.
         setError(err instanceof Error ? err.message : 'Failed to copy assets')
       })
       .finally(() => {
@@ -235,12 +274,6 @@ export function AssetCopyMoveModal({
                 </div>
               )}
 
-              {/* Success message */}
-              {success && (
-                <div className="p-3 bg-primary/10 border border-primary rounded-md text-primary text-sm">
-                  {success}
-                </div>
-              )}
 
               {/* Error message */}
               {error && (

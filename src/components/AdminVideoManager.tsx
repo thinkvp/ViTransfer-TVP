@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
 import { Button } from './ui/button'
-import { ChevronDown, ChevronUp, Plus, Video, CheckCircle2, Pencil, X, RotateCw, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Upload, Video, CheckCircle2, Pencil, X, RotateCw, Loader2 } from 'lucide-react'
 import VideoUpload from './VideoUpload'
 import VideoList from './VideoList'
 import { InlineEdit } from './InlineEdit'
@@ -438,9 +438,16 @@ export default function AdminVideoManager({
                         Add New Version
                       </Button>
                     ) : (
-                      <div className="space-y-3">
+                      // Inset panel: the form used to sit bare on the card background while
+                      // every version below it is a bordered box, so it read as loose page
+                      // furniture above the list. Same box language as a version row, one
+                      // step darker, with its own titled header.
+                      <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
                         <div className="flex items-center justify-between">
-                          <h4 className="text-sm font-medium">Upload New Version</h4>
+                          <h4 className="text-sm font-medium flex items-center gap-2">
+                            <Upload className="w-4 h-4 text-muted-foreground" />
+                            Upload New Version
+                          </h4>
                           <Button
                             type="button"
                             variant="ghost"
@@ -458,6 +465,10 @@ export default function AdminVideoManager({
                           allowApproval={canFullControl ? undefined : false}
                           showAllowApprovalField={canFullControl}
                           transcriptionEnabled={transcriptionEnabled}
+                          // Existing versions of THIS video only — the assets offered for
+                          // carry-over are its own history, not the whole project's.
+                          // Gated on full control to match the copy endpoint's own gate.
+                          siblingVideoIds={canFullControl ? groupVideos.map((v) => v.id) : undefined}
                           onUploadComplete={() => {
                             setShowNewVersionForGroup(null)
                             handleUploadComplete()
@@ -468,9 +479,15 @@ export default function AdminVideoManager({
                   </div>
                 )}
 
-                {/* Version list */}
+                {/* Version list. A labelled rule rather than a bare heading: with the
+                    upload panel above it, a heading floating over bordered rows didn't
+                    read as the start of a section. */}
                 <div className="mt-5">
-                  <h4 className="text-sm font-medium mb-3">All Versions</h4>
+                  <div className="flex items-center gap-3 mb-3">
+                    <h4 className="text-sm font-medium shrink-0">All Versions</h4>
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-xs text-muted-foreground shrink-0">{groupVideos.length}</span>
+                  </div>
                   <VideoList
                     videos={groupVideos.slice().sort((a, b) => b.version - a.version)}
                     onRefresh={onRefresh}

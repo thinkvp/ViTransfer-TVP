@@ -3,7 +3,7 @@ import * as path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
-import { isS3Mode, s3UploadFile, s3UploadLocalFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile, s3GetFileSize, s3ListPrefixSizes } from '@/lib/s3-storage'
+import { isS3Mode, s3UploadFile, s3UploadLocalFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile, s3CopyFile, s3CopyDirectory, s3GetFileSize, s3ListPrefixSizes } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -292,6 +292,49 @@ export async function moveFile(sourcePath: string, destinationPath: string): Pro
 
     throw error
   }
+}
+
+/**
+ * Copy a single stored file. In S3 mode the copy happens server-side (no bytes through this
+ * process); locally it's an fs copy. Prefer this over download→upload for duplicating an
+ * object that already lives in storage.
+ */
+export async function copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+  if (isS3Mode()) {
+    await s3CopyFile(sourcePath, destinationPath)
+    return
+  }
+
+  const sourceFullPath = getRawStoragePath(sourcePath)
+  const destinationFullPath = validatePathForWrite(destinationPath)
+
+  if (sourceFullPath === destinationFullPath) return
+
+  await fs.promises.mkdir(path.dirname(destinationFullPath), { recursive: true })
+  await fs.promises.copyFile(sourceFullPath, destinationFullPath)
+}
+
+/**
+ * Copy a whole stored directory tree to a new location, preserving relative layout, and
+ * return the number of files copied. Used to clone generated-artifact trees (HLS bundles,
+ * timeline sprite folders) whose playlists and VTT cues reference their siblings by
+ * *relative* name — so an exact-layout copy stays internally consistent.
+ */
+export async function copyDirectory(fromDirPath: string, toDirPath: string): Promise<number> {
+  if (isS3Mode()) {
+    return s3CopyDirectory(fromDirPath, toDirPath)
+  }
+
+  const fromFullPath = getRawStoragePath(fromDirPath)
+  const toFullPath = validatePathForWrite(toDirPath)
+
+  if (fromFullPath === toFullPath) return 0
+  if (!fs.existsSync(fromFullPath)) return 0
+
+  await fs.promises.mkdir(path.dirname(toFullPath), { recursive: true })
+  await fs.promises.cp(fromFullPath, toFullPath, { recursive: true })
+
+  return (await listStoredFileSizes(toDirPath)).size
 }
 
 async function removeDirectoryIfEmpty(fullPath: string): Promise<boolean> {

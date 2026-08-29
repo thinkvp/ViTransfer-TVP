@@ -108,6 +108,39 @@ export function hasActiveAssetUploads(videoId: string): boolean {
   return getQueue(videoId).some(u => isActiveStatus(u.status))
 }
 
+/**
+ * Queue asset uploads for a video WITHOUT the panel being mounted.
+ *
+ * The video-upload panel lets assets be chosen before the version exists, so by the time
+ * they can be queued the target's own asset panel may never have rendered — and `pump`
+ * bails when the video has no config entry. Seeds a config (the mounted panel overwrites
+ * it with the live transfer tuning) and starts the queue; the panel picks the queue up
+ * from the module store whenever it is opened.
+ */
+export function enqueueAssetUploads(
+  videoId: string,
+  items: Array<{ file: File; category: string }>,
+  opts: { uploadChunkSizeBytes: number; maxConcurrent?: number },
+): number {
+  if (!videoId || items.length === 0) return 0
+
+  if (!configs.has(videoId)) {
+    configs.set(videoId, {
+      maxConcurrent: opts.maxConcurrent ?? 3,
+      uploadChunkSizeBytes: opts.uploadChunkSizeBytes,
+    })
+  }
+
+  ensureBeforeUnloadGuard()
+  setQueueFor(videoId, prev => [
+    ...prev,
+    ...items.map(({ file, category }) => createQueuedUpload(videoId, file, category)),
+  ])
+  pump(videoId)
+
+  return items.length
+}
+
 // Warn before leaving the page while any asset upload is still running. Installed
 // once, lazily — the guard outlives individual panels.
 let beforeUnloadInstalled = false
@@ -164,6 +197,25 @@ function generateUploadId(): string {
 
   // Fallback: use UUID (should be rare — crypto.randomUUID is available in all supported environments)
   return `upload-${Date.now()}-${crypto.randomUUID()}`
+}
+
+/** One queue row, shared by the hook's addToQueue and the standalone enqueue. */
+function createQueuedUpload(videoId: string, file: File, category: string): QueuedUpload {
+  return {
+    id: generateUploadId(),
+    file,
+    category,
+    assetId: null,
+    videoId,
+    status: 'queued',
+    progress: 0,
+    uploadSpeed: 0,
+    error: null,
+    tusUpload: null,
+    createdAt: Date.now(),
+    startedAt: null,
+    completedAt: null,
+  }
 }
 
 /** Start queued uploads while concurrency slots are free. Safe to call repeatedly. */
@@ -655,29 +707,13 @@ export function useAssetUploadQueue({
 
   // Add file to queue
   const addToQueue = useCallback((file: File, category: string): string => {
-    const uploadId = generateUploadId()
-
-    const newUpload: QueuedUpload = {
-      id: uploadId,
-      file,
-      category,
-      assetId: null,
-      videoId,
-      status: 'queued',
-      progress: 0,
-      uploadSpeed: 0,
-      error: null,
-      tusUpload: null,
-      createdAt: Date.now(),
-      startedAt: null,
-      completedAt: null,
-    }
+    const newUpload = createQueuedUpload(videoId, file, category)
 
     ensureBeforeUnloadGuard()
     setQueueFor(videoId, prev => [...prev, newUpload])
     pump(videoId)
 
-    return uploadId
+    return newUpload.id
   }, [videoId])
 
   // Pause an upload (TUS only; S3 mode uploads cannot be paused)

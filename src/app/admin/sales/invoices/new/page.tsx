@@ -139,12 +139,11 @@ export default function NewInvoicePage() {
       const raw = sessionStorage.getItem('sales_invoice_prefill')
       if (!raw) return
       sessionStorage.removeItem('sales_invoice_prefill')
-      const prefill = JSON.parse(raw) as { clientId?: string; projectId?: string; dueDate?: string; notes?: string; terms?: string; items?: SalesLineItem[] }
+      const prefill = JSON.parse(raw) as { clientId?: string; projectId?: string; notes?: string; terms?: string; items?: SalesLineItem[] }
       if (prefill.clientId) setClientId(prefill.clientId)
       if (prefill.clientId && prefill.projectId) {
         dupPrefillRef.current = { clientId: prefill.clientId, projectId: prefill.projectId }
       }
-      if (prefill.dueDate) setDueDate(prefill.dueDate)
       if (prefill.notes !== undefined) setNotes(prefill.notes)
       if (prefill.terms !== undefined) setTerms(prefill.terms)
       if (Array.isArray(prefill.items) && prefill.items.length > 0) {

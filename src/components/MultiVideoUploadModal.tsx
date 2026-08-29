@@ -18,6 +18,10 @@ import {
   getUploadMetadata,
 } from '@/lib/tus-context'
 import { useUploadManagerActions } from '@/components/UploadManagerProvider'
+import { PendingAssetPicker, type PendingAsset } from './PendingAssetPicker'
+import { enqueueAssetUploads } from '@/hooks/useAssetUploadQueue'
+import { useTransferTuning } from '@/lib/transfer-tuning-client'
+import { toast } from 'sonner'
 
 type UploadStatus = 'pending' | 'queued' | 'error'
 
@@ -29,6 +33,8 @@ type QueuedVideo = {
   videoNotes: string
   allowApproval: boolean
   autoGenerateSubtitles: boolean
+  /** Brand-new asset files to upload once this video's own upload has landed. */
+  assets: PendingAsset[]
   status: UploadStatus
   error: string | null
 }
@@ -94,6 +100,7 @@ export default function MultiVideoUploadModal({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { addUpload } = useUploadManagerActions()
+  const { uploadChunkSizeBytes } = useTransferTuning()
 
   const [isDragging, setIsDragging] = useState(false)
   const [globalError, setGlobalError] = useState<string | null>(null)
@@ -162,6 +169,7 @@ export default function MultiVideoUploadModal({
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
           autoGenerateSubtitles: false,
+          assets: [],
           status: 'pending',
           error: null,
         })
@@ -292,13 +300,31 @@ export default function MultiVideoUploadModal({
           videoId = res.videoId
         }
 
+        const assetsToUpload = item.assets
+
         addUpload({
           file: item.file,
           projectId,
           videoId,
           videoName: trimmedVideoName,
           versionLabel: trimmedVersionLabel,
-          onComplete: () => onUploadComplete?.(),
+          onComplete: () => {
+            onUploadComplete?.()
+            // Only once the video's own upload has landed: a failed one deletes the
+            // video record, and asset uploads against a deleted video strand their
+            // files and rows.
+            if (assetsToUpload.length > 0) {
+              const queued = enqueueAssetUploads(
+                videoId,
+                assetsToUpload.map((a) => ({ file: a.file, category: a.category })),
+                { uploadChunkSizeBytes },
+              )
+              toast.success(
+                `${queued} ${queued === 1 ? 'asset' : 'assets'} queued for ${trimmedVideoName}`,
+                { description: 'Progress shows in the video’s asset panel.' },
+              )
+            }
+          },
         })
 
         updateItem(item.id, { status: 'queued' })
@@ -478,6 +504,13 @@ export default function MultiVideoUploadModal({
                           </div>
                         </div>
                         )}
+                        <div className="sm:col-span-2">
+                          <PendingAssetPicker
+                            assets={item.assets}
+                            onChange={(assets) => updateItem(item.id, { assets })}
+                            disabled={item.status !== 'pending' || submitting}
+                          />
+                        </div>
                       </div>
                     )}
 

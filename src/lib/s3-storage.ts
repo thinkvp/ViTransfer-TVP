@@ -757,6 +757,73 @@ export async function s3MoveDirectory(
   }
 }
 
+/**
+ * Copy one object server-side. The bytes never pass through this process — S3/R2 does the
+ * transfer itself (multipart for objects above the single-copy ceiling, same as a move).
+ * Throws when the source is absent, so callers can't register a path that holds nothing.
+ */
+export async function s3CopyFile(sourceKey: string, destinationKey: string): Promise<void> {
+  if (sourceKey === destinationKey) return
+
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const sourceHead = await client.send(
+    new HeadObjectCommand({ Bucket: bucket, Key: sourceKey })
+  ).catch((err: any) => {
+    if (err?.name === 'NotFound' || err?.$metadata?.httpStatusCode === 404) return null
+    throw err
+  })
+
+  if (!sourceHead) {
+    throw new Error(`Source object not found: ${sourceKey}`)
+  }
+
+  await s3CopyObjectWithFallback(client, bucket, sourceKey, destinationKey, sourceHead.ContentLength ?? undefined)
+}
+
+/**
+ * Copy every object under `fromPrefix` to the same relative path under `toPrefix`, server-side.
+ * Returns the number of objects copied (0 when the source prefix holds nothing). Used to clone
+ * a whole generated-artifact tree — an HLS bundle, a sprite sheet folder — in one pass; the
+ * layout is preserved exactly, which is what keeps relative playlist/VTT references valid.
+ */
+export async function s3CopyDirectory(fromPrefix: string, toPrefix: string): Promise<number> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const fromNormalized = fromPrefix.endsWith('/') ? fromPrefix : `${fromPrefix}/`
+  const toNormalized = toPrefix.endsWith('/') ? toPrefix : `${toPrefix}/`
+
+  if (fromNormalized === toNormalized) return 0
+
+  let continuationToken: string | undefined
+  let copied = 0
+
+  do {
+    const listResponse = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: fromNormalized,
+        ContinuationToken: continuationToken,
+        MaxKeys: 1000,
+      })
+    )
+
+    for (const obj of listResponse.Contents ?? []) {
+      const sourceKey = obj.Key
+      if (!sourceKey) continue
+      const destinationKey = `${toNormalized}${sourceKey.slice(fromNormalized.length)}`
+      await s3CopyObjectWithFallback(client, bucket, sourceKey, destinationKey, obj.Size)
+      copied++
+    }
+
+    continuationToken = listResponse.IsTruncated ? listResponse.NextContinuationToken : undefined
+  } while (continuationToken)
+
+  return copied
+}
+
 /** Check whether a key exists in S3. */
 export async function s3FileExists(key: string): Promise<boolean> {
   const client = getS3Client()

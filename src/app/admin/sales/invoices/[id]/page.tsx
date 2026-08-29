@@ -340,7 +340,9 @@ export default function InvoiceDetailPage() {
 
   const onDuplicate = () => {
     if (!invoice) return
-    const prefill = { clientId, projectId, dueDate, notes, terms, items }
+    // The due date is deliberately not copied: the new invoice is issued today,
+    // so it gets a fresh due date from the default due-day window in settings.
+    const prefill = { clientId, projectId, notes, terms, items }
     try {
       sessionStorage.setItem('sales_invoice_prefill', JSON.stringify(prefill))
     } catch {
