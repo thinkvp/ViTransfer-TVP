@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -230,6 +230,11 @@ export function DeveloperToolsSection({
   const [pendingBacklogPurge, setPendingBacklogPurge] = useState(false)
   const [pendingBullmqPurge, setPendingBullmqPurge] = useState(false)
 
+  const refreshS3StatusRef = useRef<(() => Promise<void>) | null>(null)
+
+  // Read the status on mount, and again whenever the tab regains focus, so a
+  // migration started from another session is still picked up (this replaces the old
+  // unconditional 10s idle poll) and starts the live poll below.
   useEffect(() => {
     let cancelled = false
 
@@ -244,15 +249,40 @@ export function DeveloperToolsSection({
       }
     }
 
+    refreshS3StatusRef.current = refreshStatus
     void refreshStatus()
-    const intervalMs = s3Status?.active ? 2000 : 10000
-    const timer = setInterval(() => {
-      void refreshStatus()
-    }, intervalMs)
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refreshStatus()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       cancelled = true
+      refreshS3StatusRef.current = null
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [])
+
+  // Only poll while a migration is actually running. An idle Developer Tools panel
+  // used to hit this endpoint every 10s for as long as it stayed mounted, which is
+  // pure waste and inflates request volume against the server's crawl detection.
+  useEffect(() => {
+    if (!s3Status?.active) return
+
+    const timer = setInterval(() => {
+      if (document.hidden) return // hidden tabs resume via visibilitychange
+      void refreshS3StatusRef.current?.()
+    }, 2000)
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) void refreshS3StatusRef.current?.()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
       clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [s3Status?.active])
 

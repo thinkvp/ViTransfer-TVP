@@ -360,13 +360,21 @@ export default function NotificationsBell() {
     fetchPage({ replace: true })
 
     pollingRef.current = window.setInterval(() => {
+      if (document.hidden) return // hidden tabs resume via visibilitychange
       // Silent refresh: update data and badge without triggering loading
       // state, which avoids the flash & scroll-reset when the panel is open.
       fetchPage({ replace: true, markSeen: openRef.current, silent: true })
     }, 30_000)
 
+    // Catch up as soon as the tab becomes visible again so the badge is not stale.
+    const onVisibilityChange = () => {
+      if (!document.hidden) fetchPage({ replace: true, markSeen: openRef.current, silent: true })
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     return () => {
       if (pollingRef.current) window.clearInterval(pollingRef.current)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [fetchPage])
 

@@ -291,6 +291,7 @@ export default function ExpensesPage() {
                         {e.accountId ? (
                           <Link
                             href={`/admin/accounting/chart-of-accounts/${e.accountCode ?? e.accountId}`}
+                            prefetch={false}
                             className="text-xs text-primary hover:underline underline-offset-2 whitespace-nowrap"
                           >
                             {e.accountCode ? `${e.accountCode} — ` : ''}{e.accountName ?? 'Account'}

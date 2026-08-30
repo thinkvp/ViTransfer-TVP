@@ -576,6 +576,7 @@ export default function SalesInvoicesPage() {
                           <td className="px-3 py-2 font-medium">
                             <Link
                               href={`/admin/sales/invoices/${row.invoice.id}`}
+                              prefetch={false}
                               className="hover:underline"
                               onClick={(e) => e.stopPropagation()}
                             >
@@ -592,7 +593,7 @@ export default function SalesInvoicesPage() {
                           <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
                           <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.invoice.clientId ? (
-                              <Link href={`/admin/clients/${row.invoice.clientId}`} className="hover:underline">
+                              <Link href={`/admin/clients/${row.invoice.clientId}`} prefetch={false} className="hover:underline">
                                 {clientNameById[row.invoice.clientId] ?? row.invoice.clientId}
                               </Link>
                             ) : (
@@ -601,7 +602,7 @@ export default function SalesInvoicesPage() {
                           </td>
                           <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.invoice.projectId ? (
-                              <Link href={`/admin/projects/${row.invoice.projectId}`} className="hover:underline">
+                              <Link href={`/admin/projects/${row.invoice.projectId}`} prefetch={false} className="hover:underline">
                                 {projectTitleById[row.invoice.projectId] ?? row.invoice.projectId}
                               </Link>
                             ) : (

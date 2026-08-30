@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { getAlbumZipFileName } from '@/lib/album-photo-zip'
-import { generateAlbumPhotoAccessToken } from '@/lib/photo-access'
+import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { batchResolveFileSizes, getStoredFileRecords, storedFileExists } from '@/lib/stored-file'
@@ -402,6 +402,15 @@ export async function GET(
     const photoIds = album.photos.map((p: any) => p.id)
     const photoSizeMap = await batchResolveFileSizes('ALBUM_PHOTO', photoIds)
 
+    // S3 mode: presign thumbnails so the file list loads each <img> straight from the
+    // bucket. Proxying them through /api/content/photo/<token> puts a unique, extension-
+    // less path on the origin for every photo, which reads as crawling to an IPS and can
+    // get the viewer's own IP banned on a large album. Mirrors the album grid route.
+    // Returns an empty map in local mode, where the token URL below is still used.
+    const directThumbUrls = await presignAlbumPhotoThumbnailUrls(
+      album.photos.filter((p: any) => p.thumbnailStatus === 'READY').map((p: any) => p.id),
+    )
+
     const photos: DownloadableFile[] = await Promise.all(
       album.photos.map(async (photo: any) => {
         const tokenValue = await generateAlbumPhotoAccessToken({
@@ -424,7 +433,7 @@ export async function GET(
           photoId: photo.id,
           fileName: photo.fileName,
           fileSizeBytes: photoSizeMap.get(photo.id) ?? 0,
-          thumbnailUrl: `/api/content/photo/${tokenValue}?variant=thumbnail`,
+          thumbnailUrl: directThumbUrls.get(photo.id) ?? `/api/content/photo/${tokenValue}?variant=thumbnail`,
           previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
           downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
         } as DownloadableFile

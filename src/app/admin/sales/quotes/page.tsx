@@ -541,6 +541,7 @@ export default function SalesQuotesPage() {
                           <td className="px-3 py-2 font-medium">
                             <Link
                               href={`/admin/sales/quotes/${row.quote.id}`}
+                              prefetch={false}
                               className="hover:underline"
                               onClick={(e) => e.stopPropagation()}
                             >
@@ -557,7 +558,7 @@ export default function SalesQuotesPage() {
                           <td className="px-3 py-2 tabular-nums">{formatMoney(row.totalCents, getCurrencySymbol(settings.currencyCode))}</td>
                           <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.quote.clientId ? (
-                              <Link href={`/admin/clients/${row.quote.clientId}`} className="hover:underline">
+                              <Link href={`/admin/clients/${row.quote.clientId}`} prefetch={false} className="hover:underline">
                                 {clientNameById[row.quote.clientId] ?? row.quote.clientId}
                               </Link>
                             ) : (
@@ -566,7 +567,7 @@ export default function SalesQuotesPage() {
                           </td>
                           <td className="px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                             {row.quote.projectId ? (
-                              <Link href={`/admin/projects/${row.quote.projectId}`} className="hover:underline">
+                              <Link href={`/admin/projects/${row.quote.projectId}`} prefetch={false} className="hover:underline">
                                 {projectTitleById[row.quote.projectId] ?? row.quote.projectId}
                               </Link>
                             ) : (

@@ -976,9 +976,9 @@ export default function BankAccountsPage() {
                                   const acctName = t.accountName ?? t.expense?.accountName ?? ''
                                   const acctCode = coaAccounts.find(a => a.id === acctId)?.code
                                   if (acctId && acctCode)
-                                    return <Link href={`/admin/accounting/chart-of-accounts/${acctCode}`} onClick={e => e.stopPropagation()} className="text-xs text-primary hover:underline underline-offset-2 truncate block">{acctName}</Link>
+                                    return <Link href={`/admin/accounting/chart-of-accounts/${acctCode}`} prefetch={false} onClick={e => e.stopPropagation()} className="text-xs text-primary hover:underline underline-offset-2 truncate block">{acctName}</Link>
                                   if (acctId)
-                                    return <Link href={`/admin/accounting/chart-of-accounts/${acctId}`} onClick={e => e.stopPropagation()} className="text-xs text-primary hover:underline underline-offset-2 truncate block">{acctName}</Link>
+                                    return <Link href={`/admin/accounting/chart-of-accounts/${acctId}`} prefetch={false} onClick={e => e.stopPropagation()} className="text-xs text-primary hover:underline underline-offset-2 truncate block">{acctName}</Link>
                                   if (t.matchType === 'INVOICE_PAYMENT') return <span className="text-xs text-muted-foreground truncate block">Matched Invoice</span>
                                   return <span className="text-xs text-muted-foreground truncate block">{acctName}</span>
                                 })()}

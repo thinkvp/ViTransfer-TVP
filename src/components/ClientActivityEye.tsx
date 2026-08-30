@@ -140,6 +140,7 @@ export default function ClientActivityEye() {
 
     async function poll() {
       if (pollInFlightRef.current) return
+      if (typeof document !== 'undefined' && document.hidden) return // hidden tabs resume via visibilitychange
       pollInFlightRef.current = true
       try {
         const res = await apiFetch('/api/client-activity')
@@ -162,9 +163,16 @@ export default function ClientActivityEye() {
     poll()
     const interval = setInterval(poll, open ? 5_000 : 15_000)
 
+    // Hidden tabs skip polling entirely; catch up as soon as the tab is visible again.
+    const onVisibilityChange = () => {
+      if (!document.hidden) void poll()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     return () => {
       active = false
       clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [open])
 

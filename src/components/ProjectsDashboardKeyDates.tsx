@@ -984,14 +984,14 @@ export default function ProjectsDashboardKeyDates({
                         <div className="mt-0.5 space-y-1">
                           <div className="flex flex-wrap items-center gap-x-1">
                             {k.project.clientId ? (
-                              <Link href={`/admin/clients/${k.project.clientId}`} className="text-sm underline underline-offset-2">
+                              <Link href={`/admin/clients/${k.project.clientId}`} prefetch={false} className="text-sm underline underline-offset-2">
                                 {k.project.companyName || 'Unnamed Client'}
                               </Link>
                             ) : (
                               <span className="text-sm">{k.project.companyName || 'No Client'}</span>
                             )}
                             <span className="text-sm text-muted-foreground">—</span>
-                            <Link href={`/admin/projects/${k.projectId}`} className="text-sm underline underline-offset-2">
+                            <Link href={`/admin/projects/${k.projectId}`} prefetch={false} className="text-sm underline underline-offset-2">
                               {k.project.title}
                             </Link>
                           </div>
@@ -1123,6 +1123,7 @@ export default function ProjectsDashboardKeyDates({
                                 <Link
                                   key={k.id}
                                   href={`/admin/projects/${k.projectId}`}
+                                  prefetch={false}
                                   className={`flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white min-w-0 max-w-full w-full ${colors.dot} hover:opacity-90`}
                                   title={`${typeLabel(k.type)} — ${k.project.companyName || k.project.title}`}
                                 >
@@ -1147,6 +1148,7 @@ export default function ProjectsDashboardKeyDates({
                                 <Link
                                   key={`${k.docType}:${k.docId}`}
                                   href={href}
+                                  prefetch={false}
                                   className={`flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium text-white min-w-0 max-w-full w-full ${colors.dot} hover:opacity-90`}
                                   title={titleBits.join(' | ')}
                                 >

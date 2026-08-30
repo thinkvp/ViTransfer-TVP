@@ -506,7 +506,7 @@ export default function SalesPaymentsPage() {
                           <td className="px-3 py-2 text-muted-foreground">{p.reference || '—'}</td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {p.clientId ? (
-                              <Link href={`/admin/clients/${p.clientId}`} className="hover:underline">
+                              <Link href={`/admin/clients/${p.clientId}`} prefetch={false} className="hover:underline">
                                 {clientNameById[p.clientId] ?? p.clientId}
                               </Link>
                             ) : (
@@ -515,7 +515,7 @@ export default function SalesPaymentsPage() {
                           </td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {p.invoiceId ? (
-                              <Link href={`/admin/sales/invoices/${p.invoiceId}`} className="hover:underline">
+                              <Link href={`/admin/sales/invoices/${p.invoiceId}`} prefetch={false} className="hover:underline">
                                 {invoiceNumberById[p.invoiceId] ?? p.invoiceId}
                               </Link>
                             ) : (

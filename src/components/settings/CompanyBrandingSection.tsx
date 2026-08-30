@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -72,6 +73,7 @@ export function CompanyBrandingSection({
   setShow,
   hideCollapse,
 }: CompanyBrandingSectionProps) {
+  const router = useRouter()
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoError, setLogoError] = useState<string | null>(null)
   const [logoSuccess, setLogoSuccess] = useState<string | null>(null)
@@ -154,6 +156,10 @@ export function CompanyBrandingSection({
 
       setLogoSuccess('Logo uploaded successfully.')
       onCompanyLogoUploaded()
+      // The root layout renders branding server-side, so its cached RSC payload
+      // still carries the old logo. Drop the client Router Cache (see
+      // experimental.staleTimes in next.config.js) so the change shows immediately.
+      router.refresh()
     } catch {
       setLogoError('Failed to upload logo')
     } finally {
@@ -219,6 +225,9 @@ export function CompanyBrandingSection({
 
       setFaviconSuccess('Favicon uploaded successfully.')
       onCompanyFaviconUploaded()
+      // Favicon and page title come from the root layout's generateMetadata; drop the
+      // cached payload so the new icon is picked up without a manual reload.
+      router.refresh()
     } catch {
       setFaviconError('Failed to upload favicon')
     } finally {

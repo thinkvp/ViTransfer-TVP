@@ -371,13 +371,13 @@ export default function SalesDashboardPage() {
                     {dashboardData.quoteRows.map((r) => (
                       <tr key={r.quote.id} className="border-b border-border/60 last:border-b-0">
                         <td className="py-2 pr-3 font-medium whitespace-nowrap">
-                          <Link href={`/admin/sales/quotes/${encodeURIComponent(r.quote.id)}`} className="hover:underline">
+                          <Link href={`/admin/sales/quotes/${encodeURIComponent(r.quote.id)}`} prefetch={false} className="hover:underline">
                             {r.quote.quoteNumber}
                           </Link>
                         </td>
                         <td className="py-2 pr-3 text-muted-foreground min-w-[120px]">
                           {r.quote.clientId ? (
-                            <Link href={`/admin/clients/${encodeURIComponent(r.quote.clientId)}`} className="hover:underline">
+                            <Link href={`/admin/clients/${encodeURIComponent(r.quote.clientId)}`} prefetch={false} className="hover:underline">
                               {clientNameById[r.quote.clientId] ?? r.quote.clientId}
                             </Link>
                           ) : (
@@ -430,13 +430,13 @@ export default function SalesDashboardPage() {
                     {dashboardData.invoiceRows.map((r) => (
                       <tr key={r.invoice.id} className="border-b border-border/60 last:border-b-0">
                         <td className="py-2 pr-3 font-medium whitespace-nowrap">
-                          <Link href={`/admin/sales/invoices/${encodeURIComponent(r.invoice.id)}`} className="hover:underline">
+                          <Link href={`/admin/sales/invoices/${encodeURIComponent(r.invoice.id)}`} prefetch={false} className="hover:underline">
                             {r.invoice.invoiceNumber}
                           </Link>
                         </td>
                         <td className="py-2 pr-3 text-muted-foreground min-w-[120px]">
                           {r.invoice.clientId ? (
-                            <Link href={`/admin/clients/${encodeURIComponent(r.invoice.clientId)}`} className="hover:underline">
+                            <Link href={`/admin/clients/${encodeURIComponent(r.invoice.clientId)}`} prefetch={false} className="hover:underline">
                               {clientNameById[r.invoice.clientId] ?? r.invoice.clientId}
                             </Link>
                           ) : (
@@ -494,7 +494,7 @@ export default function SalesDashboardPage() {
                       <td className="py-2 pr-3 font-medium whitespace-nowrap">{formatMoney(p.amountCents, getCurrencySymbol(settings.currencyCode))}</td>
                       <td className="py-2 pr-3 text-muted-foreground min-w-[120px]">
                         {p.clientId ? (
-                          <Link href={`/admin/clients/${encodeURIComponent(p.clientId)}`} className="hover:underline">
+                          <Link href={`/admin/clients/${encodeURIComponent(p.clientId)}`} prefetch={false} className="hover:underline">
                             {clientNameById[p.clientId] ?? p.clientId}
                           </Link>
                         ) : (
@@ -503,7 +503,7 @@ export default function SalesDashboardPage() {
                       </td>
                       <td className="py-2 pr-3 text-muted-foreground whitespace-nowrap">
                         {p.invoiceId ? (
-                          <Link href={`/admin/sales/invoices/${encodeURIComponent(p.invoiceId)}`} className="hover:underline">
+                          <Link href={`/admin/sales/invoices/${encodeURIComponent(p.invoiceId)}`} prefetch={false} className="hover:underline">
                             {dashboardData.invoiceNumberById[p.invoiceId] ?? p.invoiceId}
                           </Link>
                         ) : (

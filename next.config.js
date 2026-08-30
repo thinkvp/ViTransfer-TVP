@@ -13,6 +13,22 @@ const nextConfig = {
   experimental: {
     serverActions: {
       bodySizeLimit: '100mb'
+    },
+    // Client Router Cache TTL.
+    //
+    // The root layout calls unstable_noStore() to read branding from the DB, which
+    // makes every route in the app dynamic. Next's default of `dynamic: 0` therefore
+    // makes EVERY prefetch single-use: a <Link> that scrolls back into view refetches
+    // its RSC payload from the origin. That produced dozens of duplicate prefetches per
+    // session and tripped the server's crawl detection (see CHANGELOG 2.5.7).
+    //
+    // Caching these is safe because admin pages are client components that fetch their
+    // own data via /api on mount -- the cached payload is an empty shell, not business
+    // data. Settings saves and logo/favicon uploads call router.refresh(), which clears
+    // this cache so branding changes are not held back by it.
+    staleTimes: {
+      dynamic: 60,
+      static: 300
     }
   },
 
