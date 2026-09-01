@@ -53,7 +53,8 @@ type FeedbackComment = {
   content: string
   authorName: string
   isInternal: boolean
-  timecode: string
+  // null = a "general" comment: feedback on the whole video, not a moment in it.
+  timecode: string | null
   timecodeEnd: string | null
   parentId: string | null
   createdAt: Date

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { canPreviewFile } from '@/lib/document-preview'
 import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
@@ -120,11 +121,19 @@ export async function POST(
       ? inlineAssetUrl
       : (isAudioAsset ? inlineAssetUrl : null)
 
+    // Documents (PDF, Word, spreadsheets, text) are opened by the in-app viewer, which needs
+    // the same token-scoped inline URL that video and audio playback already use — the
+    // content route serves it without a Content-Disposition, so the browser renders rather
+    // than downloads. Kept separate from playbackUrl so the media players are never handed a
+    // document they cannot play.
+    const viewUrl = canPreviewFile(asset.fileName) ? inlineAssetUrl : null
+
     // Return download URL with asset ID parameter
     const response = NextResponse.json({
       url: directAssetUrl,
       ...(previewUrl ? { previewUrl } : {}),
       ...(playbackUrl ? { playbackUrl } : {}),
+      ...(viewUrl ? { viewUrl } : {}),
       ...(hlsUrl ? { hlsUrl } : {}),
     })
     response.headers.set('Cache-Control', 'no-store')

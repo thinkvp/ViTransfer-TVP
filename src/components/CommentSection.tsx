@@ -77,6 +77,30 @@ function parseVideoFileSize(value: unknown): number | null {
 }
 
 
+// Scroll a message list to one comment without touching any ancestor.
+//
+// element.scrollIntoView() walks up the tree and scrolls EVERY scrollable ancestor, and the
+// sidebar card's content wrapper is overflow:hidden — scrollable by script, but with no
+// scrollbar for the user to put it back. Posting a comment therefore nudged the whole
+// sidebar down, pushing the "next version requested" banner and the version-notes header
+// out of view and leaving a blank band above the composer that survived until a refresh.
+// It only bites once the sidebar's header content is tall enough to overflow, which is why
+// an older video (banner + notes) did it every time and a freshly uploaded one never did.
+//
+// Module scope on purpose: keeping it out of the component means handleScrollToComment
+// gains no new component-scope dependency for react-hooks/exhaustive-deps to flag.
+function scrollCommentIntoView(container: HTMLDivElement | null, element: HTMLElement) {
+  if (!container || !container.contains(element)) {
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return
+  }
+  const containerRect = container.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+  // Centre the comment in the list, measured in the list's own scroll space.
+  const offset = (elementRect.top - containerRect.top) - (container.clientHeight - elementRect.height) / 2
+  container.scrollTo({ top: Math.max(0, container.scrollTop + offset), behavior: 'smooth' })
+}
+
 export function CommentSectionView({
   projectId,
   projectSlug,
@@ -466,14 +490,23 @@ export function CommentSectionView({
     }
   }
 
+  /**
+   * Authenticated GET for a comment attachment. The same thread is read by admins (bearer
+   * token) and by share-link visitors (share token), so every attachment request has to
+   * pick its credential the same way — download, voice-note playback and the in-app viewer
+   * all route through here.
+   */
+  const fetchCommentFile = (url: string): Promise<Response> =>
+    isAdminView
+      ? apiFetch(url)
+      : shareToken
+        ? fetch(url, { headers: { Authorization: `Bearer ${shareToken}` } })
+        : fetch(url)
+
   const handleDownloadCommentFile = async (commentId: string, fileId: string, fileName: string) => {
     try {
       const url = `/api/comments/${commentId}/files/${fileId}`
-      const response = isAdminView
-        ? await apiFetch(url)
-        : shareToken
-          ? await fetch(url, { headers: { Authorization: `Bearer ${shareToken}` } })
-          : await fetch(url)
+      const response = await fetchCommentFile(url)
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}))
@@ -514,11 +547,7 @@ export function CommentSectionView({
     if (cached) return cached
 
     const url = `/api/comments/${commentId}/files/${fileId}`
-    const response = isAdminView
-      ? await apiFetch(url)
-      : shareToken
-        ? await fetch(url, { headers: { Authorization: `Bearer ${shareToken}` } })
-        : await fetch(url)
+    const response = await fetchCommentFile(url)
 
     if (!response.ok) {
       return null
@@ -780,6 +809,9 @@ export function CommentSectionView({
     return mergedComments.filter(comment => comment.videoId === selectedVideoId)
   })()
 
+  // A "general" comment carries no timecode: it's about the whole video, not a moment in it.
+  const isGeneralComment = (c: Comment) => !c.timecode
+
   const sortedComments = [...displayComments].sort((a, b) => {
     if (commentSortMode === 'date') {
       // Newest first
@@ -791,6 +823,16 @@ export function CommentSectionView({
       return a.videoId.localeCompare(b.videoId)
     }
 
+    // General comments have no timeline position to sort on, so they're grouped ahead of the
+    // timecoded list rather than being interleaved with genuine first-frame notes by the
+    // 00:00:00:00 fallback below.
+    const aGeneral = isGeneralComment(a)
+    const bGeneral = isGeneralComment(b)
+    if (aGeneral !== bGeneral) return aGeneral ? -1 : 1
+    if (aGeneral && bGeneral) {
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    }
+
     const aTimecode = a.timecode || '00:00:00:00'
     const bTimecode = b.timecode || '00:00:00:00'
     const timecodeCmp = aTimecode.localeCompare(bTimecode)
@@ -799,6 +841,11 @@ export function CommentSectionView({
     // Secondary sort for deterministic ordering
     return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
   })
+
+  const showPlacementDividers =
+    commentSortMode === 'timecode' &&
+    sortedComments.some(isGeneralComment) &&
+    sortedComments.some((c) => !isGeneralComment(c))
 
   // Sort replies under each parent chronologically
   sortedComments.forEach(comment => {
@@ -909,7 +956,7 @@ export function CommentSectionView({
   const handleScrollToComment = (commentId: string) => {
     const element = document.getElementById(`comment-${commentId}`)
     if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      scrollCommentIntoView(messagesContainerRef.current, element)
 
       // Brief highlight effect (flash inside the comment block)
       const block = element.querySelector('[data-comment-block]') as HTMLElement | null
@@ -939,10 +986,29 @@ export function CommentSectionView({
   }
 
   const scrollToInput = () => {
-    const el = document.getElementById('feedback-input')
+    // Several composers can be mounted at once and they all carry #feedback-input: the
+    // share page renders one for mobile (page flow, under the video) and one for the
+    // desktop sidebar, plus the fullscreen overlay's own. Only one of them is displayed,
+    // and getElementById would always hand back the first in document order — the mobile
+    // one — so pick the instance that actually has a box.
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLTextAreaElement>('#feedback-input')
+    )
+    const el = candidates.find((c) => c.getClientRects().length > 0)
     if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    ;(el as HTMLTextAreaElement).focus?.()
+    // Same hazard as scrollCommentIntoView. Only scroll when the composer is genuinely
+    // off-screen (the mobile layout, where it sits in page flow); in the desktop sidebar
+    // it is always visible, and both scrollIntoView and a bare focus() would scroll the
+    // overflow:hidden card instead of doing nothing.
+    const rect = el.getBoundingClientRect()
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+    const fullyVisible = rect.top >= 0 && rect.bottom <= viewportHeight
+    if (!fullyVisible) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    // Always preventScroll: focus's own scrolling would jump instantly and cancel the
+    // smooth scroll above.
+    el.focus?.({ preventScroll: true })
   }
 
   // Allow other UI (e.g. timeline markers) to scroll the feedback pane to a comment.
@@ -1231,6 +1297,8 @@ export function CommentSectionView({
                   allowFileUpload={allowCommentFileUpload}
                   clientUploadQuota={clientUploadQuota}
                   onRefreshUploadQuota={refreshClientUploadQuota}
+                  isGeneralComment={management.isGeneralComment}
+                  onPlacementChange={management.handlePlacementChange}
                   selectedTimestamp={selectedTimestamp}
                   selectedEndTimestamp={selectedEndTimestamp}
                   onClearTimestamp={handleClearTimestamp}
@@ -1628,6 +1696,8 @@ export function CommentSectionView({
             allowFileUpload={allowCommentFileUpload}
             clientUploadQuota={clientUploadQuota}
             onRefreshUploadQuota={refreshClientUploadQuota}
+            isGeneralComment={management.isGeneralComment}
+            onPlacementChange={management.handlePlacementChange}
             selectedTimestamp={selectedTimestamp}
             selectedEndTimestamp={selectedEndTimestamp}
             onClearTimestamp={handleClearTimestamp}
@@ -1788,9 +1858,18 @@ export function CommentSectionView({
             </div>
           ) : (
             <>
-              {sortedComments.map((comment) => {
+              {sortedComments.map((comment, index) => {
                 const isViewerMessage = isAdminView ? comment.isInternal : !comment.isInternal
                 const hasReplies = comment.replies && comment.replies.length > 0
+
+                // Label the two groups, but only when both actually exist and the list is in
+                // timecode order — date order interleaves them by design and needs no headings.
+                const previousComment = index > 0 ? sortedComments[index - 1] : null
+                const placementDivider = !showPlacementDividers
+                  ? null
+                  : (index === 0 || isGeneralComment(previousComment!) !== isGeneralComment(comment))
+                    ? (isGeneralComment(comment) ? 'General notes' : 'Timecoded')
+                    : null
                 const isRecipientAuthored = (c: any) => {
                   if (c?.authorType) return c.authorType === 'RECIPIENT'
                   // Back-compat fallback (less strict): only non-internal.
@@ -1822,6 +1901,16 @@ export function CommentSectionView({
 
                 return (
                   <div key={comment.id}>
+                    {placementDivider && (
+                      <div className={cn(
+                        'mb-2 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground',
+                        index > 0 && 'mt-3'
+                      )}>
+                        <span>{placementDivider}</span>
+                        <span className="h-px flex-1 bg-border" />
+                      </div>
+                    )}
+
                     {/* Parent Bubble that extends with replies */}
                     {!hasReplies ? (
                       // No replies - use normal MessageBubble
@@ -1836,7 +1925,7 @@ export function CommentSectionView({
                         parentComment={null}
                         onReply={() => {
                           handleReply(comment.id, comment.videoId)
-                          if (!hideInput) scrollToInput()
+                          scrollToInput()
                         }}
                         onSeekToTimestamp={handleSeekToTimestamp}
                         onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
@@ -1847,6 +1936,7 @@ export function CommentSectionView({
                         commentsDisabled={commentsDisabled}
                         isViewerMessage={isViewerMessage}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
+                        onFetchCommentFile={(shareToken || isAdminView) ? fetchCommentFile : undefined}
                         onResolveCommentFilePlaybackUrl={(shareToken || isAdminView) ? resolveCommentFilePlaybackUrl : undefined}
                         showAuthorAvatar
                         showColorEdge={false}
@@ -1870,7 +1960,7 @@ export function CommentSectionView({
                         parentComment={null}
                         onReply={() => {
                           handleReply(comment.id, comment.videoId)
-                          if (!hideInput) scrollToInput()
+                          scrollToInput()
                         }}
                         onSeekToTimestamp={handleSeekToTimestamp}
                         onDelete={canDeleteParent ? () => handleDeleteComment(comment.id) : undefined}
@@ -1885,6 +1975,7 @@ export function CommentSectionView({
                         onDeleteReply={allowAnyReplyDelete ? handleDeleteComment : undefined}
                         canDeleteReply={allowAnyReplyDelete ? canDeleteReply : undefined}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
+                        onFetchCommentFile={(shareToken || isAdminView) ? fetchCommentFile : undefined}
                         onResolveCommentFilePlaybackUrl={(shareToken || isAdminView) ? resolveCommentFilePlaybackUrl : undefined}
                         showAuthorAvatar
                         showColorEdge={false}

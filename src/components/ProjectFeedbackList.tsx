@@ -13,6 +13,7 @@ import {
   Download,
   Eye,
   EyeOff,
+  Film,
   FolderKanban,
   Loader2,
   MessageSquare,
@@ -34,7 +35,8 @@ type FeedbackComment = {
   content: string
   authorName: string
   isInternal: boolean
-  timecode: string
+  // null = a "general" comment: feedback on the whole video, not a moment in it.
+  timecode: string | null
   timecodeEnd: string | null
   parentId: string | null
   createdAt: string
@@ -552,16 +554,24 @@ function FeedbackRow({
         <span className="mr-1.5 inline-flex items-center gap-1.5 align-baseline text-xs text-muted-foreground">
           {isReply && <CornerDownRight className="h-3 w-3" />}
           <span className="font-medium text-foreground/80">{comment.authorName}</span>
-          {/* Timecode pill — same styling as the share-page comment timecode */}
-          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-400/50 bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium text-amber-400">
-            <Clock className="h-3 w-3 shrink-0" />
-            <span className="tabular-nums">
-              {formatTimecodeDisplay(comment.timecode, { showFrames: false })}
-              {comment.timecodeEnd
-                ? ` – ${formatTimecodeDisplay(comment.timecodeEnd, { showFrames: false })}`
-                : ''}
+          {/* Placement pill — same styling as the share-page comment pills. A comment with no
+              timecode is "general": feedback on the whole video rather than a moment in it. */}
+          {comment.timecode ? (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-400/50 bg-amber-500/20 px-1.5 py-0.5 text-xs font-medium text-amber-400">
+              <Clock className="h-3 w-3 shrink-0" />
+              <span className="tabular-nums">
+                {formatTimecodeDisplay(comment.timecode, { showFrames: false })}
+                {comment.timecodeEnd
+                  ? ` – ${formatTimecodeDisplay(comment.timecodeEnd, { showFrames: false })}`
+                  : ''}
+              </span>
             </span>
-          </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-sky-400/40 bg-sky-500/15 px-1.5 py-0.5 text-xs font-medium text-sky-300">
+              <Film className="h-3 w-3 shrink-0" />
+              General
+            </span>
+          )}
         </span>
         <span className="wrap-break-word">{comment.content}</span>
         {comment.hasAttachments && (

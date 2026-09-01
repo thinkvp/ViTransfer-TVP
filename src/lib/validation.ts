@@ -208,9 +208,10 @@ export const createCommentSchema = z.object({
   projectId: cuidSchema,
   videoId: cuidSchema, // Required - all comments must be video-specific
   videoVersion: z.number().int().positive().optional(),
+  // null/omitted = a "general" comment: feedback on the whole video, not a moment in it.
   timecode: z.string().refine(isValidTimecode, {
     message: 'Invalid timecode format. Expected HH:MM:SS:FF'
-  }),
+  }).nullable().optional(),
   timecodeEnd: z.string().refine(isValidTimecode, {
     message: 'Invalid timecodeEnd format. Expected HH:MM:SS:FF'
   }).optional(),

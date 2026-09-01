@@ -67,6 +67,20 @@ const nextConfig = {
           "font-src 'self' data: https:",
           `connect-src 'self' blob:${tusOrigin ? ` ${tusOrigin}` : ''} https:`,
           "media-src 'self' blob: https:",
+          // In-app document viewing frames the file itself: a blob: URL in local storage
+          // mode, and a presigned URL served straight from the S3/R2 endpoint in S3 mode so
+          // document bytes never round-trip through the app.
+          //
+          // The S3 origin deliberately is NOT pinned here. headers() is evaluated at BUILD
+          // time and baked into the routes manifest, whereas S3_ENDPOINT is a runtime-only
+          // secret that is absent during `docker build` — pinning it produced a policy that
+          // silently blocked every presigned document in production images while working in
+          // dev. `https:` is what img-src, media-src, font-src and connect-src already allow,
+          // so it does not widen the blast radius, and frame-ancestors 'none' still stops
+          // this app being framed by anyone else.
+          "frame-src 'self' blob: https:",
+          // Keep <object>/<embed> disabled: the document viewer uses <iframe>, and a
+          // plugin-embedded uploaded file is a far larger blast radius than a framed one.
           "object-src 'none'",
           "base-uri 'self'",
           "form-action 'self'",

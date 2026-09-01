@@ -404,6 +404,40 @@ async function main() {
     assert(uploadsRoute.includes('canUpload'), 'uploads route lost its canUpload gate')
   })
 
+  await check('inline file serving never covers script-hosting uploads', async () => {
+    // Serving a client-uploaded .html or .svg inline from our own origin hands the uploader
+    // script execution as us. The policy lives in one place; these are the routes that stream
+    // arbitrary uploads inline and must consult it.
+    const policy = await readSource('src/lib/document-preview.ts')
+    for (const ext of ['svg', 'html', 'xhtml', 'xml']) {
+      assert(
+        new RegExp(`'${ext}'`).test(policy.split('NEVER_INLINE_EXTENSIONS')[1]?.split(']')[0] ?? ''),
+        `${ext} dropped out of NEVER_INLINE_EXTENSIONS`,
+      )
+    }
+
+    // Assert the gate is wired into the disposition decision, not merely imported —
+    // an earlier version of this check passed with the call removed, because the import
+    // line alone satisfied it.
+    const uploadsContent = await readSource('src/app/api/share/uploads/content/[token]/route.ts')
+    const gate = uploadsContent.match(/const\s+forceAttachment\s*=\s*(.+)/)?.[1] ?? ''
+    assert(
+      gate.includes('isNeverInlineFile(') && gate.includes('isDownload'),
+      'share uploads content route no longer decides disposition from the never-inline policy',
+    )
+    assert(
+      /forceAttachment[\s\S]{0,200}attachment;/.test(uploadsContent),
+      'share uploads content route lost its forced-attachment branch',
+    )
+
+    // The generic inline switch used by the admin download routes must refuse the same set.
+    const inlineView = await readSource('src/lib/inline-view.ts')
+    assert(
+      inlineView.includes('canPreviewFile'),
+      'inline-view no longer checks whether a file may be shown inline at all',
+    )
+  })
+
   await check('every notification type the client worker renders is also selectable', async () => {
     // The project query has TWO type filters: an outer `some` that decides whether a
     // project is picked up at all, and an inner select that decides which rows are

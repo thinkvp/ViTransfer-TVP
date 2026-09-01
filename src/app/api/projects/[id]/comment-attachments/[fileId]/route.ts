@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { contentDispositionFor, inlineViewUrlResponse } from '@/lib/inline-view'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs, { createReadStream } from 'fs'
 
@@ -82,6 +83,15 @@ export async function GET(
   const sanitizedFilename = sanitizeFilenameForHeader(file.fileName)
   const contentType = isValidMimeType(file.fileType) ? file.fileType : 'application/octet-stream'
 
+  // In-app viewer asking for a URL: hand back a presigned inline URL so the file renders
+  // straight from S3 instead of being relayed (and buffered) through the app.
+  const viewUrl = await inlineViewUrlResponse(request, {
+    key: storagePath,
+    fileName: file.fileName,
+    contentType,
+  })
+  if (viewUrl) return viewUrl
+
   if (isS3Mode()) {
     const presignedUrl = await s3GetPresignedDownloadUrl(storagePath, 300, file.fileName, contentType)
     return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
@@ -121,7 +131,7 @@ export async function GET(
   return new NextResponse(readableStream, {
     headers: {
       'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${sanitizedFilename}"`,
+      'Content-Disposition': contentDispositionFor(request, file.fileName, sanitizedFilename),
       'Content-Length': stat.size.toString(),
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'private, no-cache',

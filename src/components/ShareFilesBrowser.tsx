@@ -18,6 +18,8 @@ import { cn } from '@/lib/utils'
 import { apiFetch } from '@/lib/api-client'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
+import { DocumentViewerModal } from '@/components/DocumentViewerModal'
+import { canPreviewFile } from '@/lib/document-preview'
 import VideoHoverPreview from '@/components/VideoHoverPreview'
 import { HlsVideo } from '@/components/HlsVideo'
 import type { TransferItem } from '@/lib/transfer-state'
@@ -29,6 +31,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Eye,
   File,
   Files,
   FileArchive,
@@ -100,6 +103,12 @@ type ShareFilesBrowserProps = {
   folderPreviewByName?: Record<string, string | null>
   resolveFilePreviewUrl?: (file: DownloadableFile) => Promise<string | null>
   resolveFilePlaybackUrl?: (file: DownloadableFile) => Promise<string | null>
+  /**
+   * Mints a URL that serves a document inline, for the in-app viewer. Share files are
+   * addressed by a short-lived content token rather than an Authorization header, so the
+   * page owns this; without it, documents stay download-only.
+   */
+  resolveDocumentViewUrl?: (file: DownloadableFile) => Promise<string | null>
   shareSlug?: string
   shareToken?: string | null
   transferItems?: TransferItem[]
@@ -193,6 +202,17 @@ function isLightboxMediaFile(file: DownloadableFile): boolean {
   return false
 }
 
+/**
+ * A document the in-app viewer can render (PDF, Word, spreadsheet, delimited or plain text).
+ *
+ * Images are excluded even though the viewer handles them: they already have a lightbox here
+ * with its own context menu and navigation, and routing them somewhere else would be a
+ * regression, not a feature.
+ */
+function isViewableDocumentFile(file: DownloadableFile): boolean {
+  return getDownloadableFileKind(file) === 'document' && canPreviewFile(file.fileName)
+}
+
 export type ContextMenuItemsProps = {
   contextMenu: { file?: DownloadableFile; group?: DownloadableGroup; imageList?: DownloadableFile[] } | null
   file?: DownloadableFile
@@ -207,6 +227,8 @@ export type ContextMenuItemsProps = {
   openFolder: { name: string; groupType: string } | null
   onPlay: () => void
   onOpenLightbox: () => void
+  /** Present only when the file is a document the in-app viewer can render. */
+  onOpenDocument?: (() => void) | null
   onOpenFolder: () => void
   onSelect: () => void
   onSelectFolder: () => void
@@ -239,6 +261,7 @@ export function ContextMenuItems({
   isVideoAssetFile,
   onPlay,
   onOpenLightbox,
+  onOpenDocument,
   onOpenFolder,
   onSelect,
   onSelectFolder,
@@ -329,6 +352,11 @@ export function ContextMenuItems({
           <Play className="mr-2 h-4 w-4" />
           Open
         </div>
+      ) : onOpenDocument ? (
+        <div className={itemClass} onClick={onOpenDocument}>
+          <Eye className="mr-2 h-4 w-4" />
+          View
+        </div>
       ) : null}
 
       {/* Select / Unselect */}
@@ -402,6 +430,7 @@ export function ShareFilesBrowser({
   folderPreviewByName,
   resolveFilePreviewUrl,
   resolveFilePlaybackUrl,
+  resolveDocumentViewUrl,
   shareSlug,
   shareToken,
   transferItems = [],
@@ -446,6 +475,7 @@ export function ShareFilesBrowser({
   const [lightboxContextMenu, setLightboxContextMenu] = useState<{ x: number; y: number; file: DownloadableFile } | null>(null)
   const lightboxContextMenuRef = useRef<HTMLDivElement | null>(null)
   const [audioLightboxState, setAudioLightboxState] = useState<{ files: DownloadableFile[]; currentIndex: number } | null>(null)
+  const [documentViewerState, setDocumentViewerState] = useState<{ files: DownloadableFile[]; currentIndex: number } | null>(null)
   const [audioPlaybackUrlByFileKey, setAudioPlaybackUrlByFileKey] = useState<Record<string, string | null>>({})
   const [videoPlaybackUrlByFileKey, setVideoPlaybackUrlByFileKey] = useState<Record<string, string | null>>({})
   const [albumViewerState, setAlbumViewerState] = useState<{ images: DownloadableFile[]; currentIndex: number; albumId: string | null } | null>(null)
@@ -1942,6 +1972,17 @@ export function ShareFilesBrowser({
     setAudioLightboxState({ files: source, currentIndex: Math.max(0, index) })
   }, [])
 
+  const openDocumentViewer = useCallback((file: DownloadableFile, fileList: DownloadableFile[]) => {
+    if (!resolveDocumentViewUrl || !isViewableDocumentFile(file)) return
+
+    // Page through the other viewable documents in the same folder, mirroring how the image
+    // lightbox pages through its siblings.
+    const documents = fileList.filter(isViewableDocumentFile)
+    const source = documents.length > 0 ? documents : [file]
+    const index = source.findIndex((f) => getDownloadableFileKey(f) === getDownloadableFileKey(file))
+    setDocumentViewerState({ files: source, currentIndex: Math.max(0, index) })
+  }, [resolveDocumentViewUrl])
+
   const navigateMixedLightbox = useCallback((delta: number) => {
     if (lightboxState) {
       const next = (lightboxState.currentIndex + delta + lightboxState.images.length) % lightboxState.images.length
@@ -2266,6 +2307,7 @@ export function ShareFilesBrowser({
         className={cn(
           'rounded-xl bg-card transition-colors overflow-hidden shadow-sm',
           (isImageFile || isAudioFile) && 'cursor-zoom-in',
+          isViewableDocumentFile(file) && resolveDocumentViewUrl && 'cursor-pointer',
           muteInactiveVideoVersion && 'opacity-55 saturate-0',
           isSelected
             ? 'border-2 border-primary/85 hover:border-primary'
@@ -2273,6 +2315,10 @@ export function ShareFilesBrowser({
         )}
         onClick={() => {
           if (blockInactiveVideoInteraction) return
+          if (isViewableDocumentFile(file) && resolveDocumentViewUrl) {
+            openDocumentViewer(file, imageList)
+            return
+          }
           if (file.type === 'upload-file') return
           if (file.type === 'video' && file.videoId && onOpenVideoVersion) {
             onOpenVideoVersion(file, openFolder?.name || null)
@@ -3564,6 +3610,11 @@ export function ShareFilesBrowser({
                     onOpenVideoVersion(contextMenu.file, openFolder?.name || null)
                   }
                 }}
+                onOpenDocument={
+                  contextMenu.file && resolveDocumentViewUrl && isViewableDocumentFile(contextMenu.file)
+                    ? () => openDocumentViewer(contextMenu.file!, contextMenu.imageList ?? [contextMenu.file!])
+                    : null
+                }
                 onOpenLightbox={() => {
                   if (!contextMenu.file || !contextMenu.imageList) return
                   const kind = getDownloadableFileKind(contextMenu.file)
@@ -3662,6 +3713,34 @@ export function ShareFilesBrowser({
             document.body,
           )
         : null}
+
+      {documentViewerState && resolveDocumentViewUrl ? (
+        <DocumentViewerModal
+          open
+          onOpenChange={(next) => { if (!next) setDocumentViewerState(null) }}
+          files={documentViewerState.files.map((f) => ({
+            id: getDownloadableFileKey(f),
+            fileName: f.fileName,
+            fileSize: f.fileSizeBytes ?? null,
+          }))}
+          index={documentViewerState.currentIndex}
+          onIndexChange={(nextIndex) =>
+            setDocumentViewerState((prev) => (prev ? { ...prev, currentIndex: nextIndex } : prev))
+          }
+          resolveSrc={async (viewerFile) => {
+            const match = documentViewerState.files.find(
+              (f) => getDownloadableFileKey(f) === viewerFile.id
+            )
+            return match ? resolveDocumentViewUrl(match) : null
+          }}
+          onDownload={(viewerFile) => {
+            const match = documentViewerState.files.find(
+              (f) => getDownloadableFileKey(f) === viewerFile.id
+            )
+            if (match) void onDownloadFile(match)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

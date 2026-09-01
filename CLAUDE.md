@@ -74,3 +74,14 @@ Single large Prisma schema (`prisma/schema.prisma`, ~90 models). Major clusters:
 - This is a security-sensitive app (self-hosted, handles client media + invoicing). Preserve existing input validation, sanitization (`src/lib/security/`, `comment-sanitization.ts`, magic-byte file validation in `file-validation.ts`/`asset-validation.ts`), and rate limiting patterns when touching upload/comment/auth paths.
 - `CHANGELOG.md` is actively maintained and large — add entries for user-facing changes; `VERSION` + `package.json` version are kept in sync.
 - Dependency `overrides` in `package.json` pin transitive versions for security — don't loosen them casually.
+
+### Changelog entries: keep them short
+
+The changelog is release notes, not an engineering write-up. Entries had drifted into 2000–3000-word essays per release; that is the failure mode to avoid.
+
+- **One bullet per user-visible change**, opening with a bold plain-English sentence describing what changed from the user's point of view.
+- **Two to four sentences of body, and stop.** A whole release should read in about a minute.
+- Include only: what changed, why it mattered, any behaviour a user must know (a default that changed, a permission that starts off, a manual upgrade step), and `**Schema migration:** <name>` when there is one.
+- Leave out: file lists ("Touches …"), line-by-line implementation narration, verification logs and test counts, rejected alternatives, and root-cause analysis. Those belong in the commit message, the PR, or a code comment — the git history already holds them.
+- A caveat is worth a bullet only if a reader would get something wrong without it. "No schema migration" is not news; omit it.
+

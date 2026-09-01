@@ -606,6 +606,15 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  // Void/un-void flips only the status server-side. Rebase the saved snapshot so
+  // that flip doesn't register as an unsaved edit — Save is disabled on a void
+  // invoice, so the user would have no way to clear the leave-page warning.
+  const rebaseSavedSnapshotStatus = (nextStatus: InvoiceStatus) => {
+    setSavedSnapshot((prev) => {
+      try { return JSON.stringify({ ...JSON.parse(prev), status: nextStatus }) } catch { return prev }
+    })
+  }
+
   // A void invoice keeps its number and record but is excluded from all
   // accounting. Only unpaid invoices (no manual or Stripe payments) may be voided.
   const canVoid = Boolean(invoice) && effectiveStatus !== 'VOID' && countablePayments.length === 0 && stripePayments.length === 0
@@ -622,6 +631,7 @@ export default function InvoiceDetailPage() {
       const next = await voidSalesInvoice(invoice.id, invoice.version)
       setInvoice({ ...next, hasOpenedEmail: invoice.hasOpenedEmail })
       setStatus(next.status)
+      rebaseSavedSnapshotStatus(next.status)
       toast.success('Invoice voided')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to void invoice'
@@ -641,6 +651,7 @@ export default function InvoiceDetailPage() {
       const next = await unvoidSalesInvoice(invoice.id, invoice.version)
       setInvoice({ ...next, hasOpenedEmail: invoice.hasOpenedEmail })
       setStatus(next.status)
+      rebaseSavedSnapshotStatus(next.status)
       toast.success('Invoice restored')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to un-void invoice'

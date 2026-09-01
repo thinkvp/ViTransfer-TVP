@@ -77,6 +77,11 @@ export function useCommentManagement({
   const [newComment, setNewComment] = useState('')
   const [selectedTimestamp, setSelectedTimestamp] = useState<number | null>(0) // Always show; kept in sync with playback
   const [selectedEndTimestamp, setSelectedEndTimestamp] = useState<number | null>(null) // Range end; null = point comment
+  // Placement of the draft comment: false = pinned to a timecode (the default), true =
+  // "general", i.e. about the whole video. Deliberately reset on every send (see
+  // resetDraft) rather than sticky — a client who writes one general note must not then
+  // file the rest of their frame-specific feedback with no timecode attached.
+  const [isGeneralComment, setIsGeneralComment] = useState(false)
   const [commentDraftAnchorTimestamp, setCommentDraftAnchorTimestamp] = useState<number | null>(null)
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -520,6 +525,7 @@ export function useCommentManagement({
 
   const resetDraft = useCallback(() => {
     setNewComment('')
+    setIsGeneralComment(false)
     setHasAutoFilledTimestamp(false)
     setReplyingToCommentId(null)
     setAttachedFiles([])
@@ -620,7 +626,11 @@ export function useCommentManagement({
     // Convert seconds to timecode for API and storage
     const selectedVideo = videos.find(v => v.id === validatedVideoId)
     const fps = selectedVideo?.fps || 24 // Default to 24fps if not available
-    const timecode = selectedTimestamp !== null ? secondsToTimecode(selectedTimestamp, fps) : '00:00:00:00'
+    // A general comment carries no time at all — null, not 00:00:00:00, which would pin it
+    // to the first frame and give it a timeline marker.
+    const timecode = isGeneralComment
+      ? null
+      : selectedTimestamp !== null ? secondsToTimecode(selectedTimestamp, fps) : '00:00:00:00'
 
     const rawCommentInput = newComment
     const finalCommentContent = rawCommentInput.trim() ? rawCommentInput : '*Voice Note*'
@@ -656,6 +666,7 @@ export function useCommentManagement({
     // Snapshot current form state; keep UI visible until uploads finish
     const commentContent = finalCommentContent
     const commentTimestamp = selectedTimestamp
+    const commentIsGeneral = isGeneralComment
     const commentVideoId = validatedVideoId
     const commentParentId = replyingToCommentId
     const filesToUpload: Array<AttachedCommentFile & { uploadIntent: 'attachment' | 'voice-note' }> = [
@@ -674,10 +685,13 @@ export function useCommentManagement({
       // Convert timestamp to timecode for API
       const commentVideo = videos.find(v => v.id === commentVideoId)
       const fps = commentVideo?.fps || 24
-      const commentTimecode = commentTimestamp !== null ? secondsToTimecode(commentTimestamp, fps) : '00:00:00:00'
+      const commentTimecode = commentIsGeneral
+        ? null
+        : commentTimestamp !== null ? secondsToTimecode(commentTimestamp, fps) : '00:00:00:00'
 
-      // Build request body - only include fields with values
-      const commentEndTimecode = selectedEndTimestamp !== null && !commentParentId
+      // Build request body - only include fields with values.
+      // An out-time needs an in-time, so a general comment never carries a range.
+      const commentEndTimecode = selectedEndTimestamp !== null && !commentParentId && !commentIsGeneral
         ? secondsToTimecode(selectedEndTimestamp, fps)
         : undefined
 
@@ -807,6 +821,7 @@ export function useCommentManagement({
       setUploadStatusText('')
       setUploadProgress(null)
       setNewComment(rawCommentInput)
+      setIsGeneralComment(commentIsGeneral)
       setSelectedTimestamp(commentTimestamp)
       setSelectedVideoId(commentVideoId)
       toast.error(`Failed to submit comment: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -819,6 +834,9 @@ export function useCommentManagement({
   const handleReply = (commentId: string, videoId: string) => {
     setReplyingToCommentId(commentId)
     setSelectedVideoId(videoId)
+    // A reply inherits its parent's placement server-side, so the draft's own mode is
+    // meaningless here — clear it so cancelling the reply lands back on the default.
+    setIsGeneralComment(false)
     // A reply threads under its parent and has no timeline position, so drop any
     // active comment-range marker/selection (it doesn't apply to a reply).
     setSelectedEndTimestamp(null)
@@ -847,9 +865,32 @@ export function useCommentManagement({
     )
   }
 
+  // Switch the draft between timecoded and general placement.
+  // General has no timeline position, so it tears down the draft range marker the same way
+  // starting a reply does; switching back re-anchors on the current playhead so the pill
+  // never reappears showing a stale time.
+  const handlePlacementChange = (general: boolean) => {
+    setIsGeneralComment(general)
+    if (general) {
+      setSelectedEndTimestamp(null)
+      setPinned(false)
+      setCommentDraftAnchorTimestamp(null)
+      commentDraftAnchorTimestampRef.current = null
+      window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
+    } else {
+      syncTimestampToCurrentPlayhead()
+    }
+  }
+
   const handleClearTimestamp = () => {
     setSelectedEndTimestamp(null)
     setPinned(false)
+    // Re-anchor the draft on the playhead we're about to follow, the same way resetDraft
+    // does. Without this the anchor keeps the time we just discarded, so the drift check
+    // in shouldShowTimestampReset stays true and the reset control never goes away —
+    // survivable when it was the word "Reset", plainly broken now that it's an X.
+    setCommentDraftAnchorTimestamp(null)
+    commentDraftAnchorTimestampRef.current = null
     // Reset should clear the draft timeline marker and follow the current playhead.
     window.dispatchEvent(new CustomEvent('deactivateCommentRange'))
     syncTimestampToCurrentPlayhead()
@@ -1198,6 +1239,7 @@ export function useCommentManagement({
     hasUnsentComment,
     selectedTimestamp,
     selectedEndTimestamp,
+    isGeneralComment,
     shouldShowTimestampReset,
     selectedVideoId,
     selectedVideoFps,
@@ -1212,6 +1254,7 @@ export function useCommentManagement({
     handleSubmitComment,
     handleReply,
     handleCancelReply,
+    handlePlacementChange,
     handleClearTimestamp,
     handleClearRange,
     handleSetCommentTimes,

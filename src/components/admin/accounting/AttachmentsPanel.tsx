@@ -2,9 +2,11 @@
 
 import { useRef, useState } from 'react'
 import { CameraCaptureButton } from '@/components/admin/accounting/CameraCaptureButton'
+import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { Button } from '@/components/ui/button'
+import { canPreviewFile } from '@/lib/document-preview'
 import { cn } from '@/lib/utils'
-import { Loader2, Paperclip, X } from 'lucide-react'
+import { Download, Loader2, Paperclip, X } from 'lucide-react'
 
 export interface AttachmentItem {
   id: string
@@ -39,6 +41,7 @@ export function AttachmentsPanel({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState('')
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
 
   async function handleFiles(files: File[]) {
     if (files.length === 0) return
@@ -62,17 +65,29 @@ export function AttachmentsPanel({
 
       {items.length > 0 && (
         <div className="space-y-1">
-          {items.map(item => (
+          {items.map((item, itemIndex) => {
+            const previewable = canPreviewFile(item.name)
+            return (
             <div key={item.id} className="flex items-center gap-2 text-sm">
               <Paperclip className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
               <button
                 type="button"
-                onClick={() => void onDownload(item)}
+                onClick={() => previewable ? setViewerIndex(itemIndex) : void onDownload(item)}
                 className="text-primary hover:underline text-sm truncate max-w-xs text-left"
-                title={item.name}
+                title={previewable ? `View ${item.name}` : `Download ${item.name}`}
               >
                 {item.name}
               </button>
+              {previewable && (
+                <button
+                  type="button"
+                  onClick={() => void onDownload(item)}
+                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={`Download ${item.name}`}
+                >
+                  <Download className="w-3.5 h-3.5" />
+                </button>
+              )}
               {onDelete && (
                 <button
                   type="button"
@@ -87,7 +102,8 @@ export function AttachmentsPanel({
                 </button>
               )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -134,6 +150,18 @@ export function AttachmentsPanel({
           </div>
           {error && <p className="text-xs text-destructive mt-1">{error}</p>}
         </div>
+      )}
+
+      {viewerIndex !== null && (
+        <DocumentViewerModal
+          open
+          onOpenChange={open => { if (!open) setViewerIndex(null) }}
+          files={items.map(item => ({ id: item.id, fileName: item.name }))}
+          index={viewerIndex}
+          onIndexChange={setViewerIndex}
+          resolveUrl={file => `/api/admin/accounting/attachments/${file.id}`}
+          onDownload={file => onDownload({ id: file.id, name: file.fileName })}
+        />
       )}
     </div>
   )

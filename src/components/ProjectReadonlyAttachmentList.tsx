@@ -1,8 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { apiFetch } from '@/lib/api-client'
+import { canPreviewFile } from '@/lib/document-preview'
 import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
+import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 
 type AttachmentFile = {
@@ -32,6 +35,7 @@ export function ProjectReadonlyAttachmentList({
   const [files, setFiles] = useState<AttachmentFile[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -121,14 +125,14 @@ export function ProjectReadonlyAttachmentList({
 
   return (
     <div className="space-y-2">
-      {files.map((file) => (
+      {files.map((file, idx) => (
         <div key={file.id} className="flex items-center justify-between gap-3 border rounded-lg bg-card px-3 py-2">
           <div className="flex-1 min-w-0">
             <button
               type="button"
-              onClick={() => void handleDownload(file)}
+              onClick={() => canPreviewFile(file.fileName) ? setViewerIndex(idx) : void handleDownload(file)}
               className="w-full text-sm font-medium truncate text-left text-foreground hover:underline"
-              title={`Download ${file.fileName}`}
+              title={canPreviewFile(file.fileName) ? `View ${file.fileName}` : `Download ${file.fileName}`}
             >
               {file.fileName}
             </button>
@@ -140,8 +144,33 @@ export function ProjectReadonlyAttachmentList({
               ) : null}
             </div>
           </div>
+          {canPreviewFile(file.fileName) && (
+            <button
+              type="button"
+              onClick={() => void handleDownload(file)}
+              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label={`Download ${file.fileName}`}
+            >
+              <Download className="w-4 h-4" />
+            </button>
+          )}
         </div>
       ))}
+
+      {viewerIndex !== null && (
+        <DocumentViewerModal
+          open
+          onOpenChange={(v) => { if (!v) setViewerIndex(null) }}
+          files={files.map((f) => ({ id: f.id, fileName: f.fileName, fileSize: f.fileSize }))}
+          index={viewerIndex}
+          onIndexChange={setViewerIndex}
+          resolveUrl={(file) => files.find((f) => f.id === file.id)?.downloadUrl ?? ''}
+          onDownload={(file) => {
+            const row = files.find((f) => f.id === file.id)
+            if (row) void handleDownload(row)
+          }}
+        />
+      )}
     </div>
   )
 }

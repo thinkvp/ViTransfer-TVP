@@ -5,6 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { contentDispositionFor, inlineViewUrlResponse } from '@/lib/inline-view'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { createWebReadableStream } from '@/lib/stream-utils'
 import fs from 'fs'
@@ -138,6 +139,15 @@ export async function GET(
 
     const safeFilename = sanitizeFilenameForHeader(commentFile.fileName)
 
+    // In-app viewer asking for a URL: hand back a presigned inline URL so the attachment
+    // renders straight from S3 instead of being relayed (and buffered) through the app.
+    const viewUrl = await inlineViewUrlResponse(request, {
+      key: storagePath,
+      fileName: commentFile.fileName,
+      contentType: mimeType,
+    })
+    if (viewUrl) return viewUrl
+
     if (isS3Mode()) {
       const presignedUrl = await s3GetPresignedDownloadUrl(storagePath, 300, commentFile.fileName, mimeType)
       return NextResponse.redirect(presignedUrl, { status: 302, headers: { 'Cache-Control': 'no-store' } })
@@ -183,7 +193,7 @@ export async function GET(
       headers: {
         'Content-Type': mimeType,
         'Content-Length': contentLength.toString(),
-        'Content-Disposition': `attachment; filename="${safeFilename}"`,
+        'Content-Disposition': contentDispositionFor(request, commentFile.fileName, safeFilename),
         'X-Content-Type-Options': 'nosniff',
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache',

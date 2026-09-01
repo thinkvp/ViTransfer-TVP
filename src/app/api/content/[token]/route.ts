@@ -8,6 +8,7 @@ import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl, s3GetPresignedDownload
 // Token-based auth; entity types (VIDEO_ASSET, SHARE_UPLOAD_FILE) resolved via tokens, not projectId.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, getStoredFileRecords, VIDEO_DELIVERY_ROLES, ASSET_DELIVERY_ROLES } from '@/lib/stored-file'
+import { canPreviewFile, getPreviewMimeType } from '@/lib/document-preview'
 import { rateLimit } from '@/lib/rate-limit'
 import { getClientIpAddress } from '@/lib/utils'
 import { getAuthContext } from '@/lib/auth'
@@ -257,6 +258,15 @@ export async function GET(
       filePath = assetPaths.get('ORIGINAL') ?? null
       filename = asset.fileName
       selectedAsset = { fileName: asset.fileName }
+
+      // A document asset can now be framed by the in-app viewer, which needs a real content
+      // type to render: asset.fileType is browser-reported at upload and is routinely
+      // application/octet-stream, which every browser refuses to display. The filename is
+      // authoritative here, exactly as it is for every other preview decision. The
+      // generated-preview branches below set their own type and are unaffected.
+      if (canPreviewFile(asset.fileName)) {
+        contentType = getPreviewMimeType(asset.fileName, asset.fileType)
+      }
 
       if (wantsAssetPlaybackPreview) {
         const previewPath = assetPaths.get('PREVIEW_MP4') ?? null

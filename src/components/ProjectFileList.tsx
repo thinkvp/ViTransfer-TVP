@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { apiDelete, apiFetch } from '@/lib/api-client'
+import { canPreviewFile } from '@/lib/document-preview'
 import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
-import { Trash2 } from 'lucide-react'
+import { Download, Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
@@ -33,6 +35,7 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [pendingDeleteFile, setPendingDeleteFile] = useState<ProjectFile | null>(null)
 
   async function load() {
@@ -135,14 +138,14 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
   return (
     <>
     <div className="space-y-2">
-      {files.map((f) => (
+      {files.map((f, idx) => (
         <div key={f.id} className="flex items-center justify-between gap-3 border rounded-lg bg-card px-3 py-2">
           <div className="flex-1 min-w-0">
             <button
               type="button"
-              onClick={() => void handleDownload(f)}
+              onClick={() => canPreviewFile(f.fileName) ? setViewerIndex(idx) : void handleDownload(f)}
               className="w-full text-sm font-medium truncate text-left text-foreground hover:underline"
-              title={`Download ${f.fileName}`}
+              title={canPreviewFile(f.fileName) ? `View ${f.fileName}` : `Download ${f.fileName}`}
             >
               {f.fileName}
             </button>
@@ -155,6 +158,17 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {canPreviewFile(f.fileName) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void handleDownload(f)}
+                aria-label={`Download ${f.fileName}`}
+              >
+                <Download className="w-4 h-4" />
+              </Button>
+            )}
             {canDelete && !!f.deleteUrl && (
               <Button
                 type="button"
@@ -170,6 +184,24 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
         </div>
       ))}
     </div>
+
+    {viewerIndex !== null && (
+      <DocumentViewerModal
+        open
+        onOpenChange={(v) => { if (!v) setViewerIndex(null) }}
+        files={files.map((f) => ({ id: f.id, fileName: f.fileName, fileSize: f.fileSize, fileType: f.fileType }))}
+        index={viewerIndex}
+        onIndexChange={setViewerIndex}
+        // The list merges project files and email attachments, each of which carries its
+        // own download route, so the URL comes from the row rather than being rebuilt here.
+        resolveUrl={(file) => files.find((f) => f.id === file.id)?.downloadUrl
+          ?? `/api/projects/${projectId}/files/${file.id}`}
+        onDownload={(file) => {
+          const row = files.find((f) => f.id === file.id)
+          if (row) void handleDownload(row)
+        }}
+      />
+    )}
 
     <ConfirmDialog
       open={pendingDeleteFile !== null}

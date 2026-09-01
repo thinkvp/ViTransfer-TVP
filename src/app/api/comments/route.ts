@@ -335,7 +335,9 @@ export async function POST(request: NextRequest) {
 
     // Replies should not create their own timeline marker/time.
     // For replies, inherit the parent comment's timecode (and version).
-    let finalTimecode = timecode
+    // A null timecode is a "general" comment — feedback on the whole video rather than a
+    // moment in it — so it must survive to the create() below rather than defaulting to 0.
+    let finalTimecode: string | null = timecode ?? null
 
     let finalVideoVersion = videoVersion
     if (parentId) {
@@ -413,7 +415,8 @@ export async function POST(request: NextRequest) {
         videoId,
         videoVersion: finalVideoVersion || null,
         timecode: finalTimecode,
-        timecodeEnd: parentId ? null : (timecodeEnd || null),
+        // An out-time needs an in-time: a general comment can never carry a range.
+        timecodeEnd: (parentId || !finalTimecode) ? null : (timecodeEnd || null),
         content: contentValidation.sanitizedContent!,
         authorName: contentValidation.sanitizedAuthorName,
         authorEmail: finalAuthorEmail,

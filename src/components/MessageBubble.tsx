@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Comment } from '@prisma/client'
-import { Clock, Trash2, CornerDownRight, Download, Check, Lock, Pencil } from 'lucide-react'
+import { Clock, Trash2, CornerDownRight, Download, Check, Lock, Pencil, Film } from 'lucide-react'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
 import { CommentFileDisplay } from './FileDisplay'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
@@ -44,6 +44,8 @@ interface MessageBubbleProps {
   onSaveEdit?: (commentId: string, content: string) => Promise<boolean>
   onDownloadCommentFile?: (commentId: string, fileId: string, fileName: string) => Promise<void>
   onResolveCommentFilePlaybackUrl?: (commentId: string, fileId: string) => Promise<string | null>
+  /** Authenticated fetch for attachment bytes (admin bearer or share token). Enables in-app viewing. */
+  onFetchCommentFile?: (url: string) => Promise<Response>
 
   // UI options
   showAuthorAvatar?: boolean
@@ -189,6 +191,7 @@ export default function MessageBubble({
   onSaveEdit,
   onDownloadCommentFile,
   onResolveCommentFilePlaybackUrl,
+  onFetchCommentFile,
   showAuthorAvatar = false,
   showColorEdge = true,
   avatarClassName,
@@ -377,6 +380,15 @@ export default function MessageBubble({
               </button>
             ) : null}
 
+            {/* General comment: no timecode at all, so it gets a placement chip instead of a
+                seek button. Replies inherit their parent's placement and never show either. */}
+            {!isReply && !comment.timecode ? (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap mr-2 align-baseline bg-sky-500/15 text-sky-300 border border-sky-400/40">
+                <Film className="w-3 h-3 shrink-0" />
+                General
+              </span>
+            ) : null}
+
             {editingId !== comment.id ? (
               <span
                 className="whitespace-pre-wrap wrap-break-word"
@@ -406,6 +418,8 @@ export default function MessageBubble({
                   fileName={file.fileName}
                   fileSize={file.fileSize}
                   commentId={comment.id}
+                  siblings={commentRegularFiles}
+                  onFetchFile={onFetchCommentFile}
                   onDownload={
                     onDownloadCommentFile
                       ? async (fileId) => onDownloadCommentFile(comment.id, fileId, file.fileName)
@@ -513,6 +527,8 @@ export default function MessageBubble({
                                 fileName={file.fileName}
                                 fileSize={file.fileSize}
                                 commentId={reply.id}
+                                siblings={replyRegularFiles}
+                                onFetchFile={onFetchCommentFile}
                                 onDownload={
                                   onDownloadCommentFile
                                     ? async (fileId) => onDownloadCommentFile(reply.id, fileId, file.fileName)

@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server'
+import { canPreviewFile, getPreviewMimeType, isNeverInlineFile } from '@/lib/document-preview'
 import { consumeShareUploadAccessToken } from '@/lib/share-upload-access'
 import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { createWebReadableStream } from '@/lib/stream-utils'
@@ -54,10 +55,24 @@ export async function GET(
   }
 
   const size = Math.max(0, Number(access.fileSize || 0))
+
+  // Client-uploaded files are streamed from our own origin, so an uploaded .html or .svg
+  // served inline would execute the uploader's script as us. Those types are forced to
+  // attachment regardless of what was asked for. This is narrower than "not previewable":
+  // videos and audio are unpreviewable but must stay inline for the playback URL to work.
+  const forceAttachment = isDownload || isNeverInlineFile(access.fileName)
+
+  // Prefer the type the filename implies for anything the viewer can render — the stored
+  // fileType is browser-reported at upload and is often octet-stream, which will not render.
+  const contentType = canPreviewFile(access.fileName)
+    ? getPreviewMimeType(access.fileName, access.fileType)
+    : (access.fileType || 'application/octet-stream')
+
   const headers: Record<string, string> = {
-    'Content-Type': access.fileType || 'application/octet-stream',
+    'Content-Type': contentType,
+    'X-Content-Type-Options': 'nosniff',
     'Cache-Control': isImageUpload && !isDownload ? 'private, max-age=300' : 'private, max-age=60',
-    'Content-Disposition': isDownload
+    'Content-Disposition': forceAttachment
       ? `attachment; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(access.fileName)}`
       : `inline; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(access.fileName)}`,
   }

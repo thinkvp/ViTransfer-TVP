@@ -162,7 +162,9 @@ export async function GET(request: NextRequest) {
     else childrenByParentId.set(c.parentId, [c])
   }
 
-  const roots = (allComments as any[]).filter(c => !c.parentId)
+  // An SRT cue needs a time, so general comments (and their reply threads) are not
+  // exportable — they'd all land on a 00:00:00:00 cue and bury the real first-frame notes.
+  const roots = (allComments as any[]).filter(c => !c.parentId && c.timecode)
 
   // Flatten comments in a parent->reply order (pre-order traversal).
   // Each descendant is grouped under the top-level parent's timecode cue.
@@ -195,7 +197,8 @@ export async function GET(request: NextRequest) {
   for (const c of allComments as any[]) {
     if (!c.parentId) continue
     if (!byId.has(c.parentId)) {
-      const tc = c.timecode || '00:00:00:00'
+      if (!c.timecode) continue
+      const tc = c.timecode
       items.push({ row: c, kind: 'reply', groupTimecode: tc })
     }
   }

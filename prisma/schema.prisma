@@ -933,7 +933,10 @@ model Comment {
   videoId      String // All comments must be video-specific
   video        Video  @relation(fields: [videoId], references: [id], onDelete: Cascade)
   videoVersion Int? // track which version this comment was for
-  timecode     String // HH:MM:SS:FF format (e.g., "00:00:32:15" for 32 seconds 15 frames at given FPS)
+  // HH:MM:SS:FF format (e.g., "00:00:32:15" for 32 seconds 15 frames at given FPS).
+  // NULL = a "general" comment: feedback about the whole video rather than a moment in it.
+  // Replies inherit their parent's value, so a reply under a general comment is also NULL.
+  timecode     String?
   timecodeEnd  String? // Optional range end — HH:MM:SS:FF format; when set, comment spans timecode → timecodeEnd
   content      String
   authorName   String? // made optional to allow anonymous comments

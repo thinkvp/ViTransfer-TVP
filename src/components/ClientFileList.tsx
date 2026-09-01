@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { apiDelete, apiFetch } from '@/lib/api-client'
+import { canPreviewFile } from '@/lib/document-preview'
 import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
 import { Download, Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -29,6 +31,7 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
   const [error, setError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [pendingDeleteFile, setPendingDeleteFile] = useState<{ id: string; name: string } | null>(null)
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
 
   async function load() {
     setLoading(true)
@@ -123,10 +126,21 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
   return (
     <>
     <div className="space-y-2">
-      {files.map((f) => (
+      {files.map((f, idx) => (
         <div key={f.id} className="flex items-center justify-between gap-3 border rounded-lg bg-card px-3 py-2">
           <div className="min-w-0">
-            <div className="text-sm font-medium truncate">{f.fileName}</div>
+            {canPreviewFile(f.fileName) ? (
+              <button
+                type="button"
+                onClick={() => setViewerIndex(idx)}
+                className="text-sm font-medium truncate text-left text-primary hover:underline max-w-full"
+                title={`View ${f.fileName}`}
+              >
+                {f.fileName}
+              </button>
+            ) : (
+              <div className="text-sm font-medium truncate">{f.fileName}</div>
+            )}
             <div className="text-xs text-muted-foreground truncate">
               {formatFileSize(Number(f.fileSize))}
               {f.uploadedByName ? ` • ${f.uploadedByName}` : ''}
@@ -152,6 +166,18 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
         </div>
       ))}
     </div>
+
+    {viewerIndex !== null && (
+      <DocumentViewerModal
+        open
+        onOpenChange={(v) => { if (!v) setViewerIndex(null) }}
+        files={files.map((f) => ({ id: f.id, fileName: f.fileName, fileSize: f.fileSize, fileType: f.fileType }))}
+        index={viewerIndex}
+        onIndexChange={setViewerIndex}
+        resolveUrl={(file) => `/api/clients/${clientId}/files/${file.id}`}
+        onDownload={(file) => void handleDownload(file.id, file.fileName)}
+      />
+    )}
 
     <ConfirmDialog
       open={pendingDeleteFile !== null}

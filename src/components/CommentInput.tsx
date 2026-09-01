@@ -6,7 +6,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Input } from './ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
-import { Send, Paperclip, Clock, ChevronDown, Check, Trash2, Keyboard, Mic, Square } from 'lucide-react'
+import { Send, Paperclip, Clock, ChevronDown, Check, Trash2, Keyboard, Mic, Square, MessageSquare, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { FileUploadModal } from './FileUploadModal'
 import { AttachedFileDisplay } from './FileDisplay'
@@ -36,6 +36,11 @@ interface CommentInputProps {
   voiceNoteDraft?: VoiceNoteDraft | null
   onVoiceNoteSelect?: (file: File, durationSeconds: number) => void
   onVoiceNoteClear?: () => void
+
+  // Placement: timecoded (pinned to a moment) vs general (about the whole video).
+  // Omit onPlacementChange to hide the control entirely and keep the timecoded-only bar.
+  isGeneralComment?: boolean
+  onPlacementChange?: (general: boolean) => void
 
   // Timestamp
   selectedTimestamp: number | null
@@ -106,6 +111,8 @@ export default function CommentInput({
   voiceNoteDraft = null,
   onVoiceNoteSelect,
   onVoiceNoteClear,
+  isGeneralComment = false,
+  onPlacementChange,
   selectedTimestamp,
   selectedEndTimestamp = null,
   onClearTimestamp,
@@ -1061,8 +1068,52 @@ export default function CommentInput({
             {/* Replies thread under a parent comment and carry no timeline position,
                 so the comment-time pill doesn't apply while replying — hide it. */}
             {!currentVideoRestricted && !replyingToComment && (
-              <div className="w-full rounded-t-lg border border-input border-b-0 bg-muted/35 px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs">
-                <div className="relative min-w-0" ref={timePopoverRef}>
+              <div className="relative w-full rounded-t-lg border border-input border-b-0 bg-muted/35 px-2.5 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                <div className="flex min-w-0 items-center gap-2">
+                  {/* Placement: a general comment is about the whole video, so it carries no
+                      time at all — selecting it hides the pill rather than greying it, so the
+                      bar can never show a timecode that doesn't apply. */}
+                  {onPlacementChange && (
+                    <div
+                      role="group"
+                      aria-label="Comment placement"
+                      className="inline-flex shrink-0 rounded-md border border-border bg-muted/40 p-0.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onPlacementChange(false)}
+                        aria-pressed={!isGeneralComment}
+                        title="Pin this comment to a moment in the video"
+                        className={cn(
+                          'inline-flex items-center gap-1 rounded px-2 py-1 transition-colors',
+                          !isGeneralComment
+                            ? 'bg-background font-medium text-amber-300 shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <Clock className="h-3 w-3 shrink-0" />
+                        Timecoded
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onPlacementChange(true)}
+                        aria-pressed={isGeneralComment}
+                        title="Comment on the whole video instead"
+                        className={cn(
+                          'inline-flex items-center gap-1 rounded px-2 py-1 transition-colors',
+                          isGeneralComment
+                            ? 'bg-background font-medium text-sky-300 shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        )}
+                      >
+                        <MessageSquare className="h-3 w-3 shrink-0" />
+                        General
+                      </button>
+                    </div>
+                  )}
+
+                  {isGeneralComment ? null : (
+                <div className="min-w-0" ref={timePopoverRef}>
                   <button
                     type="button"
                     onClick={() => setTimePopoverOpen((o) => !o)}
@@ -1199,29 +1250,25 @@ export default function CommentInput({
                     </div>
                   )}
                 </div>
-
-                <div className="flex items-center gap-2 min-w-0">
-                  {showTimestampReset && (
-                    <button
-                      type="button"
-                      onClick={onClearTimestamp}
-                      className="text-xs font-medium text-muted-foreground hover:text-foreground"
-                      title="Reset to original timestamp"
-                    >
-                      Reset
-                    </button>
                   )}
 
-                  {selectedEndTimestamp !== null && (
-                  <button
-                    type="button"
-                    onClick={() => onClearRange?.()}
-                    className="text-xs font-medium text-muted-foreground hover:text-foreground"
-                    title="Reset out time"
-                    aria-label="Reset out time"
-                  >
-                    Reset
-                  </button>
+                  {/* Reset, as an X beside the time it resets rather than a word at the far
+                      end of the bar — the segmented control left no room for a label there.
+                      The two cases are mutually exclusive: showTimestampReset requires no
+                      out-time, and the range reset requires one. */}
+                  {!isGeneralComment && (showTimestampReset || selectedEndTimestamp !== null) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedEndTimestamp !== null) onClearRange?.()
+                        else onClearTimestamp()
+                      }}
+                      className="shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title={selectedEndTimestamp !== null ? 'Reset out time' : 'Reset to original timestamp'}
+                      aria-label={selectedEndTimestamp !== null ? 'Reset out time' : 'Reset to original timestamp'}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   )}
                 </div>
               </div>
@@ -1229,13 +1276,17 @@ export default function CommentInput({
 
             <Textarea
               id="feedback-input"
-              placeholder="Type your message..."
+              placeholder={isGeneralComment && !replyingToComment
+                ? 'Leave a general comment...'
+                : 'Type your message...'}
               value={newComment}
               onChange={(e) => onCommentChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onFocus={() => {
                 // A reply has no timeline position — don't spawn a comment-range marker.
                 if (replyingToComment) return
+                // Neither does a general comment.
+                if (isGeneralComment) return
                 window.dispatchEvent(new CustomEvent('activateCommentRange'))
               }}
               className={cn(

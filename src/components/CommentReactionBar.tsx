@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { SmilePlus } from 'lucide-react'
 import {
   DropdownMenu,
@@ -29,6 +30,11 @@ export function CommentReactionBar({
   canReact = false,
   size = 'default',
 }: CommentReactionBarProps) {
+  // The picker is controlled purely so it can close itself. Its emoji are plain buttons
+  // rather than DropdownMenuItems — the menu-item styling fights the emoji grid — so Radix
+  // never sees a select event and would otherwise leave the popup open after a choice.
+  const [pickerOpen, setPickerOpen] = useState(false)
+
   const items = (reactions || []).filter((reaction) => reaction.count > 0)
   const interactive = canReact && !!onToggle
 
@@ -70,7 +76,7 @@ export function CommentReactionBar({
       })}
 
       {interactive && (
-        <DropdownMenu>
+        <DropdownMenu open={pickerOpen} onOpenChange={setPickerOpen}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -85,14 +91,20 @@ export function CommentReactionBar({
               <SmilePlus className={iconClass} />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="flex w-auto min-w-0 gap-0.5 p-1">
+          {/* data-reaction-picker opts this menu out of the exit animation — see globals.css.
+              Without it Radix leaves the closed menu mounted and visible. */}
+          <DropdownMenuContent data-reaction-picker align="start" className="flex w-auto min-w-0 gap-0.5 p-1">
             {REACTION_EMOJIS.map((emoji) => {
               const active = items.some((item) => item.emoji === emoji && item.viewerReacted)
               return (
                 <button
                   key={emoji}
                   type="button"
-                  onClick={() => onToggle!(emoji, !active)}
+                  onClick={() => {
+                    // Closes on both adding and removing — one click, one decision.
+                    onToggle!(emoji, !active)
+                    setPickerOpen(false)
+                  }}
                   aria-label={active ? `Remove ${emoji} reaction` : `React with ${emoji}`}
                   className={`flex h-7 w-7 items-center justify-center rounded-full text-base leading-none transition-colors hover:bg-accent ${
                     active ? 'bg-primary/15' : ''

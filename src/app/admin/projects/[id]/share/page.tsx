@@ -2188,6 +2188,37 @@ export default function AdminSharePage() {
       return null
     }
   }, [project?.slug, getUploadAccessUrl])
+  /**
+   * Token-scoped URL that serves a document inline, for the in-app viewer.
+   *
+   * Share files carry their capability in the URL rather than an Authorization header, so
+   * the viewer is handed a ready URL instead of fetching through an authenticated route.
+   * Upload files already have one — the content route serves the un-suffixed base URL inline
+   * — and asset documents get `viewUrl` from the download-token route.
+   */
+  const resolveDownloadableViewUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    if (file.type === 'upload-file' && file.uploadFileId) {
+      const entry = await getUploadAccessUrl(file.uploadFileId)
+      // playbackUrl is the base content URL with no ?download=true, which the uploads content
+      // route serves inline. Never fall back to downloadUrl: that forces an attachment
+      // disposition and the frame would render nothing.
+      return entry?.playbackUrl || null
+    }
+
+    if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
+
+    try {
+      const url = `/api/videos/${file.videoId}/assets/${file.assetId}/download-token`
+      const response = await apiFetch(url, { method: 'POST' })
+      if (!response.ok) return null
+      const data = await response.json().catch(() => ({}))
+      return typeof (data as any)?.viewUrl === 'string' && (data as any).viewUrl
+        ? String((data as any).viewUrl)
+        : null
+    } catch {
+      return null
+    }
+  }, [getUploadAccessUrl])
 
   // Photos-only projects: default to first album once albums load.
   useEffect(() => {
@@ -2506,6 +2537,7 @@ export default function AdminSharePage() {
                 folderPreviewByName={folderPreviewByName}
                 resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
                 resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
+                resolveDocumentViewUrl={resolveDownloadableViewUrl}
                 onPreviewTokenExpired={() => requestFilesRefresh(true)}
                 onApproveVideo={handleApproveVideo}
                 shareSlug={String(project.slug)}
@@ -2952,6 +2984,8 @@ function AdminShareFeedbackGrid({
                 allowFileUpload={true}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
+                isGeneralComment={management.isGeneralComment}
+                onPlacementChange={management.handlePlacementChange}
                 selectedTimestamp={management.selectedTimestamp}
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
@@ -3057,6 +3091,8 @@ function AdminShareFeedbackGrid({
                 allowFileUpload={true}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
+                isGeneralComment={management.isGeneralComment}
+                onPlacementChange={management.handlePlacementChange}
                 selectedTimestamp={management.selectedTimestamp}
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}

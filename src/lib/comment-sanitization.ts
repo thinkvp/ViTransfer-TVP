@@ -14,8 +14,17 @@
 import { secondsToTimecode, parseTimecodeInput, isValidTimecode } from './timecode'
 import type { CommentReactionSummary } from './comment-reactions'
 
-// Fallback for legacy comments that still have a numeric timestamp column
-const normalizeTimecode = (comment: any): string => {
+// Fallback for legacy comments that still have a numeric timestamp column.
+//
+// Returns null for "general" comments (feedback on the whole video rather than a moment
+// in it), which is the one case that must NOT fall through to the 00:00:00:00 default —
+// doing so would silently pin every general comment to the first frame.
+const normalizeTimecode = (comment: any): string | null => {
+  // Explicitly general: stored as NULL, and replies inherit that from their parent.
+  if (comment.timecode === null && typeof comment.timestamp !== 'number') {
+    return null
+  }
+
   if (comment.timecode && typeof comment.timecode === 'string') {
     const trimmed = comment.timecode.trim()
 

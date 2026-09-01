@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
+import { inlineViewUrlResponse } from '@/lib/inline-view'
 import { isS3Mode, s3GetPresignedDownloadUrl, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import fs from 'fs'
 import { createReadStream } from 'fs'
@@ -94,6 +95,17 @@ export async function GET(
   const contentType = isValidMimeType(attachment.fileType) ? attachment.fileType : 'application/octet-stream'
 
   const dispositionType = inlineRequested && attachment.isInline ? 'inline' : 'attachment'
+
+  // In-app viewer asking for a URL (`inline=1&view=url`). Unlike `dispositionType` above,
+  // which only lets through the cid: images an email body embeds, this covers any
+  // previewable attachment — but it is a strictly additional branch, so plain `inline=1`
+  // requests from the email renderer keep the exact behaviour they had before.
+  const viewUrl = await inlineViewUrlResponse(request, {
+    key: storagePath,
+    fileName: attachment.fileName,
+    contentType,
+  })
+  if (viewUrl) return viewUrl
 
   // S3 mode: redirect to a presigned URL so the browser downloads directly from R2
   if (isS3Mode()) {

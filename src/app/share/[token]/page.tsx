@@ -2496,6 +2496,41 @@ export default function SharePage() {
       return null
     }
   }, [getUploadAccessUrl, isAdminSession, shareToken])
+  /**
+   * Token-scoped URL that serves a document inline, for the in-app viewer.
+   *
+   * Share files carry their capability in the URL rather than an Authorization header, so
+   * the viewer is handed a ready URL instead of fetching through an authenticated route.
+   * Upload files already have one — the content route serves the un-suffixed base URL inline
+   * — and asset documents get `viewUrl` from the download-token route.
+   */
+  const resolveDownloadableViewUrl = useCallback(async (file: DownloadableFile): Promise<string | null> => {
+    if (file.type === 'upload-file' && file.uploadFileId) {
+      const entry = await getUploadAccessUrl(file.uploadFileId)
+      // playbackUrl is the base content URL with no ?download=true, which the uploads content
+      // route serves inline. Never fall back to downloadUrl: that forces an attachment
+      // disposition and the frame would render nothing.
+      return entry?.playbackUrl || null
+    }
+
+    if (file.type !== 'asset' || !file.videoId || !file.assetId) return null
+
+    try {
+      const url = `/api/videos/${file.videoId}/assets/${file.assetId}/download-token`
+      const response = isAdminSession
+        ? await apiFetch(url, { method: 'POST' })
+        : shareToken
+          ? await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${shareToken}` } })
+          : await fetch(url, { method: 'POST' })
+      if (!response.ok) return null
+      const data = await response.json().catch(() => ({}))
+      return typeof (data as any)?.viewUrl === 'string' && (data as any).viewUrl
+        ? String((data as any).viewUrl)
+        : null
+    } catch {
+      return null
+    }
+  }, [getUploadAccessUrl, isAdminSession, shareToken])
 
   const fetchTokensForVideos = useCallback(async (videos: any[]) => {
     if (project?.enableVideos === false) return videos
@@ -3566,6 +3601,7 @@ export default function SharePage() {
               folderPreviewByName={folderPreviewByName}
               resolveFilePreviewUrl={resolveDownloadablePreviewUrl}
               resolveFilePlaybackUrl={resolveDownloadablePlaybackUrl}
+              resolveDocumentViewUrl={resolveDownloadableViewUrl}
               onPreviewTokenExpired={() => requestFilesRefresh(true)}
               onApproveVideo={handleApproveVideo}
               shareSlug={token}
@@ -4093,6 +4129,8 @@ function ShareFeedbackGrid({
                 allowFileUpload={Boolean(project.allowClientUploadFiles)}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
+                isGeneralComment={management.isGeneralComment}
+                onPlacementChange={management.handlePlacementChange}
                 selectedTimestamp={management.selectedTimestamp}
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}
@@ -4200,6 +4238,8 @@ function ShareFeedbackGrid({
                 allowFileUpload={Boolean(project.allowClientUploadFiles)}
                 clientUploadQuota={management.clientUploadQuota}
                 onRefreshUploadQuota={management.refreshClientUploadQuota}
+                isGeneralComment={management.isGeneralComment}
+                onPlacementChange={management.handlePlacementChange}
                 selectedTimestamp={management.selectedTimestamp}
                 selectedEndTimestamp={management.selectedEndTimestamp}
                 onClearTimestamp={management.handleClearTimestamp}

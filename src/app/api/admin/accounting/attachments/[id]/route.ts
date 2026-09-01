@@ -7,6 +7,7 @@ import { sanitizeFilenameForHeader } from '@/lib/storage'
 // eslint-disable-next-line no-restricted-imports
 import { deleteStoredFile, getStoredFilePath, getStoredFileRecords } from '@/lib/stored-file'
 import { deleteAccountingFile, resolveAccountingFilePath, adjustAccountingFilesBytes, toAccountingS3Key } from '@/lib/accounting/file-storage'
+import { contentDispositionFor, inlineViewUrlResponse } from '@/lib/inline-view'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import fs from 'fs'
 
@@ -46,6 +47,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const filename = sanitizeFilenameForHeader(attachment.originalName)
 
+  // In-app viewer asking for a URL: hand back a presigned inline URL so the receipt renders
+  // straight from R2 rather than being relayed through the app.
+  const viewUrl = await inlineViewUrlResponse(request, {
+    key: toAccountingS3Key(storagePath),
+    fileName: attachment.originalName,
+    contentType,
+  })
+  if (viewUrl) return viewUrl
+
   // S3 mode: redirect to a presigned download URL so bytes go direct from R2 to browser
   if (isS3Mode()) {
     const key = toAccountingS3Key(storagePath)
@@ -68,7 +78,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   return new NextResponse(fileBuffer as unknown as BodyInit, {
     headers: {
       'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Disposition': contentDispositionFor(request, attachment.originalName, filename),
       'Content-Length': fileBuffer.length.toString(),
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'private, no-cache',

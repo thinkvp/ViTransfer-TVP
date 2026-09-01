@@ -6,7 +6,7 @@ import { expireCurrentWindowSession, getAccessToken, isCurrentWindowSessionTimed
 import { attemptRefresh } from '@/lib/api-client'
 import { useUploadManagerActionsOptional } from '@/components/UploadManagerProvider'
 
-const INACTIVITY_TIMEOUT = 30 * 60 * 1000 // 30 minutes
+const INACTIVITY_TIMEOUT = 2 * 60 * 60 * 1000 // 2 hours
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
 const PROACTIVE_REFRESH_BEFORE_MS = 5 * 60 * 1000 // Refresh 5 min before access token expires
 
@@ -101,7 +101,7 @@ export default function SessionMonitor() {
       // An upload in flight is work in progress even when nobody is touching the
       // machine, and it only survives while this page stays mounted — logging out
       // navigates to /login, unmounts UploadManagerProvider and silently abandons
-      // the transfer. Count uploading as activity; the normal 30-minute countdown
+      // the transfer. Count uploading as activity; the normal inactivity countdown
       // restarts from scratch once the queue drains.
       if ((uploadActionsRef.current?.getActiveUploads().length ?? 0) > 0) {
         lastActivityRef.current = Date.now()

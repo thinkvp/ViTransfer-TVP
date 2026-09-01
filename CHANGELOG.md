@@ -5,6 +5,34 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.8] - 2026-08-31
+
+### Added
+
+- **A comment can now be about the whole video instead of a moment in it** — the composer gains a **Timecoded / General** segmented control. Timecoded stays the default and the mode resets to it after every send, deliberately: a client who files one general note should not silently keep filing frame-specific feedback with no timecode. General comments group under a "General notes" divider above the timecoded list, carry a blue **General** chip, and are excluded from SRT export (a cue needs a time). Stored as a null `timecode` rather than a new column. **Schema migration:** `20260831000000_comment_general_placement` (`Comment.timecode` → nullable).
+
+- **Uploaded documents now open in the app instead of only downloading** — PDFs, images, Word files, spreadsheets and text files open in a viewer modal with arrow-key paging through the rest of the list, Download and Open-in-new-tab still one click away. Wired into every surface that accepts a document: accounting attachments, client/user/project files, comment attachments in both admin and share views, email attachments, and the share-page file browser (with a **View** entry in its right-click menu). Anything without a renderer keeps the old download behaviour.
+
+  Comment attachment chips were redesigned around a single click target: a tinted file-type tile, the extension beside the size (`PDF · 45.01 KB`), no separate download button. Images under 2MB show their own thumbnail; above that they fall back to the icon, because comment attachments have no generated thumbnail and a preview means fetching the original.
+
+  In S3 mode the bytes never touch the app — the existing download routes gained `?inline=1&view=url`, returning a short-lived presigned URL with `Content-Disposition: inline` so the browser loads straight from R2. `.docx` and spreadsheets are converted in the browser (mammoth and SheetJS, both dynamically imported), so the feature adds no API surface at all; viewing reuses each surface's already-gated download route rather than introducing a generic preview endpoint that `npm run check:rbac` could not see inside.
+
+  **SVG, HTML/XHTML and XML may never render inline**, enforced in one place and server-side too: a `blob:` URL inherits our origin, so framing one would be stored XSS from any surface accepting client uploads. Converted `.docx` HTML goes through DOMPurify plus an explicit URL pass. The same policy closes a pre-existing hole — `/api/share/uploads/content/[token]` served *every* client upload with `Content-Disposition: inline`; those types are now forced to `attachment`, with `X-Content-Type-Options: nosniff`.
+
+  **SheetJS is installed from `cdn.sheetjs.com`, not npm, and that is deliberate** — the npm-published `xlsx` is frozen at 0.18.5 with two unfixed high-severity advisories that would fail the Dockerfile's audit gate. The trade-off is that **upgrades here are manual**: bump the URL in `package.json`, because `npm outdated` and `npm audit` cannot see it.
+
+  CSP gained `frame-src 'self' blob: https:`. Pinning the origin from `S3_ENDPOINT` was tried and fails in Docker — `headers()` in `next.config.js` is evaluated at build time and that variable is runtime-only, so a dev server cannot catch it.
+
+### Changed
+
+- **The admin app now waits two hours before logging you out for inactivity, up from 30 minutes** — half an hour is shorter than plenty of ordinary interruptions, and this only moves the client-side idle cutoff; the JWT layer and the two-minute warning are unchanged. An upload in flight still counts as activity.
+
+### Fixed
+
+- **Tapping Reply on a phone looked like it did nothing** — on the mobile share layout the composer sits above the thread, so on a long list it was hundreds of pixels off-screen. Replying now scrolls it into view and focuses it. Two bugs: `scrollToInput` was only called when `CommentSection` rendered its own composer, which is the one case the share pages don't use; and every composer carries `id="feedback-input"`, so `getElementById` always found the hidden mobile one. Desktop is deliberately untouched.
+
+- **Voiding an invoice no longer leaves the page claiming you have unsaved changes** — `status` is part of the dirty-check snapshot, and the void handler mirrored the new status into local state without rebasing it, so a successful void read as a pending edit that the disabled Save button could never clear.
+
 ## [2.5.7] - 2026-08-31
 
 ### Fixed

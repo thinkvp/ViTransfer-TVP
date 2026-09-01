@@ -964,6 +964,40 @@ export async function s3GetPresignedDownloadUrl(
   return getSignedUrl(client, command, { expiresIn: expiresInSeconds })
 }
 
+/**
+ * Generate a presigned GET URL for in-app viewing (sets Content-Disposition: inline).
+ *
+ * The document viewer points an <iframe>/<img> straight at this URL so the bytes go from
+ * R2 to the browser without passing through the app — the same reason downloads redirect
+ * rather than proxy. Unlike s3GetPresignedStreamUrl this pins both the disposition and the
+ * filename, so a "save" from inside the browser's PDF viewer keeps the original name
+ * instead of the storage key.
+ *
+ * Callers MUST NOT hand a file type here that can execute script in our origin — the
+ * presigned host is a separate origin, but the same NEVER_INLINE_EXTENSIONS policy in
+ * document-preview.ts applies for consistency.
+ */
+export async function s3GetPresignedInlineUrl(
+  key: string,
+  expiresInSeconds: number,
+  filename: string,
+  contentType?: string
+): Promise<string> {
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ResponseContentDisposition:
+      `inline; filename="${filename.replace(/[^\x20-\x7E]/g, '_')}"; ` +
+      `filename*=UTF-8''${encodeURIComponent(filename)}`,
+    ...(contentType ? { ResponseContentType: contentType } : {}),
+  })
+
+  return getSignedUrl(client, command, { expiresIn: expiresInSeconds })
+}
+
 // ---------------------------------------------------------------------------
 // Server-side multipart upload (for worker output uploads)
 // ---------------------------------------------------------------------------
