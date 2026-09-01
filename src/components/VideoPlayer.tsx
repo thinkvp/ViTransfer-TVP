@@ -3415,7 +3415,7 @@ export default function VideoPlayer({
                 <div className="relative time-display-toggle">
                   <button
                     type="button"
-                    className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0 bg-transparent border-0 cursor-pointer"
+                    className="relative inline-flex items-center justify-center text-muted-foreground/60 hover:text-muted-foreground transition-colors bg-transparent border-0 cursor-pointer pl-8 -ml-8 pr-1 -mr-1 py-2 -my-2"
                     onClick={() => setShowTimeDisplayMenu((v) => !v)}
                     aria-label="Toggle time display format"
                     title="Switch between duration and timecode"
@@ -4420,7 +4420,7 @@ export default function VideoPlayer({
                 <div className="relative time-display-toggle">
                   <button
                     type="button"
-                    className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0 bg-transparent border-0 cursor-pointer"
+                    className="relative inline-flex items-center justify-center text-muted-foreground/60 hover:text-muted-foreground transition-colors bg-transparent border-0 cursor-pointer pl-8 -ml-8 pr-1 -mr-1 py-2 -my-2"
                     onClick={() => setShowTimeDisplayMenu((v) => !v)}
                     aria-label="Toggle time display format"
                     title="Switch between duration and timecode"
@@ -4628,8 +4628,13 @@ export default function VideoPlayer({
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
                 </Button>
 
-                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap truncate min-w-0 flex items-center gap-0.5">
-                  <span>
+                {/* `truncate` belongs on the text, not on this container: it carries
+                    overflow:hidden, and the time-format menu opens upward out of this
+                    16px-tall row, so on the container it clipped the menu away entirely —
+                    invisible and unclickable. The desktop layouts have no truncate here,
+                    which is why this only ever failed on mobile. */}
+                <div className="text-xs text-muted-foreground tabular-nums whitespace-nowrap min-w-0 flex items-center gap-0.5">
+                  <span className="truncate min-w-0">
                     {formatTimestampDisplay(currentTimeSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)} /{' '}
                     {formatTimestampDisplay(effectiveDurationSeconds, effectiveDurationSeconds, effectiveFps, timeDisplayMode)}
                   </span>
@@ -4637,7 +4642,7 @@ export default function VideoPlayer({
                   <div className="relative time-display-toggle shrink-0">
                     <button
                       type="button"
-                      className="inline-flex items-center text-muted-foreground/60 hover:text-muted-foreground transition-colors p-0 bg-transparent border-0 cursor-pointer"
+                      className="relative inline-flex items-center justify-center text-muted-foreground/60 hover:text-muted-foreground transition-colors bg-transparent border-0 cursor-pointer pl-8 -ml-8 pr-1 -mr-1 py-2 -my-2"
                       onClick={() => setShowTimeDisplayMenu((v) => !v)}
                       aria-label="Toggle time display format"
                       title="Switch between duration and timecode"

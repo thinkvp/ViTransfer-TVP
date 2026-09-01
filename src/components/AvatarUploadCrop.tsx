@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { apiFetch } from '@/lib/api-client'
 import { Camera, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { readableTextColorForBackground } from '@/lib/display-color'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface AvatarUploadCropProps {
@@ -66,7 +67,13 @@ function AvatarPreview({
   return (
     <div
       className={cn('rounded-full flex items-center justify-center font-semibold uppercase select-none', className)}
-      style={{ width: size, height: size, backgroundColor: bg, color: '#fff', fontSize: size * 0.33 }}
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: bg,
+        color: readableTextColorForBackground(bg),
+        fontSize: size * 0.33,
+      }}
     >
       {initials}
     </div>

@@ -2,6 +2,7 @@
 
 import Image from 'next/image'
 import { cn } from '@/lib/utils'
+import { readableTextColorForBackground } from '@/lib/display-color'
 import { useEffect, useState } from 'react'
 
 // Matches the user-avatar endpoint URL so we can check existence before rendering the <img>.
@@ -99,6 +100,9 @@ export function InitialsAvatar(props: {
 
   const initials = getUserInitials(name, email)
   const bg = typeof displayColor === 'string' && displayColor.trim() ? displayColor : '#64748b'
+  // Display colours are user-chosen, so white initials can vanish on a pale one —
+  // pick whichever of white/near-black contrasts better with the background.
+  const fg = readableTextColorForBackground(bg)
   const label = (title ?? String(name || email || '').trim()) || 'Recipient'
 
   if (resolvedSrc && !imgError) {
@@ -126,7 +130,7 @@ export function InitialsAvatar(props: {
         'h-7 w-7 rounded-full ring-2 ring-card shadow-sm flex items-center justify-center text-[11px] font-semibold uppercase select-none shrink-0',
         className
       )}
-      style={{ backgroundColor: bg, color: '#fff' }}
+      style={{ backgroundColor: bg, color: fg }}
       title={label}
       aria-label={label}
     >

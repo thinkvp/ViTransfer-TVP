@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import VideoPlayer from '@/components/VideoPlayer'
 
 export const dynamic = 'force-dynamic'
-import CommentInput from '@/components/CommentInput'
+import CommentInput, { MIN_COMMENT_PANEL_WIDTH } from '@/components/CommentInput'
 import { CommentSectionView } from '@/components/CommentSection'
 import VideoSidebar from '@/components/VideoSidebar'
 import { ShareFilesBrowser } from '../../../components/ShareFilesBrowser'
@@ -3808,7 +3808,7 @@ function ShareFeedbackGrid({
 }) {
   const logoSrc = '/api/branding/logo'
   const [isDesktop, setIsDesktop] = useState(false)
-  const [commentsWidth, setCommentsWidth] = useState(420)
+  const [commentsWidth, setCommentsWidth] = useState(MIN_COMMENT_PANEL_WIDTH)
   const [isResizingComments, setIsResizingComments] = useState(false)
 
   const feedbackContainerRef = useRef<HTMLDivElement>(null)
@@ -3852,8 +3852,9 @@ function ShareFeedbackGrid({
     const savedWidth = localStorage.getItem('share_comments_width')
     if (savedWidth) {
       const width = parseInt(savedWidth, 10)
-      if (Number.isFinite(width) && width >= 380 && width <= window.innerWidth * 0.6) {
-        setCommentsWidth(width)
+      if (Number.isFinite(width)) {
+        const maxWidth = Math.max(MIN_COMMENT_PANEL_WIDTH, window.innerWidth * 0.6)
+        setCommentsWidth(Math.max(MIN_COMMENT_PANEL_WIDTH, Math.min(maxWidth, width)))
       }
     }
   }, [isDesktop])
@@ -3866,7 +3867,7 @@ function ShareFeedbackGrid({
 
       const rect = feedbackContainerRef.current.getBoundingClientRect()
       const nextWidth = rect.right - e.clientX
-      const minWidth = 380
+      const minWidth = MIN_COMMENT_PANEL_WIDTH
       const maxWidth = Math.min(rect.width * 0.6, window.innerWidth * 0.6)
 
       const clamped = Math.max(minWidth, Math.min(maxWidth, nextWidth))

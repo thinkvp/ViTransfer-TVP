@@ -17,6 +17,22 @@ import { MAX_FILES_PER_COMMENT } from '@/lib/fileUpload'
 import { cn, formatTimestamp } from '@/lib/utils'
 import { commentHtmlToPlainText } from '@/lib/comment-plain-text'
 
+/**
+ * Narrowest the comment panel may be before the composer's meta bar stops fitting on one row.
+ *
+ * Measured at the bar's widest state — Timecoded selected, a full drop-frame range
+ * ("00:00:47:22 - 00:00:56:04") and the reset attached — with the row cloned to `max-content`
+ * inside the bar so nothing could shrink and give a falsely small answer:
+ *
+ *   segmented control 179 + gap 8 + time pill with reset 215  = 402 row
+ *   + bar padding/border 22 + composer p-4 32 + card border 2  = 458
+ *
+ * Rounded to 480 so the row keeps a little air and survives platform font-metric differences
+ * over 25 characters of timecode. Both share pages clamp their resizable panel to this, so
+ * dragging the panel in can never clip the timecode off the edge.
+ */
+export const MIN_COMMENT_PANEL_WIDTH = 480
+
 type VoiceNoteDraft = {
   file: File
   durationSeconds: number
@@ -820,6 +836,10 @@ export default function CommentInput({
     }
   }
 
+  // The two reset cases are mutually exclusive: showTimestampReset requires no out-time,
+  // and the range reset requires one.
+  const showResetControl = !isGeneralComment && (showTimestampReset || selectedEndTimestamp !== null)
+
   const displayedStartTimestamp = selectedTimestamp ?? 0
   const displayedEndTimestamp = selectedEndTimestamp
   const displayTime = formatForMode(displayedStartTimestamp)
@@ -1092,7 +1112,7 @@ export default function CommentInput({
                         )}
                       >
                         <Clock className="h-3 w-3 shrink-0" />
-                        Timecoded
+                        <span className="max-sm:sr-only">Timecoded</span>
                       </button>
                       <button
                         type="button"
@@ -1107,25 +1127,54 @@ export default function CommentInput({
                         )}
                       >
                         <MessageSquare className="h-3 w-3 shrink-0" />
-                        General
+                        <span className="max-sm:sr-only">General</span>
                       </button>
                     </div>
                   )}
 
                   {isGeneralComment ? null : (
                 <div className="min-w-0" ref={timePopoverRef}>
-                  <button
-                    type="button"
-                    onClick={() => setTimePopoverOpen((o) => !o)}
-                    className="min-w-0 inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/10 px-2 py-0.5 text-amber-300 font-medium tabular-nums hover:bg-amber-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                    title="Edit comment in/out time"
-                    aria-label="Edit comment in and out time"
-                    aria-haspopup="dialog"
-                    aria-expanded={timePopoverOpen}
-                  >
-                    <Clock className="w-3 h-3 shrink-0" />
-                    <span className="truncate">{displayRangeTime}</span>
-                  </button>
+                  {/* The reset sits inside the pill rather than beside it. As a loose glyph it
+                      had only the flex gap between itself and the pill's border, so it read as
+                      cramped however much room was to its right — widening the panel moves the
+                      cluster left but not that gap. Attached, it drops the gap entirely, gains
+                      real padding, and says plainly that it clears *this* time. */}
+                  <div className="inline-flex min-w-0 items-center rounded-full border border-amber-400/40 bg-amber-500/10 text-amber-300">
+                    <button
+                      type="button"
+                      onClick={() => setTimePopoverOpen((o) => !o)}
+                      className={cn(
+                        'min-w-0 inline-flex items-center gap-1 py-0.5 pl-2 font-medium tabular-nums transition-colors',
+                        'hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+                        showResetControl ? 'rounded-l-full pr-1.5' : 'rounded-full pr-2'
+                      )}
+                      title="Edit comment in/out time"
+                      aria-label="Edit comment in and out time"
+                      aria-haspopup="dialog"
+                      aria-expanded={timePopoverOpen}
+                    >
+                      <Clock className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{displayRangeTime}</span>
+                    </button>
+
+                    {showResetControl && (
+                      <>
+                        <span aria-hidden="true" className="h-3.5 w-px shrink-0 bg-amber-400/30" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedEndTimestamp !== null) onClearRange?.()
+                            else onClearTimestamp()
+                          }}
+                          className="shrink-0 rounded-r-full px-1.5 py-1 transition-colors hover:bg-amber-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                          title={selectedEndTimestamp !== null ? 'Reset out time' : 'Reset to original timestamp'}
+                          aria-label={selectedEndTimestamp !== null ? 'Reset out time' : 'Reset to original timestamp'}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </>
+                    )}
+                  </div>
 
                   {timePopoverOpen && (
                     <div
@@ -1252,33 +1301,22 @@ export default function CommentInput({
                 </div>
                   )}
 
-                  {/* Reset, as an X beside the time it resets rather than a word at the far
-                      end of the bar — the segmented control left no room for a label there.
-                      The two cases are mutually exclusive: showTimestampReset requires no
-                      out-time, and the range reset requires one. */}
-                  {!isGeneralComment && (showTimestampReset || selectedEndTimestamp !== null) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (selectedEndTimestamp !== null) onClearRange?.()
-                        else onClearTimestamp()
-                      }}
-                      className="shrink-0 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      title={selectedEndTimestamp !== null ? 'Reset out time' : 'Reset to original timestamp'}
-                      aria-label={selectedEndTimestamp !== null ? 'Reset out time' : 'Reset to original timestamp'}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
                 </div>
               </div>
             )}
 
             <Textarea
               id="feedback-input"
-              placeholder={isGeneralComment && !replyingToComment
-                ? 'Leave a general comment...'
-                : 'Type your message...'}
+              placeholder={
+                // Name the placement only while the control that sets it is on screen: the
+                // meta bar hides for replies and on a restricted video, and neither of those
+                // carries a placement, so they keep the neutral prompt.
+                currentVideoRestricted || replyingToComment
+                  ? 'Type your message...'
+                  : isGeneralComment
+                    ? 'Leave a general comment...'
+                    : 'Leave a timecoded comment...'
+              }
               value={newComment}
               onChange={(e) => onCommentChange(e.target.value)}
               onKeyDown={handleKeyDown}

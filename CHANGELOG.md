@@ -5,11 +5,27 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.9] - 2026-09-01
+
+### Changed
+
+- **Initials avatars now pick their own text colour** — the initials were always white, so a pale display colour left them barely readable. Each avatar now compares the WCAG contrast of white and near-black against its background and uses whichever wins, which flips light and mid-tone colours to dark initials and leaves deep ones white. Nothing to configure, and it is independent of the Accent text setting.
+
+### Fixed
+
+- **The duration/timecode switch on the video player now works on a phone** — tapping the chevron beside the time did nothing on mobile while working fine on desktop. The mobile row puts `truncate` on the container holding the time readout, and `truncate` carries `overflow: hidden`; the menu opens upward out of that 16px-tall row, so it was clipped away entirely — rendered, but invisible and unhittable. Neither desktop layout has `truncate` there, which is exactly why the split. It now sits on the time text itself, so the row still ellipsises and the container no longer clips.
+
+  The chevron's tap target was also only 12×12 CSS pixels — hittable with a cursor, not with a fingertip. Its hit box now extends left over its own time label, which is dead space in the same parent, and barely to the right so the neighbouring controls keep their own taps. Layout is unchanged.
+
+- **A full timecode range no longer gets clipped off the edge of the comment panel** — with the placement control added to the meta bar, a range like `00:00:47:22 - 00:00:56:04` no longer fit beside it. The panel's drag-resize floor (380px) and default (420px) both predate that control and are well short of the 458px the row actually needs, so both become one `MIN_COMMENT_PANEL_WIDTH` of 480, replacing six hard-coded numbers spread across the two share pages. A width saved before this is now clamped into range rather than discarded, and the segmented control drops to icon-only on phones, where the panel can never reach that floor.
+
+  The reset also moved **inside** the time pill, as an attached segment behind a hairline divider. As a loose glyph it had only the 8px flex gap between itself and the pill's border and read as cramped no matter how much room sat to its right — widening the panel moves the cluster left but not that gap. Attached, it reads as part of the control it acts on and its tap target grows from 18px to 24×20.
+
 ## [2.5.8] - 2026-08-31
 
 ### Added
 
-- **A comment can now be about the whole video instead of a moment in it** — the composer gains a **Timecoded / General** segmented control. Timecoded stays the default and the mode resets to it after every send, deliberately: a client who files one general note should not silently keep filing frame-specific feedback with no timecode. General comments group under a "General notes" divider above the timecoded list, carry a blue **General** chip, and are excluded from SRT export (a cue needs a time). Stored as a null `timecode` rather than a new column. **Schema migration:** `20260831000000_comment_general_placement` (`Comment.timecode` → nullable).
+- **A comment can now be about the whole video instead of a moment in it** — the composer gains a **Timecoded / General** segmented control. Timecoded stays the default and the mode resets to it after every send, deliberately: a client who files one general note should not silently keep filing frame-specific feedback with no timecode. The composer names the mode it is in ("Leave a timecoded comment…" / "Leave a general comment…"). General comments group under a "General notes" divider above the timecoded list, carry a blue **General** chip, and are excluded from SRT export (a cue needs a time). Stored as a null `timecode` rather than a new column. **Schema migration:** `20260831000000_comment_general_placement` (`Comment.timecode` → nullable).
 
 - **Uploaded documents now open in the app instead of only downloading** — PDFs, images, Word files, spreadsheets and text files open in a viewer modal with arrow-key paging through the rest of the list, Download and Open-in-new-tab still one click away. Wired into every surface that accepts a document: accounting attachments, client/user/project files, comment attachments in both admin and share views, email attachments, and the share-page file browser (with a **View** entry in its right-click menu). Anything without a renderer keeps the old download behaviour.
 
