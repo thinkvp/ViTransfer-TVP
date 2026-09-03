@@ -11,6 +11,7 @@ import type { SalesLineItem } from '@/lib/sales/types'
 import { cashReceiptReportingAmountCents, listSalesCashReceiptsInRange, listSalesCashReceiptsUpTo } from '@/lib/accounting/sales-cash-receipts'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 import { expenseReportingDateWhere } from '@/lib/accounting/expense-reporting'
+import { reportDateFilter } from '@/lib/accounting/date-range'
 import type {
   ProfitLossReport,
   BalanceSheetReport,
@@ -198,24 +199,25 @@ async function buildPostedBalanceSheetLines(
 
 async function buildDebitNormalProfitLossLines(
   accountType: 'COGS' | 'EXPENSE',
-  startDate: string,
-  endDate: string,
+  startDate: string | null,
+  endDate: string | null,
   taxRatePercent: number,
   basis: 'CASH' | 'ACCRUAL'
 ): Promise<ReportLine[]> {
+  const dateFilter = reportDateFilter(startDate, endDate)
   const [expenses, bankTransactions, journals, splitLines] = await Promise.all([
     // Expense records are the only leg where incurred vs paid dates differ —
     // on cash basis they count when paid (see expense-reporting.ts / gst.ts)
     prisma.expense.findMany({
       where: {
-        ...expenseReportingDateWhere(basis, { gte: startDate, lte: endDate }),
+        ...expenseReportingDateWhere(basis, dateFilter),
         account: { type: accountType },
       },
       include: { account: { select: { code: true, name: true, type: true } } },
     }),
     prisma.bankTransaction.findMany({
       where: {
-        date: { gte: startDate, lte: endDate },
+        date: dateFilter,
         status: 'MATCHED',
         matchType: { in: ['MANUAL'] },
         account: { type: accountType },
@@ -224,14 +226,14 @@ async function buildDebitNormalProfitLossLines(
     }),
     prisma.journalEntry.findMany({
       where: {
-        date: { gte: startDate, lte: endDate },
+        date: dateFilter,
         account: { type: accountType },
       },
       include: { account: { select: { code: true, name: true, type: true } } },
     }),
     prisma.splitLine.findMany({
       where: {
-        bankTransaction: { date: { gte: startDate, lte: endDate }, status: 'MATCHED' },
+        bankTransaction: { date: dateFilter, status: 'MATCHED' },
         account: { type: accountType },
       },
       include: { account: { select: { code: true, name: true, type: true } } },
@@ -330,10 +332,12 @@ function formatProfitLossRows(
 // ── Profit & Loss ─────────────────────────────────────────────────────────────
 
 export async function buildProfitLossReport(
-  startDate: string,
-  endDate: string,
+  startDate: string | null,
+  endDate: string | null,
   basis: 'CASH' | 'ACCRUAL'
 ): Promise<ProfitLossReport> {
+  // Either bound may be null — an all-time P&L leaves both open (see date-range.ts)
+  const dateFilter = reportDateFilter(startDate, endDate)
   // ── Income from SalesInvoices ──────────────────────────────────────────────
   let incomeLines: ReportLine[] = []
   let totalIncomeCents = 0
@@ -424,7 +428,7 @@ export async function buildProfitLossReport(
     const invoices = await prisma.salesInvoice.findMany({
       where: {
         status: { in: ['OPEN', 'SENT', 'PAID', 'PARTIALLY_PAID', 'OVERDUE'] },
-        issueDate: { gte: startDate, lte: endDate },
+        issueDate: dateFilter,
       },
       select: { itemsJson: true, taxEnabled: true },
     })
@@ -453,7 +457,7 @@ export async function buildProfitLossReport(
   const [incomeBankTxns, incomeJournals, incomeSplits] = await Promise.all([
     prisma.bankTransaction.findMany({
       where: {
-        date: { gte: startDate, lte: endDate },
+        date: dateFilter,
         status: 'MATCHED',
         matchType: { in: ['MANUAL'] },
         account: { type: 'INCOME' },
@@ -462,14 +466,14 @@ export async function buildProfitLossReport(
     }),
     prisma.journalEntry.findMany({
       where: {
-        date: { gte: startDate, lte: endDate },
+        date: dateFilter,
         account: { type: 'INCOME' },
       },
       include: { account: { select: { id: true, code: true, name: true, type: true } } },
     }),
     prisma.splitLine.findMany({
       where: {
-        bankTransaction: { date: { gte: startDate, lte: endDate }, status: 'MATCHED' },
+        bankTransaction: { date: dateFilter, status: 'MATCHED' },
         account: { type: 'INCOME' },
       },
       include: { account: { select: { id: true, code: true, name: true, type: true } } },
@@ -521,8 +525,8 @@ export async function buildProfitLossReport(
   const netProfitCents = grossProfitCents - totalExpenseCents
 
   return {
-    fromDate: startDate,
-    toDate: endDate,
+    fromDate: startDate ?? '',
+    toDate: endDate ?? '',
     basis,
     currency: 'AUD',
     income: formatProfitLossRows(incomeLines, incomeAccounts),

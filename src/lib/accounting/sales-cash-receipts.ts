@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import type { SalesLineItem } from '@/lib/sales/types'
+import { reportDateFilter } from '@/lib/accounting/date-range'
 
 type InvoiceSnapshot = {
   itemsJson: unknown
@@ -31,10 +32,10 @@ export function cashReceiptReportingAmountCents(
   return amountCents - Math.round((amountCents * taxCents) / totalCents)
 }
 
-export async function listSalesCashReceiptsInRange(startDate: string, endDate: string): Promise<SalesCashReceipt[]> {
+export async function listSalesCashReceiptsInRange(startDate: string | null, endDate: string | null): Promise<SalesCashReceipt[]> {
   const payments = await prisma.salesPayment.findMany({
     where: {
-      paymentDate: { gte: startDate, lte: endDate },
+      paymentDate: reportDateFilter(startDate, endDate),
       OR: [
         { excludeFromInvoiceBalance: false },
         { source: 'STRIPE' },

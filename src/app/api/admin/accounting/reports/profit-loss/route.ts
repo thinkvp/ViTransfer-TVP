@@ -8,6 +8,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 // GET /api/admin/accounting/reports/profit-loss?from=YYYY-MM-DD&to=YYYY-MM-DD&basis=CASH|ACCRUAL
+// from and to are both optional: omit one for an open-ended range, both for an all-time P&L.
 export async function GET(request: NextRequest) {
   const authResult = await requireApiMenu(request, 'accounting')
   if (authResult instanceof Response) return authResult
@@ -21,19 +22,16 @@ export async function GET(request: NextRequest) {
   if (rateLimitResult) return rateLimitResult
 
   const { searchParams } = new URL(request.url)
-  const from = searchParams.get('from')
-  const to = searchParams.get('to')
+  const from = searchParams.get('from') || null
+  const to = searchParams.get('to') || null
   const requestedBasis = searchParams.get('basis')
 
-  if (!from || !to) {
-    return NextResponse.json({ error: 'from and to query params are required (YYYY-MM-DD)' }, { status: 400 })
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+  const isIsoDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
+  if ((from && !isIsoDate(from)) || (to && !isIsoDate(to))) {
     return NextResponse.json({ error: 'Dates must be in YYYY-MM-DD format' }, { status: 400 })
   }
 
-  if (from > to) {
+  if (from && to && from > to) {
     return NextResponse.json({ error: 'from must be before or equal to to' }, { status: 400 })
   }
 

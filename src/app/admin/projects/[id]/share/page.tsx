@@ -3116,6 +3116,7 @@ function AdminShareFeedbackGrid({
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-b-lg rounded-t-none border-t-0"
                 showTopBorder={false}
+                resizable
               />
             </div>
           ) : null}

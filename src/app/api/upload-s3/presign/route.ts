@@ -45,15 +45,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'S3 storage is not enabled' }, { status: 404 })
   }
 
-  const limited = await rateLimit(
-    request,
-    { windowMs: 60_000, maxRequests: 30, message: 'Too many upload requests' },
-    'upload-s3-presign',
-  )
-  if (limited) return limited
-
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
+
+  // One presign per file, so the ceiling has to clear a full bulk album batch
+  // (300 photos) with room for retries. Scoped by user id, not IP+UA, so one
+  // person's batch can't lock out everyone behind the same NAT.
+  const limited = await rateLimit(
+    request,
+    { windowMs: 60_000, maxRequests: 600, message: 'Too many upload requests' },
+    'upload-s3-presign',
+    authResult.id,
+  )
+  if (limited) return limited
 
   let body: any
   try {

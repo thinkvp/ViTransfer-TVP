@@ -14,6 +14,14 @@ import { BarChart2, Scale } from 'lucide-react'
 import type { ProfitLossReport, BalanceSheetReport, ProfitLossSection, BalanceSheetSection, AccountingSettings } from '@/lib/accounting/types'
 import { cn } from '@/lib/utils'
 
+/** Period heading for a range that may be open at either end ('' = open, both open = all time). */
+function fmtPeriod(from: string, to: string) {
+  if (from && to) return `${from} to ${to}`
+  if (from) return `${from} onwards`
+  if (to) return `Up to ${to}`
+  return 'All time'
+}
+
 function fmtAud(cents: number) {
   const abs = (Math.abs(cents) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return cents < 0 ? `($${abs})` : `$${abs}`
@@ -66,7 +74,9 @@ export default function ReportsPage() {
     setPlLoading(true)
     setPlReport(null)
     try {
-      const params = new URLSearchParams({ from: plFrom, to: plTo, basis: plBasis })
+      const params = new URLSearchParams({ basis: plBasis })
+      if (plFrom) params.set('from', plFrom)
+      if (plTo) params.set('to', plTo)
       const res = await apiFetch(`/api/admin/accounting/reports/profit-loss?${params}`)
       if (res.ok) { const d = await res.json(); setPlReport(d.report) }
     } finally { setPlLoading(false) }
@@ -151,7 +161,7 @@ export default function ReportsPage() {
               sections.push({ title: 'Expenses', columns: plCols, rows: expRows })
               // Net Profit
               sections.push({ columns: plCols, rows: [{ cells: ['Net Profit', fmtAud(plReport.netProfitCents)], bold: true, doubleSeparator: true, color: plReport.netProfitCents >= 0 ? 'green' : 'red' }] })
-              generateReportPdf({ title: 'Profit & Loss', subtitle: `${plReport.fromDate} to ${plReport.toDate} (${plReport.basis}) — All figures ex GST`, sections })
+              generateReportPdf({ title: 'Profit & Loss', subtitle: `${fmtPeriod(plReport.fromDate, plReport.toDate)} (${plReport.basis}) — All figures ex GST`, sections })
             } else if (tab === 'bs' && bsReport) {
               const bsCols = [{ header: 'Account' }, { header: 'Amount', align: 'right' as const, nowrap: true }]
               const mkSection = (title: string, rows: typeof bsReport.assets, total: number, totalLabel: string): PdfSection => ({
@@ -196,6 +206,7 @@ export default function ReportsPage() {
                   to={plTo}
                   onFromChange={setPlFrom}
                   onToChange={setPlTo}
+                  onRangeChange={(f, t) => { setPlFrom(f); setPlTo(t) }}
                 />
                 <div className="space-y-1">
                   <Label>Basis</Label>
@@ -203,7 +214,7 @@ export default function ReportsPage() {
                     {plBasis === 'CASH' ? 'Cash' : 'Accrual'}
                   </div>
                 </div>
-                <Button onClick={runPL} disabled={settingsLoading || plLoading || !plFrom || !plTo} className="self-end">
+                <Button onClick={runPL} disabled={settingsLoading || plLoading} className="self-end">
                   {plLoading ? 'Running…' : 'Run Report'}
                 </Button>
               </div>
@@ -214,7 +225,7 @@ export default function ReportsPage() {
             <Card className="print:shadow-none">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">
-                  Profit &amp; Loss — {plReport.fromDate} to {plReport.toDate}
+                  Profit &amp; Loss — {fmtPeriod(plReport.fromDate, plReport.toDate)}
                   <span className="text-sm font-normal text-muted-foreground ml-2">({plReport.basis})</span>
                 </CardTitle>
               </CardHeader>

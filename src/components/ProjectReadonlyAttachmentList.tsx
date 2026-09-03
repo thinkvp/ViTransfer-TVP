@@ -5,7 +5,6 @@ import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { apiFetch } from '@/lib/api-client'
 import { canPreviewFile } from '@/lib/document-preview'
 import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
-import { Download } from 'lucide-react'
 import { toast } from 'sonner'
 
 type AttachmentFile = {
@@ -144,16 +143,6 @@ export function ProjectReadonlyAttachmentList({
               ) : null}
             </div>
           </div>
-          {canPreviewFile(file.fileName) && (
-            <button
-              type="button"
-              onClick={() => void handleDownload(file)}
-              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label={`Download ${file.fileName}`}
-            >
-              <Download className="w-4 h-4" />
-            </button>
-          )}
         </div>
       ))}
 

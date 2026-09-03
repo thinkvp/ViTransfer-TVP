@@ -151,7 +151,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     request,
     // Bulk photo uploads can create hundreds of records quickly.
     // Scope by admin+album to avoid shared IP/user-agent lockouts and allow batch uploads.
-    { windowMs: 60 * 1000, maxRequests: 300, message: 'Too many upload requests. Please slow down.' },
+    { windowMs: 60 * 1000, maxRequests: 600, message: 'Too many upload requests. Please slow down.' },
     'album-photos-create',
     `${auth.id}:${albumId}`
   )

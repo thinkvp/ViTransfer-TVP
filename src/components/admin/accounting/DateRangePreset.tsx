@@ -56,9 +56,15 @@ interface DateRangePresetProps {
   to: string
   onFromChange: (v: string) => void
   onToChange: (v: string) => void
+  /**
+   * Called instead of onFromChange + onToChange when a preset moves both ends at once.
+   * Required: consumers that fetch imperatively from the single-field callbacks would
+   * otherwise fire two requests, each pairing a new value with a stale counterpart.
+   */
+  onRangeChange: (from: string, to: string) => void
 }
 
-export function DateRangePreset({ from, to, onFromChange, onToChange }: DateRangePresetProps) {
+export function DateRangePreset({ from, to, onFromChange, onToChange, onRangeChange }: DateRangePresetProps) {
   const [preset, setPreset] = useState<DatePreset>(() => inferPreset(from, to))
 
   useEffect(() => {
@@ -69,8 +75,7 @@ export function DateRangePreset({ from, to, onFromChange, onToChange }: DateRang
     setPreset(p)
     if (p !== 'CUSTOM') {
       const dates = getPresetDates(p)!
-      onFromChange(dates.from)
-      onToChange(dates.to)
+      onRangeChange(dates.from, dates.to)
     }
   }
 

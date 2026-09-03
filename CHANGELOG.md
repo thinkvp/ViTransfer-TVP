@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-09-03
+
+### Fixed
+
+- **Bulk photo uploads no longer stop at 30 files with "Too many requests"** — every browser-direct upload asks the server to presign it first, and that endpoint allowed only 30 requests a minute, counted per IP and browser rather than per signed-in user. A 40-photo album drop tripped it a third of the way in and locked that machine out of uploading anything — videos and assets included — for a minute. Presign, complete and abort now count against the user and carry enough headroom for a full 300-file batch plus retries.
+
+- **The Profit & Loss report can now be run for "All time"** — "All time" sat in the report's date dropdown but left **Run Report** permanently greyed out, because the P&L API required both dates. Both ends are now optional, so an all-time or one-sided P&L runs: useful for reconciling lifetime net profit against accumulated profits in equity. The heading and PDF subtitle read "All time" (or "<date> onwards" / "Up to <date>") instead of printing a blank range.
+
+- **Date-range presets on the account ledger no longer show the wrong period (often "No entries found")** — picking a preset such as "All time" changes both ends of the range at once, but the picker reported them as two separate changes and the Chart of Accounts account page fired a fetch on each, so the second request paired the new end date with the *old* start date. Choosing "All time" from "This financial year" actually queried 1 July onwards, and every preset switch could land on a mismatched range or a stale response. Presets now hand both dates over in one callback, so one request goes out with the range that is on screen.
+
 ## [2.5.9] - 2026-09-01
 
 ### Changed

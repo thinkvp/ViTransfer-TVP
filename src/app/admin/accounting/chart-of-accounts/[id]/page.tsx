@@ -370,6 +370,7 @@ export default function AccountLedgerPage() {
                 to={to}
                 onFromChange={v => { setFrom(v); setPage(1); void load(1, v, to, search) }}
                 onToChange={v => { setTo(v); setPage(1); void load(1, from, v, search) }}
+                onRangeChange={(f, t) => { setFrom(f); setTo(t); setPage(1); void load(1, f, t, search) }}
               />
             </div>
           </div>

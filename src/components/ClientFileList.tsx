@@ -6,7 +6,7 @@ import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { canPreviewFile } from '@/lib/document-preview'
 import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
-import { Download, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
@@ -139,7 +139,14 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
                 {f.fileName}
               </button>
             ) : (
-              <div className="text-sm font-medium truncate">{f.fileName}</div>
+              <button
+                type="button"
+                onClick={() => void handleDownload(f.id, f.fileName)}
+                className="text-sm font-medium truncate text-left text-foreground hover:underline max-w-full"
+                title={`Download ${f.fileName}`}
+              >
+                {f.fileName}
+              </button>
             )}
             <div className="text-xs text-muted-foreground truncate">
               {formatFileSize(Number(f.fileSize))}
@@ -150,9 +157,6 @@ export function ClientFileList({ clientId, refreshTrigger }: ClientFileListProps
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button type="button" variant="outline" size="sm" onClick={() => void handleDownload(f.id, f.fileName)}>
-              <Download className="w-4 h-4" />
-            </Button>
             <Button
               type="button"
               variant="outline"

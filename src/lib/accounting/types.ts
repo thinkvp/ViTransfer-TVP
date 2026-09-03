@@ -243,6 +243,7 @@ export interface TaxRate {
 
 // Profit & Loss report
 export interface ProfitLossReport {
+  /** Empty string when the range is open at that end (an all-time report leaves both empty) */
   fromDate: string
   toDate: string
   basis: 'CASH' | 'ACCRUAL'

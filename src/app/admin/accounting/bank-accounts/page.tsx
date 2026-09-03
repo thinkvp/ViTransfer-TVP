@@ -887,6 +887,7 @@ export default function BankAccountsPage() {
               to={txnTo}
               onFromChange={v => { setTxnFrom(v); setTxnPage(1) }}
               onToChange={v => { setTxnTo(v); setTxnPage(1) }}
+              onRangeChange={(f, t) => { setTxnFrom(f); setTxnTo(t); setTxnPage(1) }}
             />
           </div>
 

@@ -286,6 +286,7 @@ export default function ChartOfAccountsPage() {
                 to={balanceTo}
                 onFromChange={v => { setBalanceFrom(v) }}
                 onToChange={v => { setBalanceTo(v) }}
+                onRangeChange={(f, t) => { setBalanceFrom(f); setBalanceTo(t) }}
               />
             </div>
           </div>

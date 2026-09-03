@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client'
+import type { ReportDateFilter } from '@/lib/accounting/date-range'
 
 // Basis-aware date handling for Expense records in reports. Expense records are
 // the one P&L leg where "incurred" (expense.date) and "paid" (the reconciled
@@ -13,7 +14,7 @@ import type { Prisma } from '@prisma/client'
 
 export function expenseReportingDateWhere(
   basis: 'CASH' | 'ACCRUAL',
-  range: { gte?: string; lte: string }
+  range: ReportDateFilter
 ): Prisma.ExpenseWhereInput {
   return basis === 'CASH'
     ? {

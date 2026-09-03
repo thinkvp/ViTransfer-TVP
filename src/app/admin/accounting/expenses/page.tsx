@@ -228,6 +228,7 @@ export default function ExpensesPage() {
                 to={toDate}
                 onFromChange={v => handleFilterChange(() => setFromDate(v))}
                 onToChange={v => handleFilterChange(() => setToDate(v))}
+                onRangeChange={(f, t) => handleFilterChange(() => { setFromDate(f); setToDate(t) })}
               />
             </div>
           </div>

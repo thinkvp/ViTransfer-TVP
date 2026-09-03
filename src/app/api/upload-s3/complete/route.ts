@@ -28,15 +28,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'S3 storage is not enabled' }, { status: 404 })
   }
 
-  const limited = await rateLimit(
-    request,
-    { windowMs: 60_000, maxRequests: 30, message: 'Too many requests' },
-    'upload-s3-complete',
-  )
-  if (limited) return limited
-
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
+
+  // Mirrors the presign ceiling: one completion per file in a bulk batch.
+  const limited = await rateLimit(
+    request,
+    { windowMs: 60_000, maxRequests: 600, message: 'Too many requests' },
+    'upload-s3-complete',
+    authResult.id,
+  )
+  if (limited) return limited
 
   let body: any
   try {

@@ -33,6 +33,12 @@ import { commentHtmlToPlainText } from '@/lib/comment-plain-text'
  */
 export const MIN_COMMENT_PANEL_WIDTH = 480
 
+/**
+ * Resting height of the writing area, and the floor the drag handle clamps to. Matches the
+ * Textarea primitive's own `min-h-[80px]`, which is what governs at `rows={2}`.
+ */
+const DEFAULT_COMPOSER_HEIGHT = 80
+
 type VoiceNoteDraft = {
   file: File
   durationSeconds: number
@@ -105,6 +111,9 @@ interface CommentInputProps {
   containerClassName?: string
   containerStyle?: CSSProperties
   showTopBorder?: boolean
+  // Desktop-only: put a drag handle on the composer's top edge so the writing area can be
+  // pulled taller, taking the space from the comment list above it.
+  resizable?: boolean
 
   // Optional: portal dialogs into a specific container (needed for element fullscreen)
   dialogPortalContainer?: HTMLElement | null
@@ -159,6 +168,7 @@ export default function CommentInput({
   containerClassName,
   containerStyle,
   showTopBorder = true,
+  resizable = false,
   dialogPortalContainer = null,
   isInFullscreenMode = false,
 }: CommentInputProps) {
@@ -180,6 +190,64 @@ export default function CommentInput({
   // the interval below so the Delete button appears/expires without user interaction.
   const [deleteTick, setDeleteTick] = useState(0)
   const [voiceNoteError, setVoiceNoteError] = useState('')
+
+  // Height of the writing area when the user has dragged the top handle. Deliberately plain
+  // state and never written to storage: the composer is meant to come back at its resting
+  // two-row height on every load, and only grow for as long as someone is writing a long note.
+  const [composerHeight, setComposerHeight] = useState<number | null>(null)
+  const [isResizingHeight, setIsResizingHeight] = useState(false)
+  const heightResizeStartRef = useRef<{ pointerY: number; height: number } | null>(null)
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const startHeightResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    heightResizeStartRef.current = {
+      pointerY: e.clientY,
+      // Measure rather than trust state: before the first drag there is no explicit height.
+      height: composerTextareaRef.current?.offsetHeight ?? DEFAULT_COMPOSER_HEIGHT,
+    }
+    setIsResizingHeight(true)
+  }
+
+  useEffect(() => {
+    if (!isResizingHeight) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const start = heightResizeStartRef.current
+      if (!start) return
+      // The handle sits above the box, so dragging up (a smaller clientY) grows it.
+      const next = start.height + (start.pointerY - e.clientY)
+      // Cap at half the viewport so the composer can never push the comments it answers
+      // off the top of the panel.
+      const max = Math.max(DEFAULT_COMPOSER_HEIGHT, Math.round(window.innerHeight * 0.5))
+      setComposerHeight(Math.max(DEFAULT_COMPOSER_HEIGHT, Math.min(max, next)))
+    }
+
+    const handleMouseUp = () => setIsResizingHeight(false)
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizingHeight])
+
+  // A window that shrank below what was dragged would otherwise keep the oversized box.
+  useEffect(() => {
+    if (composerHeight === null) return
+    const onResize = () => {
+      const max = Math.max(DEFAULT_COMPOSER_HEIGHT, Math.round(window.innerHeight * 0.5))
+      setComposerHeight((prev) => (prev !== null && prev > max ? max : prev))
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [composerHeight])
 
   useEffect(() => {
     const hasActiveWindow = () =>
@@ -852,10 +920,34 @@ export default function CommentInput({
       style={containerStyle}
       className={cn(
         'p-4 bg-card shrink-0 min-w-0',
+        resizable ? 'relative' : null,
         showTopBorder ? 'border-t border-border' : null,
         containerClassName
       )}
     >
+      {/* Drag handle straddling the seam between the comment list and the composer. Mouse-only
+          and desktop-only, like the panel's width splitter — a phone has no room to trade. */}
+      {resizable && (
+        <div
+          onMouseDown={startHeightResize}
+          onDoubleClick={() => setComposerHeight(null)}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize the comment box"
+          title="Drag to resize · double-click to reset"
+          className={cn(
+            'group absolute inset-x-0 top-0 z-10 hidden h-2.5 -translate-y-1/2 cursor-row-resize select-none items-center justify-center bg-transparent transition-colors lg:flex',
+            isResizingHeight ? 'bg-primary/15' : 'hover:bg-primary/15'
+          )}
+        >
+          <div
+            className={cn(
+              'h-0.5 w-8 rounded-full bg-primary/45 transition-opacity',
+              isResizingHeight ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            )}
+          />
+        </div>
+      )}
       {/* Restriction Warning */}
       {currentVideoRestricted && restrictionMessage && (
         <div className="mb-3 p-3 bg-warning-visible border-2 border-warning-visible rounded-lg">
@@ -1307,6 +1399,14 @@ export default function CommentInput({
 
             <Textarea
               id="feedback-input"
+              ref={composerTextareaRef}
+              // The primitive animates every property for 200ms, which makes a drag trail the
+              // cursor. Suppress it for the duration of the drag only.
+              style={
+                composerHeight !== null
+                  ? { height: composerHeight, transition: isResizingHeight ? 'none' : undefined }
+                  : undefined
+              }
               placeholder={
                 // Name the placement only while the control that sets it is on screen: the
                 // meta bar hides for replies and on a restricted video, and neither of those

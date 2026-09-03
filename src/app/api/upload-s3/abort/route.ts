@@ -24,15 +24,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'S3 storage is not enabled' }, { status: 404 })
   }
 
-  const limited = await rateLimit(
-    request,
-    { windowMs: 60_000, maxRequests: 60, message: 'Too many requests' },
-    'upload-s3-abort',
-  )
-  if (limited) return limited
-
   const authResult = await requireApiAuth(request)
   if (authResult instanceof Response) return authResult
+
+  // Cancelling a bulk batch fires one abort per queued file.
+  const limited = await rateLimit(
+    request,
+    { windowMs: 60_000, maxRequests: 600, message: 'Too many requests' },
+    'upload-s3-abort',
+    authResult.id,
+  )
+  if (limited) return limited
 
   let body: any
   try {

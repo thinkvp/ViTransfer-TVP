@@ -6,7 +6,7 @@ import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { apiDelete, apiFetch } from '@/lib/api-client'
 import { canPreviewFile } from '@/lib/document-preview'
 import { formatDate, formatDateTime, formatFileSize } from '@/lib/utils'
-import { Download, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
@@ -158,17 +158,6 @@ export function ProjectFileList({ projectId, refreshTrigger, canDelete = true, o
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            {canPreviewFile(f.fileName) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void handleDownload(f)}
-                aria-label={`Download ${f.fileName}`}
-              >
-                <Download className="w-4 h-4" />
-              </Button>
-            )}
             {canDelete && !!f.deleteUrl && (
               <Button
                 type="button"
