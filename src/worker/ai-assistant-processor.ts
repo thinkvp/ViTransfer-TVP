@@ -33,6 +33,7 @@ import { extractAttachmentText } from '../lib/ai/extraction'
 import { attachmentMimeType, type AiRequestAttachment } from '../lib/ai/attachments'
 import type { KnownContact, LibraryItem } from '../lib/ai/proposal-schemas'
 import { getDefaultTaxRatePercent } from '../lib/sales/line-items'
+import { toLocalYmd } from '../lib/project-start-date'
 import { buildHistoricalMappings, loadAccountHistory, suggestAccountFromHistory } from '../lib/accounting/description-match'
 import { processImageBuffer } from '../lib/image-processing'
 
@@ -196,10 +197,20 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
       else contactsByClientId.set(contact.clientId, [contact])
     }
 
-    const today = new Date().toISOString().slice(0, 10)
+    // The worker's own local date (process TZ), not UTC: on UTC+10 an early-morning run
+    // used to hand the model yesterday's date and every document came out backdated.
+    const today = toLocalYmd(new Date()) ?? new Date().toISOString().slice(0, 10)
     const taxRatePercent = await getDefaultTaxRatePercent(prisma)
     const salesSettings = await prisma.salesSettings
-      .findUnique({ where: { id: 'default' }, select: { defaultTerms: true, businessName: true } })
+      .findUnique({
+        where: { id: 'default' },
+        select: {
+          defaultTerms: true,
+          businessName: true,
+          defaultQuoteValidDays: true,
+          defaultInvoiceDueDays: true,
+        },
+      })
       .catch(() => null)
 
     // Safeguard + customisation context from Settings
@@ -333,6 +344,8 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
         today,
         taxRatePercent,
         defaultTerms: salesSettings?.defaultTerms ?? null,
+        defaultQuoteValidDays: salesSettings?.defaultQuoteValidDays ?? 14,
+        defaultInvoiceDueDays: salesSettings?.defaultInvoiceDueDays ?? 7,
         ownCompanyNames,
         team: teamUsers.map((u) => ({ name: u.name || u.email, email: u.email })),
         libraryItems: libraryItems.map((item) => ({
@@ -406,6 +419,15 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
           }
         : null,
       libraryById: new Map(libraryItems.map((item) => [item.id, item])),
+      // Quote/invoice terms always come from Sales Settings, never from the model. A refine
+      // pass opts out (null) so the user can ask it to change the terms on a draft.
+      salesDefaultTerms: refine ? null : (salesSettings?.defaultTerms ?? null),
+      salesDefaultWindows: refine
+        ? null
+        : {
+            quoteValidDays: salesSettings?.defaultQuoteValidDays ?? 14,
+            invoiceDueDays: salesSettings?.defaultInvoiceDueDays ?? 7,
+          },
       portfolioById: new Map(),
       replySignature,
       studioKnowledge: studioInstructions,
@@ -458,7 +480,9 @@ export async function processAiAssistantRequest(job: Job<AiAssistantJob>) {
 async function processExpenseRequest(request: AiAssistantRequest, driver: AiDriver) {
   const requestId = request.id
   const refine = parseRefineInput(request.contextJson)
-  const today = new Date().toISOString().slice(0, 10)
+  // The worker's own local date (process TZ), not UTC: on UTC+10 an early-morning run
+  // used to hand the model yesterday's date and every document came out backdated.
+  const today = toLocalYmd(new Date()) ?? new Date().toISOString().slice(0, 10)
 
   const accounts: ExpenseAccountOption[] = await prisma.account.findMany({
     where: { type: { in: ['EXPENSE', 'COGS'] }, isActive: true },

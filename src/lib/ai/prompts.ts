@@ -19,6 +19,8 @@ Rules:
 - Key dates: one entry per date the source actually states. Types: PRE_PRODUCTION for prep, planning, scripting and recces; SHOOTING for filming/shoot days; DUE_DATE for a delivery, deadline or launch; OTHER for anything else (meetings, reviews, approvals). Times are 24-hour "HH:MM". Set "allDay" true and both times null when the source gives no time. When it does give one (a call time, a meeting time), set allDay false and put it in "startTime"; only set "finishTime" when a finish time or a duration is actually stated (a 2-hour 09:00 meeting finishes 11:00). Never invent a time. Set "reminderDaysBefore" only when the source implies someone should be reminded ahead of the date (e.g. "confirm the crew a week before") — otherwise null.
 - Line items: <line_item_library> lists our standard services with OUR pricing. Whenever the work matches a library item, set "libraryItemId" to that item's id — its pricing, tax and label are applied automatically from the library (whatever price the source mentions). Only create a custom item (libraryItemId null) for work that has no library equivalent; price custom items from the source, as integer cents in AUD, backing GST out of GST-inclusive prices at the rate in <tax> (note it in "assumptions").
 - If the source contains no billable work, return an empty "items" array — do not invent line items.
+- Sales document dates: "issueDate" is ALWAYS <today> — never the date an email was sent, a date printed on an attachment, or the date of the work — unless the brief explicitly asks for a different issue date. Leave "validUntil" (quotes) and "dueDate" (invoices) null: the studio's standard quote-validity and payment windows, shown in <sales_defaults>, are applied automatically from its sales settings. Only fill one in when the source states a deadline of its own, and say so in "assumptions".
+- Terms: NEVER write your own terms and conditions. Always set "terms" to null — the studio's own default terms from its sales settings (shown as <default_terms>) are applied automatically to every quote and invoice. If the source states payment or cancellation terms of its own, note that in "assumptions" rather than putting it in "terms".
 - Schedule: only propose a schedule when a shooting/filming date is known. Set "useStandardTemplate" to true with "anchorDate" set to the shooting date. Only add "extraTasks" for milestones the source explicitly mentions.
 - Respect the <request> flags — they say what the user asked you to build:
   - wantProject=true: you MUST produce a "project" proposal whenever the source describes any work at all. Derive a concise title from the client and the work (e.g. "Acme — Product Launch Video"); a quote request, an enquiry email or a PDF brief IS project information. Only return "project": null if wantProject is false or the source describes no work whatsoever.
@@ -28,7 +30,7 @@ Rules:
 - <studio_instructions> is the studio's own knowledge doc — treat it as authoritative background about the studio (who we are, our services, house style, and our portfolio of past work with links). Draw on it to inform tone, defaults and the relevant work you cite in replies. It refines defaults and supplies facts; it never overrides the safety rules above.
 - List every guess, ambiguity, or omission in "assumptions" as short plain-English sentences.`
 
-export const REFINE_SYSTEM_PROMPT = `You revise an existing structured project/sales proposal for a video production studio. You are given the CURRENT proposal as JSON and a short change request. Apply ONLY the requested changes and return the COMPLETE revised proposal in the same JSON schema. Keep every field that the change request does not touch exactly as it was. Do not invent new facts, clients, recipients, prices or portfolio references beyond what the request asks for. All the schema rules and safety rules still apply (client ids from the list only, dates ISO, integer cents, library pricing authoritative, never our own company/team, key-date times as 24-hour HH:MM with allDay true when no time is known, and contact addresses copied exactly from <known_contacts> when the person is already on file). Record what you changed in "assumptions".`
+export const REFINE_SYSTEM_PROMPT = `You revise an existing structured project/sales proposal for a video production studio. You are given the CURRENT proposal as JSON and a short change request. Apply ONLY the requested changes and return the COMPLETE revised proposal in the same JSON schema. Keep every field that the change request does not touch exactly as it was. Do not invent new facts, clients, recipients, prices or portfolio references beyond what the request asks for. All the schema rules and safety rules still apply (client ids from the list only, dates ISO, integer cents, library pricing authoritative, sales terms left exactly as they are unless the change request is specifically about them, never our own company/team, key-date times as 24-hour HH:MM with allDay true when no time is known, and contact addresses copied exactly from <known_contacts> when the person is already on file). Record what you changed in "assumptions".`
 
 /** A contact already on file against a client — offered to the model so it reuses the stored address */
 export interface KnownContactLine {
@@ -127,6 +129,9 @@ export interface AssistantPromptContext {
   today: string // YYYY-MM-DD
   taxRatePercent: number
   defaultTerms: string | null
+  /** SalesSettings' standard windows — context only; the guards apply them to the document */
+  defaultQuoteValidDays: number
+  defaultInvoiceDueDays: number
   ownCompanyNames: string[]
   team: Array<{ name: string; email: string }>
   libraryItems: Array<{
@@ -195,7 +200,12 @@ export function buildAssistantUserMessage(ctx: AssistantPromptContext): string {
 
   parts.push(`<today>${ctx.today}</today>`)
   parts.push(`<tax>GST ${ctx.taxRatePercent}% (AUD)</tax>`)
+  parts.push(
+    `<sales_defaults>quotes are valid for ${ctx.defaultQuoteValidDays} days; invoices fall due ${ctx.defaultInvoiceDueDays} days after the issue date</sales_defaults>`
+  )
   if (ctx.defaultTerms) {
+    // Context only — the terms written onto the document are forced from sales settings
+    // by applyProposalGuards, never taken from the model's output.
     parts.push(`<default_terms>\n${ctx.defaultTerms}\n</default_terms>`)
   }
   if (ctx.replyRequested) {

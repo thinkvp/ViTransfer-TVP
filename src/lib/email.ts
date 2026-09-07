@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer'
+import type { SendMailOptions, Transporter } from 'nodemailer'
 import { prisma } from './db'
 import { decrypt } from './encryption'
 import { normalizeHexDisplayColor } from './display-color'
@@ -487,7 +488,7 @@ const SMTP_POOL_MAX_CONNECTIONS = Number(process.env.SMTP_POOL_MAX_CONNECTIONS) 
 const SMTP_POOL_MAX_MESSAGES = Number(process.env.SMTP_POOL_MAX_MESSAGES) || 100
 
 // Memoized pooled transporter, rebuilt only when the SMTP connection config changes.
-let pooledTransporter: nodemailer.Transporter | null = null
+let pooledTransporter: Transporter | null = null
 let pooledTransporterSignature: string | null = null
 
 /**
@@ -602,7 +603,7 @@ export async function sendEmail({
   subject: string
   html: string
   text?: string
-  attachments?: nodemailer.SendMailOptions['attachments']
+  attachments?: SendMailOptions['attachments']
 }) {
   try {
     const settings = await getEmailSettings()

@@ -101,6 +101,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
   const [togglingSocialCopiesAlbumId, setTogglingSocialCopiesAlbumId] = useState<string | null>(null)
   const [pendingDisableSocialAlbumId, setPendingDisableSocialAlbumId] = useState<string | null>(null)
   const [pendingDeleteAlbum, setPendingDeleteAlbum] = useState<{ id: string; name: string } | null>(null)
+  const [deletingAlbumId, setDeletingAlbumId] = useState<string | null>(null)
   const [pendingDeletePhoto, setPendingDeletePhoto] = useState<{ albumId: string; photoId: string; fileName: string } | null>(null)
 
   // Reprocess state per album
@@ -373,7 +374,10 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
   const confirmDeleteAlbum = async () => {
     const { id: albumId } = pendingDeleteAlbum!
-    setPendingDeleteAlbum(null)
+    // Deleting a large album clears a lot of storage, so this can take a few seconds.
+    // ConfirmDialog keeps itself open and shows "Please wait…" for as long as we're
+    // awaiting — closing it here first would leave the user staring at an idle row.
+    setDeletingAlbumId(albumId)
     try {
       await apiDelete(`/api/albums/${albumId}`)
 
@@ -412,6 +416,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       }
     } catch (e: any) {
       toast.error(e?.message || 'Failed to delete album')
+    } finally {
+      setDeletingAlbumId(null)
     }
   }
 
@@ -782,14 +788,24 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                           type="button"
                           variant="outline"
                           size="sm"
+                          disabled={deletingAlbumId === album.id}
                           onClick={(e) => {
                             e.preventDefault()
                             e.stopPropagation()
                             void handleDeleteAlbum(album.id, album.name)
                           }}
                         >
-                          <Trash2 className="w-4 h-4 mr-2 text-destructive" />
-                          Delete album
+                          {deletingAlbumId === album.id ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Deleting…
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-4 h-4 mr-2 text-destructive" />
+                              Delete album
+                            </>
+                          )}
                         </Button>
                       )}
                     </div>
@@ -813,14 +829,24 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                           type="button"
                           variant="outline"
                           size="sm"
+                          disabled={deletingAlbumId === album.id}
                           onClick={(e) => {
                             e.preventDefault()
                             e.stopPropagation()
                             void handleDeleteAlbum(album.id, album.name)
                           }}
                         >
-                          <Trash2 className="w-4 h-4 mr-2 text-destructive" />
-                          Delete album
+                          {deletingAlbumId === album.id ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Deleting…
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-4 h-4 mr-2 text-destructive" />
+                              Delete album
+                            </>
+                          )}
                         </Button>
                       )}
                       <Button
@@ -1083,7 +1109,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       open={pendingDeleteAlbum !== null}
       onOpenChange={(v) => { if (!v) setPendingDeleteAlbum(null) }}
       title={`Delete Album "${pendingDeleteAlbum?.name ?? ''}"?`}
-      description="This will delete the album and all its photos. This action cannot be undone."
+      description="This will delete the album and all its photos. Large albums can take a few seconds to clear. This action cannot be undone."
       confirmLabel="Delete"
       onConfirm={confirmDeleteAlbum}
     />

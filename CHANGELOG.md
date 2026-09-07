@@ -5,6 +5,24 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] - Unreleased
+
+### Changed
+
+- **The AI assistant now uses your real sales defaults on the quotes and invoices it drafts** — it was writing its own plausible-sounding terms ("Standard terms apply (cancellation notice…)") and picking its own validity window, ignoring **Sales > Settings**. Terms are now always copied from **Default terms**, and a quote's valid-until / an invoice's due date are worked out from **Default quote valid days** / **Default invoice due days**, the same way the manual New Quote and New Invoice screens do it. A deadline the client's own brief states is kept and flagged in the assistant's assumptions instead. Asking the assistant to revise a draft can still change any of them, and every field on the review card stays editable.
+
+- **Dependency refresh across the stack** — Next.js, React, Prisma, the AWS SDK, Radix and the rest moved to their latest compatible releases, and Nodemailer, the OpenAI and Anthropic SDKs and SimpleWebAuthn each crossed a major version. This clears the three advisories `npm audit` was reporting (xmldom, qs, browserslist) and removes `@types/nodemailer`, which Nodemailer 10 supersedes with its own bundled types. Stripe, BullMQ, ioredis, ESLint and TypeScript were deliberately left where they are — each needs its own migration rather than a version bump.
+
+### Fixed
+
+- **Creating or deleting a quote or invoice no longer reloads the whole admin app** — those four screens navigated by assigning `window.location.href`, which threw away the loaded admin shell and rebuilt it from scratch. On create it also destroyed the "Created quote/invoice …" confirmation mid-navigation, so the toast flashed or never appeared. They now use the router like the rest of the app, so the transition is instant and the confirmation survives it.
+
+- **The AI assistant no longer drafts quotes dated yesterday** — the worker took "today" from the UTC clock, so between midnight and 10am Brisbane time it told the model the previous day's date and every document it drafted was backdated. It now reads the date in the worker's own timezone (the `TZ` in your stack env), and the model is told the issue date is always today rather than a date it found in the email it was given.
+
+- **The close button on the photo viewer no longer sits on top of "Download Full Resolution"** — the dialog's X is pinned to the top-right corner, and the viewer's download buttons ran right up to that same edge, so the X overlapped the button and clicks landed on whichever won. The viewer header now leaves room for it on both the desktop and stacked mobile layouts.
+
+- **Deleting an album no longer looks like nothing is happening** — the confirmation dialog closed the instant you clicked Delete, leaving the album sitting there untouched while the request ran, which on a large album took the better part of a minute. The server was deleting each photo's files one at a time (three storage round trips per photo) before clearing the album folder in bulk anyway; it now reads every file in a single query and does the whole job in two batched deletes. The dialog also stays up and shows that it is working until the album is actually gone.
+
 ## [2.6.0] - 2026-09-03
 
 ### Fixed

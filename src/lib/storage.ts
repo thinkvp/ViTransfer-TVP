@@ -3,7 +3,7 @@ import * as path from 'path'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { mkdir } from 'fs/promises'
-import { isS3Mode, s3UploadFile, s3UploadLocalFile, s3DownloadFile, s3DeleteFile, s3DeleteDirectory, s3MoveDirectory, s3MoveFile, s3CopyFile, s3CopyDirectory, s3GetFileSize, s3ListPrefixSizes } from '@/lib/s3-storage'
+import { isS3Mode, s3UploadFile, s3UploadLocalFile, s3DownloadFile, s3DeleteFile, s3DeleteFiles, s3DeleteDirectory, s3MoveDirectory, s3MoveFile, s3CopyFile, s3CopyDirectory, s3GetFileSize, s3ListPrefixSizes } from '@/lib/s3-storage'
 
 export const STORAGE_ROOT = process.env.STORAGE_ROOT || path.join(process.cwd(), 'uploads')
 
@@ -242,6 +242,31 @@ export async function deleteFile(filePath: string): Promise<void> {
     if (stats.isFile()) {
       await fs.promises.unlink(fullPath)
     }
+  }
+}
+
+/**
+ * Delete many files at once.
+ *
+ * In S3 mode this is a batched DeleteObjects call (1000 keys per request) instead of
+ * one round trip per file; locally the unlinks run in bounded-parallel chunks. Callers
+ * deleting a known set of paths should use this rather than awaiting deleteFile in a loop.
+ *
+ * Files only. Directory-role StoredFile paths (TIMELINE_SPRITES, HLS_SEGMENTS) name a prefix
+ * rather than an object — passing one here silently strands its contents. Route those to
+ * deleteDirectory, the same way deleteStoredFile does.
+ */
+export async function deleteFiles(filePaths: string[]): Promise<void> {
+  if (filePaths.length === 0) return
+
+  if (isS3Mode()) {
+    await s3DeleteFiles(filePaths)
+    return
+  }
+
+  const CONCURRENCY = 32
+  for (let i = 0; i < filePaths.length; i += CONCURRENCY) {
+    await Promise.all(filePaths.slice(i, i + CONCURRENCY).map((filePath) => deleteFile(filePath)))
   }
 }
 

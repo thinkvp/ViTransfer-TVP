@@ -221,6 +221,7 @@ export function AuthProvider({ children, requireAuth = false }: AuthProviderProp
     // - Clears any cached authenticated pages
     // - Triggers middleware check immediately
     // - More reliable than soft navigation
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- the full reload is the point; see above
     window.location.href = '/login'
   }
 

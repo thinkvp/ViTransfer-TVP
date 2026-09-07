@@ -403,7 +403,7 @@ export default function QuoteDetailPage() {
     setShowDeleteQuoteConfirm(false)
     try {
       await deleteSalesQuote(quote.id)
-      window.location.href = '/admin/sales/quotes'
+      router.push('/admin/sales/quotes')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to delete quote'
       toast.error(msg)

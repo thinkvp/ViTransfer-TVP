@@ -3364,8 +3364,9 @@ export function ShareFilesBrowser({
             <DialogContent className="max-w-none w-[95vw] h-[95vh] flex flex-col" title="Album photo viewer">
               {viewerFile && viewerSrc ? (
                 <div className="flex-1 min-h-0 flex flex-col gap-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div className="min-w-0">
+                  {/* pr-9 keeps the header clear of the dialog's absolutely positioned close button */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:pr-9">
+                    <div className="min-w-0 pr-9 sm:pr-0">
                       <p className="text-sm text-muted-foreground">
                         This is a low resolution preview. Use the buttons to download the original versions.
                       </p>

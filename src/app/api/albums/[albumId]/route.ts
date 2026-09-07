@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
-import { deleteDirectory, deleteFile, moveDirectory, moveFile } from '@/lib/storage'
-import { renameStoredPaths, updateStoredFilePath, getStoredFileRecords, countStoredFilesByPath, deleteStoredFilesByCriteria, getStoredFileAggregate } from '@/lib/stored-file'
+import { deleteDirectory, deleteFiles, moveDirectory, moveFile } from '@/lib/storage'
+import { renameStoredPaths, updateStoredFilePath, getStoredFileRecords, findSharedStoragePaths, deleteStoredFilesByCriteria, getStoredFileAggregate } from '@/lib/stored-file'
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -278,41 +278,55 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       }
     }
 
-    // Best-effort: delete physical files via StoredFile
-    for (const photo of album.photos) {
-      try {
-        const storedFiles = await getStoredFileRecords('ALBUM_PHOTO', [photo.id], {
-          select: { storagePath: true },
-        })
-        for (const sf of storedFiles) {
-          const sharedCount = await countStoredFilesByPath(sf.storagePath, { excludeEntityType: 'ALBUM_PHOTO', excludeEntityId: photo.id })
-          if (sharedCount === 0) {
-            await deleteFile(sf.storagePath)
-          }
-        }
+    const photoIds = album.photos.map(p => p.id)
+    const projectStoragePath = album.project.storagePath
+      || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
+    const albumStorageRoot = buildAlbumStorageRoot(
+      projectStoragePath,
+      album.storageFolderName || album.name || album.id,
+    )
 
-        // StoredFile already handles all paths — no per-field deletion needed
-      } catch {
-        // Ignore storage errors; DB is source of truth
-      }
+    // Best-effort: delete physical files via StoredFile.
+    //
+    // Two queries and two bulk deletes for the whole album. Originals and ZIPs sit under
+    // the album folder, so deleteDirectory clears them in batched passes; only the preview
+    // tree (thumbnails/social copies, keyed by photo id outside the album folder) needs an
+    // explicit key list. Doing this per photo cost three round trips each, which is what
+    // made deleting a large album take upwards of a minute.
+    try {
+      const storedFiles = await getStoredFileRecords('ALBUM_PHOTO', photoIds, {
+        select: { storagePath: true },
+      })
+      const paths = Array.from(
+        new Set(storedFiles.map((sf) => sf.storagePath as string).filter(Boolean)),
+      )
+      // A path still referenced by an entity outside this album must survive. Photos of
+      // *this* album don't count — they are all going away together.
+      const sharedPaths = await findSharedStoragePaths(paths, {
+        excludeEntityType: 'ALBUM_PHOTO',
+        excludeEntityIds: photoIds,
+      })
+      const albumRootPrefix = `${albumStorageRoot}/`
+      const previewTreePaths = paths.filter(
+        (storagePath) => !sharedPaths.has(storagePath) && !storagePath.startsWith(albumRootPrefix),
+      )
+
+      await Promise.all([
+        deleteFiles(previewTreePaths),
+        deleteDirectory(albumStorageRoot),
+      ])
+    } catch (err) {
+      // Ignore storage errors; DB is source of truth
+      console.warn('[album-delete] Storage cleanup failed (non-fatal):', err)
     }
 
     // Delete DB records (in case cascade isn't configured)
     await prisma.albumPhoto.deleteMany({ where: { albumId } })
     await prisma.album.delete({ where: { id: albumId } })
 
-    // Clean up StoredFile rows for all deleted photos and the album
-    const photoIds = album.photos.map(p => p.id)
-    await deleteStoredFilesByCriteria({
-      entityType: 'ALBUM_PHOTO',
-      entityIds: photoIds,
-    }).catch(() => {})
-    await deleteStoredFilesByCriteria({
-      entityType: 'ALBUM',
-      entityIds: [albumId],
-    }).catch(() => {})
-
-    // Compute total bytes from StoredFile for adjustment
+    // Sum the bytes we are about to drop BEFORE removing the rows that hold the sizes —
+    // aggregating afterwards always returned 0, so deleting an album never reduced the
+    // project's total.
     const photoSizeAgg = photoIds.length > 0
       ? await getStoredFileAggregate({
           entityType: 'ALBUM_PHOTO',
@@ -324,26 +338,23 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       entityId: albumId,
       fileRole: { in: ['ZIP_FULL', 'ZIP_SOCIAL'] },
     })
+
+    // Clean up StoredFile rows for all deleted photos and the album
+    await deleteStoredFilesByCriteria({
+      entityType: 'ALBUM_PHOTO',
+      entityIds: photoIds,
+    }).catch(() => {})
+    await deleteStoredFilesByCriteria({
+      entityType: 'ALBUM',
+      entityIds: [albumId],
+    }).catch(() => {})
+
     const photosDelta = BigInt(photoSizeAgg._sum.fileSize ?? 0)
     const zipDelta = BigInt(albumZipAgg._sum.fileSize ?? 0)
     await adjustProjectTotalBytes(album.projectId, (photosDelta + zipDelta) * BigInt(-1))
 
     // Notify open share pages / admin views so the deleted album disappears live.
     await publishProjectEvent(album.projectId, 'album')
-
-    // Best-effort: delete album directory (if empty or still present)
-    try {
-      const projectStoragePath = album.project.storagePath
-        || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
-      await deleteDirectory(
-        buildAlbumStorageRoot(
-          projectStoragePath,
-          album.storageFolderName || album.name || album.id,
-        )
-      )
-    } catch {
-      // ignore
-    }
 
     return NextResponse.json({ ok: true })
   } catch (error) {

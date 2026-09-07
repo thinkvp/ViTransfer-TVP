@@ -408,6 +408,33 @@ export async function s3MoveFile(sourceKey: string, destinationKey: string): Pro
  * Delete all objects whose key starts with the given prefix (simulates directory delete).
  * Processes in batches of 1000 (S3 DeleteObjects limit).
  */
+/**
+ * Delete many objects by exact key.
+ *
+ * Uses DeleteObjects (1000 keys per request), so deleting N files costs
+ * ceil(N/1000) round trips rather than N. Prefer this over looping
+ * s3DeleteFile whenever the key set is known up front.
+ */
+export async function s3DeleteFiles(keys: string[]): Promise<void> {
+  if (keys.length === 0) return
+
+  const client = getS3Client()
+  const bucket = getS3Bucket()
+
+  for (let i = 0; i < keys.length; i += 1000) {
+    const chunk = keys.slice(i, i + 1000)
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: {
+          Objects: chunk.map((key) => ({ Key: key })),
+          Quiet: true,
+        },
+      })
+    )
+  }
+}
+
 export async function s3DeleteDirectory(prefix: string): Promise<void> {
   const client = getS3Client()
   const bucket = getS3Bucket()

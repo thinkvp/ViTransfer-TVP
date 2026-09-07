@@ -947,8 +947,16 @@ export function CommentSectionView({
       const video = videos.find(v => v.id === videoId)
       if (!video) return
 
-      // Navigate to admin share page with video, version, and timestamp parameters
+      // Navigate to admin share page with video, version, and timestamp parameters.
+      //
+      // This MUST stay a hard navigation. The share page applies these params from a
+      // deep-link effect guarded by `if (!activeVideoName)`, so it only honours them on a
+      // fresh mount. A router.push() keeps the component mounted, and when a video is
+      // already selected the URL changes while the page ignores it entirely - the seek
+      // silently does nothing. Verified against the running app. Making this soft means
+      // first teaching that effect to re-apply when the deep-link params change.
       const adminShareUrl = `/admin/projects/${projectId}/share?video=${encodeURIComponent(video.name)}&version=${videoVersion || video.version}&t=${Math.floor(timestamp)}`
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = adminShareUrl
     }
   }

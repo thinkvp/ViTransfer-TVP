@@ -271,6 +271,9 @@ function handleSessionExpired() {
   }
 
   if (typeof window !== 'undefined') {
+    // A hard navigation is deliberate here: it tears down all React state holding data the
+    // expired session fetched. This module is also outside React, so useRouter() isn't available.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = '/login?sessionExpired=true'
   }
 }

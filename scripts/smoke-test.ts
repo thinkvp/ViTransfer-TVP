@@ -478,6 +478,28 @@ async function main() {
     assert(src.includes('register'), 'instrumentation register() missing')
   })
 
+  await check('album delete sums bytes before dropping the StoredFile rows', async () => {
+    // The size lives on the StoredFile row, so aggregating after deleteStoredFilesByCriteria
+    // always sums 0 and the project's total bytes never comes down. Order is load-bearing.
+    const src = await readSource('src/app/api/albums/[albumId]/route.ts')
+    const firstAggregate = src.indexOf('getStoredFileAggregate({')
+    const firstRowDelete = src.indexOf('deleteStoredFilesByCriteria({')
+    assert(firstAggregate > -1 && firstRowDelete > -1, 'album delete no longer aggregates or clears StoredFile rows')
+    assert(
+      firstAggregate < firstRowDelete,
+      'album delete aggregates fileSize after deleting the rows — the byte adjustment will always be 0',
+    )
+  })
+
+  await check('album delete stays batched (no per-photo storage round trips)', async () => {
+    // A 300-photo album used to cost three round trips per photo. The batched helpers
+    // keep it at two queries plus two bulk deletes.
+    const src = await readSource('src/app/api/albums/[albumId]/route.ts')
+    assert(src.includes('findSharedStoragePaths('), 'album delete no longer uses the batched shared-path lookup')
+    assert(src.includes('deleteFiles('), 'album delete no longer uses the batched file delete')
+    assert(!src.includes('countStoredFilesByPath('), 'album delete reintroduced the per-path shared-file count')
+  })
+
   // ── 7. Live HTTP checks (optional — needs a running server) ──────────────
   section('Live HTTP checks')
 

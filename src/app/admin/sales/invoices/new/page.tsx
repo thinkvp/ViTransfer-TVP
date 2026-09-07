@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GripVertical, Plus, Tag, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -84,6 +84,7 @@ export default function NewInvoicePage() {
   // client-change effect can select it once that client's projects have loaded.
   const dupPrefillRef = useRef<{ clientId: string; projectId: string } | null>(null)
   const linkPrefillAppliedRef = useRef(false)
+  const router = useRouter()
   const searchParams = useSearchParams()
 
   const [settings, setSettings] = useState<SalesSettings>({
@@ -310,7 +311,7 @@ export default function NewInvoicePage() {
       })
 
       toast.success(`Created invoice ${inv.invoiceNumber}`)
-      window.location.href = `/admin/sales/invoices/${inv.id}`
+      router.push(`/admin/sales/invoices/${inv.id}`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create invoice'
       toast.error(msg)

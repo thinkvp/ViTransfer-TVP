@@ -92,6 +92,8 @@ export const SalesProposalSchema = z.object({
   validUntil: z.string().nullable(), // quotes
   dueDate: z.string().nullable(), // invoices
   notes: z.string().nullable(),
+  // Always overwritten by applyProposalGuards with SalesSettings.defaultTerms — the model
+  // is told to leave it null rather than writing boilerplate of its own.
   terms: z.string().nullable(),
   items: z.array(SalesLineItemProposalSchema),
 })
@@ -227,6 +229,19 @@ export interface ProposalGuardContext {
   libraryById: Map<string, LibraryItem>
   /** Portfolio pieces keyed by id — authoritative title/url for reply links */
   portfolioById: Map<string, PortfolioItem>
+  /**
+   * SalesSettings.defaultTerms — authoritative, like library pricing. When set (including
+   * an empty string, meaning "no terms") the guard writes it over whatever the model put in
+   * "terms", so a quote/invoice never carries invented boilerplate. Null disables the
+   * override: refine passes pass null so "change the terms to X" isn't clobbered.
+   */
+  salesDefaultTerms: string | null
+  /**
+   * SalesSettings' standard windows, used to fill a validUntil/dueDate the model left
+   * null (the prompt tells it to, unless the source states its own deadline) and to
+   * repair one that lands before the issue date. Null in refine mode, as above.
+   */
+  salesDefaultWindows: { quoteValidDays: number; invoiceDueDays: number } | null
   /** Sign-off appended to a drafted reply */
   replySignature: string | null
   /**
@@ -342,6 +357,14 @@ function clientNamesRoughlyMatch(sourceName: string, matchedName: string): boole
  * Prompt instructions are advisory; these are enforcement. Mutations are pure —
  * a new object is returned and dropped/nulled data is recorded in `assumptions`.
  */
+/** Add whole days to a YYYY-MM-DD string. UTC arithmetic, so DST can never shift the result. */
+function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + (Number.isFinite(days) ? Math.trunc(days) : 0))
+  return dt.toISOString().slice(0, 10)
+}
+
 export function applyProposalGuards(input: AssistantResult, ctx: ProposalGuardContext): AssistantResult {
   const result: AssistantResult = JSON.parse(JSON.stringify(input))
   const note = (msg: string) => {
@@ -581,6 +604,60 @@ export function applyProposalGuards(input: AssistantResult, ctx: ProposalGuardCo
     if (s.dueDate && !ISO_DATE_RE.test(s.dueDate)) {
       note(`Sales: invalid due date "${s.dueDate}" — cleared.`)
       s.dueDate = null
+    }
+
+    // An issue date that isn't today is worth surfacing — it usually means the model took
+    // it off the email or attachment rather than from <today>.
+    if (ctx.salesDefaultWindows && s.issueDate !== ctx.today) {
+      note(`Sales: issue date is ${s.issueDate}, not today (${ctx.today}) — check it on the card.`)
+    }
+
+    // Quote validity and payment window come from Sales Settings unless the source stated
+    // its own deadline (the prompt tells the model to leave these null otherwise).
+    if (ctx.salesDefaultWindows) {
+      // `notable` is false for the field this document type doesn't use: both are still
+      // resolved, because the review card lets the user switch QUOTE <-> INVOICE and the
+      // field that appears should already hold a date.
+      const fillWindow = (
+        current: string | null,
+        days: number,
+        label: string,
+        notable: boolean
+      ): string => {
+        const standard = addDaysYmd(s.issueDate, days)
+        if (!current) return standard
+        if (current < s.issueDate) {
+          if (notable) {
+            note(`Sales: ${label} ${current} was before the issue date — replaced with the standard ${days}-day window (${standard}).`)
+          }
+          return standard
+        }
+        if (notable && current !== standard) {
+          note(`Sales: ${label} ${current} came from the brief, not your standard ${days}-day window (${standard}).`)
+        }
+        return current
+      }
+      const { quoteValidDays, invoiceDueDays } = ctx.salesDefaultWindows
+      const wantQuote = s.docType === 'QUOTE' || s.docType === 'BOTH'
+      const wantInvoice = s.docType === 'INVOICE' || s.docType === 'BOTH'
+      s.validUntil = fillWindow(s.validUntil, quoteValidDays, 'valid-until', wantQuote)
+      s.dueDate = fillWindow(s.dueDate, invoiceDueDays, 'due date', wantInvoice)
+    }
+
+    // Terms are the studio's own boilerplate, not something the model gets to write.
+    if (ctx.salesDefaultTerms !== null) {
+      const enforced = ctx.salesDefaultTerms.trim() || null
+      const proposed = (s.terms ?? '').trim() || null
+      // Only worth a note when the model actually wrote terms of its own; filling in an
+      // empty field is the normal path and would otherwise flag every single run.
+      if (proposed !== null && proposed !== enforced) {
+        note(
+          enforced
+            ? 'Sales: the terms the model wrote were replaced with your default terms from Sales Settings.'
+            : 'Sales: the terms the model wrote were cleared — no default terms are set in Sales Settings.'
+        )
+      }
+      s.terms = enforced
     }
 
     s.items = s.items.filter((rawItem) => {

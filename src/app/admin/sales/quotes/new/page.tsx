@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { GripVertical, Plus, Tag, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -81,6 +81,7 @@ export default function NewQuotePage() {
   const [issueDate, setIssueDate] = useState<string>(() => getTodayYmdLocal())
   const [validUntil, setValidUntil] = useState<string>('')
   const linkPrefillAppliedRef = useRef(false)
+  const router = useRouter()
   const searchParams = useSearchParams()
 
   const [settings, setSettings] = useState<SalesSettings>({
@@ -290,7 +291,7 @@ export default function NewQuotePage() {
       })
 
       toast.success(`Created quote ${quote.quoteNumber}`)
-      window.location.href = `/admin/sales/quotes/${quote.id}`
+      router.push(`/admin/sales/quotes/${quote.id}`)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create quote'
       toast.error(msg)

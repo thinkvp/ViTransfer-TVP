@@ -803,6 +803,34 @@ export async function countStoredFilesByPath(
 }
 
 /**
+ * Batched form of countStoredFilesByPath: given many paths, return the subset that is
+ * still referenced by some entity outside the exclusion.
+ *
+ * One query for the whole set. Deletion paths that would otherwise call
+ * countStoredFilesByPath once per file should use this — the per-path version costs a
+ * round trip each, which dominates when clearing an album or project.
+ */
+export async function findSharedStoragePaths(
+  storagePaths: string[],
+  options?: { excludeEntityType?: EntityType; excludeEntityIds?: string[] },
+): Promise<Set<string>> {
+  if (storagePaths.length === 0) return new Set()
+
+  const where: any = { storagePath: { in: Array.from(new Set(storagePaths)) } }
+  const not: any = {}
+  if (options?.excludeEntityType) not.entityType = options.excludeEntityType
+  if (options?.excludeEntityIds?.length) not.entityId = { in: options.excludeEntityIds }
+  if (Object.keys(not).length > 0) where.NOT = not
+
+  const rows = await prisma.storedFile.findMany({
+    where,
+    select: { storagePath: true },
+    distinct: ['storagePath'],
+  })
+  return new Set(rows.map((row) => row.storagePath))
+}
+
+/**
  * Determine which of the given videos have a *custom* thumbnail — i.e. their
  * VIDEO/THUMBNAIL row points at one of the video's own VideoAsset files (set via
  * "Set as video thumbnail") rather than at a generated thumbnail.jpg.

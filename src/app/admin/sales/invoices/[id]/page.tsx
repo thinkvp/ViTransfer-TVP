@@ -599,7 +599,7 @@ export default function InvoiceDetailPage() {
     setShowDeleteInvoiceConfirm(false)
     try {
       await deleteSalesInvoice(invoice.id)
-      window.location.href = '/admin/sales/invoices'
+      router.push('/admin/sales/invoices')
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to delete invoice'
       toast.error(msg)

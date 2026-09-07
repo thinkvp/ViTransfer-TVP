@@ -352,7 +352,8 @@ export function ShareAlbumViewer({
       <Dialog open={!!viewerPhoto} onOpenChange={(open) => !open && setViewerPhoto(null)}>
         <DialogContent className="max-w-none w-[95vw] h-[95vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle className="truncate">{viewerPhoto?.fileName || 'Photo'}</DialogTitle>
+            {/* pr-9 keeps the title clear of the dialog's absolutely positioned close button */}
+            <DialogTitle className="truncate pr-9">{viewerPhoto?.fileName || 'Photo'}</DialogTitle>
           </DialogHeader>
           {viewerPhoto && (
             <div className="flex-1 min-h-0 flex flex-col gap-3">

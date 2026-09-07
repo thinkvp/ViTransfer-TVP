@@ -98,10 +98,12 @@ const CANNED_RESULT: AssistantResult = {
       proposedNewClient: { name: 'Our Studio Pty Ltd', address: null, phone: null, website: null, recipients: [] },
     },
     issueDate: '2026-07-05',
-    validUntil: '2026-08-05',
+    // Left null like the prompt asks -> guard fills the studio's standard 14-day window
+    validUntil: null,
     dueDate: null,
     notes: null,
-    terms: null,
+    // Boilerplate the model made up -> guard replaces it with the studio's default terms
+    terms: 'Standard terms apply (cancellation notice, oncosted production expenses).',
     items: [
       // Library item with a WRONG price copied by the model → guard applies library pricing + label
       { libraryItemId: 'lib-halfday', description: 'Half-day shoot', details: null, quantity: 1, unitPriceCents: 99, taxRatePercent: 0 },
@@ -156,6 +158,8 @@ const GUARD_CTX = {
     ['pf-brand', { id: 'pf-brand', title: 'Acme Brand Launch', url: 'https://studio.example/work/acme', description: 'brand video' }],
   ]),
   replySignature: 'Cheers,\nThe Studio Team',
+  salesDefaultTerms: 'Payment due within 7 days unless otherwise agreed.',
+  salesDefaultWindows: { quoteValidDays: 14, invoiceDueDays: 7 },
   studioKnowledge: 'About us: we make brand films.\nPortfolio: Acme Brand Launch — https://studio.example/work/acme',
 }
 
@@ -208,6 +212,8 @@ async function main() {
       today: '2026-07-05',
       taxRatePercent: 10,
       defaultTerms: null,
+    defaultQuoteValidDays: 14,
+    defaultInvoiceDueDays: 7,
       ownCompanyNames: ['Our Studio Pty Ltd'],
       team: [{ name: 'Simon', email: 'simon@ourstudio.example' }],
       libraryItems: [
@@ -257,6 +263,21 @@ async function main() {
     )
     check('guard clears an out-of-range reminder offset', kds[2]?.reminderDaysBefore === null)
     check('guard truncates float cents', guarded.sales?.items[1]?.unitPriceCents === 15000)
+    check(
+      'guard fills valid-until from the standard quote window',
+      guarded.sales?.validUntil === '2026-07-19',
+      guarded.sales?.validUntil ?? '(null)'
+    )
+    check(
+      'guard also resolves the due date so a QUOTE -> INVOICE switch has one',
+      guarded.sales?.dueDate === '2026-07-12',
+      guarded.sales?.dueDate ?? '(null)'
+    )
+    check(
+      'guard replaces invented terms with the sales-settings default',
+      guarded.sales?.terms === 'Payment due within 7 days unless otherwise agreed.',
+      guarded.sales?.terms ?? '(null)'
+    )
 
     const recips = (guarded.project?.recipients ?? []) as Array<{
       name: string
@@ -367,10 +388,21 @@ async function main() {
     )
 
     // 4d. a refine pass resends no source text — the verbatim check must not fire then
-    const refineGuarded = applyProposalGuards(CANNED_RESULT, { ...GUARD_CTX, sourceText: '' })
+    const refineGuarded = applyProposalGuards(CANNED_RESULT, {
+      ...GUARD_CTX,
+      sourceText: '',
+      salesDefaultTerms: null,
+      salesDefaultWindows: null,
+    })
     check(
       'no source text (refine) keeps recipients instead of dropping them all',
       refineGuarded.project?.recipients.some((r) => r.email === 'invented@acme.example') === true
+    )
+    check('refine mode does not fill the date windows', refineGuarded.sales?.validUntil === null)
+    check(
+      'refine mode leaves the terms alone so they can be edited',
+      refineGuarded.sales?.terms === CANNED_RESULT.sales?.terms,
+      refineGuarded.sales?.terms ?? '(null)'
     )
 
     // 4b. refine prompt shape includes current proposal + change request
@@ -496,6 +528,8 @@ async function main() {
         today: new Date().toISOString().slice(0, 10),
         taxRatePercent: 10,
         defaultTerms: null,
+    defaultQuoteValidDays: 14,
+    defaultInvoiceDueDays: 7,
         ownCompanyNames: ['Our Studio Pty Ltd'],
         team: [{ name: 'Simon', email: 'simon@ourstudio.example' }],
         libraryItems: [
