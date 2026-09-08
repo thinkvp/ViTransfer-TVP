@@ -496,12 +496,13 @@ export function CommentSectionView({
    * pick its credential the same way — download, voice-note playback and the in-app viewer
    * all route through here.
    */
-  const fetchCommentFile = (url: string): Promise<Response> =>
+  const fetchCommentFile = useCallback((url: string): Promise<Response> =>
     isAdminView
       ? apiFetch(url)
       : shareToken
         ? fetch(url, { headers: { Authorization: `Bearer ${shareToken}` } })
         : fetch(url)
+  , [isAdminView, shareToken])
 
   const handleDownloadCommentFile = async (commentId: string, fileId: string, fileName: string) => {
     try {
@@ -541,7 +542,7 @@ export function CommentSectionView({
     }
   }
 
-  const resolveCommentFilePlaybackUrl = async (commentId: string, fileId: string): Promise<string | null> => {
+  const resolveCommentFilePlaybackUrl = useCallback(async (commentId: string, fileId: string): Promise<string | null> => {
     const cacheKey = `${commentId}:${fileId}`
     const cached = commentPlaybackUrlCacheRef.current.get(cacheKey)
     if (cached) return cached
@@ -563,7 +564,7 @@ export function CommentSectionView({
     const objectUrl = URL.createObjectURL(blob)
     commentPlaybackUrlCacheRef.current.set(cacheKey, objectUrl)
     return objectUrl
-  }
+  }, [fetchCommentFile])
 
   useEffect(() => {
     const playbackUrlCache = commentPlaybackUrlCacheRef.current

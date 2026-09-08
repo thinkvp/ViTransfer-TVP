@@ -5,7 +5,11 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.6.1] - Unreleased
+## [2.6.1] - 2026-09-08
+
+### Added
+
+- **A Help button on the share page explains how to use it** — clients arriving on a review link had no guide to timecoded comments, versions or what Approve actually does, so that explanation had to go in the covering email every time. A **Help** button now sits at the top right of the breadcrumb bar and opens a five-topic guide — getting around, watching, leaving feedback, versions and sign-off, photos and files — each with a labelled wireframe of the part of the page it describes. Topics and individual tips are hidden when they do not apply to that share, so a video-only link says nothing about commenting. The same button appears on the admin share preview.
 
 ### Changed
 
@@ -14,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dependency refresh across the stack** — Next.js, React, Prisma, the AWS SDK, Radix and the rest moved to their latest compatible releases, and Nodemailer, the OpenAI and Anthropic SDKs and SimpleWebAuthn each crossed a major version. This clears the three advisories `npm audit` was reporting (xmldom, qs, browserslist) and removes `@types/nodemailer`, which Nodemailer 10 supersedes with its own bundled types. Stripe, BullMQ, ioredis, ESLint and TypeScript were deliberately left where they are — each needs its own migration rather than a version bump.
 
 ### Fixed
+
+- **Viewing a comment thread with an image attachment no longer locks the visitor out with "Too many requests"** — the attachment thumbnails added in 2.5.8 re-fetched themselves on every re-render of the thread, and the thread re-renders about five times a second while a video is playing (and again on every keystroke in the reply box). One small image was enough to burn through the 30-downloads-a-minute limit in a few seconds, blocking further downloads and raising a rate-limit alert. Each thumbnail is now fetched once and remembered, voice notes are resolved the same way, and asking for a preview URL no longer counts against the download limit.
 
 - **Creating or deleting a quote or invoice no longer reloads the whole admin app** — those four screens navigated by assigning `window.location.href`, which threw away the loaded admin shell and rebuilt it from scratch. On create it also destroyed the "Created quote/invoice …" confirmation mid-navigation, so the toast flashed or never appeared. They now use the router like the rest of the app, so the transition is instant and the confirmation survives it.
 

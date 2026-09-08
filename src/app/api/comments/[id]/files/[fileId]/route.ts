@@ -5,7 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getTransferTuningSettings } from '@/lib/settings'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
-import { contentDispositionFor, inlineViewUrlResponse } from '@/lib/inline-view'
+import { contentDispositionFor, inlineViewUrlResponse, wantsInlineViewUrl } from '@/lib/inline-view'
 import { isS3Mode, s3GetPresignedDownloadUrl } from '@/lib/s3-storage'
 import { createWebReadableStream } from '@/lib/stream-utils'
 import fs from 'fs'
@@ -120,13 +120,22 @@ export async function GET(
       )
     }
 
-    // Rate limiting: 30 downloads per minute
-    const rateLimitResult = await rateLimit(request, {
-      windowMs: 60 * 1000,
-      maxRequests: 30,
-      message: 'Too many downloads. Please try again later.'
-    }, 'comment-file-download')
-    
+    // Rate limiting. Asking for a presigned inline URL in S3 mode transfers no bytes and
+    // happens once per image attachment when a thread renders its thumbnails, so it gets a
+    // roomier bucket of its own; serving the actual file stays at 30 per minute.
+    const isUrlNegotiation = wantsInlineViewUrl(request) && isS3Mode()
+    const rateLimitResult = isUrlNegotiation
+      ? await rateLimit(request, {
+          windowMs: 60 * 1000,
+          maxRequests: 240,
+          message: 'Too many preview requests. Please try again later.'
+        }, 'comment-file-preview-url')
+      : await rateLimit(request, {
+          windowMs: 60 * 1000,
+          maxRequests: 30,
+          message: 'Too many downloads. Please try again later.'
+        }, 'comment-file-download')
+
     if (rateLimitResult) {
       return rateLimitResult
     }

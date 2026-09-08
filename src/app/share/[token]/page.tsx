@@ -19,7 +19,8 @@ import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Lock, Check, Mail, KeyRound } from 'lucide-react'
+import { Lock, Check, Mail, KeyRound, CircleHelp } from 'lucide-react'
+import { ShareHelpModal } from '@/components/ShareHelpModal'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
 import { apiFetch, attemptRefresh } from '@/lib/api-client'
 import { withCommentIdentity } from '@/lib/comment-identity'
@@ -113,6 +114,7 @@ export default function SharePage() {
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [downloadableFiles, setDownloadableFiles] = useState<DownloadableGroup[] | null>(null)
   const [hasApprovableVideos, setHasApprovableVideos] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [desktopContentTab, setDesktopContentTab] = useState<'view' | 'files'>('files')
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set())
   const [activeAlbumId, setActiveAlbumId] = useState<string | null>(null)
@@ -3490,7 +3492,35 @@ export default function SharePage() {
           </>
         )}
 
+        {/* Help — pinned to the right. The header scrolls horizontally on narrow
+            screens, so this sticks rather than sliding out of reach. */}
+        <div className="ml-auto self-stretch sticky right-0 shrink-0 flex items-center gap-1 pl-3 pr-1 lg:pr-3 bg-card">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={() => setHelpOpen(true)}
+            title="How to use this page"
+            aria-label="How to use this page"
+          >
+            <CircleHelp className="w-4 h-4" />
+            <span className="hidden sm:inline">Help</span>
+          </Button>
+        </div>
+
       </div>
+
+      <ShareHelpModal
+        open={helpOpen}
+        onOpenChange={setHelpOpen}
+        canComment={!project.hideFeedback}
+        canApprove={hasApprovableVideos}
+        hasVersions={readyVideos.length > 1}
+        hasAlbums={project.enablePhotos !== false && albums.length > 0}
+        hasFiles={(downloadableFilesWithOptimisticUploads?.length ?? 0) > 0}
+        canUpload={Boolean(project?.allowClientUploadFiles && project?.enableClientUploads !== false)}
+        canSwitchProjects={canSwitchProjects}
+      />
 
       {/* Main content row: sidebar + content area */}
       <div className={cn(

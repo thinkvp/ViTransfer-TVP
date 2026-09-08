@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Comment } from '@prisma/client'
 import { Clock, Trash2, CornerDownRight, Download, Check, Lock, Pencil, Film } from 'lucide-react'
 import { timecodeToSeconds, formatTimecodeDisplay } from '@/lib/timecode'
@@ -128,17 +128,26 @@ function VoiceNoteAttachment({
   const [src, setSrc] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // The resolver closes over the viewer's credentials and is rebuilt whenever the thread
+  // re-renders, which happens on every playhead tick. Depending on it here would re-request
+  // the voice note several times a second, so it is read through a ref instead.
+  const resolveRef = useRef(onResolvePlaybackUrl)
+  useEffect(() => {
+    resolveRef.current = onResolvePlaybackUrl
+  })
+
   useEffect(() => {
     let mounted = true
 
     async function loadPlaybackSource() {
-      if (!onResolvePlaybackUrl) {
+      const resolve = resolveRef.current
+      if (!resolve) {
         setError('Unable to load voice note.')
         return
       }
 
       try {
-        const resolved = await onResolvePlaybackUrl(commentId, fileId)
+        const resolved = await resolve(commentId, fileId)
         if (!mounted) return
         if (!resolved) {
           setError('Unable to load voice note.')
@@ -156,7 +165,7 @@ function VoiceNoteAttachment({
     return () => {
       mounted = false
     }
-  }, [commentId, fileId, onResolvePlaybackUrl])
+  }, [commentId, fileId])
 
   return (
     <div className="space-y-2">

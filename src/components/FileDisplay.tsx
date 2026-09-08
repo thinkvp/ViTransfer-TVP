@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { DocumentViewerModal } from '@/components/DocumentViewerModal'
 import { canPreviewFile, getPreviewExtension, getPreviewMode } from '@/lib/document-preview'
@@ -26,6 +26,15 @@ import {
  * whole viewer is built to avoid.
  */
 const IMAGE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024
+
+/**
+ * Presigned thumbnail URLs, remembered across mounts. Switching videos tears the whole
+ * thread down and rebuilds it, and without this every attachment would be re-negotiated
+ * each time. The TTL stays below the 5-minute life of the presigned URL itself so a cached
+ * entry can never be handed to an <img> after it has expired.
+ */
+const THUMBNAIL_URL_TTL_MS = 4 * 60 * 1000
+const thumbnailUrlCache = new Map<string, { url: string; at: number }>()
 
 /**
  * Tile treatment per file type. Colour is a recognition aid, not status, so it stays in the
@@ -185,26 +194,49 @@ export function CommentFileDisplay({
 
   const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null)
 
+  // The fetcher is rebuilt on every render of the thread (it closes over the share token /
+  // admin session), so it must never be an effect dependency: the comment list re-renders
+  // on every playhead tick and every keystroke in the reply box, and a dependency on it
+  // would re-fetch each thumbnail several times a second until the download rate limit
+  // locked the visitor out. Keep the latest one in a ref and key the effect on the file.
+  const fetchFileRef = useRef(onFetchFile)
   useEffect(() => {
-    if (!wantsThumbnail || !onFetchFile) return
+    fetchFileRef.current = onFetchFile
+  })
+
+  useEffect(() => {
+    if (!wantsThumbnail) return
+    const fetchFile = fetchFileRef.current
+    if (!fetchFile) return
 
     let cancelled = false
     let objectUrl: string | null = null
+
+    const cacheKey = `${commentId}:${fileId}`
+    const cached = thumbnailUrlCache.get(cacheKey)
+    if (cached) {
+      if (Date.now() - cached.at < THUMBNAIL_URL_TTL_MS) {
+        setThumbnailSrc(cached.url)
+        return
+      }
+      thumbnailUrlCache.delete(cacheKey)
+    }
 
     void (async () => {
       try {
         // Same negotiation the viewer uses: in S3 mode the route answers with a presigned
         // inline URL and the browser loads the image straight from storage; only local-mode
         // installs hand back bytes for us to wrap in an object URL.
-        const response = await onFetchFile(
+        const response = await fetchFile(
           `/api/comments/${commentId}/files/${fileId}?inline=1&view=url`
         )
         if (!response.ok) return
 
         if ((response.headers.get('content-type') || '').includes('application/json')) {
           const payload = await response.json().catch(() => null)
-          if (!cancelled && typeof payload?.url === 'string' && payload.url) {
-            setThumbnailSrc(payload.url)
+          if (typeof payload?.url === 'string' && payload.url) {
+            thumbnailUrlCache.set(cacheKey, { url: payload.url, at: Date.now() })
+            if (!cancelled) setThumbnailSrc(payload.url)
           }
           return
         }
@@ -226,7 +258,7 @@ export function CommentFileDisplay({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [wantsThumbnail, onFetchFile, commentId, fileId])
+  }, [wantsThumbnail, commentId, fileId])
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes'
