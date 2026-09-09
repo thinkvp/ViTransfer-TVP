@@ -2912,9 +2912,9 @@ function AdminShareFeedbackGrid({
     : null
 
   const selectedVideo = readyVideos.find((v: any) => v.id === management.selectedVideoId)
-  const selectedVideoApproved = selectedVideo ? Boolean(selectedVideo.approved) : false
-  const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
-  const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved || !canManageShareComments)
+  // Approval no longer closes feedback — it locks the existing comments server-side and
+  // leaves the box open (see CommentSectionView). Only the RBAC action gates the input here.
+  const commentsDisabled = !canManageShareComments
 
   // Subtitle edit mode: swaps the comments panel for the subtitle editor and
   // (desktop) shows the timeline strip under the player (CC menu → Edit).

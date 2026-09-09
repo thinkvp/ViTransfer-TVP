@@ -474,13 +474,63 @@ async function main() {
       )
     })
 
+    await check('approval locks the feedback that was already there', async () => {
+      const locked = await prisma.comment.findUnique({
+        where: { id: commentId },
+        select: { lockedAt: true },
+      })
+      assert(locked?.lockedAt, 'pre-approval comment was not locked')
+      // Locked feedback is frozen for share sessions even with allowClientDeleteComments on.
+      const del = await api('DELETE', `/api/comments/${commentId}`, { token: shareToken })
+      assert.equal(del.status, 403, `expected 403 deleting locked comment, got ${del.status}`)
+      const patch = await api('PATCH', `/api/comments/${commentId}`, {
+        token: shareToken,
+        json: { content: 'edit of locked feedback' },
+      })
+      assert.equal(patch.status, 403, `expected 403 editing locked comment, got ${patch.status}`)
+    })
+
+    let postApprovalCommentId = ''
+
+    await check('approval leaves the comment box open (new feedback still accepted)', async () => {
+      const { status, body } = await api('POST', '/api/comments', {
+        token: shareToken,
+        json: {
+          projectId: project.id,
+          videoId: video.id,
+          videoVersion: 1,
+          timecode: '00:00:03:00',
+          content: 'one more thought after sign-off',
+          authorName: 'Smoke Test Recipient',
+          recipientId: recipient.id,
+        },
+      })
+      assert.equal(status, 200, `expected 200, got ${status}: ${JSON.stringify(body)}`)
+      const created = await prisma.comment.findFirst({
+        where: { projectId: project.id, content: { contains: 'after sign-off' } },
+        select: { id: true, lockedAt: true },
+      })
+      assert(created, 'post-approval comment was not persisted')
+      assert.equal(created.lockedAt, null, 'post-approval comment should not be locked')
+      postApprovalCommentId = created.id
+    })
+
+    await check('post-approval feedback stays editable by the client who left it', async () => {
+      const patch = await api('PATCH', `/api/comments/${postApprovalCommentId}`, {
+        token: shareToken,
+        json: { content: 'one more thought after sign-off (revised)' },
+      })
+      assert.equal(patch.status, 200, `expected 200 editing own new comment, got ${patch.status}`)
+    })
+
     // ── Project setting enforcement ──────────────────────────────────────────
     section('Project setting enforcement')
 
     await check('client delete is denied when the project opt-in is off', async () => {
       await prisma.project.update({ where: { id: project.id }, data: { allowClientDeleteComments: false } })
       try {
-        const { status } = await api('DELETE', `/api/comments/${commentId}`, { token: shareToken })
+        // Uses the unlocked post-approval comment so the 403 comes from the opt-in, not the lock.
+        const { status } = await api('DELETE', `/api/comments/${postApprovalCommentId}`, { token: shareToken })
         assert.equal(status, 403, `expected 403, got ${status}`)
       } finally {
         await prisma.project.update({ where: { id: project.id }, data: { allowClientDeleteComments: true } })
@@ -553,11 +603,17 @@ async function main() {
       })
 
       await check('admin can delete a client comment (removes attachments)', async () => {
+        // Locks never apply to admins, so the post-approval comment goes the same way.
         const { status, body } = await api('DELETE', `/api/comments/${commentId}`, { token: adminToken })
         assert.equal(status, 200, `expected 200, got ${status}: ${JSON.stringify(body)}`)
+        commentId = '' // handled — skip client-side cleanup
+        if (postApprovalCommentId) {
+          const extra = await api('DELETE', `/api/comments/${postApprovalCommentId}`, { token: adminToken })
+          assert.equal(extra.status, 200, `expected 200, got ${extra.status}: ${JSON.stringify(extra.body)}`)
+          postApprovalCommentId = ''
+        }
         const remaining = await prisma.comment.count({ where: { projectId: project.id } })
         assert.equal(remaining, 0, 'comments still present after admin delete')
-        commentId = '' // handled — skip client-side cleanup
       })
     }
   } finally {

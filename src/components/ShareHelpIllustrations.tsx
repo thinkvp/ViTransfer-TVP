@@ -371,7 +371,7 @@ export function VersionsIllustration() {
       <rect x="34" y="240" width="18" height="14" rx="3" fill="none" stroke={C.success} strokeWidth="1.6" />
       <path d="M 38 240 v -5 a 5 5 0 0 1 10 0 v 5" stroke={C.success} strokeWidth="1.6" fill="none" />
       <Label x={68} y={246} fill={C.fg} weight={600}>Approved</Label>
-      <Label x={68} y={264} size={10}>Comments close on an approved video, and only that version stays on the page.</Label>
+      <Label x={68} y={264} size={10}>Feedback locks in on an approved video, and only that version stays on the page.</Label>
       <Badge x={604} y={252} n={4} />
     </Figure>
   )

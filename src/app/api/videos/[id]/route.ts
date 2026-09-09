@@ -13,6 +13,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAcc
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { publishProjectEvent } from '@/lib/project-events'
+import { lockCommentsForApprovedVideo } from '@/lib/comment-locks'
 import {
   allocateUniqueStorageName,
   buildProjectAllVideosRoot,
@@ -633,6 +634,16 @@ export async function PATCH(
 
       console.log(`[VIDEO-APPROVAL] Admin toggled approval for video ${id} to ${approved}`)
       await updateProjectStatus(video.projectId, id, approved, video.project.status, admin.id)
+
+      // Approving freezes the client feedback on this video (all versions) without closing
+      // the comment box — mirrors the client approve route. Unapproving does not unlock:
+      // a lock, once applied, is permanent (same rule as "Request Next Version").
+      if (approved) {
+        // A rename can land in the same PATCH, so lock against the post-update name.
+        const groupName = typeof updateData.name === 'string' ? updateData.name : video.name
+        await lockCommentsForApprovedVideo({ projectId: video.projectId, videoName: groupName })
+        await publishProjectEvent(video.projectId, 'comment')
+      }
 
       // NOTE: Admin-toggled approvals/unapprovals do NOT send email notifications
       // Only client-initiated approvals (via /approve route) send emails immediately

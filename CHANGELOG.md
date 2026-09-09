@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.2] - 2026-09-09
+
+### Changed
+
+- **Approving a video no longer closes the comment box** — sign-off used to freeze the whole feedback panel, so a client who spotted something the moment after approving had no way to tell us. Approval now works the same way **Request Next Version** already did: the feedback already on the video is locked in (padlocked, no longer editable, deletable or reactable by the client) while the comment box stays open for anything new. Admins are unaffected by locks, and the share-page Help guide has been updated to match. **Schema migration:** `20260909000000_lock_comments_on_approval` (data only) — it locks the existing feedback on anything already approved, so nothing that was frozen before becomes editable again.
+
 ## [2.6.1] - 2026-09-08
 
 ### Added

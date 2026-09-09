@@ -952,10 +952,10 @@ export function useCommentManagement({
         return
       }
 
-      // Clients cannot delete comments on an approved video.
-      const commentVideo = videos.find(v => v.id === targetComment.videoId)
-      if (commentVideo?.approved) {
-        toast.error('Comments cannot be deleted after the video has been approved.')
+      // Locked feedback (next version requested, or the video approved) is frozen for
+      // clients. Comments added after the lock stay theirs to remove.
+      if ((targetComment as any)?.lockedAt) {
+        toast.error('This feedback is locked in and can no longer be deleted.')
         return
       }
 
@@ -1008,15 +1008,12 @@ export function useCommentManagement({
       return false
     }
 
-    // Clients cannot edit comments on an approved video.
+    // Locked feedback (next version requested, or the video approved) is frozen for clients.
     if (!useAdminAuth && !adminUser) {
       const targetComment = findCommentById(commentId)
-      if (targetComment) {
-        const commentVideo = videos.find(v => v.id === targetComment.videoId)
-        if (commentVideo?.approved) {
-          toast.error('Comments cannot be edited after the video has been approved.')
-          return false
-        }
+      if ((targetComment as any)?.lockedAt) {
+        toast.error('This feedback is locked in and can no longer be edited.')
+        return false
       }
     }
 

@@ -10,6 +10,7 @@ import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib
 import { getProjectRecipients } from '@/lib/recipients'
 import { enqueueShareUploadPreview, getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
 import { publishProjectEvent } from '@/lib/project-events'
+import { lockCommentsForApprovedProject } from '@/lib/comment-locks'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
 import { isS3Mode } from '@/lib/s3-storage'
 import {
@@ -1135,6 +1136,14 @@ export async function PATCH(
 
       // Notify open share pages / admin dashboards so the status badge updates live.
       await publishProjectEvent(project.id, 'status')
+
+      // Sign-off freezes the client feedback that led to it without closing the comment box
+      // (see lockCommentsForApprovedProject). Moving the status back off APPROVED does not
+      // unlock — a lock, once applied, is permanent.
+      if (validatedBody.status === 'APPROVED') {
+        await lockCommentsForApprovedProject({ projectId: project.id })
+        await publishProjectEvent(project.id, 'comment')
+      }
 
       // Clear PROJECT_USER_ASSIGNED notifications for users who can no longer see the new status.
       // A user is "blinded" when their role's projectVisibility doesn't include the new status.

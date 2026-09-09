@@ -282,7 +282,8 @@ export default function MessageBubble({
 
   const fallbackBorderColorClass = comment.isInternal ? 'border-l-foreground' : 'border-l-muted-foreground'
   const displayColor = (comment as any)?.displayColor as string | null | undefined
-  // Locked = the next version was requested for this comment's video version.
+  // Locked = the next version was requested for this comment's video, or the video was
+  // approved. Either way the note is "locked in": no edit, delete or reaction for clients.
   const isLocked = Boolean((comment as any).lockedAt) && !comment.isInternal
 
   const avatarName = effectiveAuthorName || 'Anonymous'
@@ -308,8 +309,8 @@ export default function MessageBubble({
           data-comment-block
           className={
             (isLocked
-              // Locked comments (next version requested) get an amber left edge so they
-              // read as "locked in" at a glance, matching the amber timecode pills.
+              // Locked comments get an amber left edge so they read as "locked in" at a
+              // glance, matching the amber timecode pills.
               ? 'bg-card border border-border border-l-4 border-l-amber-500 rounded-lg p-3'
               : showColorEdge
                 ? `bg-card border border-border ${displayColor ? '' : fallbackBorderColorClass} border-l-4 rounded-lg p-3`
@@ -339,7 +340,7 @@ export default function MessageBubble({
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground whitespace-nowrap">
               {isLocked ? (
-                <span title="Locked — the next version was requested" className="inline-flex">
+                <span title="Locked in — this feedback can no longer be changed" className="inline-flex">
                   <Lock className="w-3 h-3 shrink-0 text-amber-500" aria-label="Locked" />
                 </span>
               ) : null}
@@ -483,7 +484,7 @@ export default function MessageBubble({
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             {(reply as any).lockedAt && !reply.isInternal ? (
-                              <span title="Locked — the next version was requested" className="inline-flex">
+                              <span title="Locked in — this feedback can no longer be changed" className="inline-flex">
                                 <Lock className="w-3 h-3 shrink-0 text-amber-500" aria-label="Locked" />
                               </span>
                             ) : null}

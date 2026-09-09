@@ -6,7 +6,7 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock, FileClock, History, Info, Lock, MessageCircle, Share2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, FileClock, History, Info, MessageCircle, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -338,10 +338,10 @@ export function CommentSectionView({
   // Reaction picker visibility. Counts render for everyone regardless; this only decides
   // whether the viewer gets the add/toggle affordance. Per-comment lock state is applied
   // inside MessageBubble.
-  // Deliberately not gated on commentsDisabled: approving a video freezes new feedback, but
-  // reacting to feedback that already exists stays available (the API agrees). Admins are
-  // gated server-side on makeCommentsOnProjects — there is no client-side mirror of that
-  // action here. Per-comment lock state is applied inside MessageBubble.
+  // Not gated on approval: signing a video off locks the feedback on it (MessageBubble
+  // applies per-comment lock state, and the API agrees) but reacting to anything added
+  // afterwards stays available. Admins are gated server-side on makeCommentsOnProjects —
+  // there is no client-side mirror of that action here.
   const canReact = isAdminView || allowClientReactions
 
   // Own-comment check for inline editing. Admins match by userId; clients match by the
@@ -731,18 +731,11 @@ export function CommentSectionView({
   const approvedVideo = videos.find(v => v.approved === true) || videos.find(v => v.id === localApprovedVideoId)
   // Project is approved but this specific video is NOT individually approved
   const isProjectApprovedOnly = isApproved && !isCurrentVideoApproved && !hasAnyApprovedVideo && !hasLocallyApprovedVideoInGroup
-  const commentsDisabled = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || hasLocallyApprovedVideoInGroup
-
-  // Set of video IDs that are considered approved (server-side + optimistic local).
-  // Used to gate per-comment edit/delete for non-admin viewers.
-  const approvedVideoIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const v of videos) {
-      if (v.approved === true) ids.add(v.id)
-    }
-    if (localApprovedVideoId) ids.add(localApprovedVideoId)
-    return ids
-  }, [videos, localApprovedVideoId])
+  // Sign-off reached for this video (or the whole project). It drives the banners and the
+  // "feedback is locked in" notices — it does NOT close the comment box. Approving locks the
+  // feedback that already exists (server-side `lockedAt`, exactly like Request Next Version)
+  // while new notes stay welcome, so per-comment edit/delete is gated on `lockedAt` alone.
+  const approvalSignedOff = isApproved || isCurrentVideoApproved || hasAnyApprovedVideo || hasLocallyApprovedVideoInGroup
 
   // Always use hook comments (includes optimistic updates)
   // Local comments only used as fallback if hook hasn't loaded
@@ -1325,7 +1318,7 @@ export function CommentSectionView({
                   recipients={recipients}
                   currentVideoRestricted={currentVideoRestricted}
                   restrictionMessage={restrictionMessage}
-                  commentsDisabled={commentsDisabled}
+                  commentsDisabled={false}
                   showShortcutsButton={showShortcutsButton}
                   onShowShortcuts={handleOpenShortcuts}
                   showTopBorder={false}
@@ -1549,8 +1542,8 @@ export function CommentSectionView({
               <DialogTitle>Approve Video</DialogTitle>
               <DialogDescription>
                 {headerVideo
-                  ? `Approve ${headerVideo.versionLabel || 'this version'} for ${headerVideoName}? This will lock further feedback and make it downloadable.`
-                  : 'Approve this version? This will lock further feedback and make it downloadable.'}
+                  ? `Approve ${headerVideo.versionLabel || 'this version'} for ${headerVideoName}? Your feedback will be locked in and the version becomes downloadable. You can still add comments.`
+                  : 'Approve this version? Your feedback will be locked in and the version becomes downloadable. You can still add comments.'}
               </DialogDescription>
             </DialogHeader>
             <div className="flex justify-end gap-2 pt-2">
@@ -1606,7 +1599,7 @@ export function CommentSectionView({
         </Dialog>
 
                 {/* Approval Status Banner */}
-        {commentsDisabled && isProjectApprovedOnly && (
+        {approvalSignedOff && isProjectApprovedOnly && (
                     <div className="bg-primary border-b border-border py-3 px-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
@@ -1615,14 +1608,14 @@ export function CommentSectionView({
                     Project Approved
                   </h3>
                   <p className="text-sm text-white/80">
-                    Downloads were not enabled for this version.
+                    Downloads were not enabled for this version. Your feedback is locked in, but you can still add comments.
                   </p>
                 </div>
               </div>
             </div>
           </div>
         )}
-        {commentsDisabled && !isProjectApprovedOnly && (
+        {approvalSignedOff && !isProjectApprovedOnly && (
           <div className="bg-success-visible border-b border-border py-3 px-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
@@ -1656,7 +1649,7 @@ export function CommentSectionView({
         {/* Next Version Requested banner (video is "Reviewed" on the share page).
             Once the next version has actually been uploaded, it flips to "available"
             with a button that jumps to the newer version. */}
-        {!commentsDisabled && isHeaderVideoRevisionRequested && (
+        {!approvalSignedOff && isHeaderVideoRevisionRequested && (
           <div className="bg-primary/10 border-b border-border py-3 px-4 shrink-0">
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
@@ -1724,7 +1717,7 @@ export function CommentSectionView({
             recipients={recipients}
             currentVideoRestricted={currentVideoRestricted}
             restrictionMessage={restrictionMessage}
-            commentsDisabled={commentsDisabled}
+            commentsDisabled={false}
             showShortcutsButton={showShortcutsButton}
             onShowShortcuts={handleOpenShortcuts}
           />
@@ -1816,19 +1809,6 @@ export function CommentSectionView({
         </div>
         ) : null}
 
-        {/* Approved notice above the comment list — styled like the "All feedback
-            submitted?" prompt for consistency. The no-comments empty state below
-            has its own larger version of this message. */}
-        {commentsDisabled && sortedComments.length > 0 ? (
-          <div className="px-4 py-2 border-b border-border bg-card shrink-0">
-            <p className="text-xs text-muted-foreground">
-              {isProjectApprovedOnly
-                ? 'This project has been approved. Comments are now closed.'
-                : 'This video has been approved. Comments are now closed.'}
-            </p>
-          </div>
-        ) : null}
-
         {/* Messages Area - Threaded Conversations */}
         <div className="relative flex-1 min-h-0 flex flex-col">
           {!showListActionsRow && sortedComments.length > 1 ? (
@@ -1848,20 +1828,14 @@ export function CommentSectionView({
         <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0 bg-muted/70">
           {sortedComments.length === 0 ? (
             <div className="text-center py-12">
-              {commentsDisabled ? (
-                <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-3 flex items-center justify-center">
-                  <Lock className="w-5 h-5 text-muted-foreground" />
-                </div>
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-3 flex items-center justify-center">
-                  <MessageCircle className="w-5 h-5 text-muted-foreground" />
-                </div>
-              )}
+              <div className="w-12 h-12 rounded-full bg-muted mx-auto mb-3 flex items-center justify-center">
+                <MessageCircle className="w-5 h-5 text-muted-foreground" />
+              </div>
               <p className="text-muted-foreground">
-                {commentsDisabled && isProjectApprovedOnly
-                  ? 'This project has been approved. Comments are now closed.'
-                  : commentsDisabled
-                    ? 'This video has been approved. Comments are now closed.'
+                {approvalSignedOff && isProjectApprovedOnly
+                  ? 'This project has been approved. You can still leave a comment if something comes up.'
+                  : approvalSignedOff
+                    ? 'This video has been approved. You can still leave a comment if something comes up.'
                     : 'Leave feedback here — comments are time-stamped to the video.'}
               </p>
             </div>
@@ -1885,19 +1859,18 @@ export function CommentSectionView({
                   return !c?.isInternal
                 }
 
-                // Locked comments (next version requested) are no longer client-deletable.
-                // Comments on approved videos are also not client-deletable.
-                const canDeleteParent = canAdminDelete || (canClientDelete && isRecipientAuthored(comment) && !(comment as any).lockedAt && !approvedVideoIds.has((comment as any).videoId))
+                // Locked feedback (next version requested, or the video approved) is frozen
+                // for clients; anything added afterwards stays theirs to remove.
+                const canDeleteParent = canAdminDelete || (canClientDelete && isRecipientAuthored(comment) && !(comment as any).lockedAt)
                 const allowAnyReplyDelete = canAdminDelete || canClientDelete
-                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply) && !(reply as any).lockedAt && !approvedVideoIds.has((reply as any).videoId))
+                const canDeleteReply = (reply: Comment) => canAdminDelete || (canClientDelete && isRecipientAuthored(reply) && !(reply as any).lockedAt)
 
                 // Editing is limited to the viewer's own comments. Admins can always edit
                 // their own; clients need the edit/delete setting on, a recipient-authored
-                // comment matching their name, no lock (next version not yet requested),
-                // and the video must not be approved.
+                // comment matching their name, and no lock on it.
                 const canEditOwn = (c: any) => isAdminView
                   ? isOwnComment(c)
-                  : (canClientDelete && isRecipientAuthored(c) && isOwnComment(c) && !c?.lockedAt && !approvedVideoIds.has(c?.videoId))
+                  : (canClientDelete && isRecipientAuthored(c) && isOwnComment(c) && !c?.lockedAt)
                 const canEditParent = canEditOwn(comment)
                 const canEditReply = (reply: Comment) => canEditOwn(reply)
 
@@ -1942,7 +1915,7 @@ export function CommentSectionView({
                         onSaveEdit={handleEditComment}
                         onScrollToComment={handleScrollToComment}
                         formatMessageTime={formatMessageTime}
-                        commentsDisabled={commentsDisabled}
+                        commentsDisabled={false}
                         isViewerMessage={isViewerMessage}
                         onDownloadCommentFile={(shareToken || isAdminView) ? handleDownloadCommentFile : undefined}
                         onFetchCommentFile={(shareToken || isAdminView) ? fetchCommentFile : undefined}
@@ -1978,7 +1951,7 @@ export function CommentSectionView({
                         onSaveEdit={handleEditComment}
                         onScrollToComment={handleScrollToComment}
                         formatMessageTime={formatMessageTime}
-                        commentsDisabled={commentsDisabled}
+                        commentsDisabled={false}
                         isViewerMessage={isViewerMessage}
                         replies={comment.replies}
                         onDeleteReply={allowAnyReplyDelete ? handleDeleteComment : undefined}

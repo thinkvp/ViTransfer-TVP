@@ -191,7 +191,8 @@ export function ShareHelpModal({
           </>,
           <>
             Once you have left every note on a version, click <Strong>Request Next Version</Strong>. That is the signal
-            we act on — it tells us your feedback is complete and we can start the re-cut.
+            we act on — it tells us your feedback is complete and we can start the re-cut. The notes you have already
+            sent are then <Strong>locked in</Strong> (they show a small padlock) so we work from a fixed list.
           </>,
           canApprove ? (
             <>
@@ -200,8 +201,8 @@ export function ShareHelpModal({
             </>
           ) : null,
           <>
-            Approving closes comments on that video and leaves only the approved version on the page, so do it once you
-            are genuinely happy.
+            Approving locks the feedback the same way and leaves only the approved version on the page. Either way the
+            comment box stays open — if you spot something afterwards, you can still send it.
           </>,
         ].filter(Boolean) as React.ReactNode[],
       })

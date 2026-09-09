@@ -11,6 +11,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { publishProjectEvent } from '@/lib/project-events'
+import { lockCommentsForApprovedVideo } from '@/lib/comment-locks'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -152,6 +153,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         approvedByName,
       },
     })
+
+    // Sign-off freezes the feedback that led to it, but does not close the comment box —
+    // same semantics as "Request Next Version" (see lockCommentsForApprovedVideo).
+    await lockCommentsForApprovedVideo({ projectId, videoName: selectedVideo.name, at: now })
 
     try {
       const settings = await getSecuritySettings()
@@ -296,8 +301,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     // Notify any open share pages / admin dashboards so the approval badge and
-    // (auto-approve / Reviewed) status update live for everyone viewing.
+    // (auto-approve / Reviewed) status update live for everyone viewing. `comment` makes
+    // other open pages refetch comments so the just-applied locks (lockedAt) show without
+    // a manual refresh — the `approval` handler alone does not refetch comments.
     await publishProjectEvent(projectId, 'approval')
+    await publishProjectEvent(projectId, 'comment')
 
     console.log('[APPROVAL] Approval process complete, returning success')
     return NextResponse.json({ success: true })

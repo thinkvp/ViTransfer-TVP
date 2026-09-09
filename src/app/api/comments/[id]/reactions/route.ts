@@ -157,10 +157,10 @@ async function resolveReactionContext(
     return { ok: false, response: NextResponse.json({ error: 'Reactions are disabled for this project' }, { status: 403 }) }
   }
 
-  // Locked comments (next version requested) are frozen for share sessions, consistent
-  // with edit/delete. Admins are unaffected.
+  // Locked comments — the next version was requested, or the video was approved — are frozen
+  // for share sessions, consistent with edit/delete. Admins are unaffected.
   if (comment.lockedAt) {
-    return { ok: false, response: NextResponse.json({ error: 'This comment is locked because the next version was requested' }, { status: 403 }) }
+    return { ok: false, response: NextResponse.json({ error: 'This feedback is locked in and can no longer be reacted to' }, { status: 403 }) }
   }
 
   // Trust the session's recipient first. A body-supplied id is only honoured after

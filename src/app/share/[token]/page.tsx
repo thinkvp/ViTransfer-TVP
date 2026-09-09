@@ -4077,9 +4077,9 @@ function ShareFeedbackGrid({
     subtitleGuardRef.current = isEditingSubtitles ? subtitleGuard : null
     return () => { subtitleGuardRef.current = null }
   }, [isEditingSubtitles, subtitleGuard, subtitleGuardRef])
-  const selectedVideoApproved = selectedVideo ? Boolean(selectedVideo.approved) : false
-  const anyApproved = readyVideos.some((v: any) => Boolean(v.approved))
-  const commentsDisabled = Boolean(isApproved || selectedVideoApproved || anyApproved)
+  // Approval no longer closes feedback: it locks the comments already on the video
+  // (server-side `lockedAt`, same as Request Next Version) and leaves the box open, so the
+  // input renders regardless of sign-off. CommentSectionView shows the approved banner.
 
   const currentVideoRestricted = Boolean(
     project.restrictCommentsToLatestVersion &&
@@ -4119,7 +4119,7 @@ function ShareFeedbackGrid({
               shareToken={shareToken}
               onStreamError={onStreamError}
               commentsForTimeline={management.comments as any}
-              disableFullscreenCommentsUI={commentsDisabled}
+              disableFullscreenCommentsUI={false}
               useFullTimecode={Boolean(project?.useFullTimecode)}
               showTimeDisplayToggle={true}
               onCloseVideo={onCloseVideo}
@@ -4140,7 +4140,7 @@ function ShareFeedbackGrid({
             </div>
           )}
 
-          {!commentsDisabled && !isEditingSubtitles ? (
+          {!isEditingSubtitles ? (
             <div className="mt-3 lg:hidden">
               <CommentInput
                 newComment={management.newComment}
@@ -4181,7 +4181,7 @@ function ShareFeedbackGrid({
                 recipients={project.recipients || []}
                 currentVideoRestricted={currentVideoRestricted}
                 restrictionMessage={restrictionMessage}
-                commentsDisabled={commentsDisabled}
+                commentsDisabled={false}
                 showShortcutsButton={isDesktop}
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-lg"
@@ -4243,13 +4243,13 @@ function ShareFeedbackGrid({
               allowCommentFileUpload={Boolean(project.allowClientUploadFiles)}
               hideInput={true}
               largeAvatars={true}
-              cardClassName={!commentsDisabled && isDesktop ? 'rounded-b-none' : undefined}
+              cardClassName={isDesktop ? 'rounded-b-none' : undefined}
               management={management as any}
             />
             )}
           </div>
 
-          {!commentsDisabled && !isEditingSubtitles ? (
+          {!isEditingSubtitles ? (
             <div className="hidden lg:block shrink-0">
               <CommentInput
                 newComment={management.newComment}
@@ -4290,7 +4290,7 @@ function ShareFeedbackGrid({
                 recipients={project.recipients || []}
                 currentVideoRestricted={currentVideoRestricted}
                 restrictionMessage={restrictionMessage}
-                commentsDisabled={commentsDisabled}
+                commentsDisabled={false}
                 showShortcutsButton={isDesktop}
                 onShowShortcuts={() => window.dispatchEvent(new CustomEvent('openShortcutsDialog'))}
                 containerClassName="border border-border rounded-b-lg rounded-t-none border-t-0"

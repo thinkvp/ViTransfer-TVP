@@ -58,11 +58,6 @@ export async function PATCH(
         recipientId: true,
         projectId: true,
         videoId: true,
-        video: {
-          select: {
-            approved: true,
-          },
-        },
         project: {
           select: {
             id: true,
@@ -154,14 +149,6 @@ export async function PATCH(
         )
       }
 
-      // Clients cannot edit comments on an approved video.
-      if (existingComment.video?.approved) {
-        return NextResponse.json(
-          { error: 'Comments cannot be edited after the video has been approved' },
-          { status: 403 }
-        )
-      }
-
       // SECURITY: Clients must NEVER be able to edit admin/user-authored or internal
       // comments. Legacy anonymous comments without a linked recipient are not editable.
       if (existingComment.userId || !existingComment.recipientId || existingComment.isInternal) {
@@ -172,10 +159,11 @@ export async function PATCH(
       }
     }
 
-    // Locked comments (next version requested) can no longer be edited by share sessions.
+    // Locked comments — the next version was requested, or the video was approved — can no
+    // longer be edited by share sessions. Newer comments on the same video stay editable.
     if (!isAdmin && existingComment.lockedAt) {
       return NextResponse.json(
-        { error: 'This comment is locked because the next version was requested' },
+        { error: 'This feedback is locked in and can no longer be edited' },
         { status: 403 }
       )
     }
@@ -313,11 +301,6 @@ export async function DELETE(
         recipientId: true,
         projectId: true,
         videoId: true,
-        video: {
-          select: {
-            approved: true,
-          },
-        },
         project: {
           select: {
             id: true,
@@ -400,14 +383,6 @@ export async function DELETE(
         )
       }
 
-      // Clients cannot delete comments on an approved video.
-      if (existingComment.video?.approved) {
-        return NextResponse.json(
-          { error: 'Comments cannot be deleted after the video has been approved' },
-          { status: 403 }
-        )
-      }
-
       // SECURITY: Clients must NEVER be able to delete admin/user-authored comments.
       // The only exception is implicit: when a client deletes a recipient-authored parent
       // comment, any admin replies are deleted as a cascade.
@@ -434,11 +409,11 @@ export async function DELETE(
         )
       }
 
-      // Locked comments (next version requested) can no longer be deleted by clients,
-      // even when allowClientDeleteComments is enabled.
+      // Locked comments — the next version was requested, or the video was approved — can no
+      // longer be deleted by clients, even when allowClientDeleteComments is enabled.
       if (existingComment.lockedAt) {
         return NextResponse.json(
-          { error: 'This comment is locked because the next version was requested' },
+          { error: 'This feedback is locked in and can no longer be deleted' },
           { status: 403 }
         )
       }
