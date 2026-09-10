@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.3] - 2026-09-10
+
+### Added
+
+- **Auto-generated captions must be marked checked before a client can download them** — Whisper captions landed in the client's download list the moment a video was approved, so clients were taking away subtitles nobody had proof-read. The subtitle editor now has an admin-only **Mark checked** button: until it is pressed the `.srt` stays out of the client's files, downloads and zips (playback captions are unaffected), and any later edit, regeneration or replacement clears the check again. Unchecked caption files are also named `…_AUTO-DRAFT.srt`, so the caveat survives the download. The gate starts **on** and can be switched off in **Settings > Subtitles & Transcription**; existing captions are withheld until someone checks them. **Schema migration:** `20260910000000_subtitle_signoff`.
+
+### Fixed
+
+- **The share page no longer shows the wrong total length for a video** — a five-minute video could report "01:04" and then creep upwards as it played, which also threw off the timeline: clicking halfway along the scrub bar jumped to the wrong place. The player was asking the browser how long the video was, and the browser's answer degrades to "however much I've buffered" whenever the streaming engine gets rebuilt mid-playback — which happened every time the page refreshed project data (an approval, a status change, a new version). The player now uses the length recorded when the video was processed, and the streaming engine is no longer rebuilt on those refreshes. Guest video links carry the recorded length too.
+
+- **A video and its attachments no longer serve each other's stream** — playback playlists were cached per video, but an attachment's playback token carries its parent video's ID, so whichever was opened first in a session was served to both for the next two hours. On any project with a 1080p rendition that meant the wrong duration and, if you played it, the wrong footage.
+
 ## [2.6.2] - 2026-09-09
 
 ### Changed

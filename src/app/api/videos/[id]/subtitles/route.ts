@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { readCuesForVideo, writeCuesForVideo, SubtitlesNotFoundError, type SubtitleEditedBy } from '@/lib/subtitle-store'
+import { getRequireSubtitleApprovalForDownload } from '@/lib/settings'
 import { MAX_CUES, MAX_CUE_TEXT_LENGTH, type SubtitleCue } from '@/lib/subtitles'
 import { publishProjectEvent } from '@/lib/project-events'
 
@@ -29,6 +30,8 @@ async function resolveVideoWithAccess(request: NextRequest, videoId: string) {
       subtitlesEditedAt: true,
       subtitlesEditedById: true,
       subtitlesEditedByName: true,
+      subtitlesApprovedAt: true,
+      subtitlesApprovedByName: true,
       project: { select: { id: true, sharePassword: true, authMode: true } },
     },
   })
@@ -71,12 +74,24 @@ export async function GET(
           at: video.subtitlesEditedAt.toISOString(),
         }
       : null
+    // Caption sign-off state for the editor header: who vouched for these exact
+    // cues, and whether the .srt is currently withheld from client downloads.
+    const checkedBy = video.subtitlesApprovedAt
+      ? {
+          name: accessCheck.isGuest ? 'Admin' : (video.subtitlesApprovedByName || 'Admin'),
+          at: video.subtitlesApprovedAt.toISOString(),
+        }
+      : null
     const response = NextResponse.json({
       cues,
       fileName,
       updatedAt,
       transcriptionStatus: video.transcriptionStatus,
       lastEditedBy,
+      checkedBy,
+      // The policy flag itself: the panel derives "withheld from clients" from
+      // this plus checkedBy, so it stays right after a save clears the sign-off.
+      downloadGateEnabled: await getRequireSubtitleApprovalForDownload(),
     })
     response.headers.set('Cache-Control', 'no-store')
     return response

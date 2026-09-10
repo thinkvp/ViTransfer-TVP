@@ -5,6 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getStoredFilePathForProject } from '@/lib/stored-file'
+import { isSubtitleAssetWithheldForViewer } from '@/lib/subtitle-delivery'
 import { buildHlsMasterUrl } from '@/lib/video-stream-url'
 
 /**
@@ -83,6 +84,15 @@ export async function POST(
       if (!asset.video.approved) {
         return NextResponse.json(
           { error: 'Assets are only available for approved videos' },
+          { status: 403 }
+        )
+      }
+
+      // Captions nobody has signed off are not a deliverable — the listing hides
+      // them, and this closes the by-id door behind it.
+      if (await isSubtitleAssetWithheldForViewer(asset, asset.video, { isAdmin: false })) {
+        return NextResponse.json(
+          { error: 'These captions have not been checked yet and are not available for download' },
           { status: 403 }
         )
       }

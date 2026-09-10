@@ -755,6 +755,9 @@ export default function VideoPlayer({
   const previousVideoNameRef = useRef<string | null>(null)
   const currentTimeRef = useRef(0)
   const selectedVideoIdRef = useRef<string | null>(null)
+  // Mirror of `effectiveDurationSeconds` for callbacks that must clamp a seek without
+  // taking a dependency on it (keyboard handlers, frame stepping, the initial-seek effect).
+  const effectiveDurationRef = useRef(0)
   const hasTrustedAspectRatioRef = useRef(false)
   const holdBoostPointerIdRef = useRef<number | null>(null)
   const holdBoostStartMsRef = useRef(0)
@@ -790,8 +793,17 @@ export default function VideoPlayer({
   const safeIndex = Math.min(selectedVideoIndex, displayVideos.length - 1)
   const selectedVideo = displayVideos[safeIndex >= 0 ? safeIndex : 0]
 
+  // Total-duration readout. The DB value (probed by ffmpeg at ingest) is ground truth and
+  // is preferred whenever it exists; the <video> element is only a fallback.
+  //
+  // The element cannot be trusted on its own: hls.js sets `MediaSource.duration` exactly once
+  // for a VOD playlist (it never reloads the level), so if that assignment is missed — or the
+  // MediaSource is replaced mid-playback by an error recovery — `video.duration` silently
+  // degrades to "highest buffered end" and creeps upward with the buffer, roughly playhead +
+  // maxBufferLength. That surfaced as a ~5-minute video reporting a slowly-climbing 01:04.
+  // The element is still the fallback for videos whose metadata probe produced no duration.
   const effectiveDurationSeconds =
-    durationSeconds || (selectedVideo?.duration as number | undefined) || 0
+    ((selectedVideo?.duration as number | undefined) || 0) || durationSeconds || 0
 
   // HLS master-playlist URL handed back by the share/guest/admin token routes. HLS is the
   // sole playback path now — when this is empty (packaging not yet ready) the player shows a
@@ -1063,6 +1075,17 @@ export default function VideoPlayer({
 
   useEffect(() => {
     selectedVideoIdRef.current = selectedVideo?.id ?? null
+  }, [selectedVideo?.id])
+
+  useEffect(() => {
+    effectiveDurationRef.current = effectiveDurationSeconds
+  }, [effectiveDurationSeconds])
+
+  // Drop the previous video's element-reported duration when the selection changes. It is
+  // only ever a fallback (see effectiveDurationSeconds), but without this it lingers until
+  // the new element reports metadata and briefly shows the wrong length after a switch.
+  useEffect(() => {
+    setDurationSeconds(0)
   }, [selectedVideo?.id])
 
   useEffect(() => {
@@ -1749,13 +1772,25 @@ export default function VideoPlayer({
   // Ask the parent to re-mint tokens after an unrecoverable stream failure. Latches per
   // videoId (cleared on the next successful loadedmetadata) so an error→refresh→error
   // sequence can't loop. Shared by the MP4 <video> onError and the hls.js error handler.
+  //
+  // `onStreamError` is held in a ref so this callback keeps a stable identity. The share
+  // page's handler closes over its whole `project` object, so it changes identity on every
+  // setProject (an approval, a status change, a new version, the periodic token refresh).
+  // This callback is in the hls.js lifecycle effect's dependencies — when it churned, the
+  // effect re-ran and destroyed/rebuilt hls.js mid-playback, resetting the element (and with
+  // it the MediaSource duration, which hls.js only assigns once for a VOD playlist).
+  const onStreamErrorRef = useRef(onStreamError)
+  useEffect(() => {
+    onStreamErrorRef.current = onStreamError
+  }, [onStreamError])
+
   const triggerStreamErrorRecovery = useCallback(() => {
     const vid = selectedVideoIdRef.current
     if (!vid) return
     if (streamErrorRecoveryRef.current === vid) return
     streamErrorRecoveryRef.current = vid
-    onStreamError?.(vid)
-  }, [onStreamError])
+    onStreamErrorRef.current?.(vid)
+  }, [])
 
   // hls.js (MSE) lifecycle: attach to the <video> element and load the master playlist.
   // Re-runs when the video changes or the parent hands back a fresh hlsUrl (token refresh),
@@ -1925,7 +1960,7 @@ export default function VideoPlayer({
     }
     if (precisionDragAnchorRef.current) return
     const el = scrubBarRef.current
-    const duration = (videoRef.current?.duration || durationSeconds || selectedVideo?.duration || 0) as number
+    const duration = effectiveDurationSeconds
     if (!el || !duration || duration <= 0) return
     const rect = el.getBoundingClientRect()
     const x = Math.min(Math.max(clientX - rect.left, 0), rect.width)
@@ -1985,7 +2020,7 @@ export default function VideoPlayer({
 
   const getTimeFromScrubEvent = (clientX: number) => {
     const el = scrubBarRef.current
-    const duration = (videoRef.current?.duration || durationSeconds || selectedVideo?.duration || 0) as number
+    const duration = effectiveDurationSeconds
     if (!el || !duration || duration <= 0) return { time: 0, left: 0, width: 0 }
     const rect = el.getBoundingClientRect()
     // Precision drag: map movement relative to the anchor, scaled down, so the
@@ -2040,7 +2075,7 @@ export default function VideoPlayer({
     }
 
     const spriteBaseUrl = selectedVideo?.timelineSpriteUrl as string | null | undefined
-    const duration = (videoRef.current?.duration || durationSeconds || selectedVideo?.duration || 0) as number
+    const duration = effectiveDurationSeconds
     const el = scrubBarRef.current
 
     if (!el || !duration || duration <= 0 || !spriteBaseUrl || timelineCues.length === 0) {
@@ -2239,8 +2274,9 @@ export default function VideoPlayer({
       const videoEl = videoRef.current
       const handleLoadedMetadata = () => {
         if (initialSeekTime !== null) {
-          // Ensure timestamp is within video duration
-          const duration = videoEl.duration
+          // Ensure timestamp is within video duration. Prefer the authoritative (DB)
+          // duration — the element's own can under-report while HLS is still buffering.
+          const duration = effectiveDurationRef.current || videoEl.duration
           const seekTime = Math.min(initialSeekTime, duration)
 
           videoEl.currentTime = seekTime
@@ -2442,7 +2478,8 @@ export default function VideoPlayer({
     }
 
     const frameDuration = 1 / fps
-    const duration = Number.isFinite(video.duration) ? video.duration : undefined
+    const duration = effectiveDurationRef.current
+      || (Number.isFinite(video.duration) ? video.duration : undefined)
     const nextTime = direction < 0
       ? Math.max(0, video.currentTime - frameDuration)
       : (duration ? Math.min(duration, video.currentTime + frameDuration) : video.currentTime + frameDuration)
@@ -2544,7 +2581,8 @@ export default function VideoPlayer({
 
         const side: 'left' | 'right' = e.code === 'ArrowLeft' ? 'left' : 'right'
         const delta = side === 'left' ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS
-        const upperBound = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Number.MAX_SAFE_INTEGER
+        const clampSource = effectiveDurationRef.current || video.duration
+        const upperBound = Number.isFinite(clampSource) && clampSource > 0 ? clampSource : Number.MAX_SAFE_INTEGER
         const targetTime = Math.min(upperBound, Math.max(0, (video.currentTime || 0) + delta))
         try {
           video.currentTime = targetTime

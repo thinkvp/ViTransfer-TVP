@@ -58,6 +58,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           versionLabel: true,
           status: true,
           approved: true,
+          duration: true,
           timelinePreviewsReady: true,
           hlsVersion: true,
         },
@@ -230,6 +231,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       version: link.video.version,
       versionLabel: link.video.versionLabel,
       approved: link.video.approved,
+      // Authoritative length for the player's duration readout and its seek clamps — the
+      // <video> element's own duration is only a fallback (see VideoPlayer).
+      duration: link.video.duration,
       isLatestVersion,
       hasThumbnail,
       timelinePreviewsReady: link.video.timelinePreviewsReady,

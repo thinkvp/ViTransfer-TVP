@@ -117,7 +117,13 @@ export async function GET(
   // --- {label}/index.m3u8: rewrite segment URIs (init.mp4 + seg-*.m4s) ---
   if (pathParts.length === 2 && RENDITION_LABELS.has(pathParts[0]) && pathParts[1] === 'index.m3u8') {
     const label = pathParts[0]
-    const cacheKey = `hls_variant:${sessionId}:${verified.videoId}:${label}`
+    // Key on the resolved storage root, not the videoId alone: an asset playback token
+    // carries its PARENT video's id, so a video and its assets shared a key — and since
+    // assets always package a "1080" rendition, any project with a 1080 rendition served
+    // whichever playlist was fetched first to both for the whole cache window (wrong
+    // duration, wrong segments). The root already encodes the entity, so it can't drift
+    // from the playlist actually read below.
+    const cacheKey = `hls_variant:${sessionId}:${hlsRoot}:${label}`
 
     // Mark this session as streaming. hls.js fetches the variant playlist when a
     // rendition starts playing, so this is a reliable "started watching" signal.

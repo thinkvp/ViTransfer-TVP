@@ -17,6 +17,7 @@ type ResolvePayload = {
     version?: number | null
     versionLabel?: string | null
     approved?: boolean
+    duration?: number | null
     isLatestVersion?: boolean
     streamUrl720p?: string
     streamUrl1080p?: string
@@ -145,6 +146,7 @@ export function GuestVideoViewer({ token }: { token: string }) {
     version: data.video.version,
     versionLabel: data.video.versionLabel,
     approved: data.video.approved,
+    duration: data.video.duration,
     streamUrl720p: data.video.streamUrl720p,
     streamUrl1080p: data.video.streamUrl1080p,
     hlsUrl: data.video.hlsUrl,

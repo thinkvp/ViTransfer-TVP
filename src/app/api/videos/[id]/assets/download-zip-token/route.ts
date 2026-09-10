@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
 import { getRedis } from '@/lib/redis'
+import { filterSubtitleAssetsForViewer } from '@/lib/subtitle-delivery'
 import crypto from 'crypto'
 import { z } from 'zod'
 
@@ -73,13 +74,19 @@ export async function POST(
       }
     }
 
-    // Verify all asset IDs belong to this video
-    const assets = await prisma.videoAsset.findMany({
-      where: {
-        id: { in: assetIds },
-        videoId,
-      },
-    })
+    // Verify all asset IDs belong to this video. Unchecked captions are withheld
+    // from clients, so a stale selection containing one fails the count check
+    // below rather than quietly zipping it.
+    const assets = await filterSubtitleAssetsForViewer(
+      await prisma.videoAsset.findMany({
+        where: {
+          id: { in: assetIds },
+          videoId,
+        },
+      }),
+      video,
+      { isAdmin: accessCheck.isAdmin },
+    )
 
     if (assets.length === 0) {
       return NextResponse.json({ error: 'No valid assets found' }, { status: 404 })

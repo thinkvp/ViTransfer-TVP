@@ -25,6 +25,7 @@ const cachedSessionTimeout: CachedValue<number> = { value: 15 * 60, expiresAt: 0
 const cachedSmtpConfigured: CachedValue<boolean> = { value: false, expiresAt: 0 }
 const cachedAutoApproveProject: CachedValue<boolean> = { value: true, expiresAt: 0 }
 const cachedExcludeInternalIpsFromAnalytics: CachedValue<boolean> = { value: true, expiresAt: 0 }
+const cachedRequireSubtitleApproval: CachedValue<boolean> = { value: true, expiresAt: 0 }
 const cachedClientUploadPolicy: CachedValue<ClientUploadPolicy> = {
   value: DEFAULT_CLIENT_UPLOAD_POLICY,
   expiresAt: 0,
@@ -95,6 +96,7 @@ export function invalidateSettingsCaches() {
   cachedBrandingSettings.expiresAt = 0
   cachedTransferTuning.expiresAt = 0
   cachedClientUploadPolicy.expiresAt = 0
+  cachedRequireSubtitleApproval.expiresAt = 0
 }
 
 /**
@@ -284,6 +286,33 @@ export async function getAutoApproveProject(): Promise<boolean> {
   } catch (error) {
     console.error('Error fetching auto-approve setting:', error)
     return cachedAutoApproveProject.value
+  }
+}
+
+/**
+ * Withhold a video's caption .srt from client downloads until an admin has marked
+ * it checked. Defaults to ON — the safe direction: an unread setting must not let
+ * un-proof-read auto-captions out as a deliverable. See `subtitle-delivery.ts`.
+ */
+export async function getRequireSubtitleApprovalForDownload(): Promise<boolean> {
+  const now = Date.now()
+  if (cachedRequireSubtitleApproval.expiresAt > now) {
+    return cachedRequireSubtitleApproval.value
+  }
+
+  try {
+    const settings = await prisma.settings.findUnique({
+      where: { id: 'default' },
+      select: { subtitlesRequireApprovalForDownload: true },
+    })
+
+    const value = settings?.subtitlesRequireApprovalForDownload ?? true
+    cachedRequireSubtitleApproval.value = value
+    cachedRequireSubtitleApproval.expiresAt = now + SETTINGS_CACHE_TTL_MS
+    return value
+  } catch (error) {
+    console.error('Error fetching subtitle download gate setting:', error)
+    return cachedRequireSubtitleApproval.value
   }
 }
 

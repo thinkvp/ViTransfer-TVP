@@ -752,6 +752,23 @@ export async function updateStoredFilePath(
 }
 
 /**
+ * Update the download filename for a specific entity+role, leaving the storage
+ * path alone. Used when a file's delivered name changes but its bytes don't
+ * (e.g. captions dropping the AUTO-DRAFT marker on sign-off).
+ */
+export async function updateStoredFileName(
+  entityType: EntityType,
+  entityId: string,
+  fileRole: FileRole,
+  newFileName: string,
+) {
+  return prisma.storedFile.update({
+    where: { entityType_entityId_fileRole: { entityType, entityId, fileRole } },
+    data: { fileName: newFileName },
+  })
+}
+
+/**
  * Check if a StoredFile record exists for the given entity+role.
  * Returns boolean — cheaper than fetching the full row.
  */

@@ -5,6 +5,7 @@ import { downloadFile, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getStoredFilePath } from '@/lib/stored-file'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { rateLimit } from '@/lib/rate-limit'
+import { filterSubtitleAssetsForViewer } from '@/lib/subtitle-delivery'
 import { ZipArchive } from 'archiver'
 import { Readable } from 'stream'
 import { z } from 'zod'
@@ -72,13 +73,18 @@ export async function POST(
       }
     }
 
-    // Get all requested assets
-    const assets = await prisma.videoAsset.findMany({
-      where: {
-        id: { in: assetIds },
-        videoId,
-      },
-    })
+    // Get all requested assets. Captions nobody has signed off are withheld from
+    // clients (see lib/subtitle-delivery), so they are simply left out of the zip.
+    const assets = await filterSubtitleAssetsForViewer(
+      await prisma.videoAsset.findMany({
+        where: {
+          id: { in: assetIds },
+          videoId,
+        },
+      }),
+      video,
+      { isAdmin: accessCheck.isAdmin },
+    )
 
     if (assets.length === 0) {
       return NextResponse.json({ error: 'No valid assets found' }, { status: 404 })

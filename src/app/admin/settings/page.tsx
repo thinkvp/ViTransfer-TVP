@@ -191,6 +191,7 @@ export default function GlobalSettingsPage() {
   const [transcriptionMaxCharsPerLine, setTranscriptionMaxCharsPerLine] = useState<number | ''>(42)
   const [transcriptionMaxLines, setTranscriptionMaxLines] = useState<number | ''>(2)
   const [transcriptionLanguage, setTranscriptionLanguage] = useState('en')
+  const [subtitlesRequireApprovalForDownload, setSubtitlesRequireApprovalForDownload] = useState(true)
   const [appDomain, setAppDomain] = useState('')
   const [mainCompanyDomain, setMainCompanyDomain] = useState('')
   const [defaultPreviewResolutions, setDefaultPreviewResolutions] = useState<string[]>(['720p'])
@@ -378,6 +379,7 @@ export default function GlobalSettingsPage() {
     transcriptionEnabled, transcriptionProvider, transcriptionWhisperUrl, transcriptionWhisperModel,
     transcriptionOpenaiApiKey, transcriptionOpenaiModel, transcriptionLanguage,
     transcriptionMaxCharsPerLine, transcriptionMaxLines,
+    subtitlesRequireApprovalForDownload,
   })
   const hasUnsavedChanges = dataLoaded && savedSnapshot !== '' && settingsSnapshot !== savedSnapshot
   useUnsavedChanges(hasUnsavedChanges)
@@ -438,6 +440,7 @@ export default function GlobalSettingsPage() {
         setTranscriptionLanguage(data.transcriptionLanguage ?? 'en')
         setTranscriptionMaxCharsPerLine(typeof data.transcriptionMaxCharsPerLine === 'number' ? data.transcriptionMaxCharsPerLine : 42)
         setTranscriptionMaxLines(typeof data.transcriptionMaxLines === 'number' ? data.transcriptionMaxLines : 2)
+        setSubtitlesRequireApprovalForDownload(data.subtitlesRequireApprovalForDownload ?? true)
         setSecretConfigured({
           smtp: !!data.smtpPasswordConfigured,
           aiAnthropic: !!data.aiAnthropicApiKeyConfigured,
@@ -848,6 +851,7 @@ export default function GlobalSettingsPage() {
         transcriptionLanguage: transcriptionLanguage.trim(),
         transcriptionMaxCharsPerLine: transcriptionMaxCharsPerLine === '' ? 0 : transcriptionMaxCharsPerLine,
         transcriptionMaxLines: transcriptionMaxLines === '' ? 2 : transcriptionMaxLines,
+        subtitlesRequireApprovalForDownload,
       }
 
       // Save global settings
@@ -962,6 +966,7 @@ export default function GlobalSettingsPage() {
         setTranscriptionLanguage(refreshedData.transcriptionLanguage ?? 'en')
         setTranscriptionMaxCharsPerLine(typeof refreshedData.transcriptionMaxCharsPerLine === 'number' ? refreshedData.transcriptionMaxCharsPerLine : 42)
         setTranscriptionMaxLines(typeof refreshedData.transcriptionMaxLines === 'number' ? refreshedData.transcriptionMaxLines : 2)
+        setSubtitlesRequireApprovalForDownload(refreshedData.subtitlesRequireApprovalForDownload ?? true)
         setSecretConfigured({
           smtp: !!refreshedData.smtpPasswordConfigured,
           aiAnthropic: !!refreshedData.aiAnthropicApiKeyConfigured,
@@ -1342,6 +1347,8 @@ export default function GlobalSettingsPage() {
             transcriptionMaxCharsPerLine={transcriptionMaxCharsPerLine}
             setTranscriptionMaxCharsPerLine={setTranscriptionMaxCharsPerLine}
             transcriptionMaxLines={transcriptionMaxLines}
+            subtitlesRequireApprovalForDownload={subtitlesRequireApprovalForDownload}
+            setSubtitlesRequireApprovalForDownload={setSubtitlesRequireApprovalForDownload}
             setTranscriptionMaxLines={setTranscriptionMaxLines}
             show={showTranscription}
             setShow={setShowTranscription}
@@ -1742,6 +1749,8 @@ export default function GlobalSettingsPage() {
                 transcriptionMaxCharsPerLine={transcriptionMaxCharsPerLine}
                 setTranscriptionMaxCharsPerLine={setTranscriptionMaxCharsPerLine}
                 transcriptionMaxLines={transcriptionMaxLines}
+                subtitlesRequireApprovalForDownload={subtitlesRequireApprovalForDownload}
+                setSubtitlesRequireApprovalForDownload={setSubtitlesRequireApprovalForDownload}
                 setTranscriptionMaxLines={setTranscriptionMaxLines}
                 show={true}
                 setShow={() => {}}

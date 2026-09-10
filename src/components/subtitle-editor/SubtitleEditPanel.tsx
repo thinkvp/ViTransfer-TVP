@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   Loader2, Search, X, Download, FileText, RefreshCw, Undo2,
-  Scissors, ArrowDownToLine, Trash2, Plus,
+  Scissors, ArrowDownToLine, Trash2, Plus, ShieldCheck, ShieldAlert,
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { MAX_CUE_TEXT_LENGTH } from '@/lib/subtitles'
@@ -201,6 +201,23 @@ export function SubtitleEditPanel({ editor }: { editor: SubtitleEditorApi }) {
               Last edited by {editor.lastEditedBy.name} <span className="italic">{formatDateTime(editor.lastEditedBy.at)}</span>
             </p>
           )}
+          {editor.checkedBy ? (
+            <p className="text-xs text-green-600 dark:text-green-500 flex items-center gap-1 truncate">
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                Checked by {editor.checkedBy.name} <span className="italic">{formatDateTime(editor.checkedBy.at)}</span>
+              </span>
+            </p>
+          ) : (
+            <p className="text-xs text-amber-600 dark:text-amber-500 flex items-center gap-1 truncate">
+              <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                {editor.isAdmin
+                  ? `Not checked${editor.withheldFromClients ? ' — the .srt is withheld from clients' : ''}`
+                  : 'Not checked yet — treat these captions as a draft'}
+              </span>
+            </p>
+          )}
         </div>
         <Button
           type="button"
@@ -272,16 +289,46 @@ export function SubtitleEditPanel({ editor }: { editor: SubtitleEditorApi }) {
         <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!editor.canUndo} onClick={editor.undo}>
           <Undo2 className="w-3.5 h-3.5 mr-1" /> Undo
         </Button>
-        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={editor.loading || editor.cues.length === 0} onClick={editor.exportTranscript}>
-          <FileText className="w-3.5 h-3.5 mr-1" /> .txt
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={editor.loading || editor.cues.length === 0} onClick={editor.exportSrt}>
-          <Download className="w-3.5 h-3.5 mr-1" /> SRT
-        </Button>
+        {/* Exporting is the same file by another door, so clients lose it while
+            the captions are withheld. Admins always keep it — that is how they check. */}
+        {(editor.isAdmin || !editor.withheldFromClients) && (
+          <>
+            <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={editor.loading || editor.cues.length === 0} onClick={editor.exportTranscript}>
+              <FileText className="w-3.5 h-3.5 mr-1" /> .txt
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={editor.loading || editor.cues.length === 0} onClick={editor.exportSrt}>
+              <Download className="w-3.5 h-3.5 mr-1" /> SRT
+            </Button>
+          </>
+        )}
         {editor.isAdmin && (
-          <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void editor.regenerate()} title="Regenerate from audio (overwrites edits)">
-            <RefreshCw className="w-3.5 h-3.5 mr-1" /> Regen
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant={editor.checkedBy ? 'outline' : 'default'}
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={editor.loading || editor.signingOff || editor.dirty || editor.cues.length === 0}
+              title={
+                editor.dirty
+                  ? 'Save your edits first, then mark the captions checked'
+                  : editor.checkedBy
+                    ? 'Withdraw the check — the .srt goes back to being withheld from clients'
+                    : 'Mark these captions proof-read — releases the .srt to clients'
+              }
+              onClick={() => void editor.setChecked(!editor.checkedBy)}
+            >
+              {editor.signingOff
+                ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                : editor.checkedBy
+                  ? <ShieldAlert className="w-3.5 h-3.5 mr-1" />
+                  : <ShieldCheck className="w-3.5 h-3.5 mr-1" />}
+              {editor.checkedBy ? 'Uncheck' : 'Mark checked'}
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void editor.regenerate()} title="Regenerate from audio (overwrites edits)">
+              <RefreshCw className="w-3.5 h-3.5 mr-1" /> Regen
+            </Button>
+          </>
         )}
         <div className="flex-1" />
         <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-xs" disabled={!editor.dirty || editor.saving} onClick={editor.discard}>

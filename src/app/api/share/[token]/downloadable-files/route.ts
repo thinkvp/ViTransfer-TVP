@@ -7,6 +7,7 @@ import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { batchResolveFileSizes, getStoredFileRecords, storedFileExists } from '@/lib/stored-file'
+import { filterSubtitleAssetsForViewer } from '@/lib/subtitle-delivery'
 import type { DownloadableFile, DownloadableGroup, DownloadableFilesResult } from '@/lib/downloadable-files'
 
 export const runtime = 'nodejs'
@@ -207,6 +208,12 @@ export async function GET(
     }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 
+
+  // Captions nobody has signed off are withheld from clients — drop them before
+  // anything downstream builds a downloadable entry (see lib/subtitle-delivery).
+  for (const video of readyVideos) {
+    video.assets = await filterSubtitleAssetsForViewer(video.assets, video, { isAdmin: accessCheck.isAdmin })
+  }
 
   // Build video groups: one per unique video name, containing all versions.
   const videosByName = new Map<string, typeof readyVideos>()

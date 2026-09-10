@@ -8,9 +8,9 @@
  */
 import { prisma } from './db'
 import { downloadFile, uploadFile } from './storage'
-import { getStoredFilePathForProject, registerStoredFiles } from './stored-file'
+import { getStoredFilePathForProject, registerStoredFiles, updateStoredFileName } from './stored-file'
 import { buildVideoSubtitlesStorageRoot } from './project-storage-paths'
-import { parseSrt, serializeSrt, serializeVtt, type SubtitleCue } from './subtitles'
+import { applyDraftMarker, parseSrt, serializeSrt, serializeVtt, type SubtitleCue } from './subtitles'
 
 export class SubtitlesNotFoundError extends Error {
   constructor(message = 'No subtitles exist for this video') {
@@ -26,10 +26,14 @@ async function findSubtitleAsset(videoId: string) {
   })
 }
 
-/** Filesystem/browser-friendly SRT name. Mirrors the worker's helper. */
+/**
+ * Filesystem/browser-friendly SRT name. Mirrors the worker's helper. Freshly
+ * written cues are never signed off, so the name always carries the draft marker
+ * — `setSubtitleSignOff` strips it when an admin marks the captions checked.
+ */
 function sanitizeSubtitleFileName(name: string, versionLabel: string): string {
   const base = `${name}_${versionLabel}_captions`.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim()
-  return `${base}.srt`
+  return applyDraftMarker(`${base}.srt`, true)
 }
 
 async function streamToString(storagePath: string): Promise<string> {
@@ -104,11 +108,20 @@ export async function writeCuesForVideo(
       select: { id: true, fileName: true, updatedAt: true, video: { select: { projectId: true } } },
     })
     asset = created
-  } else if (opts?.uploadedByName) {
-    await prisma.videoAsset.update({
-      where: { id: asset.id },
-      data: { uploadedByName: opts.uploadedByName },
-    }).catch(() => {})
+  } else {
+    // Any write replaces the cues wholesale, so whatever sign-off the file had no
+    // longer describes its content — the name goes back to carrying the marker.
+    const draftName = applyDraftMarker(asset.fileName, true)
+    if (draftName !== asset.fileName || opts?.uploadedByName) {
+      await prisma.videoAsset.update({
+        where: { id: asset.id },
+        data: {
+          fileName: draftName,
+          ...(opts?.uploadedByName ? { uploadedByName: opts.uploadedByName } : {}),
+        },
+      }).catch(() => {})
+      asset = { ...asset, fileName: draftName }
+    }
   }
   const projectId = asset.video.projectId
 
@@ -157,20 +170,73 @@ export async function writeCuesForVideo(
 
   await prisma.video.update({
     where: { id: videoId },
-    data: opts?.editedBy
-      ? {
-          subtitlesEditedAt: new Date(),
-          subtitlesEditedById: opts.editedBy.userId,
-          subtitlesEditedByRecipientId: opts.editedBy.recipientId,
-          subtitlesEditedByName: opts.editedBy.name,
-        }
-      : {
-          subtitlesEditedAt: null,
-          subtitlesEditedById: null,
-          subtitlesEditedByRecipientId: null,
-          subtitlesEditedByName: null,
-        },
+    data: {
+      // Sign-off covers exact content, and this call just replaced it.
+      subtitlesApprovedAt: null,
+      subtitlesApprovedById: null,
+      subtitlesApprovedByName: null,
+      ...(opts?.editedBy
+        ? {
+            subtitlesEditedAt: new Date(),
+            subtitlesEditedById: opts.editedBy.userId,
+            subtitlesEditedByRecipientId: opts.editedBy.recipientId,
+            subtitlesEditedByName: opts.editedBy.name,
+          }
+        : {
+            subtitlesEditedAt: null,
+            subtitlesEditedById: null,
+            subtitlesEditedByRecipientId: null,
+            subtitlesEditedByName: null,
+          }),
+    },
   }).catch(() => {})
 
   return { cueCount: cues.length }
+}
+
+export interface SubtitleSignOffActor {
+  userId: string | null
+  name: string
+}
+
+/**
+ * Mark a video's captions checked (or withdraw that), keeping the delivered
+ * filename in step: signed-off captions lose the AUTO-DRAFT marker, withdrawn
+ * ones get it back. The bytes and storage path never change — only the name the
+ * browser saves the file under, on both the VideoAsset row and its StoredFile.
+ *
+ * Sign-off is set ONLY here; every cue write clears it (see writeCuesForVideo).
+ * Returns the resulting filename, or null when the video has no captions.
+ */
+export async function setSubtitleSignOff(
+  videoId: string,
+  actor: SubtitleSignOffActor | null,
+): Promise<{ fileName: string } | null> {
+  const asset = await findSubtitleAsset(videoId)
+  if (!asset) return null
+
+  const fileName = applyDraftMarker(asset.fileName, actor === null)
+
+  if (fileName !== asset.fileName) {
+    await prisma.videoAsset.update({ where: { id: asset.id }, data: { fileName } })
+    // Downloads read the VideoAsset name, but keep the registry honest too.
+    await updateStoredFileName('VIDEO_ASSET', asset.id, 'ORIGINAL', fileName).catch(() => {})
+  }
+
+  await prisma.video.update({
+    where: { id: videoId },
+    data: actor
+      ? {
+          subtitlesApprovedAt: new Date(),
+          subtitlesApprovedById: actor.userId,
+          subtitlesApprovedByName: actor.name,
+        }
+      : {
+          subtitlesApprovedAt: null,
+          subtitlesApprovedById: null,
+          subtitlesApprovedByName: null,
+        },
+  })
+
+  return { fileName }
 }

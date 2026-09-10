@@ -31,6 +31,8 @@ interface TranscriptionSettingsSectionProps {
   setTranscriptionMaxCharsPerLine: (value: number | '') => void
   transcriptionMaxLines: number | ''
   setTranscriptionMaxLines: (value: number | '') => void
+  subtitlesRequireApprovalForDownload: boolean
+  setSubtitlesRequireApprovalForDownload: (value: boolean) => void
   show: boolean
   setShow: (value: boolean) => void
   hideCollapse?: boolean
@@ -61,6 +63,8 @@ export function TranscriptionSettingsSection({
   setTranscriptionMaxCharsPerLine,
   transcriptionMaxLines,
   setTranscriptionMaxLines,
+  subtitlesRequireApprovalForDownload,
+  setSubtitlesRequireApprovalForDownload,
   show,
   setShow,
   hideCollapse,
@@ -159,6 +163,27 @@ export function TranscriptionSettingsSection({
                 you can turn auto-generation off per version at upload, and set captions manually (upload an SRT
                 or copy them from another version). Subtitles appear as a CC option in the player, and the SRT
                 becomes a downloadable video asset once the video is approved.
+              </div>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer group">
+            <input
+              type="checkbox"
+              checked={subtitlesRequireApprovalForDownload}
+              onChange={(e) => setSubtitlesRequireApprovalForDownload(e.target.checked)}
+              className="mt-1 h-4 w-4 text-primary focus:ring-primary rounded"
+            />
+            <div className="flex-1">
+              <div className="font-medium text-sm group-hover:text-primary transition-colors">
+                Only release captions clients can download once they are marked checked
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Auto-generated captions are a review aid, not a deliverable, until someone has read them.
+                With this on, the <span className="font-mono">.srt</span> stays out of the client&apos;s downloads
+                until an admin hits <strong>Mark checked</strong> in the subtitle editor — playback captions (CC)
+                are unaffected either way. Unchecked caption files are named{' '}
+                <span className="font-mono">…_AUTO-DRAFT.srt</span> so the warning survives the download.
               </div>
             </div>
           </label>

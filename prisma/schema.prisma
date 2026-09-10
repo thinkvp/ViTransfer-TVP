@@ -854,6 +854,14 @@ model Video {
   subtitlesEditedByRecipientId String?
   subtitlesEditedByName        String?
 
+  // Caption sign-off: an admin has proof-read these exact cues, so the SRT may be
+  // delivered to clients (see Settings.subtitlesRequireApprovalForDownload). Set ONLY
+  // by the explicit "Mark checked" action and CLEARED by every wholesale cue write
+  // (regeneration, manual edit, SRT set/copy) — sign-off describes content, not a file.
+  subtitlesApprovedAt     DateTime?
+  subtitlesApprovedById   String?
+  subtitlesApprovedByName String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1232,6 +1240,9 @@ model Settings {
   // Caption formatting applied at generation time (readability of the displayed captions)
   transcriptionMaxCharsPerLine Int? @default(42) // 0/null = no wrapping
   transcriptionMaxLines        Int? @default(2)
+  // Withhold the caption .srt from client downloads until an admin marks it checked
+  // (Video.subtitlesApprovedAt). Playback captions are unaffected — only the file.
+  subtitlesRequireApprovalForDownload Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

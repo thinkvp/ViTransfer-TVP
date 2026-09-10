@@ -17,6 +17,33 @@ export interface SubtitleCue {
   text: string
 }
 
+/**
+ * Filename marker carried by captions nobody has signed off on. The point is to
+ * survive leaving the app: once a file sits in someone's Downloads folder the UI
+ * caveat is gone, so the caveat travels in the name. Added whenever cues are
+ * written, stripped when an admin marks them checked (see lib/subtitle-delivery).
+ */
+export const AUTO_DRAFT_MARKER = '_AUTO-DRAFT'
+
+export function hasDraftMarker(fileName: string): boolean {
+  const dot = fileName.lastIndexOf('.')
+  const stem = dot > 0 ? fileName.slice(0, dot) : fileName
+  return stem.endsWith(AUTO_DRAFT_MARKER)
+}
+
+/**
+ * Add or strip the draft marker, preserving the extension. Idempotent in both
+ * directions, so callers can apply it to a name of unknown provenance (a
+ * hand-uploaded SRT that was promoted, say) without accumulating markers.
+ */
+export function applyDraftMarker(fileName: string, isDraft: boolean): string {
+  const dot = fileName.lastIndexOf('.')
+  const stem = dot > 0 ? fileName.slice(0, dot) : fileName
+  const ext = dot > 0 ? fileName.slice(dot) : ''
+  const bare = stem.endsWith(AUTO_DRAFT_MARKER) ? stem.slice(0, -AUTO_DRAFT_MARKER.length) : stem
+  return `${bare}${isDraft ? AUTO_DRAFT_MARKER : ''}${ext}`
+}
+
 export const MAX_CUES = 20000
 export const MAX_CUE_TEXT_LENGTH = 1000
 

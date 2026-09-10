@@ -11,6 +11,7 @@ import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoAssetStor
 import { getStoredFileRecords, registerStoredFile } from '@/lib/stored-file'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
+import { filterSubtitleAssetsForViewer } from '@/lib/subtitle-delivery'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -98,11 +99,16 @@ export async function GET(
       )
     }
 
-    // Get all assets for this video
-    const assets = await prisma.videoAsset.findMany({
-      where: { videoId },
-      orderBy: { createdAt: 'desc' },
-    })
+    // Get all assets for this video. Captions nobody has signed off are withheld
+    // from clients (playback CC is unaffected) — see lib/subtitle-delivery.
+    const assets = await filterSubtitleAssetsForViewer(
+      await prisma.videoAsset.findMany({
+        where: { videoId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      video,
+      { isAdmin: accessCheck.isAdmin },
+    )
 
         // Resolve file sizes from StoredFile
     const assetIds = assets.map(a => a.id)

@@ -5,7 +5,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import type { TranscriptionJob } from '../lib/queue'
 import { whisperTranscribe, whisperTranscribeVerbose, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
-import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, buildCuesFromWords } from '../lib/subtitles'
+import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, buildCuesFromWords, applyDraftMarker } from '../lib/subtitles'
 import { usesBritishSpelling, convertToBritishEnglish } from '../lib/american-to-british'
 import { extractAudioForTranscription } from '../lib/ffmpeg'
 import { computeWaveformPeaksFromWav } from '../lib/waveform-peaks'
@@ -113,10 +113,15 @@ export async function processTranscription(job: Job<TranscriptionJob>) {
 // Video subtitles (SRT VideoAsset + playback VTT)
 // ---------------------------------------------------------------------------
 
-/** Keep the download filename filesystem/browser-friendly without losing meaning. */
+/**
+ * Keep the download filename filesystem/browser-friendly without losing meaning.
+ * Machine-written captions always carry the AUTO-DRAFT marker: it is stripped
+ * when an admin marks them checked, so a file that leaves the app unchecked says
+ * so in its own name. Mirrors the helper in `subtitle-store.ts`.
+ */
 function sanitizeSubtitleFileName(name: string, versionLabel: string): string {
   const base = `${name}_${versionLabel}_captions`.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim()
-  return `${base}.srt`
+  return applyDraftMarker(`${base}.srt`, true)
 }
 
 async function processVideoSubtitles(videoId: string, force: boolean) {
@@ -389,6 +394,9 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
           subtitlesEditedById: null,
           subtitlesEditedByRecipientId: null,
           subtitlesEditedByName: null,
+          subtitlesApprovedAt: null,
+          subtitlesApprovedById: null,
+          subtitlesApprovedByName: null,
         },
       })
       return
@@ -474,11 +482,15 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       data: {
         transcriptionStatus: 'READY',
         transcriptionError: null,
-        // Freshly (re)generated — any previous manual-edit attribution is stale
+        // Freshly (re)generated — any previous manual-edit attribution is stale,
+        // and so is any sign-off: nobody has read these cues.
         subtitlesEditedAt: null,
         subtitlesEditedById: null,
         subtitlesEditedByRecipientId: null,
         subtitlesEditedByName: null,
+        subtitlesApprovedAt: null,
+        subtitlesApprovedById: null,
+        subtitlesApprovedByName: null,
       },
     })
 

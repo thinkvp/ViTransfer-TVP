@@ -262,6 +262,7 @@ export async function PATCH(request: NextRequest) {
       transcriptionLanguage,
       transcriptionMaxCharsPerLine,
       transcriptionMaxLines,
+      subtitlesRequireApprovalForDownload,
     } = body
 
     // SECURITY: Validate AI assistant settings
@@ -316,6 +317,13 @@ export async function PATCH(request: NextRequest) {
     }
 
     // SECURITY: Validate Whisper transcription settings
+    if (subtitlesRequireApprovalForDownload !== undefined && typeof subtitlesRequireApprovalForDownload !== 'boolean') {
+      return NextResponse.json(
+        { error: 'Invalid value for subtitlesRequireApprovalForDownload. Must be a boolean.' },
+        { status: 400 }
+      )
+    }
+
     if (transcriptionEnabled !== undefined && typeof transcriptionEnabled !== 'boolean') {
       return NextResponse.json(
         { error: 'Invalid value for transcriptionEnabled. Must be a boolean.' },
@@ -684,6 +692,8 @@ export async function PATCH(request: NextRequest) {
       transcriptionLanguage: typeof transcriptionLanguage === 'string' ? (transcriptionLanguage.trim() || null) : transcriptionLanguage,
       transcriptionMaxCharsPerLine: Number.isInteger(transcriptionMaxCharsPerLine) ? transcriptionMaxCharsPerLine : undefined,
       transcriptionMaxLines: Number.isInteger(transcriptionMaxLines) ? transcriptionMaxLines : undefined,
+      subtitlesRequireApprovalForDownload:
+        typeof subtitlesRequireApprovalForDownload === 'boolean' ? subtitlesRequireApprovalForDownload : undefined,
     }
 
     // Only update password if it's not the placeholder

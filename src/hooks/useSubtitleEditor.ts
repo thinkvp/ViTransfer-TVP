@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getAccessToken } from '@/lib/token-store'
-import { serializeSrt, serializeVtt, cuesToTranscriptTxt, type SubtitleCue } from '@/lib/subtitles'
+import { serializeSrt, serializeVtt, cuesToTranscriptTxt, applyDraftMarker, type SubtitleCue } from '@/lib/subtitles'
 import {
   toEditorCues,
   toApiCues,
@@ -66,6 +66,13 @@ export interface SubtitleEditorApi {
   canSave: boolean
   /** Latest manual cue edit (null = never edited since generation → "(auto-generated)"). */
   lastEditedBy: { name: string; at: string } | null
+  /** Caption sign-off: who vouched for these exact cues (null = nobody has). */
+  checkedBy: { name: string; at: string } | null
+  /** True while the .srt is kept out of client downloads (gate on + not signed off). */
+  withheldFromClients: boolean
+  /** Admin-only sign-off toggle; resolves false when the call fails. */
+  setChecked: (checked: boolean) => Promise<boolean>
+  signingOff: boolean
   selectCue: (id: string | null, opts?: { seek?: boolean }) => void
   updateCueText: (id: string, text: string) => void
   /** Snapshot for undo at the START of a text-edit session (textarea focus). */
@@ -122,6 +129,9 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
   const [dirty, setDirty] = useState(false)
   const [selectedCueId, setSelectedCueId] = useState<string | null>(null)
   const [lastEditedBy, setLastEditedBy] = useState<{ name: string; at: string } | null>(null)
+  const [checkedBy, setCheckedBy] = useState<{ name: string; at: string } | null>(null)
+  const [downloadGateEnabled, setDownloadGateEnabled] = useState(false)
+  const [signingOff, setSigningOff] = useState(false)
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
   const [peaks, setPeaks] = useState<WaveformPeaks | null>(null)
   const [undoStack, setUndoStack] = useState<EditorCue[][]>([])
@@ -169,6 +179,12 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
           ? { name: data.lastEditedBy.name, at: data.lastEditedBy.at }
           : null,
       )
+      setCheckedBy(
+        data.checkedBy && typeof data.checkedBy.name === 'string' && typeof data.checkedBy.at === 'string'
+          ? { name: data.checkedBy.name, at: data.checkedBy.at }
+          : null,
+      )
+      setDownloadGateEnabled(data.downloadGateEnabled === true)
       setDirty(false)
       setUndoStack([])
       setSelectedCueId(null)
@@ -505,13 +521,52 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
   const toSubtitleCues = useCallback((): SubtitleCue[] =>
     cuesRef.current.map((c, i) => ({ index: i + 1, startMs: c.startMs, endMs: c.endMs, text: c.text })), [])
 
+  // Unchecked captions export under the AUTO-DRAFT name too — the editor is just
+  // another door to the same file, and the caveat has to travel with it.
   const exportSrt = useCallback(() => {
-    downloadBlob(serializeSrt(toSubtitleCues()), 'application/x-subrip;charset=utf-8', `${exportBaseName}_captions.srt`)
-  }, [exportBaseName, toSubtitleCues])
+    const fileName = applyDraftMarker(`${exportBaseName}_captions.srt`, checkedBy === null)
+    downloadBlob(serializeSrt(toSubtitleCues()), 'application/x-subrip;charset=utf-8', fileName)
+  }, [exportBaseName, toSubtitleCues, checkedBy])
 
   const exportTranscript = useCallback(() => {
     downloadBlob(cuesToTranscriptTxt(toSubtitleCues()), 'text/plain;charset=utf-8', `${exportBaseName}_transcript.txt`)
   }, [exportBaseName, toSubtitleCues])
+
+  // Caption sign-off (admin only). The server also renames the file — dropping
+  // or restoring the AUTO-DRAFT marker — so the copy a client saves says whether
+  // anyone checked it.
+  const setChecked = useCallback(async (checked: boolean): Promise<boolean> => {
+    if (!videoId || !isAdmin) return false
+    setError(null)
+    setNotice(null)
+    setSigningOff(true)
+    try {
+      const response = await fetch(`/api/videos/${videoId}/subtitles/check`, {
+        method: checked ? 'POST' : 'DELETE',
+        headers: buildAuthHeaders(shareToken, isAdmin),
+      })
+      const body = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(body?.error || 'Failed to update the caption check')
+      }
+      setCheckedBy(
+        checked && body?.checkedBy && typeof body.checkedBy.name === 'string'
+          ? { name: body.checkedBy.name, at: body.checkedBy.at }
+          : null,
+      )
+      setNotice(
+        checked
+          ? (downloadGateEnabled ? 'Captions marked checked — clients can now download the .srt.' : 'Captions marked checked.')
+          : (downloadGateEnabled ? 'Check withdrawn — the .srt is withheld from clients again.' : 'Check withdrawn.'),
+      )
+      return true
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to update the caption check')
+      return false
+    } finally {
+      setSigningOff(false)
+    }
+  }, [videoId, isAdmin, shareToken, downloadGateEnabled])
 
   const regenerate = useCallback(async () => {
     if (!videoId) return
@@ -539,6 +594,8 @@ export function useSubtitleEditor(args: UseSubtitleEditorArgs): SubtitleEditorAp
     cues, loading, saving, error, notice, dirty,
     selectedCueId, activeCueId, currentTimeMs, durationMs, peaks,
     isAdmin, videoName, versionLabel, canSave, lastEditedBy,
+    checkedBy, withheldFromClients: downloadGateEnabled && checkedBy === null,
+    setChecked, signingOff,
     selectCue, updateCueText, beginTextEdit, retimeCue, clampPreview,
     splitAt, mergeNext, remove, insertAtPlayhead,
     undo, canUndo: undoStack.length > 0,
