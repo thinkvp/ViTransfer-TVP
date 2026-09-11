@@ -5,7 +5,7 @@ import { validateRequest, updateCommentSchema } from '@/lib/validation'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { filterInternalComments, sanitizeComment } from '@/lib/comment-sanitization'
 import { sanitizeCommentHtml } from '@/lib/security/html-sanitization'
-import { cancelCommentNotification, hydrateCommentReactions } from '@/lib/comment-helpers'
+import { cancelCommentNotification, hydrateCommentReactions, syncCommentNotificationContent } from '@/lib/comment-helpers'
 import { recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { getCurrentUserFromRequest } from '@/lib/auth'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -183,6 +183,12 @@ export async function PATCH(
       where: { id },
       data: updateData,
     })
+
+    // Comment summaries are batched, so an edit made before the next digest goes out
+    // must rewrite the queued copy — otherwise the email quotes the original wording.
+    if (updateData.content !== undefined) {
+      await syncCommentNotificationContent(id, updateData.content)
+    }
 
     // Notify any open share pages to refetch so the edit appears live.
     await publishProjectEvent(existingComment.projectId, 'comment')
@@ -419,15 +425,17 @@ export async function DELETE(
       }
     }
 
-    // Cancel any pending notifications for this comment
-    await cancelCommentNotification(id)
-
     // Collect comment ids (parent + replies) before deletion
     const replyIds = await prisma.comment.findMany({
       where: { parentId: id },
       select: { id: true },
     })
     const commentIds = [id, ...replyIds.map(r => r.id)]
+
+    // Cancel pending notifications for the whole thread, not just the clicked comment:
+    // replies cascade-delete with their parent, and a leftover row would email a reply
+    // quoting feedback that no longer exists.
+    await cancelCommentNotification(commentIds)
 
     const commentFiles = await prisma.commentFile.findMany({
       where: { commentId: { in: commentIds } },

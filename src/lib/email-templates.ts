@@ -16,6 +16,8 @@ interface NotificationData {
   timecode?: string | null
   timecodeEnd?: string | null
   isReply?: boolean
+  /** Set when the comment was edited after it was queued; the body below is the latest text. */
+  edited?: boolean
   approved?: boolean
   approvedVideos?: Array<{ id: string; name: string }>
   parentComment?: {
@@ -106,6 +108,18 @@ function truncateAtWordBoundary(text: string, maxChars: number): string {
   const cut = text.slice(0, maxChars)
   const lastSpace = cut.lastIndexOf(' ')
   return `${(lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
+}
+
+/**
+ * "(edited)" marker for a comment that changed after it was queued.
+ *
+ * Digests are batched, so a client can edit their feedback before the summary goes out.
+ * The email carries the current wording; this says so, rather than quietly showing text
+ * that differs from what the reader remembers being notified about.
+ */
+function renderEditedTag(n: NotificationData): string {
+  if (!n.edited) return ''
+  return `<span style="font-size:12px; color:#6b7280; font-weight:400; margin-left:6px;">(edited)</span>`
 }
 
 /**
@@ -231,7 +245,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
         <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
           ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, data.useFullTimecode, n.timecodeEnd)}` : ''}
         </div>
-        <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:${parentQuote ? '6px' : '2px'};">${escapeHtml(n.authorName)}</div>
+        <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:${parentQuote ? '6px' : '2px'};">${escapeHtml(n.authorName)}${renderEditedTag(n)}</div>
         ${parentQuote}
         <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
         ${renderReactionTally(n.reactions)}
@@ -312,7 +326,7 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
         </div>
         <div style="margin-bottom:${parentQuote ? '6px' : '4px'};">
           <span style="font-size:14px; font-weight:700; color:#111827;">${escapeHtml(n.authorName)}</span>
-          ${n.authorEmail ? `<span style="font-size:12px; color:#6b7280; margin-left:6px;">${escapeHtml(n.authorEmail)}</span>` : ''}
+          ${n.authorEmail ? `<span style="font-size:12px; color:#6b7280; margin-left:6px;">${escapeHtml(n.authorEmail)}</span>` : ''}${renderEditedTag(n)}
         </div>
         ${parentQuote}
         <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>

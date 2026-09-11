@@ -1836,7 +1836,7 @@ export function CommentSectionView({
                   ? 'This project has been approved. You can still leave a comment if something comes up.'
                   : approvalSignedOff
                     ? 'This video has been approved. You can still leave a comment if something comes up.'
-                    : 'Leave feedback here — comments are time-stamped to the video.'}
+                    : 'Leave any feedback or comments here.'}
               </p>
             </div>
           ) : (

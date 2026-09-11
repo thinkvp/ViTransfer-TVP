@@ -14,6 +14,7 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { publishProjectEvent } from '@/lib/project-events'
 import { lockCommentsForApprovedVideo } from '@/lib/comment-locks'
+import { cancelCommentNotification } from '@/lib/comment-helpers'
 import {
   allocateUniqueStorageName,
   buildProjectAllVideosRoot,
@@ -806,6 +807,15 @@ export async function DELETE(
       console.error(`Failed to delete files for video ${video.id}:`, error)
       // Continue with database deletion even if storage deletion fails
     }
+
+    // Every comment on this video is about to cascade away with it, so cancel their
+    // pending summary emails first — otherwise the next digest sends feedback on a video
+    // that no longer exists. Must run before the delete, while the ids are still readable.
+    const doomedComments = await prisma.comment.findMany({
+      where: { videoId: id },
+      select: { id: true },
+    })
+    await cancelCommentNotification(doomedComments.map((c) => c.id))
 
     // Delete the video (associated comments cascade via FK on Comment.videoId)
     await prisma.video.delete({

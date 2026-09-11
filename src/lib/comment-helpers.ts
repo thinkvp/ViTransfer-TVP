@@ -427,37 +427,134 @@ export async function handleCommentNotifications(params: {
 }
 
 /**
- * Cancel pending notification for a deleted comment
- * Removes from notification queue and marks as cancelled in Redis
+ * Cancel pending notifications for deleted comment(s).
+ *
+ * Marks each comment as cancelled in Redis (the workers and the manual send path both
+ * check this before rendering a digest) and drops its still-pending queue rows.
+ *
+ * Pass every comment id that is disappearing, not just the one the user clicked:
+ * replies cascade-delete with their parent, and every comment on a video cascades when
+ * the video is deleted. A row left behind emails feedback that no longer exists.
+ *
+ * Already-sent rows are left in place — an email cannot be unsent, and deleting the row
+ * would erase it from the backlog history.
  */
-export async function cancelCommentNotification(commentId: string): Promise<void> {
+export async function cancelCommentNotification(commentIds: string | string[]): Promise<void> {
+  const ids = (Array.isArray(commentIds) ? commentIds : [commentIds]).filter(Boolean)
+  if (ids.length === 0) return
+
   try {
-    const redis = getRedis()
+    console.log(`[CANCEL-NOTIFICATION] Cancelling notifications for ${ids.length} comment(s)`)
 
-    console.log(`[CANCEL-NOTIFICATION] Cancelling notification for comment ${commentId}`)
+    // Mark as cancelled in Redis (8-day TTL covers weekly schedules). Pipelined so a
+    // video with hundreds of comments is one round trip rather than hundreds.
+    const pipeline = getRedis().pipeline()
+    for (const commentId of ids) {
+      pipeline.set(`comment_cancelled:${commentId}`, '1', 'EX', 691200) // 8 days
+    }
+    await pipeline.exec()
 
-    // Mark as cancelled in Redis (8-day TTL covers weekly schedules)
-    await redis.set(
-      `comment_cancelled:${commentId}`,
-      '1',
-      'EX',
-      691200 // 8 days
-    )
+    // Delete still-pending rows from the queue. Rows where both sides have gone out stay:
+    // the Redis marker is what stops a half-sent row from reaching the remaining side.
+    // Chunked so deleting a video with a full thread can't build a query with hundreds
+    // of OR'd JSON predicates.
+    let count = 0
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100)
+      const result = await prisma.notificationQueue.deleteMany({
+        where: {
+          AND: [
+            { OR: [{ sentToClients: false }, { sentToAdmins: false }] },
+            { OR: chunk.map((commentId) => ({ data: { path: ['commentId'], equals: commentId } })) },
+          ],
+        },
+      })
+      count += result.count
+    }
 
-    // Delete from notification queue if it exists
-    await prisma.notificationQueue.deleteMany({
-      where: {
-        data: {
-          path: ['commentId'],
-          equals: commentId
-        }
-      }
-    })
-
-    console.log(`[CANCEL-NOTIFICATION] Successfully cancelled notification for comment ${commentId}`)
+    console.log(`[CANCEL-NOTIFICATION] Removed ${count} pending notification(s) for ${ids.length} comment(s)`)
   } catch (error) {
     console.error('[CANCEL-NOTIFICATION] Error cancelling notification:', error)
     // Don't throw - deletion should succeed even if notification cancellation fails
+  }
+}
+
+/**
+ * Re-point pending notifications at a comment's edited text.
+ *
+ * Queue rows carry a snapshot of the comment body (the digest is assembled from
+ * `data`, not from a live join), so a comment edited before the next summary goes
+ * out would otherwise be emailed in its original wording — the exact thing the
+ * client edited away. Rewrite every still-pending row that quotes this comment:
+ * its own entry, a reply's "in reply to" quote, and a reaction's quoted comment.
+ *
+ * Rows with at least one side still pending are updated, which includes a row
+ * already sent to admins but not yet to clients. That is deliberate: the pending
+ * side is what a reader will act on, and the alternative — splitting the row —
+ * would double-send the comment.
+ */
+export async function syncCommentNotificationContent(commentId: string, content: string): Promise<void> {
+  try {
+    const pending = await prisma.notificationQueue.findMany({
+      where: {
+        AND: [
+          { OR: [{ sentToClients: false }, { sentToAdmins: false }] },
+          {
+            OR: [
+              { data: { path: ['commentId'], equals: commentId } },
+              { data: { path: ['parentCommentId'], equals: commentId } },
+            ],
+          },
+        ],
+      },
+      select: { id: true, data: true },
+    })
+
+    if (pending.length === 0) return
+
+    let updated = 0
+    for (const row of pending) {
+      const data = row.data as any
+      if (!data || typeof data !== 'object') continue
+
+      const next = { ...data }
+      let changed = false
+
+      if (data.commentId === commentId) {
+        // The comment itself — COMMENT_REACTION rows quote it under `reactedTo`
+        // instead of carrying it as the entry body.
+        if (data.type === 'COMMENT_REACTION') {
+          if (data.reactedTo && data.reactedTo.content !== content) {
+            next.reactedTo = { ...data.reactedTo, content }
+            changed = true
+          }
+        } else if (data.content !== content) {
+          next.content = content
+          next.edited = true
+          changed = true
+        }
+      }
+
+      if (data.parentCommentId === commentId && data.parentComment && data.parentComment.content !== content) {
+        next.parentComment = { ...data.parentComment, content }
+        changed = true
+      }
+
+      if (!changed) continue
+
+      await prisma.notificationQueue.update({
+        where: { id: row.id },
+        data: { data: next },
+      })
+      updated++
+    }
+
+    if (updated > 0) {
+      console.log(`[SYNC-NOTIFICATION] Updated ${updated} pending notification(s) after edit of comment ${commentId}`)
+    }
+  } catch (error) {
+    console.error('[SYNC-NOTIFICATION] Error syncing edited comment into pending notifications:', error)
+    // Don't throw - the edit itself must succeed even if the queue can't be updated.
   }
 }
 

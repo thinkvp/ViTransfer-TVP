@@ -5,6 +5,14 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.4] - 2026-09-11
+
+### Fixed
+
+- **Editing a comment before the summary email goes out now sends the edited wording** — comment emails are batched (hourly or daily), but the queued copy kept the text as first typed, so a client who fixed a typo or reworded their feedback still had the original quoted to the team. Pending summaries are now rewritten when a comment is edited — the comment itself, the "in reply to" quote above any reply, and the quote under a reaction — and an edited comment is marked "(edited)" in the email. Summaries already sent are left alone.
+
+- **Deleted feedback no longer turns up in a later summary email** — deleting a comment cancelled its own pending email but not its replies', so a thread deleted before the digest went out still emailed the replies, quoting a parent that no longer existed. Deleting a video cancelled nothing at all, so its comments kept going out after the video was gone. Both now cancel the whole set. Summaries already sent are left in the backlog history rather than being deleted from it.
+
 ## [2.6.3] - 2026-09-10
 
 ### Added
