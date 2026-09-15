@@ -6,7 +6,7 @@ import { getProjectRecipients } from '../lib/recipients'
 import { buildUnsubscribeUrl } from '../lib/unsubscribe'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
-import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, normalizeNotificationDataTimecode, attachReactionTallies } from './notification-helpers'
+import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, normalizeNotificationDataTimecode, attachReactionTallies, attachThreadContext } from './notification-helpers'
 import { redactEmailForLogs } from '../lib/log-sanitization'
 
 /**
@@ -171,8 +171,13 @@ export async function processClientNotifications() {
         isClientNotification: true,
         logPrefix: '[CLIENT]  ',
         onSuccess: async () => {
-          const notifications = await attachReactionTallies(
-            validNotifications.map(n => normalizeNotificationDataTimecode(n.data as any))
+          // Client digests never quote internal comments: `includeInternal: false` is the
+          // only thing keeping an internal note out of a client-facing thread quote.
+          const notifications = await attachThreadContext(
+            await attachReactionTallies(
+              validNotifications.map(n => normalizeNotificationDataTimecode(n.data as any))
+            ),
+            { includeInternal: false },
           )
 
           const emailSettings = await getEmailSettings()

@@ -20,11 +20,26 @@ interface NotificationData {
   edited?: boolean
   approved?: boolean
   approvedVideos?: Array<{ id: string; name: string }>
+  commentId?: string
+  parentCommentId?: string | null
   parentComment?: {
     authorName: string
     content: string
     timecode?: string | null
   }
+  /**
+   * Replies that landed between the quoted parent and this one, oldest first. Threads are
+   * two levels deep, so `parentComment` is always the thread root and everything said in
+   * between would otherwise be missing. Resolved live at send time by `attachThreadContext`.
+   */
+  threadContext?: Array<{
+    authorName: string
+    content: string
+    timecode?: string | null
+    isInternal?: boolean
+  }>
+  /** Replies before the quoted run-up, summarised as a count instead of being pasted in. */
+  threadContextOmitted?: number
   /** COMMENT_REACTION only: the emoji that was left. */
   emoji?: string
   /** COMMENT_REACTION only: the comment it was left on, quoted in the email. */
@@ -122,25 +137,141 @@ function renderEditedTag(n: NotificationData): string {
   return `<span style="font-size:12px; color:#6b7280; font-weight:400; margin-left:6px;">(edited)</span>`
 }
 
-/**
- * Quoted parent-comment block shown above a reply in summary emails.
- * Returns '' when the notification isn't a reply or the parent is gone (e.g. deleted).
- */
-function renderParentCommentQuote(n: NotificationData, useFullTimecode: boolean): string {
-  if (!n.isReply || !n.parentComment) return ''
-  const parentTimecode = n.parentComment.timecode
-    ? formatTimecodeForEmail(n.parentComment.timecode, useFullTimecode)
-    : ''
+/** One quoted comment inside the grey thread block: a label line and the body. */
+function renderQuoteLine(
+  label: string,
+  content: string,
+  timecode: string | null | undefined,
+  useFullTimecode: boolean,
+  isFirst: boolean,
+): string {
+  const tc = timecode ? formatTimecodeForEmail(timecode, useFullTimecode) : ''
+  const spacing = isFirst ? '' : ' margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb;'
   return `
-    <div style="margin:0 0 8px; padding:8px 12px; background:#f3f4f6; border-left:3px solid #9ca3af; border-radius:0 6px 6px 0;">
-      <div style="font-size:12px; color:#6b7280; margin-bottom:3px;">In reply to <span style="font-weight:700; color:#4b5563;">${escapeHtml(n.parentComment.authorName)}</span>${parentTimecode ? ` &bull; ${escapeHtml(parentTimecode)}` : ''}</div>
-      <div style="font-size:13px; color:#4b5563; line-height:1.5; white-space:pre-wrap;">${escapeHtml(truncateAtWordBoundary(n.parentComment.content, PARENT_QUOTE_MAX_CHARS))}</div>
+      <div style="${spacing}">
+        <div style="font-size:12px; color:#6b7280; margin-bottom:3px;">${label}${tc ? ` &bull; ${escapeHtml(tc)}` : ''}</div>
+        <div style="font-size:13px; color:#4b5563; line-height:1.5; white-space:pre-wrap;">${escapeHtml(truncateAtWordBoundary(content, PARENT_QUOTE_MAX_CHARS))}</div>
+      </div>`
+}
+
+/**
+ * The grey "what came before" block above a reply: the thread's root comment, then the
+ * replies that landed between it and the new one.
+ *
+ * Without the run-up a short reply is unreadable in a digest — "Copy that!" quoted under a
+ * question asked two replies earlier reads as an answer to the wrong thing. Anything older
+ * than the quoted window is summarised as a count rather than pasted in, so a long thread
+ * can't swamp the email.
+ *
+ * `includeParent` is false when the root comment is itself an entry in this digest and has
+ * already been rendered in full directly above.
+ */
+function renderThreadQuote(
+  n: NotificationData,
+  useFullTimecode: boolean,
+  options: { includeParent: boolean } = { includeParent: true },
+): string {
+  const parent = options.includeParent && n.isReply ? n.parentComment : undefined
+  const context = n.threadContext || []
+  const omitted = n.threadContextOmitted || 0
+  if (!parent && context.length === 0) return ''
+
+  const lines: string[] = []
+  if (parent) {
+    lines.push(renderQuoteLine(
+      `In reply to <span style="font-weight:700; color:#4b5563;">${escapeHtml(parent.authorName)}</span>`,
+      parent.content,
+      parent.timecode,
+      useFullTimecode,
+      true,
+    ))
+  }
+
+  if (omitted > 0) {
+    lines.push(`
+      <div style="font-size:12px; color:#9ca3af; font-style:italic;${lines.length ? ' margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb;' : ''}">
+        ${omitted} earlier ${omitted === 1 ? 'reply' : 'replies'} not shown
+      </div>`)
+  }
+
+  for (const entry of context) {
+    lines.push(renderQuoteLine(
+      `<span style="font-weight:700; color:#4b5563;">${escapeHtml(entry.authorName)}</span>${entry.isInternal ? ' <span style="color:#b45309;">(internal)</span>' : ''}`,
+      entry.content,
+      entry.timecode,
+      useFullTimecode,
+      lines.length === 0,
+    ))
+  }
+
+  return `
+    <div style="margin:0 0 8px; padding:8px 12px; background:#f3f4f6; border-left:3px solid #9ca3af; border-radius:0 6px 6px 0;">${lines.join('')}
     </div>
   `
 }
 
 /**
- * Quoted block for the comment an emoji was left on. Mirrors renderParentCommentQuote so a
+ * A run of digest entries that belong to one comment thread, rendered as a single block:
+ * the quoted run-up once, then each new comment beneath it.
+ *
+ * Grouping matters because every reply in a thread carries the same quoted root. Left
+ * ungrouped, three replies to one comment repeat that quote three times and the reader has
+ * to reassemble the conversation themselves.
+ */
+interface ThreadGroup {
+  entries: NotificationData[]
+  /** True when the thread's own root comment is one of the entries below. */
+  rootIncluded: boolean
+}
+
+type DigestItem =
+  | { kind: 'single'; n: NotificationData }
+  | { kind: 'thread'; group: ThreadGroup }
+
+const COMMENT_TYPES = new Set(['CLIENT_COMMENT', 'ADMIN_REPLY'])
+
+/**
+ * Collapse comment notifications that share a thread into one item, holding their position
+ * in the digest (a group sits where its earliest entry was). Approvals and reactions pass
+ * through untouched and in order.
+ *
+ * A comment always comes back as a thread item even when it can't be keyed — an older queue
+ * row with no `commentId` gets a synthetic key, so it renders as a one-entry thread rather
+ * than falling through to the non-comment branch.
+ */
+function groupNotificationsIntoThreads(notifications: NotificationData[]): DigestItem[] {
+  const items: DigestItem[] = []
+  const groupsByKey = new Map<string, ThreadGroup>()
+
+  notifications.forEach((n, index) => {
+    if (!COMMENT_TYPES.has(n.type)) {
+      items.push({ kind: 'single', n })
+      return
+    }
+
+    const key = (n.isReply && n.parentCommentId ? n.parentCommentId : n.commentId)
+      || `unkeyed:${index}`
+
+    const existing = groupsByKey.get(key)
+    if (existing) {
+      existing.entries.push(n)
+      if (!n.isReply && n.commentId === key) existing.rootIncluded = true
+      return
+    }
+
+    const group: ThreadGroup = {
+      entries: [n],
+      rootIncluded: !n.isReply && n.commentId === key,
+    }
+    groupsByKey.set(key, group)
+    items.push({ kind: 'thread', group })
+  })
+
+  return items
+}
+
+/**
+ * Quoted block for the comment an emoji was left on. Mirrors renderThreadQuote so a
  * reaction and a reply read the same way down the page.
  */
 function renderReactedToQuote(n: NotificationData, useFullTimecode: boolean): string {
@@ -194,6 +325,57 @@ function renderReactionItem(
 }
 
 /**
+ * One comment thread in a digest: the video/timecode header, the quoted run-up, and every
+ * new comment in the thread in the order they were written.
+ *
+ * Shared by the client and admin summaries, which differ only in whether an author's email
+ * address is shown next to their name.
+ */
+function renderThreadBlock(
+  group: ThreadGroup,
+  opts: {
+    useFullTimecode: boolean
+    accentColor?: string
+    accentTextMode?: string
+    showAuthorEmail?: boolean
+  },
+): string {
+  const { useFullTimecode, accentColor, accentTextMode, showAuthorEmail } = opts
+  const first = group.entries[0]
+
+  // Replies inherit their parent's video and timecode, so one header covers the thread.
+  const header = `
+      <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
+        ${escapeHtml(first.videoName)}${first.videoLabel ? ` ${emailVersionPillHtml(first.videoLabel, accentColor, accentTextMode)}` : ''}${first.timecode ? ` &bull; ${formatTimecodeForEmail(first.timecode, useFullTimecode, first.timecodeEnd)}` : ''}
+      </div>`
+
+  // The run-up belongs to the earliest reply in the group; anything after it is one of the
+  // entries rendered in full below, so quoting from a later entry would just repeat them.
+  const rootEntry = group.rootIncluded ? group.entries.find((e) => !e.isReply) : undefined
+  const firstReply = group.entries.find((e) => e.isReply)
+  const quote = firstReply
+    ? renderThreadQuote(firstReply, useFullTimecode, { includeParent: !rootEntry })
+    : ''
+
+  const sections: string[] = []
+  const renderEntry = (n: NotificationData) => `
+      <div style="${sections.length === 0 ? '' : 'margin-top:10px;'}">
+        <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:2px;">${escapeHtml(n.authorName)}${showAuthorEmail && n.authorEmail ? `<span style="font-size:12px; color:#6b7280; font-weight:400; margin-left:6px;">${escapeHtml(n.authorEmail)}</span>` : ''}${renderEditedTag(n)}</div>
+        <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
+        ${renderReactionTally(n.reactions)}
+      </div>`
+
+  if (rootEntry) sections.push(renderEntry(rootEntry))
+  if (quote) sections.push(quote)
+  for (const entry of group.entries) {
+    if (entry === rootEntry) continue
+    sections.push(renderEntry(entry))
+  }
+
+  return `${header}${sections.join('')}`
+}
+
+/**
  * Client notification summary
  */
 export function generateNotificationSummaryEmail(data: NotificationSummaryData): string {
@@ -215,7 +397,19 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
   if (unapprovedCount > 0) summaryParts.push(`${unapprovedCount} unapproved`)
   const summaryText = summaryParts.join(', ') || 'Latest activity'
 
-  const itemsHtmlContent = data.notifications.map((n) => {
+  const itemsHtmlContent = groupNotificationsIntoThreads(data.notifications).map((item) => {
+    if (item.kind === 'thread') {
+      return `
+      <div style="padding:10px 0;">${renderThreadBlock(item.group, {
+        useFullTimecode: data.useFullTimecode,
+        accentColor: data.accentColor,
+        accentTextMode: data.accentTextMode,
+      })}
+      </div>
+    `
+    }
+
+    const n = item.n
     if (n.type === 'PROJECT_APPROVED') {
       return `
         <div style="padding:10px 0;">
@@ -235,22 +429,7 @@ export function generateNotificationSummaryEmail(data: NotificationSummaryData):
       `
     }
 
-    if (n.type === 'COMMENT_REACTION') {
-      return renderReactionItem(n, data.useFullTimecode, data.accentColor, data.accentTextMode)
-    }
-
-    const parentQuote = renderParentCommentQuote(n, data.useFullTimecode)
-    return `
-      <div style="padding:10px 0;">
-        <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
-          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, data.useFullTimecode, n.timecodeEnd)}` : ''}
-        </div>
-        <div style="font-size:14px; font-weight:700; color:#111827; margin-bottom:${parentQuote ? '6px' : '2px'};">${escapeHtml(n.authorName)}${renderEditedTag(n)}</div>
-        ${parentQuote}
-        <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
-        ${renderReactionTally(n.reactions)}
-      </div>
-    `
+    return renderReactionItem(n, data.useFullTimecode, data.accentColor, data.accentTextMode)
   }).join('<div style="height:1px; background:#e5e7eb; margin:6px 0;"></div>')
 
   const itemsHtml = `
@@ -311,28 +490,23 @@ export function generateAdminSummaryEmail(data: AdminSummaryData): string {
   const headline = headlineParts.join(' and ') || 'No new activity'
 
   const projectsHtml = data.projects.map((project) => {
-    const items = project.notifications.map((n, index) => {
+    const items = groupNotificationsIntoThreads(project.notifications).map((item, index) => {
       const divider = index > 0 ? ' border-top:1px solid #e5e7eb; margin-top:8px;' : ''
 
-      if (n.type === 'COMMENT_REACTION') {
-        return `<div style="${divider}">${renderReactionItem(n, project.useFullTimecode, data.accentColor, data.accentTextMode)}</div>`
+      if (item.kind === 'thread') {
+        return `
+      <div style="padding:10px 0;${divider}">${renderThreadBlock(item.group, {
+          useFullTimecode: project.useFullTimecode,
+          accentColor: data.accentColor,
+          accentTextMode: data.accentTextMode,
+          showAuthorEmail: true,
+        })}
+      </div>
+    `
       }
 
-      const parentQuote = renderParentCommentQuote(n, project.useFullTimecode)
-      return `
-      <div style="padding:10px 0;${divider}">
-        <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
-          ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, data.accentColor, data.accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, project.useFullTimecode, n.timecodeEnd)}` : ''}
-        </div>
-        <div style="margin-bottom:${parentQuote ? '6px' : '4px'};">
-          <span style="font-size:14px; font-weight:700; color:#111827;">${escapeHtml(n.authorName)}</span>
-          ${n.authorEmail ? `<span style="font-size:12px; color:#6b7280; margin-left:6px;">${escapeHtml(n.authorEmail)}</span>` : ''}${renderEditedTag(n)}
-        </div>
-        ${parentQuote}
-        <div style="font-size:14px; color:#374151; line-height:1.6; white-space:pre-wrap;">${escapeHtml(n.content || '')}</div>
-        ${renderReactionTally(n.reactions)}
-      </div>
-    `}).join('')
+      return `<div style="${divider}">${renderReactionItem(item.n, project.useFullTimecode, data.accentColor, data.accentTextMode)}</div>`
+    }).join('')
 
     return `
       <div style="${emailCardStyle({ paddingPx: 16, borderRadiusPx: 12, marginBottomPx: 16 })}">

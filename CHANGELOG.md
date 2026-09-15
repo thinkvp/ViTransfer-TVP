@@ -5,6 +5,20 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.5] - 2026-09-15
+
+### Changed
+
+- **Summary emails now show the rest of the conversation around a reply** — a reply was quoted under the comment that started the thread, and everything said in between was left out, so "Copy that!" appeared beneath a question two replies earlier and read as an answer to the wrong thing. Replies now carry the run-up above them: the original comment, then the last few replies before the new one, with anything older summarised as a count. Replies to the same thread arriving in one digest are grouped into a single block instead of each repeating the same quote.
+
+### Fixed
+
+- **Captions no longer start at 00:00 over a musical intro** — when a video opens on music rather than silence, Whisper's segment timings drift onto the very start of the file, so the first caption appeared seconds before anyone spoke and every later line inherited the error. Word-level timings avoid this, and 2.4.0 added them — but the request asked OpenAI for word timings only, which makes it leave the segment list out of its reply, and the reply was then rejected for having no segments. Every OpenAI transcription since has quietly fallen back to the old segment timings; the self-hosted server was never asked for word timings at all. Both paths now use them. Captions already generated keep their old timing — regenerate a video's subtitles to pick up the fix.
+
+- **Settings no longer claims new uploads are transcribed automatically** — auto-generation became opt-in in 2.4.6 (the upload tickbox starts unticked), but the description under **Settings > Subtitles & Transcription** still said new versions are transcribed by default, so the switch read as an on/off for captions rather than the master switch for Whisper. Reworded to say what it actually does.
+
+- **Sending a comment summary by hand now includes the emoji reactions** — the scheduled summary showed the reaction tally under each comment and the manually sent one didn't, so the same digest looked different depending on how it went out. Both paths now build the email the same way.
+
 ## [2.6.4] - 2026-09-11
 
 ### Fixed

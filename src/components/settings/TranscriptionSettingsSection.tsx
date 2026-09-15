@@ -134,7 +134,7 @@ export function TranscriptionSettingsSection({
           <div>
             <CardTitle>Subtitles & Transcription</CardTitle>
             <CardDescription>
-              Auto-generate subtitles for video versions and power Dictate with Whisper
+              Transcribe video versions and power Dictate with Whisper
             </CardDescription>
           </div>
           {!hideCollapse && (show ? (
@@ -156,13 +156,16 @@ export function TranscriptionSettingsSection({
             />
             <div className="flex-1">
               <div className="font-medium text-sm group-hover:text-primary transition-colors">
-                Auto-generate subtitles (Whisper)
+                Enable Whisper transcription
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                The master switch for Whisper captions. When on, new versions are transcribed by default —
-                you can turn auto-generation off per version at upload, and set captions manually (upload an SRT
-                or copy them from another version). Subtitles appear as a CC option in the player, and the SRT
-                becomes a downloadable video asset once the video is approved.
+                The master switch. With it off, nothing is transcribed and Dictate falls back to the browser&apos;s
+                own speech recognition. With it on, captions become <em>available</em> — but they are never generated
+                automatically: the <strong>Auto-generate subtitles</strong> tickbox on the upload form starts
+                unticked, so tick it per version, or add captions to an existing version later from the captions
+                icon on its row (upload an SRT or copy from another version instead, if you have one). Subtitles
+                appear as a CC option in the player, and the SRT becomes a downloadable video asset once the video
+                is approved — subject to the checked-captions setting below.
               </div>
             </div>
           </label>

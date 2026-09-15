@@ -244,6 +244,8 @@ async function main() {
 					createdAt: new Date().toISOString(),
 				},
 				{
+					// Reply with the run-up quoted above it: the thread root, an omitted-count
+					// line, and the two replies immediately before this one.
 					type: 'ADMIN_REPLY',
 					videoName: 'Cut A',
 					videoLabel: 'v3',
@@ -251,6 +253,40 @@ async function main() {
 					content: "Good catch — we'll brighten that shot and re-render. New version up tomorrow.",
 					timecode: '00:01:10:00',
 					isReply: true,
+					commentId: 'c-reply-1',
+					parentCommentId: 'c-root-1',
+					parentComment: {
+						authorName: 'Alex',
+						content: 'Looks great overall! One thing though — the logo shot at 01:10 feels a bit dark on my screen. Could we lift it slightly so the wordmark reads better?',
+						timecode: '00:01:10:00',
+					},
+					threadContext: [
+						{
+							authorName: 'Studio Team',
+							content: 'Is that on the graded version or the offline?',
+							timecode: '00:01:10:00',
+						},
+						{
+							authorName: 'Alex',
+							content: 'The graded one — the offline looked fine.',
+							timecode: '00:01:10:00',
+						},
+					],
+					threadContextOmitted: 2,
+					createdAt: new Date().toISOString(),
+				},
+				{
+					// Second reply in the same thread: the digest should collapse this into the
+					// block above rather than repeating the quoted run-up.
+					type: 'ADMIN_REPLY',
+					videoName: 'Cut A',
+					videoLabel: 'v3',
+					authorName: 'Priya',
+					content: 'Re-render is queued — should land in about an hour.',
+					timecode: '00:01:10:00',
+					isReply: true,
+					commentId: 'c-reply-2',
+					parentCommentId: 'c-root-1',
 					parentComment: {
 						authorName: 'Alex',
 						content: 'Looks great overall! One thing though — the logo shot at 01:10 feels a bit dark on my screen. Could we lift it slightly so the wordmark reads better?',
@@ -288,6 +324,8 @@ async function main() {
 					shareUrl: 'http://localhost:3000/share/demo',
 					notifications: [
 						{
+							// Thread root. The reply below shares its thread, so the digest renders
+							// both in one block with no quoted copy of this comment.
 							type: 'CLIENT_COMMENT',
 							videoName: 'Cut A',
 							videoLabel: 'v3',
@@ -295,6 +333,7 @@ async function main() {
 							authorEmail: 'alex@example.com',
 							content: 'Looks good, just one tweak at 01:10.',
 							timecode: '00:01:10:00',
+							commentId: 'a-root-1',
 							reactions: [{ emoji: '🎉', count: 3 }],
 							createdAt: new Date().toISOString(),
 						},
@@ -322,11 +361,28 @@ async function main() {
 							content: "Yes please — and the same for the end card if that's easy.",
 							timecode: '00:01:10:00',
 							isReply: true,
+							commentId: 'a-reply-1',
+							parentCommentId: 'a-root-1',
 							parentComment: {
-								authorName: 'Studio Team',
-								content: "Good catch — we'll brighten that shot and re-render. New version up tomorrow.",
+								authorName: 'Alex',
+								content: 'Looks good, just one tweak at 01:10.',
 								timecode: '00:01:10:00',
 							},
+							// Admin digests quote internal replies too, labelled as such. The client
+							// digest never receives them — see attachThreadContext.
+							threadContext: [
+								{
+									authorName: 'Studio Team',
+									content: "Brightening it now — we'll push a new version tomorrow.",
+									timecode: '00:01:10:00',
+								},
+								{
+									authorName: 'Morgan',
+									content: 'Colourist has the project open already, should be quick.',
+									timecode: '00:01:10:00',
+									isInternal: true,
+								},
+							],
 							createdAt: new Date().toISOString(),
 						},
 					],

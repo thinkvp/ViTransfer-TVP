@@ -122,6 +122,122 @@ export async function attachReactionTallies(notifications: any[]): Promise<any[]
   )
 }
 
+// How many replies preceding the new one are quoted as context. Threads run long; the
+// replies immediately before the new one are what make it readable, and everything earlier
+// is summarised as a count rather than pasted into the email.
+const THREAD_CONTEXT_MAX = 3
+
+/**
+ * Quote the run-up to a reply: the replies that landed between the thread's root comment
+ * and the reply being notified about.
+ *
+ * Queue rows snapshot only the immediate parent, and comment threads are two levels deep —
+ * the reply button lives on top-level comments only — so a reply's `parentComment` is always
+ * the thread root. Anything said in between was dropped, which is exactly the context that
+ * makes a short reply ("Copy that!") legible.
+ *
+ * Read live rather than snapshotted at queue time: a digest is assembled hours after the
+ * fact, so a live read shows the current wording of each quoted comment and silently omits
+ * ones since deleted — neither of which a snapshot could do without teaching
+ * `syncCommentNotificationContent` to rewrite a whole array on every edit.
+ *
+ * `includeInternal` MUST stay false for the client channel: internal comments share the
+ * Comment table with client-visible ones, and quoting the thread is a path for them to
+ * reach a client digest.
+ */
+export async function attachThreadContext(
+  notifications: any[],
+  options: { includeInternal: boolean },
+): Promise<any[]> {
+  const replyNotifications = notifications.filter(
+    (n) => n?.type !== 'COMMENT_REACTION' && n?.isReply && typeof n?.parentCommentId === 'string',
+  )
+  if (replyNotifications.length === 0) return notifications
+
+  const parentIds = [...new Set(replyNotifications.map((n) => n.parentCommentId as string))]
+
+  const siblings = await prisma.comment.findMany({
+    where: {
+      parentId: { in: parentIds },
+      ...(options.includeInternal ? {} : { isInternal: false }),
+    },
+    select: {
+      id: true,
+      parentId: true,
+      authorName: true,
+      content: true,
+      timecode: true,
+      isInternal: true,
+      userId: true,
+      createdAt: true,
+      user: { select: { name: true, email: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (siblings.length === 0) return notifications
+
+  const byThread = new Map<string, typeof siblings>()
+  for (const reply of siblings) {
+    const list = byThread.get(reply.parentId!) || []
+    list.push(reply)
+    byThread.set(reply.parentId!, list)
+  }
+
+  return notifications.map((n) => {
+    if (!replyNotifications.includes(n)) return n
+    const thread = byThread.get(n.parentCommentId as string)
+    if (!thread) return n
+
+    // Position by id where possible. A reply filtered out of `siblings` (internal, on the
+    // client channel) has no index here, so fall back to its queued timestamp.
+    const selfIndex = thread.findIndex((reply) => reply.id === n.commentId)
+    const preceding = selfIndex >= 0
+      ? thread.slice(0, selfIndex)
+      : thread.filter((reply) => reply.createdAt.getTime() < new Date(n.createdAt).getTime())
+
+    if (preceding.length === 0) return n
+
+    const shown = preceding.slice(-THREAD_CONTEXT_MAX)
+    return {
+      ...n,
+      threadContext: shown.map((reply) => ({
+        authorName:
+          reply.authorName
+          || reply.user?.name
+          || reply.user?.email
+          || (reply.userId || reply.isInternal ? 'Admin' : 'Client'),
+        content: reply.content,
+        timecode: reply.timecode ? normalizeTimecodeValue(reply.timecode) : null,
+        isInternal: reply.isInternal,
+      })),
+      threadContextOmitted: preceding.length - shown.length,
+    }
+  })
+}
+
+/**
+ * Coerce a stored timecode into the display format, tolerating the older numeric-seconds
+ * form that early queue entries (and older Comment rows) carry.
+ */
+function normalizeTimecodeValue(value: any) {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (isValidTimecode(trimmed)) return trimmed
+    if (!Number.isNaN(Number(trimmed)) && !trimmed.includes(':')) {
+      return secondsToTimecode(parseFloat(trimmed), 24)
+    }
+    try {
+      return parseTimecodeInput(trimmed, 24)
+    } catch {
+      return trimmed
+    }
+  }
+  if (typeof value === 'number') {
+    return secondsToTimecode(value, 24)
+  }
+  return value
+}
+
 /**
  * Normalize queued notification payloads to ensure they include timecode.
  * Older queue entries stored a numeric timestamp; convert those on the fly
@@ -132,24 +248,7 @@ export function normalizeNotificationDataTimecode(data: any) {
 
   const normalized = { ...data }
 
-  const normalizeValue = (value: any) => {
-    if (typeof value === 'string') {
-      const trimmed = value.trim()
-      if (isValidTimecode(trimmed)) return trimmed
-      if (!Number.isNaN(Number(trimmed)) && !trimmed.includes(':')) {
-        return secondsToTimecode(parseFloat(trimmed), 24)
-      }
-      try {
-        return parseTimecodeInput(trimmed, 24)
-      } catch {
-        return trimmed
-      }
-    }
-    if (typeof value === 'number') {
-      return secondsToTimecode(value, 24)
-    }
-    return value
-  }
+  const normalizeValue = normalizeTimecodeValue
 
   if (!normalized.timecode && normalized.timestamp !== undefined) {
     normalized.timecode = normalizeValue(normalized.timestamp)

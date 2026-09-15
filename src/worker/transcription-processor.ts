@@ -321,54 +321,44 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
 
     let cues: ReturnType<typeof parseSrt>
 
-    if (config.provider === 'OPENAI') {
-      // Word-level timestamps via verbose_json — every word carries start/end
-      // times, so we can build cues with word-precise timing instead of relying
-      // on Whisper's coarse segment boundaries and character-count approximation.
-      // Only whisper-1 supports verbose_json + word granularity; any other
-      // configured model (or an OpenAI-compatible proxy) falls back to the
-      // plain SRT path below instead of failing the job.
-      try {
-        const verbose = await whisperTranscribeVerbose({
-          config,
-          audio: whisperAudioPath,
-          fileName: whisperFileName,
-          mimeType: whisperMimeType,
-          timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
-        })
-        const allWords = verbose.segments.flatMap((s) => s.words ?? [])
-        if (allWords.length > 0 && config.maxCharsPerLine > 0) {
-          cues = buildCuesFromWords(allWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
-        } else {
-          // Segments without word timings (model accepted verbose_json but not
-          // word granularity), or wrapping disabled (word grouping needs a line
-          // budget): use Whisper's own segment cues — the pre-2.4.0 shape.
-          // Empty segments (no speech) yield zero cues, handled below.
-          cues = verbose.segments
-            .map((s, idx) => ({
-              index: idx + 1,
-              startMs: Math.round(s.start * 1000),
-              endMs: Math.round(s.end * 1000),
-              text: s.text.trim(),
-            }))
-            .filter((c) => c.text.length > 0)
-        }
-      } catch (verboseError) {
-        console.warn(
-          `[transcription] Video ${videoId}: verbose_json transcription failed (${verboseError instanceof Error ? verboseError.message : verboseError}) — falling back to SRT`,
-        )
-        const rawSrt = await whisperTranscribe({
-          config,
-          audio: whisperAudioPath,
-          fileName: whisperFileName,
-          mimeType: whisperMimeType,
-          responseFormat: 'srt',
-          timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
-        })
-        cues = parseSrt(rawSrt)
+    // Word-level timestamps via verbose_json — every word carries start/end
+    // times, so cues get word-precise timing instead of Whisper's coarse
+    // segment boundaries plus a character-count approximation when a segment is
+    // split for line length. Both providers support it (OpenAI's whisper-1,
+    // Speaches / faster-whisper-server locally); a server or model that rejects
+    // verbose_json, or answers without word timings, falls back to the plain
+    // SRT path instead of failing the job.
+    try {
+      const verbose = await whisperTranscribeVerbose({
+        config,
+        audio: whisperAudioPath,
+        fileName: whisperFileName,
+        mimeType: whisperMimeType,
+        timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
+      })
+      const segments = verbose.segments ?? []
+      const segmentWords = segments.flatMap((s) => s.words ?? [])
+      const allWords = segmentWords.length > 0 ? segmentWords : (verbose.words ?? [])
+      if (allWords.length > 0 && config.maxCharsPerLine > 0) {
+        cues = buildCuesFromWords(allWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
+      } else {
+        // Segments without word timings (server accepted verbose_json but not
+        // word granularity), or wrapping disabled (word grouping needs a line
+        // budget): use Whisper's own segment cues — the pre-2.4.0 shape.
+        // Empty segments (no speech) yield zero cues, handled below.
+        cues = segments
+          .map((s, idx) => ({
+            index: idx + 1,
+            startMs: Math.round(s.start * 1000),
+            endMs: Math.round(s.end * 1000),
+            text: s.text.trim(),
+          }))
+          .filter((c) => c.text.length > 0)
       }
-    } else {
-      // Local Whisper — standard SRT path
+    } catch (verboseError) {
+      console.warn(
+        `[transcription] Video ${videoId}: verbose_json transcription failed (${verboseError instanceof Error ? verboseError.message : verboseError}) — falling back to SRT`,
+      )
       const rawSrt = await whisperTranscribe({
         config,
         audio: whisperAudioPath,

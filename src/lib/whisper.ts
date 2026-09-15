@@ -132,15 +132,27 @@ export interface WhisperVerboseJsonResponse {
   language: string
   duration: number
   text: string
-  segments: WhisperVerboseSegment[]
+  /**
+   * Populated only when 'segment' granularity is requested. OpenAI omits this
+   * array entirely when the request asks for word timings alone — its own SDK
+   * types both `segments` and `words` as optional — so never assume it exists.
+   */
+  segments?: WhisperVerboseSegment[]
+  /** The flat word stream: OpenAI's only word carrier, and Speaches returns it too. */
+  words?: WhisperWord[]
 }
 
 /**
  * Transcribe with word-level timestamps. Requests `verbose_json` +
  * `timestamp_granularities=["word"]` so every word carries start/end times.
- * Only supported by the OpenAI provider (api.openai.com); local Whisper
- * servers may not implement this — use {@link whisperTranscribe} with 'srt'
- * format as the fallback.
+ * Supported by OpenAI's whisper-1 and by Speaches / faster-whisper-server;
+ * a server or model that rejects it (or answers without a `words` array)
+ * falls back to {@link whisperTranscribe} with 'srt' format.
+ *
+ * Word timing matters beyond neatness: without it faster-whisper reports a
+ * segment's start from coarse token timestamps, which drift onto the start of
+ * the decode window when the audio opens on music rather than silence — the
+ * cause of captions appearing at 00:00 over a musical intro.
  */
 export async function whisperTranscribeVerbose(params: {
   config: WhisperConfig
@@ -156,6 +168,9 @@ export async function whisperTranscribeVerbose(params: {
   form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), fileName)
   form.append('model', config.model)
   form.append('response_format', 'verbose_json')
+  // Both granularities: asking for 'word' alone makes OpenAI drop `segments`
+  // from the response, and segment timestamps add no latency of their own.
+  form.append('timestamp_granularities[]', 'segment')
   form.append('timestamp_granularities[]', 'word')
   const language = config.language?.trim().split(/[-_]/)[0].toLowerCase()
   if (language) form.append('language', language)
@@ -174,8 +189,10 @@ export async function whisperTranscribeVerbose(params: {
       throw new WhisperError(`Whisper server returned ${res.status}: ${body.slice(0, 300)}`)
     }
     const json = (await res.json()) as WhisperVerboseJsonResponse
-    if (!json.segments || !Array.isArray(json.segments)) {
-      throw new WhisperError('Whisper verbose_json response missing "segments" array')
+    const hasWords = Array.isArray(json.words) && json.words.length > 0
+    const hasSegments = Array.isArray(json.segments) && json.segments.length > 0
+    if (!hasWords && !hasSegments) {
+      throw new WhisperError('Whisper verbose_json response carried neither "words" nor "segments"')
     }
     return json
   } catch (e) {

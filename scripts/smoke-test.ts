@@ -31,6 +31,7 @@ import {
 } from '@/lib/sales/money'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 import { sanitizeComment } from '@/lib/comment-sanitization'
+import { generateNotificationSummaryEmail } from '@/lib/email-templates'
 import { sanitizeCommentHtml, sanitizeText, containsSuspiciousPatterns } from '@/lib/security/html-sanitization'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getCpuAllocation } from '@/lib/cpu-config'
@@ -438,6 +439,73 @@ async function main() {
     )
   })
 
+  await check('a reply digest quotes what was said between the root and the reply', () => {
+    // Threads are two levels deep, so a reply's parentComment is always the thread root.
+    // Without the run-up, a short reply is quoted under a question asked several replies
+    // earlier and reads as an answer to the wrong thing.
+    const html = generateNotificationSummaryEmail({
+      companyName: 'Co', projectTitle: 'P', useFullTimecode: false,
+      shareUrl: 'http://localhost/share/x', recipientName: 'Alex',
+      recipientEmail: 'alex@example.com', period: 'today',
+      notifications: [{
+        type: 'ADMIN_REPLY', videoName: 'Cut A', authorName: 'Simon',
+        content: 'Copy that! Will place on hold.', isReply: true,
+        commentId: 'r2', parentCommentId: 'root',
+        parentComment: { authorName: 'Simon', content: 'Any word on the script?' },
+        threadContext: [{ authorName: 'Nickel', content: 'Still waiting on approvals' }],
+        threadContextOmitted: 4,
+        createdAt: new Date().toISOString(),
+      }],
+    })
+    assert(html.includes('Still waiting on approvals'), 'the intervening reply is missing')
+    assert(html.includes('Any word on the script?'), 'the thread root is missing')
+    assert(html.includes('4 earlier replies not shown'), 'older replies are not accounted for')
+  })
+
+  await check('replies in one thread share a single quoted run-up', () => {
+    // Every reply carries the same quoted root; rendered per-entry, a busy thread repeats
+    // that quote once per reply and the reader has to reassemble the conversation.
+    const parentComment = { authorName: 'Alex', content: 'UNIQUE-ROOT-TEXT' }
+    const base = {
+      type: 'ADMIN_REPLY' as const, videoName: 'Cut A', authorName: 'Simon',
+      isReply: true, parentCommentId: 'root', parentComment,
+      createdAt: new Date().toISOString(),
+    }
+    const html = generateNotificationSummaryEmail({
+      companyName: 'Co', projectTitle: 'P', useFullTimecode: false,
+      shareUrl: 'http://localhost/share/x', recipientName: 'Alex',
+      recipientEmail: 'alex@example.com', period: 'today',
+      notifications: [
+        { ...base, commentId: 'r1', content: 'First reply' },
+        { ...base, commentId: 'r2', content: 'Second reply' },
+      ],
+    })
+    assert.equal(
+      html.split('UNIQUE-ROOT-TEXT').length - 1, 1,
+      'the thread root is quoted more than once in the same digest',
+    )
+    assert(html.includes('First reply') && html.includes('Second reply'), 'a reply was dropped')
+  })
+
+  await check('client digests never quote internal comments', async () => {
+    // attachThreadContext reads the Comment table, which holds internal and client-visible
+    // comments alike. `includeInternal: false` on the client paths is the only thing that
+    // keeps an internal note out of a client-facing thread quote — nothing downstream can
+    // tell them apart once quoted.
+    const clientPaths = [
+      'src/worker/client-notifications.ts',
+      'src/app/api/projects/[id]/notify/route.ts',
+    ]
+    for (const spot of clientPaths) {
+      const src = await readSource(spot)
+      if (!src.includes('attachThreadContext')) continue
+      assert(
+        src.includes('includeInternal: false'),
+        `${spot} resolves thread context without excluding internal comments`,
+      )
+    }
+  })
+
   await check('every notification type the client worker renders is also selectable', async () => {
     // The project query has TWO type filters: an outer `some` that decides whether a
     // project is picked up at all, and an inner select that decides which rows are
@@ -457,6 +525,26 @@ async function main() {
       new Set(filters).size === 1,
       `client worker type filters disagree: ${filters.join('  vs  ')}`,
     )
+  })
+
+  await check('every summary path enriches its payloads the same way', async () => {
+    // A digest is assembled from the queue row's snapshot, so anything live — reaction
+    // tallies, the quoted thread run-up — has to be attached by each sending path on its
+    // own. The manual send quietly skipped tallies for two releases: same email, sent by
+    // hand, missing the reaction pills the scheduled one showed.
+    const paths = [
+      'src/worker/client-notifications.ts',
+      'src/worker/admin-notifications.ts',
+      'src/app/api/projects/[id]/notify/route.ts',
+    ]
+    for (const spot of paths) {
+      const src = await readSource(spot)
+      for (const enrichment of ['attachReactionTallies', 'attachThreadContext']) {
+        // Match the call, not the identifier: an unused import would satisfy a bare
+        // substring check while the payloads went out unenriched.
+        assert(src.includes(`${enrichment}(`), `${spot} sends summaries without ${enrichment}`)
+      }
+    }
   })
 
   await check('reaction notifications are deliverable on every path', async () => {

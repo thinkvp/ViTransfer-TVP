@@ -4,7 +4,7 @@ import { generateAdminSummaryEmail } from '../lib/email-templates'
 import { generateShareUrl } from '../lib/url'
 import { getRedis } from '../lib/redis'
 import { redactEmailForLogs } from '../lib/log-sanitization'
-import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, ADMIN_SEND_LOCK_KEY, normalizeNotificationDataTimecode, attachReactionTallies } from './notification-helpers'
+import { getPeriodString, shouldSendNow, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, ADMIN_SEND_LOCK_KEY, normalizeNotificationDataTimecode, attachReactionTallies, attachThreadContext } from './notification-helpers'
 import { canDoAction, normalizeRolePermissions } from '../lib/rbac'
 
 /**
@@ -126,9 +126,13 @@ export async function processAdminNotifications() {
       )
     }
 
-    // Live reaction tallies for every comment in the digest, one query for all projects.
+    // Live reaction tallies for every comment in the digest, one query for all projects,
+    // then the quoted run-up for each reply. Admins see internal comments in the quote.
     for (const group of Object.values(projectGroups)) {
-      group.notifications = await attachReactionTallies(group.notifications)
+      group.notifications = await attachThreadContext(
+        await attachReactionTallies(group.notifications),
+        { includeInternal: true },
+      )
     }
 
     const projectIds = Object.keys(projectGroups)

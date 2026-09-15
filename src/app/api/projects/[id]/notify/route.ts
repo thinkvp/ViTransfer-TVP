@@ -12,7 +12,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import crypto from 'crypto'
 import { getRedis } from '@/lib/redis'
-import { getPeriodString, normalizeNotificationDataTimecode, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, ADMIN_SEND_LOCK_KEY } from '@/worker/notification-helpers'
+import { getPeriodString, normalizeNotificationDataTimecode, attachThreadContext, attachReactionTallies, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, ADMIN_SEND_LOCK_KEY } from '@/worker/notification-helpers'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getStoredFileRecords } from '@/lib/stored-file'
 import fs from 'fs'
@@ -359,7 +359,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               // Identical hash to the scheduled worker (same ids + `${project.id}|${period}`
               // salt) so per-recipient idempotency markers are shared across both paths.
               const batchHash = notificationBatchHash(clientIds, `${project.id}|${period}`)
-              const notifications = clientPending.map((n) => normalizeNotificationDataTimecode(n.data as any))
+              // Same enrichment as the scheduled worker, in the same order: a manually
+              // sent summary must read identically to the one the schedule would have sent.
+              // Client digests never quote internal comments — see attachThreadContext.
+              const notifications = await attachThreadContext(
+                await attachReactionTallies(
+                  clientPending.map((n) => normalizeNotificationDataTimecode(n.data as any)),
+                ),
+                { includeInternal: false },
+              )
 
               const clientResult = await sendNotificationsWithRetry({
                 notificationIds: clientIds,
@@ -495,7 +503,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
                 select: { adminNotificationSchedule: true },
               })
               const period = getPeriodString(globalSettings?.adminNotificationSchedule || 'HOURLY')
-              const adminNotifications = adminPending.map((n) => normalizeNotificationDataTimecode(n.data as any))
+              const adminNotifications = await attachThreadContext(
+                await attachReactionTallies(
+                  adminPending.map((n) => normalizeNotificationDataTimecode(n.data as any)),
+                ),
+                { includeInternal: true },
+              )
 
               const adminResult = await sendNotificationsWithRetry({
                 notificationIds: adminIds,

@@ -806,9 +806,26 @@ export function CommentSectionView({
   // A "general" comment carries no timecode: it's about the whole video, not a moment in it.
   const isGeneralComment = (c: Comment) => !c.timecode
 
+  // Newest-first is a thread ordering, not a message ordering: a thread sits where its
+  // most recent activity puts it, so a fresh reply pulls its parent back to the top
+  // instead of leaving the conversation stranded at the parent's original post time.
+  const threadActivityTime = (c: Comment): number => {
+    const own = new Date(c.createdAt).getTime()
+    let newest = Number.isFinite(own) ? own : 0
+    for (const reply of c.replies || []) {
+      const replyTime = threadActivityTime(reply)
+      if (replyTime > newest) newest = replyTime
+    }
+    return newest
+  }
+
   const sortedComments = [...displayComments].sort((a, b) => {
     if (commentSortMode === 'date') {
-      // Newest first
+      // Newest first, by the thread's latest message (parent or any reply).
+      const activityCmp = threadActivityTime(b) - threadActivityTime(a)
+      if (activityCmp !== 0) return activityCmp
+
+      // Two threads last touched at the same instant: fall back to the parents' own times.
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     }
 
