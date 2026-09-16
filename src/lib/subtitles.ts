@@ -359,6 +359,104 @@ export interface TimedWord {
 }
 
 /**
+ * Re-attach punctuation to a word stream using the full transcript text.
+ *
+ * OpenAI's word-level timestamps arrive stripped of punctuation — "Well" where
+ * the transcript says "Well," — so cues built straight from `words[]` read as
+ * one long unpunctuated run. faster-whisper/Speaches instead returns each word
+ * with its punctuation already attached. This aligns the word stream against
+ * the punctuated transcript and gives every word back its own punctuation, so
+ * cue text matches the transcript while timing still comes from the words.
+ *
+ * Alignment is positional over alphanumerics only, so it is unaffected by the
+ * punctuation and casing differences it exists to repair, and it is idempotent:
+ * running it over words that already carry punctuation reproduces them. If the
+ * two streams disagree badly (under 90% of words located, i.e. not the same
+ * audio or an unexpected response shape) the original words are returned
+ * untouched — captions with flat punctuation beat captions with wrong words.
+ */
+export function attachPunctuationFromTranscript(words: TimedWord[], transcript: string): TimedWord[] {
+  if (words.length === 0 || !transcript.trim()) return words
+
+  // Normalised (alphanumeric, lowercase) projection of the transcript, with an
+  // index back to each character's position in the original string.
+  let norm = ''
+  const originalIndex: number[] = []
+  for (let i = 0; i < transcript.length; i++) {
+    const ch = transcript[i]
+    if (/[\p{L}\p{N}]/u.test(ch)) {
+      norm += ch.toLowerCase()
+      originalIndex.push(i)
+    }
+  }
+  if (norm === '') return words
+
+  // Locate each word's core span in the transcript, walking forward only.
+  const MAX_LOOKAHEAD = 200
+  const spans: ({ start: number; end: number } | null)[] = []
+  let cursor = 0
+  let matched = 0
+  for (const w of words) {
+    const wn = w.word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+    if (wn === '') {
+      spans.push(null)
+      continue
+    }
+    const at = norm.indexOf(wn, cursor)
+    if (at === -1 || at > cursor + MAX_LOOKAHEAD) {
+      spans.push(null)
+      continue
+    }
+    spans.push({ start: originalIndex[at], end: originalIndex[at + wn.length - 1] + 1 })
+    cursor = at + wn.length
+    matched++
+  }
+
+  if (matched < words.length * 0.9) return words
+
+  // Hand the text between spans to its neighbours: everything up to the first
+  // whitespace trails the previous word (a comma, or the hyphen of a split
+  // "well-known"), everything after the last whitespace leads the next one (an
+  // opening quote or bracket). Each gap is assigned once, so nothing doubles up.
+  const out = words.map((w) => ({ ...w }))
+  let prevEnd = 0
+  let prevWordIdx = -1
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i]
+    if (!span) continue
+    const gap = transcript.slice(prevEnd, span.start)
+    let lead = ''
+    if (gap !== '') {
+      const firstWs = gap.search(/\s/)
+      if (firstWs === -1) {
+        if (prevWordIdx >= 0) out[prevWordIdx].word += gap
+        else lead = gap
+      } else {
+        if (prevWordIdx >= 0) out[prevWordIdx].word += gap.slice(0, firstWs)
+        // Whatever is left leads this word. Internal spacing is kept, so a
+        // free-standing token (an em dash, an ellipsis) survives as its own
+        // word rather than being dropped with the whitespace around it.
+        lead = gap.slice(firstWs).replace(/^\s+/, '')
+      }
+    }
+    out[i].word = lead + transcript.slice(span.start, span.end)
+    prevEnd = span.end
+    prevWordIdx = i
+  }
+
+  // Punctuation directly after the final matched word (the closing full stop).
+  // Punctuation only, and only what is adjacent: any words still left in the
+  // transcript were never matched to a timing, and putting them on screen would
+  // show text the cue timings never accounted for.
+  if (prevWordIdx >= 0) {
+    const tail = /^\s*([^\p{L}\p{N}\s]+)/u.exec(transcript.slice(prevEnd))
+    if (tail) out[prevWordIdx].word += tail[1]
+  }
+
+  return out
+}
+
+/**
  * Build subtitle cues directly from word-level timestamps. The word stream is
  * first split into pause-delimited runs (`maxWordGapMs`, default 800 ms) so a
  * cue never straddles a real silence — otherwise its text would linger on

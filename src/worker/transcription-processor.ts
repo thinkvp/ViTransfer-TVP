@@ -5,7 +5,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import type { TranscriptionJob } from '../lib/queue'
 import { whisperTranscribe, whisperTranscribeVerbose, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
-import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, buildCuesFromWords, applyDraftMarker } from '../lib/subtitles'
+import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, buildCuesFromWords, attachPunctuationFromTranscript, applyDraftMarker } from '../lib/subtitles'
 import { usesBritishSpelling, convertToBritishEnglish } from '../lib/american-to-british'
 import { extractAudioForTranscription } from '../lib/ffmpeg'
 import { computeWaveformPeaksFromWav } from '../lib/waveform-peaks'
@@ -340,7 +340,13 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       const segmentWords = segments.flatMap((s) => s.words ?? [])
       const allWords = segmentWords.length > 0 ? segmentWords : (verbose.words ?? [])
       if (allWords.length > 0 && config.maxCharsPerLine > 0) {
-        cues = buildCuesFromWords(allWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
+        // OpenAI's words[] is punctuation-free; the transcript text is not.
+        // Restore it from the text so cue timing comes from the words while the
+        // wording matches the transcript (a no-op for servers whose words
+        // already carry punctuation, e.g. faster-whisper).
+        const transcript = verbose.text?.trim() || segments.map((seg) => seg.text).join(' ')
+        const timedWords = attachPunctuationFromTranscript(allWords, transcript)
+        cues = buildCuesFromWords(timedWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
       } else {
         // Segments without word timings (server accepted verbose_json but not
         // word granularity), or wrapping disabled (word grouping needs a line

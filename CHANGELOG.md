@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.6] - 2026-09-16
+
+### Fixed
+
+- **Captions have their punctuation back** — 2.6.5 started timing captions from Whisper's word-level timestamps, but OpenAI returns those words stripped of punctuation, so captions came out as one unpunctuated run. The wording now comes from the transcript text and the timing from the words, which is what was wanted from both. Local (self-hosted) transcription was never affected — its words already carry punctuation. Regenerate a video's subtitles to pick this up.
+
 ## [2.6.5] - 2026-09-15
 
 ### Changed
