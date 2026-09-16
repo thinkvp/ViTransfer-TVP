@@ -320,6 +320,12 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
     console.log(`[transcription] Transcribing video ${videoId} via ${config.provider} (${config.model})`)
 
     let cues: ReturnType<typeof parseSrt>
+    // Cues built from word timings are already fitted to the line budget and
+    // broken on sentence boundaries; re-flowing them would only re-split them
+    // with character-count timing, which is the very approximation word timings
+    // exist to avoid. Segment cues (no word timings, or the SRT fallback) still
+    // need the pass.
+    let cuesAreWordTimed = false
 
     // Word-level timestamps via verbose_json — every word carries start/end
     // times, so cues get word-precise timing instead of Whisper's coarse
@@ -347,6 +353,7 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
         const transcript = verbose.text?.trim() || segments.map((seg) => seg.text).join(' ')
         const timedWords = attachPunctuationFromTranscript(allWords, transcript)
         cues = buildCuesFromWords(timedWords, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
+        cuesAreWordTimed = true
       } else {
         // Segments without word timings (server accepted verbose_json but not
         // word granularity), or wrapping disabled (word grouping needs a line
@@ -407,12 +414,14 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
 
     // Collapse Whisper's end-of-audio hallucination loops (runs of adjacent
     // identical short cues over trailing silence), fold lone-word cues into
-    // their predecessor (unless separated by a real pause), then re-flow for
-    // on-screen readability (max chars/line + max lines), then canonically
+    // their predecessor (unless separated by a real pause), re-flow segment cues
+    // for on-screen readability (max chars/line + max lines), then canonically
     // re-serialize so the stored SRT matches what parseSrt returns to the edit API.
     cues = collapseRepeatedCues(cues)
     cues = mergeOrphanWordCues(cues)
-    cues = reflowCues(cues, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
+    if (!cuesAreWordTimed) {
+      cues = reflowCues(cues, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
+    }
     const srtText = serializeSrt(cues)
     const vttText = serializeVtt(cues)
 

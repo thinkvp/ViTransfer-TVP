@@ -44,6 +44,15 @@ export function applyDraftMarker(fileName: string, isDraft: boolean): string {
   return `${bare}${isDraft ? AUTO_DRAFT_MARKER : ''}${ext}`
 }
 
+/**
+ * Word-wrap tolerance shared by every wrapper here: a short word (<= 6 chars —
+ * "it", "of", "the") that only just overflows the line is pulled back onto it,
+ * because a slightly long line reads better than an orphaned "it" opening the
+ * next one.
+ */
+const SHORT_PULLBACK = 6
+const SHORT_PULLBACK_ALLOWANCE = 6
+
 export const MAX_CUES = 20000
 export const MAX_CUE_TEXT_LENGTH = 1000
 
@@ -185,8 +194,6 @@ export function reflowCues(
     // "it", "of", "the", "really") that barely overflow maxChars are pulled
     // back onto the current line: a slight exceedance reads much better than
     // an orphaned "it" dangling at the start of the next subtitle.
-    const SHORT_PULLBACK = 6
-    const SHORT_PULLBACK_ALLOWANCE = 6
     const lines: string[] = []
     let cur = ''
     for (const w of words) {
@@ -457,6 +464,88 @@ export function attachPunctuationFromTranscript(words: TimedWord[], transcript: 
 }
 
 /**
+ * Does this word close a sentence? Used to place cue boundaries where a reader
+ * would pause. Deliberately conservative: an ellipsis is a hesitation rather
+ * than a full stop, and a lone initial or a common abbreviation ("Dr.", "St.")
+ * takes a period without ending anything.
+ */
+function endsSentence(raw: string): boolean {
+  const w = raw.trim()
+  if (w === '') return false
+  if (/(\.\.\.|…)["'”’)\]]*$/.test(w)) return false
+  if (/^\p{L}\.$/u.test(w)) return false
+  if (/^(mr|mrs|ms|dr|prof|st|sr|jr|vs|etc|approx|dept|no)\.$/i.test(w)) return false
+  return /[.!?]["'”’)\]]*$/.test(w)
+}
+
+/**
+ * Greedy word-wrap of words[from..to] into at most `maxLines` lines. Words that
+ * will not fit are appended to the last line rather than dropped.
+ */
+function wrapWordRange(words: TimedWord[], from: number, to: number, maxChars: number, maxLines: number): string[] {
+  const lines: string[] = []
+  let cur = ''
+  for (let i = from; i <= to; i++) {
+    const w = words[i].word
+    if (cur === '') { cur = w; continue }
+    if ((cur + ' ' + w).length <= maxChars) { cur += ' ' + w; continue }
+    if (w.length <= SHORT_PULLBACK && (cur + ' ' + w).length <= maxChars + SHORT_PULLBACK_ALLOWANCE) {
+      cur += ' ' + w
+      continue
+    }
+    if (lines.length + 1 >= maxLines) { cur += ' ' + w; continue } // last line absorbs the remainder
+    lines.push(cur)
+    cur = w
+  }
+  if (cur !== '') lines.push(cur)
+  return lines
+}
+
+/** How many characters words[from..to] occupy once joined onto one line. */
+function rangeLength(words: TimedWord[], from: number, to: number): number {
+  let len = 0
+  for (let i = from; i <= to; i++) len += words[i].word.length + (i > from ? 1 : 0)
+  return len
+}
+
+const SENTENCE_LOOKAROUND = 2
+const SENTENCE_OVERFLOW_ALLOWANCE = 10
+
+/**
+ * Nudge a cue's last word onto a sentence boundary when one sits within a word
+ * or two of it, so a cue never trails the opening words of the next sentence
+ * ("...around the place. I") and never opens with the tail of the previous one
+ * ("past. This is..."). Greedy wrapping produces both, because it only ever
+ * looks at line length.
+ *
+ * Moving the boundary earlier is free — the cue simply carries less. Moving it
+ * later overruns the line budget, so that is allowed only for a short tail
+ * (`SENTENCE_OVERFLOW_ALLOWANCE`); failing that the cue gives up a couple of
+ * words instead, which hands the stranded tail enough company to stop reading
+ * as an orphan.
+ */
+function snapCueEnd(words: TimedWord[], start: number, greedyEnd: number, maxChars: number, maxLines: number): number {
+  const last = words.length - 1
+  if (greedyEnd >= last) return greedyEnd // nothing follows this cue
+  if (endsSentence(words[greedyEnd].word)) return greedyEnd
+
+  // Earlier: the cue is trailing the first word or two of the next sentence.
+  for (let k = greedyEnd - 1; k >= Math.max(start + 1, greedyEnd - SENTENCE_LOOKAROUND); k--) {
+    if (endsSentence(words[k].word)) return k
+  }
+
+  // Later: the next cue would open with the last word or two of this sentence.
+  for (let k = greedyEnd + 1; k <= Math.min(last, greedyEnd + SENTENCE_LOOKAROUND); k++) {
+    if (!endsSentence(words[k].word)) continue
+    if (rangeLength(words, start, k) <= maxChars * maxLines + SENTENCE_OVERFLOW_ALLOWANCE) return k
+    const shifted = k - 3 // leave three words of the sentence to travel together
+    return shifted >= start + 2 ? shifted : greedyEnd
+  }
+
+  return greedyEnd
+}
+
+/**
  * Build subtitle cues directly from word-level timestamps. The word stream is
  * first split into pause-delimited runs (`maxWordGapMs`, default 800 ms) so a
  * cue never straddles a real silence — otherwise its text would linger on
@@ -484,16 +573,19 @@ export function buildCuesFromWords(
   const maxChars = Math.floor(opts.maxCharsPerLine)
   const maxLines = Math.max(1, Math.floor(opts.maxLines))
   const maxWordGapMs = opts.maxWordGapMs ?? 800
-  const SHORT_PULLBACK = 6
-  const SHORT_PULLBACK_ALLOWANCE = 6
 
   if (allWords.length === 0) return []
+
+  // faster-whisper returns words with a leading space (" Well,"). Normalise once
+  // here: these cues are emitted as-is, with no re-flow pass downstream to tidy
+  // up double spaces.
+  const allWordsTrimmed = allWords.map((w) => ({ ...w, word: w.word.trim() })).filter((w) => w.word !== '')
 
   // Split into pause-delimited runs: a gap larger than maxWordGapMs between
   // consecutive words always starts a new run (and therefore a new cue).
   const runs: TimedWord[][] = []
   let run: TimedWord[] = []
-  for (const w of allWords) {
+  for (const w of allWordsTrimmed) {
     const prev = run[run.length - 1]
     if (prev && (w.start - prev.end) * 1000 > maxWordGapMs) {
       runs.push(run)
@@ -520,56 +612,53 @@ export function buildCuesFromWords(
 
     let i = 0
     while (i < words.length) {
-      const cueLines: string[] = []
-      const cueStartMs = Math.round(words[i].start * 1000)
-      let cueEndWordIdx = i // track the last word included in this cue
+      const start = i
+      let greedyEnd = start
+      let cursor = start
 
-      // Build up to maxLines lines for this cue
-      for (let lineNum = 0; lineNum < maxLines && i < words.length; lineNum++) {
+      // How far the line budget reaches: fill maxLines lines greedily.
+      for (let lineNum = 0; lineNum < maxLines && cursor < words.length; lineNum++) {
         let curLine = ''
         let lineWordCount = 0
 
-        // Fill one line greedily (same logic as reflowCues word-wrap)
-        while (i < words.length) {
-          const w = words[i]
+        while (cursor < words.length) {
+          const w = words[cursor]
           if (curLine === '') {
             curLine = w.word
-            lineWordCount = 1
-            cueEndWordIdx = i
-            i++
           } else if ((curLine + ' ' + w.word).length <= maxChars) {
             curLine += ' ' + w.word
-            lineWordCount++
-            cueEndWordIdx = i
-            i++
           } else if (
             w.word.length <= SHORT_PULLBACK &&
             (curLine + ' ' + w.word).length <= maxChars + SHORT_PULLBACK_ALLOWANCE
           ) {
             curLine += ' ' + w.word
-            lineWordCount++
-            cueEndWordIdx = i
-            i++
           } else {
             break // line is full
           }
+          lineWordCount++
+          greedyEnd = cursor
+          cursor++
         }
-
-        if (curLine) cueLines.push(curLine)
 
         // If we consumed no words this iteration, break to avoid infinite loop
         if (lineWordCount === 0) break
       }
 
-      if (cueLines.length === 0) continue
+      // Then prefer a sentence boundary within a word or two of it.
+      const end = snapCueEnd(words, start, greedyEnd, maxChars, maxLines)
+      const cueLines = wrapWordRange(words, start, end, maxChars, maxLines)
+      if (cueLines.length === 0) {
+        i = end + 1
+        continue
+      }
 
-      const lastWord = words[cueEndWordIdx]
       cues.push({
         index: cues.length + 1,
-        startMs: cueStartMs,
-        endMs: Math.round(lastWord.end * 1000),
+        startMs: Math.round(words[start].start * 1000),
+        endMs: Math.round(words[end].end * 1000),
         text: cueLines.join('\n'),
       })
+      i = end + 1
     }
   }
 
