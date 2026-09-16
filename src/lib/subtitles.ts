@@ -508,39 +508,93 @@ function rangeLength(words: TimedWord[], from: number, to: number): number {
   return len
 }
 
-const SENTENCE_LOOKAROUND = 2
+/**
+ * Does this word close a clause? A comma, semicolon, colon, dash or ellipsis is
+ * a weaker break than a full stop but still a place a reader pauses, so a cue
+ * boundary lands better there than one word past it.
+ */
+function endsClause(raw: string): boolean {
+  const w = raw.trim()
+  if (w === '') return false
+  return /([,;:–—]|\.\.\.|…)["'”’)\]]*$/.test(w)
+}
+
+const BOUNDARY_LOOKAROUND = 2
+/** How far a cue may overrun its line budget to keep a short tail rather than strand it. */
 const SENTENCE_OVERFLOW_ALLOWANCE = 10
+/** Lower for clauses: a comma is a weaker reason to run a caption long. */
+const CLAUSE_OVERFLOW_ALLOWANCE = 6
 
 /**
- * Nudge a cue's last word onto a sentence boundary when one sits within a word
- * or two of it, so a cue never trails the opening words of the next sentence
- * ("...around the place. I") and never opens with the tail of the previous one
- * ("past. This is..."). Greedy wrapping produces both, because it only ever
- * looks at line length.
+ * Would a cue ending here strand a word? True when the break lands on a natural
+ * boundary, or clear of the last one; false when it sits a word or two past a
+ * full stop or comma — the very shape these snaps exist to remove.
+ */
+function isCleanBreak(words: TimedWord[], start: number, end: number): boolean {
+  if (endsSentence(words[end].word) || endsClause(words[end].word)) return true
+  for (let k = end - 1; k >= Math.max(start, end - BOUNDARY_LOOKAROUND); k--) {
+    if (endsSentence(words[k].word) || endsClause(words[k].word)) return false
+  }
+  return true
+}
+
+/**
+ * Find a boundary within `BOUNDARY_LOOKAROUND` words of the greedy break.
+ * Returns null when there is none worth taking.
+ */
+function findBoundary(
+  words: TimedWord[],
+  start: number,
+  greedyEnd: number,
+  budget: number,
+  isBoundary: (word: string) => boolean,
+  allowance: number,
+): number | null {
+  const last = words.length - 1
+
+  // Earlier: the cue is trailing the first word or two of what comes next.
+  // Free — the cue simply carries less.
+  for (let k = greedyEnd - 1; k >= Math.max(start + 1, greedyEnd - BOUNDARY_LOOKAROUND); k--) {
+    if (isBoundary(words[k].word)) return k
+  }
+
+  // Later: the next cue would open with the last word or two of this unit.
+  for (let k = greedyEnd + 1; k <= Math.min(last, greedyEnd + BOUNDARY_LOOKAROUND); k++) {
+    if (!isBoundary(words[k].word)) continue
+    if (rangeLength(words, start, k) <= budget + allowance) return k
+    // Too long to absorb: end earlier instead, so three words travel together.
+    // Only if that break is itself clean — retreating past an earlier full stop
+    // or comma would just move the stranded word rather than remove it.
+    const shifted = k - 3
+    return shifted >= start + 2 && isCleanBreak(words, start, shifted) ? shifted : null
+  }
+
+  return null
+}
+
+/**
+ * Nudge a cue's last word onto a natural break when one sits within a word or
+ * two of it, so a cue never trails the opening words of the next sentence
+ * ("...around the place. I"), never opens with the tail of the previous one
+ * ("past. This is..."), and does not strand a lone word past a comma
+ * ("...when you wear earplugs, all"). Greedy wrapping produces all three,
+ * because it only ever looks at line length.
  *
- * Moving the boundary earlier is free — the cue simply carries less. Moving it
- * later overruns the line budget, so that is allowed only for a short tail
- * (`SENTENCE_OVERFLOW_ALLOWANCE`); failing that the cue gives up a couple of
- * words instead, which hands the stranded tail enough company to stop reading
- * as an orphan.
+ * Sentence endings are tried first and may run the line slightly longer, since
+ * a full stop is the better place to break and the worse place to overshoot.
  */
 function snapCueEnd(words: TimedWord[], start: number, greedyEnd: number, maxChars: number, maxLines: number): number {
   const last = words.length - 1
   if (greedyEnd >= last) return greedyEnd // nothing follows this cue
   if (endsSentence(words[greedyEnd].word)) return greedyEnd
 
-  // Earlier: the cue is trailing the first word or two of the next sentence.
-  for (let k = greedyEnd - 1; k >= Math.max(start + 1, greedyEnd - SENTENCE_LOOKAROUND); k--) {
-    if (endsSentence(words[k].word)) return k
-  }
+  const budget = maxChars * maxLines
+  const atSentence = findBoundary(words, start, greedyEnd, budget, endsSentence, SENTENCE_OVERFLOW_ALLOWANCE)
+  if (atSentence !== null) return atSentence
 
-  // Later: the next cue would open with the last word or two of this sentence.
-  for (let k = greedyEnd + 1; k <= Math.min(last, greedyEnd + SENTENCE_LOOKAROUND); k++) {
-    if (!endsSentence(words[k].word)) continue
-    if (rangeLength(words, start, k) <= maxChars * maxLines + SENTENCE_OVERFLOW_ALLOWANCE) return k
-    const shifted = k - 3 // leave three words of the sentence to travel together
-    return shifted >= start + 2 ? shifted : greedyEnd
-  }
+  if (endsClause(words[greedyEnd].word)) return greedyEnd
+  const atClause = findBoundary(words, start, greedyEnd, budget, endsClause, CLAUSE_OVERFLOW_ALLOWANCE)
+  if (atClause !== null) return atClause
 
   return greedyEnd
 }

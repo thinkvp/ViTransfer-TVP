@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Captions break at the end of a sentence, not a word or two past it** — a caption could finish on the first word of the next sentence ("...around the place. I"), or open with the last word of the previous one ("past. This is..."), because cues were packed purely by line length. Cue boundaries now prefer a sentence ending within a word or two of where the line runs out: usually the caption simply carries a little less, and where a short tail is worth keeping it is allowed to overrun the line slightly rather than strand a word on its own. Regenerate a video's subtitles to pick this up.
+- **Captions break where a sentence or clause ends, not a word or two past it** — a caption could finish on the first word of the next sentence ("...around the place. I"), open with the last word of the previous one ("past. This is..."), or strand a lone word after a comma ("...when you wear earplugs, all"), because cues were packed purely by line length. Cue boundaries now prefer a full stop, and failing that a comma, semicolon, colon or dash, within a word or two of where the line runs out: usually the caption simply carries a little less, and where a short tail is worth keeping it may overrun the line slightly rather than strand a word on its own. Captions can therefore be a little shorter than the configured line length. Regenerate a video's subtitles to pick this up.
 
 ## [2.6.6] - 2026-09-16
 
