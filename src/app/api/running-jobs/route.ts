@@ -629,6 +629,7 @@ export async function POST(request: NextRequest) {
           id: true,
           status: true,
           projectId: true,
+          hlsReady: true,
         },
       })
 
@@ -677,22 +678,25 @@ export async function POST(request: NextRequest) {
       // A stalled PROCESSING → ERROR: a half-finished transcode leaves incomplete
       // previews, so mark it failed (eligible for the Reprocess action) rather than
       // READY, which would present an unplayable video as good. A cleared QUEUED
-      // video goes back to READY only when previews from an earlier run exist
+      // video goes back to READY only when a playable rendition from an earlier run exists
       // (i.e. this was a queued reprocess); a fresh upload cleared before its
       // first transcode has nothing playable, so it lands ERROR too.
       let clearedStatus: 'READY' | 'ERROR' = 'ERROR'
       let clearedError: string | null =
         'Processing was interrupted (worker stopped) and cleared manually. Reprocess to retry.'
       if (video.status === 'QUEUED') {
-        const existingPreview = await prisma.storedFile.findFirst({
+        // Playback is the HLS bundle since direct-to-HLS, so `hlsReady` is what says an
+        // earlier run left something playable. MP4 PREVIEW_* rows only survive on legacy
+        // videos (they're reclaimed once HLS verifies), so they're a fallback, not the test.
+        const hasPlayableRendition = video.hlsReady === true || (await prisma.storedFile.findFirst({
           where: {
             entityType: 'VIDEO',
             entityId: id,
             fileRole: { in: ['PREVIEW_480', 'PREVIEW_720', 'PREVIEW_1080'] },
           },
           select: { id: true },
-        })
-        if (existingPreview) {
+        })) !== null
+        if (hasPlayableRendition) {
           clearedStatus = 'READY'
           clearedError = null
         } else {

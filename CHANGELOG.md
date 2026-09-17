@@ -5,11 +5,23 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.6.7] - 2026-09-16
+## [2.6.7] - 2026-09-17
 
 ### Changed
 
 - **Captions break where a sentence or clause ends, not a word or two past it** — a caption could finish on the first word of the next sentence ("...around the place. I"), open with the last word of the previous one ("past. This is..."), or strand a lone word after a comma ("...when you wear earplugs, all"), because cues were packed purely by line length. Cue boundaries now prefer a full stop, and failing that a comma, semicolon, colon or dash, within a word or two of where the line runs out: usually the caption simply carries a little less, and where a short tail is worth keeping it may overrun the line slightly rather than strand a word on its own. Captions can therefore be a little shorter than the configured line length. Regenerate a video's subtitles to pick this up.
+
+### Fixed
+
+- **Reopening a closed project no longer re-encodes every video** — reopening checked for the old MP4 preview files to decide what needed rebuilding, but videos have been encoded straight to HLS since 2.1.0 and those files no longer exist, so every video looked like it had lost its previews and was queued for a full re-encode — even with **Auto-delete video previews when project is closed** switched off and nothing actually missing. The check now asks whether the HLS bundle is present, so a reopen rebuilds only what a close actually deleted, and videos stay playable throughout instead of dropping back to Queued.
+
+- **Clearing a stuck queued video keeps it playable** — the same stale check decided whether a cleared video went back to Ready or to Error, so a video with a perfectly good HLS bundle was marked Error and had to be reprocessed by hand.
+
+- **Reopening a project now restores the album work that closing cancelled** — closing a project cancels its pending jobs, but reopening only re-queued album ZIPs. Photo social copies (which double as the share-page previews) and photo thumbnails cancelled mid-batch were never re-queued, leaving an album stuck Processing with photos that never render. Reopening now re-queues all three, and checks the full and social ZIPs separately instead of treating an album with one of them as complete.
+
+- **Videos stranded by closing a project are picked up on reopen** — a video still queued or processing when the project closed had its job cancelled but kept that status, so it sat in limbo until a worker restart marked it failed. Reopening now re-queues it, or simply returns it to Ready when nothing is actually missing.
+
+- **"Generate social copies" no longer silently skips photos** — the queued job used a fixed id per photo, and the queue ignores a new job whose id matches one it still has on record from an earlier run, so re-running the action could do nothing for those photos while leaving them marked Pending.
 
 ## [2.6.6] - 2026-09-16
 

@@ -8,7 +8,8 @@ import { encrypt, decrypt } from '@/lib/encryption'
 import { isSmtpConfigured, sendProjectApprovedEmail } from '@/lib/email'
 import { invalidateProjectSessions, invalidateShareTokensByProject } from '@/lib/session-invalidation'
 import { getProjectRecipients } from '@/lib/recipients'
-import { enqueueShareUploadPreview, getVideoQueue, getAlbumPhotoZipQueue } from '@/lib/queue'
+import { enqueueShareUploadPreview, getVideoQueue, getAlbumPhotoZipQueue, getAlbumPhotoSocialQueue } from '@/lib/queue'
+import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { publishProjectEvent } from '@/lib/project-events'
 import { lockCommentsForApprovedProject } from '@/lib/comment-locks'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
@@ -1211,18 +1212,18 @@ export async function PATCH(
     // Re-generate previews, timeline sprites, and album ZIPs when project is reopened from CLOSED
     if (previousStatus === 'CLOSED' && validatedBody.status !== undefined && validatedBody.status !== 'CLOSED') {
       try {
-        const requiredPreviewResolutions = new Set<PreviewResolution>(
-          parsePreviewResolutions(currentProject.previewResolutions)
-        )
-
-        // Check READY videos for missing configured previews and/or timeline assets.
+        // Check videos for missing playback (HLS) and/or timeline assets. QUEUED/PROCESSING
+        // rows are included because closing the project cancelled their jobs without resetting
+        // their status (see cancelProjectJobs) — they are stranded until a worker restart marks
+        // them ERROR. Any that still have a live job are filtered out below.
         const videosToEvaluate = await prisma.video.findMany({
           where: {
             projectId: project.id,
-            status: 'READY',
+            status: { in: ['READY', 'QUEUED', 'PROCESSING'] },
           },
           select: {
             id: true,
+            status: true,
             hlsReady: true,
           },
         })
@@ -1231,6 +1232,17 @@ export async function PATCH(
         if (videosToEvaluate.length > 0) {
           const videoQueue = getVideoQueue()
           const videoIds = videosToEvaluate.map(v => v.id)
+
+          // A stranded row is one with no job left in the queue; anything still pending or
+          // running is left alone so we never race a live transcode.
+          const liveVideoIds = new Set<string>()
+          if (videosToEvaluate.some(v => v.status !== 'READY')) {
+            const liveJobs = await videoQueue.getJobs(['active', 'waiting', 'delayed', 'prioritized'])
+            for (const job of liveJobs) {
+              const vid = job?.data?.videoId
+              if (typeof vid === 'string' && vid) liveVideoIds.add(vid)
+            }
+          }
 
           // Batch-load StoredFile records for all videos
           const videoStoredFiles = await getStoredFileRecords('VIDEO', videoIds, {
@@ -1246,77 +1258,103 @@ export async function PATCH(
 
           for (const video of videosToEvaluate) {
             const stored = pathsByVideo.get(video.id) ?? new Map()
-            const missingPreviewResolutions: PreviewResolution[] = []
-            if (requiredPreviewResolutions.has('480p') && !stored.has('PREVIEW_480')) missingPreviewResolutions.push('480p')
-            if (requiredPreviewResolutions.has('720p') && !stored.has('PREVIEW_720')) missingPreviewResolutions.push('720p')
-            if (requiredPreviewResolutions.has('1080p') && !stored.has('PREVIEW_1080')) missingPreviewResolutions.push('1080p')
 
+            // Playback lives in the HLS bundle since direct-to-HLS: MP4 PREVIEW_* files are
+            // no longer produced at all, and legacy ones are reclaimed by the hls-reconcile
+            // sweep once the bundle verifies. Their absence is therefore normal and must NOT
+            // be read as "previews are missing" — `hlsReady` is the playback signal, the same
+            // one the reconcile sweep uses. A close that sheds previews clears it (see
+            // deleteProjectPreviews), so a reopen rebuilds only what the close actually deleted.
+            const needsHls = video.hlsReady !== true
             const regenerateThumbnail = !stored.has('THUMBNAIL')
             const regenerateTimelinePreviews = Boolean(
               !stored.has('TIMELINE_VTT') ||
               !stored.has('TIMELINE_SPRITES')
             )
 
-            if (
-              missingPreviewResolutions.length === 0 &&
-              !regenerateThumbnail &&
-              !regenerateTimelinePreviews
-            ) {
-              // Thumbnail + timeline are intact (auto-close keeps them), but the HLS
-              // bundle may have been shed on close — rebuild it directly from the original
-              // so playback is restored immediately rather than waiting for the reconcile
-              // sweep. Same deterministic jobId as the sweep, so the two dedupe.
-              if (video.hlsReady === false) {
-                await videoQueue.add(
-                  'process-video',
-                  { videoId: video.id, projectId: project.id, storagePath: '', hlsOnly: true },
-                  { jobId: `hls-reconcile-${video.id}` },
-                ).catch(() => {})
-                queuedVideoPreviewJobs += 1
+            if (video.status !== 'READY' && liveVideoIds.has(video.id)) continue
+
+            // A stranded QUEUED/PROCESSING row must end up READY again, and only the full
+            // pass finalizes status (hlsOnly/timelineOnly deliberately leave it alone), so
+            // it always takes that path even when just one artifact is missing.
+            const stranded = video.status !== 'READY'
+
+            if (!needsHls && !regenerateThumbnail && !regenerateTimelinePreviews) {
+              // Nothing is missing. A stranded row just needs its status put back — it is
+              // playable, so re-encoding it to reach READY would be pure waste.
+              if (stranded) {
+                await prisma.video.update({
+                  where: { id: video.id },
+                  data: { status: 'READY', processingProgress: 100, processingPhase: null, processingError: null },
+                }).catch(() => {})
               }
               continue
             }
 
-            const originalPath = stored.get('ORIGINAL')
-            if (!originalPath) continue
-
-            await prisma.video.update({
-              where: { id: video.id },
-              data: { status: 'QUEUED', processingProgress: 0, processingPhase: null },
-            })
-            if (missingPreviewResolutions.length > 0) {
+            // HLS plus another artifact missing (a video uploaded while the project was closed
+            // with preview-shedding on gets thumbnail-only processing, so it lands here) — one
+            // full pass does all of it from a single download of the original.
+            if (stranded || (needsHls && (regenerateThumbnail || regenerateTimelinePreviews))) {
+              const originalPath = stored.get('ORIGINAL')
+              if (!originalPath) continue
               await videoQueue.add('process-video', {
                 videoId: video.id,
                 storagePath: originalPath,
                 projectId: project.id,
-                requestedPreviewResolutions: missingPreviewResolutions,
                 regenerateThumbnail,
                 regenerateTimelinePreviews,
               })
-            } else if (regenerateThumbnail && !regenerateTimelinePreviews) {
-              await videoQueue.add('process-video', {
-                videoId: video.id,
-                storagePath: originalPath,
-                projectId: project.id,
-                thumbnailOnly: true,
-              })
-            } else if (!regenerateThumbnail && regenerateTimelinePreviews) {
-              await videoQueue.add('process-video', {
-                videoId: video.id,
-                storagePath: originalPath,
-                projectId: project.id,
-                timelineOnly: true,
-              })
-            } else {
-              await videoQueue.add('process-video', {
-                videoId: video.id,
-                storagePath: originalPath,
-                projectId: project.id,
-                regenerateThumbnail: true,
-                regenerateTimelinePreviews: true,
-              })
+              queuedVideoPreviewJobs += 1
+              continue
             }
-            queuedVideoPreviewJobs += 1
+
+            if (needsHls) {
+              // Rebuild the bundle directly from the retained original so playback is restored
+              // immediately rather than waiting for the reconcile sweep. Same deterministic
+              // jobId as the sweep, so the two dedupe. The video stays READY throughout.
+              await videoQueue.add(
+                'process-video',
+                { videoId: video.id, projectId: project.id, storagePath: '', hlsOnly: true },
+                { jobId: `hls-reconcile-${video.id}` },
+              ).catch(() => {})
+              queuedVideoPreviewJobs += 1
+            }
+
+            // Thumbnails and timeline sprites survive a close (deleteProjectPreviews keeps
+            // them), so these only fire when something else lost them. Both partial modes leave
+            // the video READY, and HLS is left alone here — the bundle is either intact or
+            // already being rebuilt above.
+            if (regenerateThumbnail || regenerateTimelinePreviews) {
+              const originalPath = stored.get('ORIGINAL')
+              if (!originalPath) continue
+
+              if (regenerateThumbnail && !regenerateTimelinePreviews) {
+                await videoQueue.add('process-video', {
+                  videoId: video.id,
+                  storagePath: originalPath,
+                  projectId: project.id,
+                  thumbnailOnly: true,
+                })
+              } else if (!regenerateThumbnail && regenerateTimelinePreviews) {
+                await videoQueue.add('process-video', {
+                  videoId: video.id,
+                  storagePath: originalPath,
+                  projectId: project.id,
+                  timelineOnly: true,
+                })
+              } else {
+                // Both missing with HLS intact — one pass, and don't touch the good bundle.
+                await videoQueue.add('process-video', {
+                  videoId: video.id,
+                  storagePath: originalPath,
+                  projectId: project.id,
+                  regenerateThumbnail: true,
+                  regenerateTimelinePreviews: true,
+                  regenerateHls: false,
+                })
+              }
+              queuedVideoPreviewJobs += 1
+            }
           }
 
           if (queuedVideoPreviewJobs > 0) {
@@ -1427,9 +1465,9 @@ export async function PATCH(
         console.error('[PROJECT UPDATE] Error re-queuing previews after reopen:', err)
       }
 
-      // Re-generate album ZIPs if they were auto-deleted
+      // Re-queue the album work a close cancelled: photo thumbnails, social derivatives and
+      // ZIPs (see cancelProjectJobs — closing removes all three queues' pending jobs).
       try {
-        // Re-queue album ZIPs that have no StoredFile ZIP record
         const albums = await prisma.album.findMany({
           where: {
             projectId: project.id,
@@ -1438,27 +1476,87 @@ export async function PATCH(
           select: { id: true, socialCopiesEnabled: true },
         })
         if (albums.length > 0) {
-          // Check which albums already have ZIP StoredFile records
           const albumIds = albums.map(a => a.id)
-          const existingZips = await getStoredFileRecords('ALBUM', albumIds, { fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'], select: { entityId: true } })
-          const hasZip = new Set(existingZips.map(z => z.entityId))
-          const albumsToRequeue = albums.filter(a => !hasZip.has(a.id))
 
-          if (albumsToRequeue.length > 0) {
-            const q = getAlbumPhotoZipQueue()
-            for (const album of albumsToRequeue) {
-              const variants: AlbumZipVariant[] = album.socialCopiesEnabled ? ['full', 'social'] : ['full']
-              for (const variant of variants) {
-                const jobId = getAlbumZipJobId({ albumId: album.id, variant })
-                await q.remove(jobId).catch(() => {})
-                await q.add('generate-album-zip', { albumId: album.id, variant }, { jobId })
-              }
+          // ZIPs: check each variant separately — an album can have its full ZIP and be
+          // missing the social one, which a combined "has any ZIP" test would skip.
+          const existingZips = await getStoredFileRecords('ALBUM', albumIds, { fileRoles: ['ZIP_FULL', 'ZIP_SOCIAL'], select: { entityId: true, fileRole: true } })
+          const zipRolesByAlbum = new Map<string, Set<string>>()
+          for (const z of existingZips) {
+            let set = zipRolesByAlbum.get(z.entityId)
+            if (!set) { set = new Set(); zipRolesByAlbum.set(z.entityId, set) }
+            set.add(z.fileRole)
+          }
+
+          const q = getAlbumPhotoZipQueue()
+          let queuedZipJobs = 0
+          for (const album of albums) {
+            const roles = zipRolesByAlbum.get(album.id) ?? new Set<string>()
+            const variants: AlbumZipVariant[] = []
+            if (!roles.has('ZIP_FULL')) variants.push('full')
+            if (album.socialCopiesEnabled && !roles.has('ZIP_SOCIAL')) variants.push('social')
+            for (const variant of variants) {
+              const jobId = getAlbumZipJobId({ albumId: album.id, variant })
+              await q.remove(jobId).catch(() => {})
+              await q.add('generate-album-zip', { albumId: album.id, variant }, { jobId })
+              queuedZipJobs += 1
             }
-            console.log(`[PROJECT UPDATE] Re-queued ${albumsToRequeue.length} album(s) for ZIP regeneration after reopen`)
+          }
+          if (queuedZipJobs > 0) {
+            console.log(`[PROJECT UPDATE] Re-queued ${queuedZipJobs} album ZIP job(s) after reopen`)
+          }
+
+          // Social derivatives double as the share-page photo previews and are generated for
+          // every photo, so a cancelled one leaves the album stuck in PROCESSING with photos
+          // that never render. Nothing else re-queues them.
+          const photosNeedingSocial = await prisma.albumPhoto.findMany({
+            where: {
+              albumId: { in: albumIds },
+              status: 'READY',
+              NOT: { socialStatus: 'READY' },
+            },
+            select: { id: true },
+          })
+          if (photosNeedingSocial.length > 0) {
+            const socialQueue = getAlbumPhotoSocialQueue()
+            for (const photo of photosNeedingSocial) {
+              await prisma.albumPhoto.update({
+                where: { id: photo.id },
+                data: { socialStatus: 'PENDING', socialError: null },
+              }).catch(() => {})
+              // Remove first: the jobId is deterministic, and BullMQ silently ignores an add
+              // whose id matches a retained completed job — leaving the photo PENDING forever.
+              await socialQueue.remove(`album-photo-social-${photo.id}`).catch(() => {})
+              await socialQueue.add(
+                'process-album-photo-social',
+                { photoId: photo.id },
+                { jobId: `album-photo-social-${photo.id}` },
+              ).catch(() => {})
+            }
+            console.log(`[PROJECT UPDATE] Re-queued ${photosNeedingSocial.length} album photo social derivative(s) after reopen`)
+          }
+
+          // Photo thumbnails: the share page only backfills these when the album's FIRST photo
+          // is missing one, so a cancellation part-way through a batch is otherwise permanent.
+          // The job is per-album, idempotent, and skips photos that already have a thumbnail.
+          const albumsMissingThumbnails = await prisma.albumPhoto.findMany({
+            where: {
+              albumId: { in: albumIds },
+              status: 'READY',
+              NOT: { thumbnailStatus: 'READY' },
+            },
+            select: { albumId: true },
+            distinct: ['albumId'],
+          })
+          if (albumsMissingThumbnails.length > 0) {
+            await Promise.allSettled(
+              albumsMissingThumbnails.map(p => enqueueAlbumThumbnailJob({ albumId: p.albumId }))
+            )
+            console.log(`[PROJECT UPDATE] Re-queued thumbnails for ${albumsMissingThumbnails.length} album(s) after reopen`)
           }
         }
       } catch (err) {
-        console.error('[PROJECT UPDATE] Error re-queuing album ZIPs after reopen:', err)
+        console.error('[PROJECT UPDATE] Error re-queuing album work after reopen:', err)
       }
     }
 

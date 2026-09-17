@@ -172,6 +172,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           },
         })
 
+        // Remove first — an add whose deterministic jobId matches a retained completed job
+        // is silently ignored, which would leave the photo stuck PENDING with no job.
+        await q.remove(`album-photo-social-${photo.id}`).catch(() => {})
         await q.add(
           'process-album-photo-social',
           { photoId: photo.id },
