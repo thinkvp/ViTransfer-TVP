@@ -1310,8 +1310,16 @@ export async function PATCH(
 
             if (needsHls) {
               // Rebuild the bundle directly from the retained original so playback is restored
-              // immediately rather than waiting for the reconcile sweep. Same deterministic
-              // jobId as the sweep, so the two dedupe. The video stays READY throughout.
+              // immediately rather than waiting for the reconcile sweep. Shares the sweep's
+              // deterministic jobId so the two dedupe. The video stays READY throughout.
+              //
+              // Remove first. The sweep relies on that id being retained to throttle itself to
+              // one attempt per retention window (1 h completed, 24 h failed), but a reopen is
+              // a deliberate "fix this now" — inheriting the throttle means an add that BullMQ
+              // silently ignores, leaving the video unplayable until the id ages out. A live
+              // (active) job keeps its lock, so remove and add both no-op and the running
+              // rebuild is left alone, which is what we want.
+              await videoQueue.remove(`hls-reconcile-${video.id}`).catch(() => {})
               await videoQueue.add(
                 'process-video',
                 { videoId: video.id, projectId: project.id, storagePath: '', hlsOnly: true },

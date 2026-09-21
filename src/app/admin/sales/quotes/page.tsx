@@ -95,7 +95,8 @@ export default function SalesQuotesPage() {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
+    // Only blank the table on first load; a focus refetch swaps data in place.
+    if (tick === 0) setLoading(true)
 
     ;(async () => {
       try {

@@ -5,6 +5,14 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.8] - 2026-09-22
+
+### Fixed
+
+- **Sales pages no longer flash when you switch back to the window** — the Sales dashboard, Quotes, Invoices and Payments refetch when the window regains focus (so ages and overdue labels stay honest), but they also blanked the table to a "Loading…" line while that ran. The refreshed data now swaps in place, and the loading state only shows on the first load.
+
+- **Reopening a project rebuilds a missing video bundle even if the sweep just tried** — the reopen rebuild shares a job id with the hourly reconcile sweep so the two never double up, but the queue ignores a new job while that id is still on record (an hour after a success, a day after a failure), so a reopen could quietly do nothing and leave the video unplayable. The reopen now clears the old record first; a rebuild already running is left alone.
+
 ## [2.6.7] - 2026-09-17
 
 ### Changed

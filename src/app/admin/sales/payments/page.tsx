@@ -85,7 +85,8 @@ export default function SalesPaymentsPage() {
     let cancelled = false
     async function run() {
       try {
-        setLoading(true)
+        // Only blank the table on first load; a focus refetch swaps data in place.
+        if (tick === 0) setLoading(true)
         const [settings, r] = await Promise.all([
           fetchSalesSettings(),
           fetchSalesRollup({ invoicesLimit: 2000, quotesLimit: 1, paymentsLimit: 5000, stripePaymentsLimit: 500, includeQuotes: false }),
