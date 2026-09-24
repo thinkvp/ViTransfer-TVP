@@ -5,6 +5,17 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.9] - 2026-09-23
+
+### Changed
+
+- **Switching back to the generated thumbnail is now near-instant and no longer takes the video offline** — removing or deleting a video's custom thumbnail used to download the entire original from cloud storage to grab one frame, and hid the video from the share page until that finished. The worker now reads just the frame it needs straight from storage (a few MB rather than the whole file), and the video stays playable throughout.
+
+### Fixed
+
+- **Marking a video Reviewed from the admin project page now locks its feedback** — when a client clicks **Request Next Version**, the comments on that version are locked so share sessions can no longer edit or delete them, but the admin **Mark as Reviewed** button set the same Reviewed state without the lock. It now locks the version's client comments too; comments added afterwards stay editable, and clearing Reviewed doesn't unlock them (the same as un-approving). Versions already marked Reviewed by hand have their earlier feedback locked on upgrade. **Schema migration:** `20260923000000_lock_comments_on_manual_review` (data only).
+- **Tall pop-up windows now scroll instead of running off the screen** — dialogs such as **Add Recipient** and **Create Client** on the New Project page grew past the bottom of short or phone-sized screens, leaving their buttons out of reach. Every dialog is now capped to the screen height and scrolls inside, including the Unapprove, rename-warning and share-page name prompts.
+
 ## [2.6.8] - 2026-09-22
 
 ### Fixed

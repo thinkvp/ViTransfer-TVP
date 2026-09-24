@@ -13,7 +13,7 @@ import { isVisibleProjectStatusForUser, requireActionAccess, requireAnyActionAcc
 import { isS3Mode } from '@/lib/s3-storage'
 import { getFolderRenameQueue } from '@/lib/queue'
 import { publishProjectEvent } from '@/lib/project-events'
-import { lockCommentsForApprovedVideo } from '@/lib/comment-locks'
+import { lockCommentsForApprovedVideo, lockCommentsForReviewedVersion } from '@/lib/comment-locks'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
 import {
   allocateUniqueStorageName,
@@ -362,10 +362,13 @@ export async function PATCH(
       }
     }
 
-    // Manual "Reviewed" (next version requested) toggle. Unlike the client flow this
-    // does not lock/unlock comments — locking is the client request's semantic.
+    // Manual "Reviewed" (next version requested) toggle. Marking locks the version's
+    // client feedback exactly like the client's Request Next Version (applied after the
+    // update below); clearing does not unlock — locks are permanent, same as approval.
+    const revisionRequestedAt = revisionRequested ? new Date() : null
+    const lockForReview = revisionRequested === true && !video.revisionRequestedAt
     if (revisionRequested !== undefined) {
-      updateData.revisionRequestedAt = revisionRequested ? new Date() : null
+      updateData.revisionRequestedAt = revisionRequestedAt
       updateData.revisionRequestedById = revisionRequested ? admin.id : null
       updateData.revisionRequestedByRecipientId = null
       updateData.revisionRequestedByName = revisionRequested ? (admin.name || admin.email) : null
@@ -650,6 +653,13 @@ export async function PATCH(
       // Only client-initiated approvals (via /approve route) send emails immediately
       // This prevents spam when admins are managing multiple videos
       console.log('[VIDEO-APPROVAL] Admin approval - emails NOT sent (by design)')
+    }
+
+    // Only on the not-Reviewed → Reviewed transition: re-marking an already-Reviewed
+    // version must not sweep up comments the client added after the original request.
+    if (lockForReview && revisionRequestedAt) {
+      await lockCommentsForReviewedVersion({ videoId: id, at: revisionRequestedAt })
+      await publishProjectEvent(video.projectId, 'comment')
     }
 
     // Notify open share pages / admin views so the change (rename, notes, approval

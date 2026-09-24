@@ -261,7 +261,8 @@ export async function DELETE(
     // If this asset was the live custom thumbnail, drop the THUMBNAIL pointer and
     // regenerate a system thumbnail from the video original (mirrors the 'remove'
     // action in set-thumbnail). Done BEFORE the orphan check below so the asset's
-    // original file is no longer referenced by THUMBNAIL and can be deleted.
+    // original file is no longer referenced by THUMBNAIL and can be deleted. The video
+    // stays READY — the worker grabs the one frame without downloading the original.
     if (isCurrentThumbnail) {
       await deleteStoredFilesByCriteria({
         entityType: 'VIDEO', entityIds: [videoId], fileRoles: ['THUMBNAIL'],
@@ -269,10 +270,6 @@ export async function DELETE(
 
       const videoOriginalPath = await getStoredFilePath('VIDEO', videoId, 'ORIGINAL')
       if (videoOriginalPath) {
-        await prisma.video.update({
-          where: { id: videoId },
-          data: { status: 'QUEUED', processingProgress: 0, processingPhase: null, processingError: null },
-        })
         await getVideoQueue().add('process-video', {
           videoId,
           storagePath: videoOriginalPath,

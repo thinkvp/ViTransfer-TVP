@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db'
 import { getFilePath, moveUploadedFile, deleteDirectory, getStoredFileSize, downloadFile, listStoredFileSizes } from '../lib/storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
-import { isS3Mode, s3FileExists } from '../lib/s3-storage'
+import { isS3Mode, s3FileExists, s3GetPresignedStreamUrl } from '../lib/s3-storage'
 import { transcodeVideo, generateThumbnail, getVideoMetadata, VideoMetadata, generateTimelineSprite, FFmpegCancellationError } from '../lib/ffmpeg'
 import { Prisma, type VideoStatus, type EntityType } from '@prisma/client'
 import {
@@ -194,6 +194,41 @@ async function resolveExistingVideoOriginalPath(videoId: string, storagePath: st
   }
 
   return trimmedStoragePath
+}
+
+/**
+ * An FFmpeg input for a video's original that does NOT copy it locally. In S3 mode this is a
+ * presigned URL: FFmpeg range-reads the container index and the region around its seek point
+ * (a few MB) instead of the whole original. Local mode just reads the file in place.
+ *
+ * Only for single-frame work on an already-validated original — anything that decodes the
+ * whole stream should use downloadAndValidateVideo.
+ */
+export async function resolveOriginalStreamInput(videoId: string, storagePath: string): Promise<string> {
+  const resolved = await resolveExistingVideoOriginalPath(videoId, storagePath)
+  if (isS3Mode()) return s3GetPresignedStreamUrl(resolved, 900)
+  return getFilePath(resolved)
+}
+
+/**
+ * Finalize a thumbnail-only pass: register the generated thumbnail and settle the video back
+ * to READY. Unlike finalizeVideoWithoutPreview it leaves the probed metadata untouched — the
+ * streamed path never re-probes the original.
+ */
+export async function finalizeThumbnailOnly(videoId: string, thumbnailPath: string | null): Promise<void> {
+  if (thumbnailPath !== null && !(await videoHasCustomThumbnail(videoId))) {
+    const thumbSize = await getStoredFileSize(thumbnailPath).catch(() => null)
+    await registerStoredFile({
+      entityType: 'VIDEO', entityId: videoId, fileRole: 'THUMBNAIL',
+      storagePath: thumbnailPath, status: 'READY', fileSize: thumbSize,
+    })
+  }
+
+  await updateVideoRecord(
+    videoId,
+    { status: 'READY', processingProgress: 100, processingPhase: null, processingError: null },
+    { context: 'finalizing thumbnail-only pass' }
+  )
 }
 
 export interface OutputDimensions {

@@ -33,6 +33,26 @@ export async function lockCommentsForApprovedVideo(params: {
 }
 
 /**
+ * Freeze the client-visible feedback on a single version that has just been marked
+ * Reviewed (next version requested). Scoped to that version only — unlike approval, the
+ * video isn't signed off, so earlier versions keep whatever lock state they already had.
+ * Replies carry the same videoId, so they lock too; comments added afterwards stay open.
+ */
+export async function lockCommentsForReviewedVersion(params: {
+  videoId: string
+  at?: Date
+}): Promise<number> {
+  const { videoId, at = new Date() } = params
+
+  const result = await prisma.comment.updateMany({
+    where: { videoId, isInternal: false, lockedAt: null },
+    data: { lockedAt: at },
+  })
+
+  return result.count
+}
+
+/**
  * Freeze the client-visible feedback across a whole project that has just been signed off.
  *
  * Used when a project's status becomes APPROVED. The auto-approve path already locks each

@@ -4358,7 +4358,7 @@ function ShareNameCaptureModal({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
-      <Card className="bg-card border-border w-full max-w-md">
+      <Card className="bg-card border-border w-full max-w-md max-h-full overflow-y-auto">
         <CardHeader>
           <CardTitle>Welcome — who are you?</CardTitle>
         </CardHeader>

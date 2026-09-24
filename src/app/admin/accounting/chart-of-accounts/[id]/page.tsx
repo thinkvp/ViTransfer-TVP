@@ -623,7 +623,7 @@ export default function AccountLedgerPage() {
       />
 
       <Dialog open={linkedInvoiceTransactions.length > 0} onOpenChange={open => { if (!open) closeLinkedInvoiceTransactions() }}>
-        <DialogContent className="w-[min(96vw,56rem)] max-w-3xl overflow-hidden">
+        <DialogContent className="w-[min(96vw,56rem)] max-w-3xl overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Linked Bank Transactions</DialogTitle>
           </DialogHeader>

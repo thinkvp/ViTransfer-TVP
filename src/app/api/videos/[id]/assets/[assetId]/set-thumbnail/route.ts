@@ -90,13 +90,10 @@ export async function POST(
 
       // Regenerate the system thumbnail from the original video. With the custom
       // THUMBNAIL row gone, the worker's finalize step will register the freshly
-      // generated thumbnail under the THUMBNAIL role.
+      // generated thumbnail under the THUMBNAIL role. The video stays READY — the worker
+      // grabs the one frame straight from storage without downloading the original.
       const originalPath = await getStoredFilePath('VIDEO', videoId, 'ORIGINAL')
       if (originalPath) {
-        await prisma.video.update({
-          where: { id: videoId },
-          data: { status: 'QUEUED', processingProgress: 0, processingPhase: null, processingError: null },
-        })
         await getVideoQueue().add('process-video', {
           videoId,
           storagePath: originalPath,

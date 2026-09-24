@@ -16,6 +16,8 @@ import {
   processTimelinePreviews,
   packageVideoHlsFromOriginal,
   finalizeVideoWithoutPreview,
+  finalizeThumbnailOnly,
+  resolveOriginalStreamInput,
   updateVideoStatus,
   updateVideoRecord,
   cleanupTempFiles,
@@ -26,6 +28,7 @@ import { PROCESSING_PHASES } from '@/lib/video-processing-phase'
 import { recalculateAndStoreProjectTotalBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectDiskBytes } from '@/lib/project-total-bytes'
 import { incrementActiveVideoJobs, decrementActiveVideoJobs, getActiveVideoJobs, getCpuAllocation, getDynamicThreadsPerJob } from '@/lib/cpu-config'
 import { isS3Mode } from '@/lib/s3-storage'
+import { prisma } from '@/lib/db'
 import { HLS_PACKAGE_VERSION } from '@/lib/video-stream-url'
 
 /**
@@ -439,6 +442,19 @@ async function processThumbnailOnly(
   storagePath: string,
   projectId: string,
 ) {
+  // A video whose metadata is already on the row was validated and probed on its first pass,
+  // so only one frame is needed: grab it straight from storage without downloading the
+  // original, and without leaving READY (the video stays playable throughout). A fresh upload
+  // routed here (closed project with auto-delete previews) has no metadata yet and takes the
+  // full download + validate path below.
+  const existing = await prisma.video.findUnique({
+    where: { id: videoId },
+    select: { duration: true, width: true, height: true },
+  })
+  if (existing && existing.duration > 0 && existing.width > 0 && existing.height > 0) {
+    if (await processThumbnailFromStoredOriginal(videoId, storagePath, projectId, existing.duration)) return
+  }
+
   console.log(`[WORKER] Thumbnail-only generation for video ${videoId}`)
   const tempFiles: TempFiles = {}
   const processingStart = Date.now()
@@ -489,6 +505,52 @@ async function processThumbnailOnly(
 
     await handleProcessingError(videoId, error)
     throw error
+  } finally {
+    decrementActiveVideoJobs()
+    await cleanupTempFiles(tempFiles)
+  }
+}
+
+/**
+ * Streamed thumbnail-only pass for an already-processed video. Returns false when the frame
+ * couldn't be grabbed this way (e.g. a container FFmpeg can't seek over HTTP), so the caller
+ * falls back to the full download path instead of failing the video.
+ */
+async function processThumbnailFromStoredOriginal(
+  videoId: string,
+  storagePath: string,
+  projectId: string,
+  duration: number,
+): Promise<boolean> {
+  console.log(`[WORKER] Thumbnail-only (streamed) generation for video ${videoId}`)
+  const tempFiles: TempFiles = {}
+  const processingStart = Date.now()
+
+  incrementActiveVideoJobs()
+  try {
+    const input = await resolveOriginalStreamInput(videoId, storagePath)
+    const thumbnailPath = await processThumbnail(videoId, projectId, input, duration, tempFiles)
+    await finalizeThumbnailOnly(videoId, thumbnailPath)
+    await Promise.all([
+      recalculateAndStoreProjectTotalBytes(projectId),
+      recalculateAndStoreProjectPreviewBytes(projectId),
+      recalculateAndStoreProjectDiskBytes(projectId),
+    ])
+
+    const totalTime = Date.now() - processingStart
+    console.log(`[WORKER] Thumbnail-only (streamed) completed for ${videoId} in ${(totalTime / 1000).toFixed(2)}s`)
+    return true
+  } catch (error) {
+    if (isVideoRecordMissingError(error)) {
+      console.warn(`[WORKER] Video ${videoId} was deleted during thumbnail-only processing; aborting job cleanup updates.`)
+      return true
+    }
+    // FFmpeg's error carries its full stderr, which names the presigned input URL — redact it.
+    const reason = (error instanceof Error ? error.message : String(error))
+      .replace(/https?:\/\/\S+/g, '<url>')
+      .slice(-500)
+    console.warn(`[WORKER] Streamed thumbnail failed for ${videoId}; falling back to full download: ${reason}`)
+    return false
   } finally {
     decrementActiveVideoJobs()
     await cleanupTempFiles(tempFiles)
