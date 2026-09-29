@@ -13,9 +13,10 @@ const matchBasSchema = z.object({
 })
 
 // POST /api/admin/accounting/transactions/[id]/match-bas
-// Matches a bank debit to a lodged BAS period that has payment details recorded.
-// Creates split lines from the saved GST and PAYG components and marks the transaction
-// as MATCHED with matchType=BAS_PAYMENT.
+// Matches a bank debit (payment) or credit (refund) to a lodged BAS period that has
+// payment details recorded. The period's amounts are signed (negative = refund), so the
+// bank amount must be their exact negation. Creates split lines from the saved GST and
+// PAYG components and marks the transaction as MATCHED with matchType=BAS_PAYMENT.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   })
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   if (txn.status === 'MATCHED') return NextResponse.json({ error: 'Transaction is already matched' }, { status: 409 })
-  if (txn.amountCents >= 0) return NextResponse.json({ error: 'BAS Payment match is only valid for debits (negative amounts)' }, { status: 400 })
+  if (txn.amountCents === 0) return NextResponse.json({ error: 'BAS Payment match is not valid for a zero-amount transaction' }, { status: 400 })
 
   const body = await request.json().catch(() => null)
   const parsed = matchBasSchema.safeParse(body)
@@ -54,29 +55,34 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const gstCents = period.paymentGstCents
   const paygCents = period.paymentPaygCents ?? 0
   const totalCents = (gstCents ?? 0) + paygCents
+  const isRefund = totalCents < 0
 
-  if (!gstCents || !period.paymentGstAccountId) {
+  if (gstCents == null || !period.paymentGstAccountId) {
     return NextResponse.json({ error: 'BAS period payment details are incomplete — GST amount or account missing' }, { status: 409 })
   }
 
-  // The bank debit amount must equal the total payment (sign-insensitive comparison)
-  if (Math.abs(txn.amountCents) !== totalCents) {
+  // A payment (+) is a bank debit (−); a refund (−) is a bank credit (+)
+  if (txn.amountCents !== -totalCents) {
     return NextResponse.json({
-      error: `Transaction amount ${Math.abs(txn.amountCents)} cents does not match BAS payment total ${totalCents} cents`,
+      error: isRefund
+        ? `This BAS period expects a refund deposit of ${-totalCents} cents; the transaction is ${txn.amountCents} cents`
+        : `This BAS period expects a payment debit of ${totalCents} cents; the transaction is ${txn.amountCents} cents`,
     }, { status: 409 })
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    // Create split lines — amounts are negative (debit/money out)
-    await tx.splitLine.create({
-      data: {
-        bankTransactionId: id,
-        accountId: period.paymentGstAccountId!,
-        description: `BAS — GST net — ${period.label || `Q${period.quarter} ${period.financialYear}`}`,
-        amountCents: -gstCents,
-        taxCode: 'BAS_EXCLUDED',
-      },
-    })
+    // Split line amounts follow the bank sign: negative for money out, positive for a refund in
+    if (gstCents !== 0) {
+      await tx.splitLine.create({
+        data: {
+          bankTransactionId: id,
+          accountId: period.paymentGstAccountId!,
+          description: `BAS — GST net${gstCents < 0 ? ' refund' : ''} — ${period.label || `Q${period.quarter} ${period.financialYear}`}`,
+          amountCents: -gstCents,
+          taxCode: 'BAS_EXCLUDED',
+        },
+      })
+    }
 
     if (paygCents > 0 && period.paymentPaygAccountId) {
       await tx.splitLine.create({
@@ -96,7 +102,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       data: {
         status: 'MATCHED',
         matchType: 'BAS_PAYMENT',
-        transactionType: 'Expense',
+        transactionType: isRefund ? 'Deposit' : 'Expense',
         basPeriodId: period.id,
       },
     })

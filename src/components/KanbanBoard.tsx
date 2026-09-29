@@ -322,6 +322,7 @@ export default function KanbanBoard({
     const res = await apiFetch(`/api/kanban/cards/${id}`, { method: 'DELETE' })
     if (res.ok) {
       setDeleteCard(null)
+      setEditCard((current) => (current?.id === id ? null : current))
       if (showArchived) {
         setArchivedViewKey((current) => current + 1)
       }
@@ -600,6 +601,7 @@ export default function KanbanBoard({
           onClose={() => setEditCard(null)}
           isAdmin={isAdmin}
           currentUserId={user?.id}
+          onDelete={isAdmin ? () => setDeleteCard(editCard) : undefined}
         />
       )}
 
@@ -909,7 +911,7 @@ function KanbanCardView({
               data-card-menu
               variant="ghost"
               size="icon"
-              className="w-6 h-6 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+              className="w-6 h-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 pointer-coarse:opacity-100 pointer-coarse:w-8 pointer-coarse:h-8 transition-opacity shrink-0"
               onClick={(e) => e.stopPropagation()}
             >
               <MoreHorizontal className="w-3 h-3" />
@@ -1029,6 +1031,7 @@ export function CardDialog({
   onClose,
   isAdmin = true,
   currentUserId,
+  onDelete,
 }: {
   initial?: KanbanCardData
   columnId: string
@@ -1039,6 +1042,8 @@ export function CardDialog({
   onClose: () => void
   isAdmin?: boolean
   currentUserId?: string
+  /** When provided (and editing an existing task), shows a Delete button. The caller confirms and deletes. */
+  onDelete?: () => void
 }) {
   const router = useRouter()
   const { user: currentUser } = useAuth()
@@ -1462,6 +1467,17 @@ export function CardDialog({
           </div>
         </div>
         <DialogFooter className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+          {initial?.id && onDelete && (
+            <Button
+              className="col-span-2 w-full sm:w-auto sm:mr-auto text-destructive hover:text-destructive"
+              variant="outline"
+              onClick={onDelete}
+              disabled={saving}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete
+            </Button>
+          )}
           <Button className="w-full sm:w-auto" variant="outline" onClick={guardedClose}>
             Cancel
           </Button>

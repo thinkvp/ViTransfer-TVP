@@ -5,6 +5,23 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-09-29
+
+### Added
+
+- **The BAS list now shows what each lodged period was paid or refunded** — a new **Paid / Refunded** column shows the settled amount and date, or the amount still owed either way (in amber) if nothing has been recorded yet. It's sortable and included in the CSV and PDF exports.
+- **BAS refunds can now be recorded and matched to the bank deposit** — the payment form only accepted money paid to the ATO, so a refund quarter could never be marked as received. Refund periods now offer **Record Refund**, and the ATO deposit shows a **BAS Refund** match button in Bank Transactions, which clears the GST receivable on the balance sheet.
+
+### Changed
+
+- **Auto-generated captions now end at full stops and break at natural points** — a caption no longer runs from the end of one sentence into the start of the next ("I am really blown away. It's going to be really"): each sentence starts a new caption, and short whole sentences can still share one. Long sentences are split into evenly sized captions at commas, pauses or before words like "and"/"which", never after words that lean on the next one ("the", "of", "I", "it's"), and two-line captions wrap by the same rules. Timing still comes from each word's own timestamp. Applies to newly generated or regenerated captions; expect somewhat more, shorter captions than before.
+- **Project descriptions can now be up to 10,000 characters** — the limit was 5,000 when creating a project but only 2,000 when saving from Project Settings, so a longer description made the settings page refuse to save until it was trimmed. Both now allow 10,000, and the description box stops at the limit and shows a character count as you get close.
+
+### Fixed
+
+- **Hyphenated words in auto-generated captions no longer get a stray space** — Whisper splits words like "in-home" and "once-in-a-generation" into pieces, which captions showed as "in- home" and "once- in- a- generation" (and "40%" once came out as "40% %"). The pieces are now joined back into one word, which also stops a caption break landing inside it. Existing captions are fixed by regenerating them.
+- **Task Board cards can be edited, archived and deleted on phones and tablets** — the card's **⋯** menu only appeared on mouse hover, so on touch screens there was no way to reach Delete. It's now always visible on touch devices, with a larger tap target.
+
 ## [2.6.9] - 2026-09-23
 
 ### Changed

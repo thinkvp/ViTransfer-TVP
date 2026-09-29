@@ -88,6 +88,8 @@ export default function BasDetailPage() {
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [paymentDate, setPaymentDate] = useState('')
   const [gstAmountStr, setGstAmountStr] = useState('')
+  // Entered GST amount is always positive; the direction sets its sign (refund = negative)
+  const [gstDirection, setGstDirection] = useState<'payable' | 'refund'>('payable')
   const [paygAmountStr, setPaygAmountStr] = useState('')
   const [gstAccountId, setGstAccountId] = useState('')
   const [gstAccountSearch, setGstAccountSearch] = useState('')
@@ -328,10 +330,12 @@ export default function BasDetailPage() {
   }
 
   async function handleRecordPayment() {
-    const gstCents = Math.round(parseFloat(gstAmountStr) * 100)
+    const enteredGstCents = Math.round(parseFloat(gstAmountStr) * 100)
     const paygCents = paygAmountStr ? Math.round(parseFloat(paygAmountStr) * 100) : 0
-    if (!paymentDate) { setPaymentError('Payment date is required'); return }
-    if (!gstCents || gstCents <= 0) { setPaymentError('Enter a valid GST amount'); return }
+    if (!paymentDate) { setPaymentError('Date is required'); return }
+    if (!Number.isFinite(enteredGstCents) || enteredGstCents < 0) { setPaymentError('Enter a valid GST amount'); return }
+    const gstCents = gstDirection === 'refund' ? -enteredGstCents : enteredGstCents
+    if (gstCents + paygCents === 0) { setPaymentError('The total cannot be zero'); return }
     if (!gstAccountId) { setPaymentError('Select a GST account'); return }
     if (paygCents > 0 && !paygAccountId) { setPaymentError('Select a PAYG account'); return }
     setRecordingPayment(true)
@@ -368,6 +372,14 @@ export default function BasDetailPage() {
   if (!period) return <div className="py-10 text-center text-muted-foreground">Period not found.</div>
 
   const isLodged = period.status === 'LODGED'
+  const isRefundRecorded = (period.paymentAmountCents ?? 0) < 0
+  // Label 9 from the lodge-time snapshot: negative means the ATO owes us
+  const lodgedIsRefund = !!period.calculationJson && (
+    truncateBasCents(period.calculationJson.label1ACents)
+    + truncateBasCents(period.paygWithholdingCents ?? 0)
+    + truncateBasCents(period.paygInstalmentCents ?? 0)
+    - truncateBasCents(period.calculationJson.label1BCents)
+  ) < 0
 
   return (
     <>
@@ -502,21 +514,21 @@ export default function BasDetailPage() {
       {isLodged && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">BAS Payment</CardTitle>
+            <CardTitle className="text-sm">{isRefundRecorded || (lodgedIsRefund && !period.paymentDate) ? 'BAS Refund' : 'BAS Payment'}</CardTitle>
           </CardHeader>
           <CardContent className="text-sm">
             {period.paymentDate ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1">
-                  <div><p className="text-xs text-muted-foreground">Payment Date</p><p>{period.paymentDate}</p></div>
-                  <div><p className="text-xs text-muted-foreground">Total</p><p className="font-medium">{period.paymentAmountCents != null ? fmtAud(period.paymentAmountCents) : '—'}</p></div>
+                  <div><p className="text-xs text-muted-foreground">{isRefundRecorded ? 'Refund Date' : 'Payment Date'}</p><p>{period.paymentDate}</p></div>
+                  <div><p className="text-xs text-muted-foreground">{isRefundRecorded ? 'Refund received' : 'Total'}</p><p className={cn('font-medium', isRefundRecorded && 'text-green-400')}>{period.paymentAmountCents != null ? fmtAud(Math.abs(period.paymentAmountCents)) : '—'}</p></div>
                   {period.paymentNotes && <div className="col-span-2 sm:col-span-1"><p className="text-xs text-muted-foreground">Notes</p><p>{period.paymentNotes}</p></div>}
                 </div>
                 {/* Component breakdown */}
                 <div className="rounded border border-border divide-y divide-border text-xs">
                   <div className="flex justify-between px-3 py-1.5">
-                    <span className="text-muted-foreground">GST net (1A − 1B)</span>
-                    <span className="tabular-nums font-medium">{period.paymentGstCents != null ? fmtAud(period.paymentGstCents) : '—'}</span>
+                    <span className="text-muted-foreground">GST net (1A − 1B){(period.paymentGstCents ?? 0) < 0 ? ' — refund' : ''}</span>
+                    <span className="tabular-nums font-medium">{period.paymentGstCents != null ? fmtAud(Math.abs(period.paymentGstCents)) : '—'}</span>
                   </div>
                   {(period.paymentPaygCents ?? 0) > 0 && (
                     <div className="flex justify-between px-3 py-1.5">
@@ -533,20 +545,24 @@ export default function BasDetailPage() {
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/10 text-yellow-400">
-                      Awaiting bank match — match the ATO debit of {fmtAud(period.paymentAmountCents ?? 0)}{' '}in Bank Transactions as &ldquo;BAS Payment&rdquo;
+                      {isRefundRecorded
+                        ? <>Awaiting bank match — match the ATO deposit of {fmtAud(Math.abs(period.paymentAmountCents ?? 0))}{' '}in Bank Transactions as &ldquo;BAS Refund&rdquo;</>
+                        : <>Awaiting bank match — match the ATO debit of {fmtAud(period.paymentAmountCents ?? 0)}{' '}in Bank Transactions as &ldquo;BAS Payment&rdquo;</>}
                     </span>
                   )}
                 </div>
                 <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setPendingDeletePayment(true)}>
-                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />Remove Payment
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />{isRefundRecorded ? 'Remove Refund' : 'Remove Payment'}
                 </Button>
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="text-muted-foreground text-sm">No payment recorded yet.</p>
+                <p className="text-muted-foreground text-sm">{lodgedIsRefund ? 'No refund recorded yet.' : 'No payment recorded yet.'}</p>
                 <Button size="sm" variant="outline" onClick={() => {
+                  const gstNet = calculation ? truncateBasCents(calculation.label1ACents) - truncateBasCents(calculation.label1BCents) : null
                   setPaymentDate(new Date().toISOString().slice(0, 10))
-                  setGstAmountStr(calculation ? (Math.max(0, truncateBasCents(calculation.label1ACents) - truncateBasCents(calculation.label1BCents)) / 100).toFixed(2) : '')
+                  setGstDirection(gstNet != null && gstNet < 0 ? 'refund' : 'payable')
+                  setGstAmountStr(gstNet != null ? (Math.abs(gstNet) / 100).toFixed(2) : '')
                   setPaygAmountStr((period.paygInstalmentCents ?? 0) > 0 ? ((period.paygInstalmentCents ?? 0) / 100).toFixed(2) : '')
                   setGstAccountId(defaultGstAccountId)
                   setGstAccountSearch('')
@@ -556,7 +572,7 @@ export default function BasDetailPage() {
                   setPaymentError('')
                   setPaymentOpen(true)
                 }}>
-                  <CreditCard className="w-4 h-4 mr-1.5" />Record Payment
+                  <CreditCard className="w-4 h-4 mr-1.5" />{lodgedIsRefund ? 'Record Refund' : 'Record Payment'}
                 </Button>
               </div>
             )}
@@ -882,10 +898,10 @@ export default function BasDetailPage() {
       {/* Record Payment Dialog */}
       <Dialog open={paymentOpen} onOpenChange={open => { if (!open && !recordingPayment) setPaymentOpen(false) }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Record BAS Payment</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{lodgedIsRefund ? 'Record BAS Refund' : 'Record BAS Payment'}</DialogTitle></DialogHeader>
           <div className="space-y-4 text-sm">
             <div className="space-y-1">
-              <Label>Payment Date *</Label>
+              <Label>{lodgedIsRefund ? 'Date Received *' : 'Payment Date *'}</Label>
               <Input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} />
             </div>
 
@@ -895,7 +911,17 @@ export default function BasDetailPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>Amount ($) *</Label>
-                  <Input type="number" step="0.01" placeholder="0.00" value={gstAmountStr} onChange={e => setGstAmountStr(e.target.value)} />
+                  <Input type="number" step="0.01" min="0" placeholder="0.00" value={gstAmountStr} onChange={e => setGstAmountStr(e.target.value)} />
+                </div>
+                <div className="space-y-1">
+                  <Label>Direction</Label>
+                  <div className="flex rounded-md border border-border overflow-hidden h-9">
+                    {(['payable', 'refund'] as const).map(dir => (
+                      <button key={dir} type="button" onClick={() => setGstDirection(dir)}
+                        className={cn('flex-1 text-xs transition-colors', gstDirection === dir ? 'bg-primary/15 text-foreground font-medium' : 'text-muted-foreground hover:bg-accent/40')}
+                      >{dir === 'payable' ? 'Owed to ATO' : 'Refund'}</button>
+                    ))}
+                  </div>
                 </div>
                 <div className="space-y-1 col-span-2">
                   <Label>Account *</Label>
@@ -965,27 +991,27 @@ export default function BasDetailPage() {
 
             {/* Total */}
             {(() => {
-              const g = parseFloat(gstAmountStr) || 0
+              const g = (parseFloat(gstAmountStr) || 0) * (gstDirection === 'refund' ? -1 : 1)
               const p = parseFloat(paygAmountStr) || 0
-              const total = g + p
-              return total > 0 ? (
+              const totalCents = Math.round((g + p) * 100)
+              return totalCents !== 0 ? (
                 <div className="flex justify-between items-center border-t border-border pt-3">
-                  <span className="text-muted-foreground">Total payment</span>
-                  <span className="font-semibold tabular-nums">{fmtAud(Math.round(total * 100))}</span>
+                  <span className="text-muted-foreground">{totalCents < 0 ? 'Total refund received' : 'Total payment'}</span>
+                  <span className={cn('font-semibold tabular-nums', totalCents < 0 && 'text-green-400')}>{fmtAud(Math.abs(totalCents))}</span>
                 </div>
               ) : null
             })()}
 
             <div className="space-y-1">
               <Label>Notes <span className="text-muted-foreground text-xs">(optional)</span></Label>
-              <Input placeholder="e.g. Paid via BPAY" value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} />
+              <Input placeholder={lodgedIsRefund ? 'e.g. Refunded to business account' : 'e.g. Paid via BPAY'} value={paymentNotes} onChange={e => setPaymentNotes(e.target.value)} />
             </div>
             {paymentError && <p className="text-destructive text-sm">{paymentError}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPaymentOpen(false)} disabled={recordingPayment}>Cancel</Button>
             <Button onClick={() => void handleRecordPayment()} disabled={recordingPayment || !paymentDate || !gstAmountStr || !gstAccountId}>
-              {recordingPayment && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Record Payment
+              {recordingPayment && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}{lodgedIsRefund ? 'Record Refund' : 'Record Payment'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1084,8 +1110,8 @@ export default function BasDetailPage() {
       <ConfirmDialog
         open={pendingDeletePayment}
         onOpenChange={(v) => { if (!v) setPendingDeletePayment(false) }}
-        title="Remove Payment Record?"
-        description="This will delete the associated expense entry and cannot be undone."
+        title={isRefundRecorded ? 'Remove Refund Record?' : 'Remove Payment Record?'}
+        description="This clears the recorded amounts. If a bank transaction has been matched to this period, it goes back to unmatched."
         confirmLabel="Remove"
         onConfirm={() => { setPendingDeletePayment(false); void handleDeletePayment() }}
       />

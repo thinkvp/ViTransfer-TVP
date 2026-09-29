@@ -25,6 +25,7 @@ import {
   collapseRepeatedCues,
   mergeOrphanWordCues,
   buildCuesFromWords,
+  attachPunctuationFromTranscript,
 } from '../src/lib/subtitles'
 import {
   splitCueAt,
@@ -255,6 +256,157 @@ const MESSY_SRT =
     pauseSplitNoWrap.length === 2 &&
     pauseSplitNoWrap[0].text === 'hello world' &&
     pauseSplitNoWrap[1].text === 'again')
+}
+
+// ---------------------------------------------------------------------------
+// 6b1c. Cue and line breaks: sentences first, then phrase boundaries
+// ---------------------------------------------------------------------------
+{
+  // Evenly spaced words, 300 ms each with no gaps (one pause-free run).
+  const timed = (text: string) =>
+    text.split(' ').map((word, i) => ({ word, start: i * 0.3, end: i * 0.3 + 0.3 }))
+  const texts = (cues: { text: string }[]) => cues.map((c) => c.text)
+  const lastWord = (s: string) => s.trim().split(/\s+/).pop() ?? ''
+  const endsSentenceWord = (w: string) => /[.!?]["')\]]*$/.test(w)
+
+  // A cue never runs from one sentence into the next (the Signia file had
+  // "I am really blown away. It's going to be really").
+  const blown = timed(
+    'I am really blown away. It\'s going to be really redefining hearing care. I loved the live demonstration of ' +
+      'Cygnia Max in that cafe environment and just actually hearing how much it was reducing noise with ' +
+      'conversation, but still keeping the ambience alive when there was no conversation. As we know, it\'s so ' +
+      'important to give our clients the full signal to maintain brain health.',
+  )
+  const blownCues = buildCuesFromWords(blown, { maxCharsPerLine: 49, maxLines: 1 })
+  check('sentences: no cue continues past a full stop into the next sentence',
+    blownCues.every((c) => {
+      const ws = c.text.split(/\s+/)
+      return !ws.slice(0, -1).some(endsSentenceWord) || endsSentenceWord(ws[ws.length - 1])
+    }),
+    JSON.stringify(texts(blownCues)))
+  check('sentences: a short sentence gets its own cue',
+    blownCues[0].text === 'I am really blown away.' &&
+    blownCues[1].text === "It's going to be really redefining hearing care.",
+    JSON.stringify(texts(blownCues)))
+  // Even pieces: the long sentence must not end on a two-word scrap.
+  check('sentences: a long sentence splits into even pieces, no scrap at the end',
+    blownCues.every((c) => c.text.split(/\s+/).length >= 3),
+    JSON.stringify(texts(blownCues)))
+
+  const shorts = timed('Very good. Yes. General communication support.')
+  const shortCues = buildCuesFromWords(shorts, { maxCharsPerLine: 49, maxLines: 1 })
+  check('sentences: whole short sentences share a cue when they fit',
+    shortCues.length === 1 && shortCues[0].text === 'Very good. Yes. General communication support.',
+    JSON.stringify(texts(shortCues)))
+
+  const inWhich = timed("I'm really excited for all of the different ways in which the Max will deal with different environments.")
+  const inWhichCues = buildCuesFromWords(inWhich, { maxCharsPerLine: 49, maxLines: 1 })
+  check('weak endings: "in which" stays together',
+    inWhichCues.every((c) => lastWord(c.text) !== 'in'),
+    JSON.stringify(texts(inWhichCues)))
+
+  const state = timed('We have no choice but to make our state the building capital of the nation with the 2032 games coming up.')
+  const stateCues = buildCuesFromWords(state, { maxCharsPerLine: 49, maxLines: 1 })
+  check('weak endings: cue does not end on "the"',
+    stateCues[0].text === 'We have no choice but to make our state',
+    JSON.stringify(texts(stateCues)))
+  check('weak endings: every word kept, in order',
+    texts(stateCues).join(' ') === state.map((w) => w.word).join(' '))
+  check('weak endings: cue timing still comes from its first/last word',
+    stateCues[0].startMs === 0 && stateCues[0].endMs === 9 * 300 && stateCues[1].startMs === 9 * 300)
+
+  const contraction = timed('The sound preference demo was fantastic and I really think it\'s going to help clinicians')
+  const contractionCues = buildCuesFromWords(contraction, { maxCharsPerLine: 49, maxLines: 1 })
+  check('weak endings: cue does not end on a contracted "is"',
+    contractionCues.every((c) => lastWord(c.text) !== "it's"),
+    JSON.stringify(texts(contractionCues)))
+
+  // Moving a break earlier must not leave the next cue opening on the tail of
+  // a sentence ("and money.").
+  const money = timed('which is just going to save everyone a lot of time and money. Hearing the different soundscapes')
+  const moneyCues = buildCuesFromWords(money, { maxCharsPerLine: 49, maxLines: 1 })
+  check('weak endings: no cue opens with a stranded sentence tail',
+    !moneyCues.some((c) => /^\S+\s+money\./.test(c.text) || c.text.startsWith('money.')),
+    JSON.stringify(texts(moneyCues)))
+
+  // Line level: in a two-line cue, the first line does not end on "the".
+  const lines = timed('Effective educational leadership builds the capacity of educators by inspiring others')
+  const lineCues = buildCuesFromWords(lines, { maxCharsPerLine: 42, maxLines: 2 })
+  check('weak endings: first line of a two-line cue does not end on "the"',
+    lineCues.length === 1 &&
+    lineCues[0].text.split('\n').length === 2 &&
+    lastWord(lineCues[0].text.split('\n')[0]) !== 'the',
+    JSON.stringify(texts(lineCues)))
+
+  // Subject pronouns and auxiliaries are weak ("…logged in we", "…client has"),
+  // and "logged in" stays together.
+  const particle = timed('Once the client has logged in we send the link straight over to them')
+  const particleCues = buildCuesFromWords(particle, { maxCharsPerLine: 42, maxLines: 1 })
+  check('weak endings: no cue ends on "we", "has" or splits "logged in"',
+    particleCues.length === 2 && particleCues.every((c) => !['we', 'has', 'logged'].includes(lastWord(c.text))),
+    JSON.stringify(texts(particleCues)))
+}
+
+// ---------------------------------------------------------------------------
+// 6b1d. Words Whisper splits into several tokens ("platform" + "-based")
+// ---------------------------------------------------------------------------
+{
+  // faster-whisper shape: a token continuing the previous word has no leading space.
+  const hyphen = attachPunctuationFromTranscript(
+    [
+      { word: ' platform', start: 1.0, end: 1.4 },
+      { word: '-based', start: 1.4, end: 1.7 },
+      { word: ' design,', start: 1.8, end: 2.1 },
+    ],
+    'platform-based design,',
+  )
+  check('tokens: a hyphenated compound becomes one timed word',
+    hyphen.length === 2 && hyphen[0].word === 'platform-based' && hyphen[0].start === 1.0 && hyphen[0].end === 1.7,
+    JSON.stringify(hyphen))
+
+  const percent = attachPunctuationFromTranscript(
+    [
+      { word: ' 40', start: 0, end: 0.3 },
+      { word: '%', start: 0.3, end: 0.5 },
+      { word: ' of', start: 0.5, end: 0.6 },
+    ],
+    '40% of',
+  )
+  check('tokens: "40" + "%" becomes "40%", not "40% %"',
+    percent.map((w) => w.word).join(' ') === '40% of' && percent[0].end === 0.5,
+    JSON.stringify(percent))
+
+  // OpenAI shape: punctuation-free words, hyphen only in the transcript.
+  const openai = attachPunctuationFromTranscript(
+    [
+      { word: 'once', start: 0, end: 0.2 },
+      { word: 'in', start: 0.2, end: 0.3 },
+      { word: 'a', start: 0.3, end: 0.35 },
+      { word: 'generation', start: 0.35, end: 0.9 },
+      { word: 'opportunity', start: 0.9, end: 1.5 },
+    ],
+    'a once-in-a-generation opportunity.',
+  )
+  check('tokens: OpenAI words re-joined from the transcript',
+    openai.map((w) => w.word).join(' ') === 'once-in-a-generation opportunity.',
+    JSON.stringify(openai))
+
+  // A stream that never went through the transcript pass (it bailed out):
+  // the leading-space convention alone still joins the tokens.
+  const raw = buildCuesFromWords(
+    [
+      { word: ' a', start: 0, end: 0.1 },
+      { word: ' once', start: 0.1, end: 0.3 },
+      { word: '-in', start: 0.3, end: 0.4 },
+      { word: '-a', start: 0.4, end: 0.45 },
+      { word: '-generation', start: 0.45, end: 0.9 },
+      { word: ' opportunity', start: 0.9, end: 1.5 },
+    ],
+    { maxCharsPerLine: 42, maxLines: 1 },
+  )
+  check('tokens: continuation tokens joined without the transcript pass',
+    raw.length === 1 && raw[0].text === 'a once-in-a-generation opportunity',
+    JSON.stringify(raw))
 }
 
 // ---------------------------------------------------------------------------

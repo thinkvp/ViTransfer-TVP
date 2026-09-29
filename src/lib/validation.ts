@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import DOMPurify from 'isomorphic-dompurify'
 import { isValidTimecode } from '@/lib/timecode'
+import { PROJECT_DESCRIPTION_MAX } from '@/lib/project-description'
 import { ensureDomPurifyHooksRegistered } from '@/lib/security/dompurify-config'
 
 /**
@@ -110,7 +111,7 @@ export const loginSchema = z.object({
 
 export const createProjectSchema = z.object({
   title: safeStringSchema(1, 255),
-  description: safeStringSchema(0, 5000).optional(),
+  description: safeStringSchema(0, PROJECT_DESCRIPTION_MAX).optional(),
   companyName: safeStringSchema(0, 100)
     .refine(val => !val || !/[\r\n]/.test(val), {
       message: 'Company name cannot contain line breaks'
@@ -163,7 +164,7 @@ export const createProjectSchema = z.object({
 
 export const updateProjectSchema = z.object({
   title: safeStringSchema(1, 255).optional(),
-  description: safeStringSchema(0, 5000).optional(),
+  description: safeStringSchema(0, PROJECT_DESCRIPTION_MAX).optional(),
   companyName: safeStringSchema(0, 100)
     .refine(val => !val || !/[\r\n]/.test(val), {
       message: 'Company name cannot contain line breaks'

@@ -751,7 +751,8 @@ export async function buildBalanceSheetReport(
         _sum: { amountCents: true },
       }),
     ])
-    // These are negative (credits reduce the LIABILITY) — adding a negative reduces netGstCents
+    // Payments are negative (credits reduce the LIABILITY) — adding a negative reduces netGstCents.
+    // A BAS refund received is positive, pulling a GST receivable (negative netGstCents) back to zero.
     basGstPaymentsCents = (paidSplits._sum.amountCents ?? 0) + (paidJournals._sum.amountCents ?? 0)
   }
 

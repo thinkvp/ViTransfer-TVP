@@ -18,6 +18,7 @@ import { RecipientsEditor, type EditableRecipient } from '@/components/Recipient
 import { ProjectUsersEditor, type AssignableUser } from '@/components/ProjectUsersEditor'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { toLocalYmd } from '@/lib/project-start-date'
+import { PROJECT_DESCRIPTION_MAX } from '@/lib/project-description'
 
 // Client-safe password generation using Web Crypto API
 function generateSecurePassword(): string {
@@ -57,6 +58,7 @@ export default function NewProjectPage() {
   const canCreateProject = canDoAction(permissions, 'changeProjectSettings')
   const clientSearchRef = useRef<HTMLDivElement | null>(null)
   const [loading, setLoading] = useState(false)
+  const [descriptionLength, setDescriptionLength] = useState(0)
   const [startDate, setStartDate] = useState(() => toLocalYmd(new Date()) ?? '')
   const [authModeError, setAuthModeError] = useState<string | null>(null)
   const [passwordProtected, setPasswordProtected] = useState(true)
@@ -408,7 +410,14 @@ export default function NewProjectPage() {
                   placeholder="e.g., Project details, deliverables, notes..."
                   rows={3}
                   autoResize
+                  maxLength={PROJECT_DESCRIPTION_MAX}
+                  onChange={(e) => setDescriptionLength(e.target.value.length)}
                 />
+                {descriptionLength > PROJECT_DESCRIPTION_MAX * 0.8 && (
+                  <p className="text-xs text-muted-foreground text-right">
+                    {descriptionLength.toLocaleString()} / {PROJECT_DESCRIPTION_MAX.toLocaleString()}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2">

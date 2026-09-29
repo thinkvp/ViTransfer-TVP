@@ -28,6 +28,7 @@ import { deleteProjectPreviews } from '@/lib/delete-project-previews'
 import { recalculateAndStoreProjectDiskBytes, recalculateAndStoreProjectPreviewBytes, recalculateAndStoreProjectTotalBytes } from '@/lib/project-total-bytes'
 import { asNumberBigInt } from '@/lib/utils'
 import { generateShareUrl } from '@/lib/url'
+import { PROJECT_DESCRIPTION_MAX } from '@/lib/project-description'
 import { rateLimit } from '@/lib/rate-limit'
 import { sanitizeComment } from '@/lib/comment-sanitization'
 import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
@@ -75,7 +76,7 @@ function isPreviewableMediaFileType(fileType: string | null | undefined): boolea
 const updateProjectSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   slug: z.string().min(1).max(200).optional(),
-  description: z.string().max(2000).nullable().optional(),
+  description: z.string().max(PROJECT_DESCRIPTION_MAX).nullable().optional(),
   clientId: z.string().regex(/^c[a-z0-9]{24}$/).optional(),
   status: z.enum(['NOT_STARTED', 'IN_PROGRESS', 'IN_REVIEW', 'REVIEWED', 'ON_HOLD', 'APPROVED', 'CLOSED']).optional(),
   restrictCommentsToLatestVersion: z.boolean().optional(),

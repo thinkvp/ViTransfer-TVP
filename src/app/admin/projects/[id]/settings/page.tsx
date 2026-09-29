@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/AuthProvider'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { PROJECT_DESCRIPTION_MAX } from '@/lib/project-description'
 
 // Client-safe password generation using Web Crypto API
 function generateSecurePassword(): string {
@@ -738,7 +739,13 @@ export default function ProjectSettingsPage() {
                     placeholder="e.g., Marketing video for Q4 campaign"
                     rows={3}
                     autoResize
+                    maxLength={PROJECT_DESCRIPTION_MAX}
                   />
+                  {description.length > PROJECT_DESCRIPTION_MAX * 0.8 && (
+                    <p className="text-xs text-muted-foreground text-right">
+                      {description.length.toLocaleString()} / {PROJECT_DESCRIPTION_MAX.toLocaleString()}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     Optional description to help identify and organize this project
                   </p>
@@ -1330,7 +1337,12 @@ export default function ProjectSettingsPage() {
 
                     <div className="space-y-2">
                       <Label htmlFor="description-d">Project Description</Label>
-                      <Textarea id="description-d" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Marketing video for Q4 campaign" rows={3} autoResize />
+                      <Textarea id="description-d" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g., Marketing video for Q4 campaign" rows={3} autoResize maxLength={PROJECT_DESCRIPTION_MAX} />
+                      {description.length > PROJECT_DESCRIPTION_MAX * 0.8 && (
+                        <p className="text-xs text-muted-foreground text-right">
+                          {description.length.toLocaleString()} / {PROJECT_DESCRIPTION_MAX.toLocaleString()}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">Optional description to help identify and organize this project</p>
                     </div>
 

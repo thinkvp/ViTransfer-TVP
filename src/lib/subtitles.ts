@@ -419,47 +419,98 @@ export function attachPunctuationFromTranscript(words: TimedWord[], transcript: 
     matched++
   }
 
-  if (matched < words.length * 0.9) return words
+  // Punctuation-only tokens ("%") have nothing to locate and don't count.
+  const locatable = words.filter((w) => /[\p{L}\p{N}]/u.test(w.word)).length
+  if (matched < locatable * 0.9) return words
 
   // Hand the text between spans to its neighbours: everything up to the first
-  // whitespace trails the previous word (a comma, or the hyphen of a split
-  // "well-known"), everything after the last whitespace leads the next one (an
-  // opening quote or bracket). Each gap is assigned once, so nothing doubles up.
-  const out = words.map((w) => ({ ...w }))
+  // whitespace trails the previous word (a comma), everything after the last
+  // whitespace leads the next one (an opening quote or bracket). Each gap is
+  // assigned once, so nothing doubles up.
+  //
+  // Whisper tokenises some single written words into several timed tokens —
+  // "platform" + "-based", "40" + "%", "once" + "-in" + "-a" + "-generation".
+  // Where the transcript has no whitespace between two tokens they are one
+  // word on screen, so they merge into one timed word (first start, last end):
+  // otherwise a caption reads "platform- based", or breaks inside the word.
+  // A punctuation-only token ("%") has no span of its own; the transcript gap
+  // already supplies its text, so only its timing is kept.
+  const out: TimedWord[] = []
   let prevEnd = 0
-  let prevWordIdx = -1
-  for (let i = 0; i < spans.length; i++) {
+  let prevOut = -1 // index in `out` of the last matched word
+  for (let i = 0; i < words.length; i++) {
     const span = spans[i]
-    if (!span) continue
+    const w = words[i]
+    if (!span) {
+      if (w.word.replace(/[^\p{L}\p{N}]/gu, '') === '') {
+        if (out.length > 0) out[out.length - 1].end = Math.max(out[out.length - 1].end, w.end)
+        continue
+      }
+      out.push({ ...w }) // an unmatched real word keeps its own text
+      continue
+    }
+
     const gap = transcript.slice(prevEnd, span.start)
+    const text = transcript.slice(span.start, span.end)
+    prevEnd = span.end
+
+    if (prevOut >= 0 && prevOut === out.length - 1 && !/\s/.test(gap)) {
+      out[prevOut].word += gap + text
+      out[prevOut].end = Math.max(out[prevOut].end, w.end)
+      continue
+    }
+
     let lead = ''
     if (gap !== '') {
       const firstWs = gap.search(/\s/)
       if (firstWs === -1) {
-        if (prevWordIdx >= 0) out[prevWordIdx].word += gap
+        if (prevOut >= 0) out[prevOut].word += gap
         else lead = gap
       } else {
-        if (prevWordIdx >= 0) out[prevWordIdx].word += gap.slice(0, firstWs)
+        if (prevOut >= 0) out[prevOut].word += gap.slice(0, firstWs)
         // Whatever is left leads this word. Internal spacing is kept, so a
         // free-standing token (an em dash, an ellipsis) survives as its own
         // word rather than being dropped with the whitespace around it.
         lead = gap.slice(firstWs).replace(/^\s+/, '')
       }
     }
-    out[i].word = lead + transcript.slice(span.start, span.end)
-    prevEnd = span.end
-    prevWordIdx = i
+    out.push({ ...w, word: lead + text })
+    prevOut = out.length - 1
   }
 
   // Punctuation directly after the final matched word (the closing full stop).
   // Punctuation only, and only what is adjacent: any words still left in the
   // transcript were never matched to a timing, and putting them on screen would
   // show text the cue timings never accounted for.
-  if (prevWordIdx >= 0) {
+  if (prevOut >= 0) {
     const tail = /^\s*([^\p{L}\p{N}\s]+)/u.exec(transcript.slice(prevEnd))
-    if (tail) out[prevWordIdx].word += tail[1]
+    if (tail) out[prevOut].word += tail[1]
   }
 
+  return out
+}
+
+/**
+ * The same merge for a stream that never went through
+ * {@link attachPunctuationFromTranscript} (it bailed out on a poor match).
+ * faster-whisper marks a token that continues the previous word by omitting
+ * its leading space (" platform", "-based"), so that is used instead — but only
+ * when the stream follows that convention at all: OpenAI's words (and words
+ * that went through the transcript pass) carry no spaces, and every one of
+ * them would otherwise merge into one.
+ */
+function mergeContinuationTokens(words: TimedWord[]): TimedWord[] {
+  if (!words.some((w) => /^\s/.test(w.word))) return words
+  const out: TimedWord[] = []
+  for (const w of words) {
+    const prev = out[out.length - 1]
+    if (prev && !/^\s/.test(w.word) && w.word !== '') {
+      prev.word += w.word
+      prev.end = Math.max(prev.end, w.end)
+    } else {
+      out.push({ ...w })
+    }
+  }
   return out
 }
 
@@ -479,26 +530,82 @@ function endsSentence(raw: string): boolean {
 }
 
 /**
- * Greedy word-wrap of words[from..to] into at most `maxLines` lines. Words that
- * will not fit are appended to the last line rather than dropped.
+ * Words a caption line should not end on, because each one only makes sense
+ * with what follows it: articles and possessives ("the", "our"), the
+ * prepositions that open a noun phrase ("of", "with"), conjunctions ("and",
+ * "because"), and the subject-only pronouns ("I", "we"). Particles that can
+ * close a phrase ("in", "up", "on" — "log on", "turn it up") and words that are
+ * just as often objects or pronouns ("you", "it", "that", "her") are
+ * deliberately left out: a false positive here moves a break that was fine.
  */
-function wrapWordRange(words: TimedWord[], from: number, to: number, maxChars: number, maxLines: number): string[] {
-  const lines: string[] = []
-  let cur = ''
-  for (let i = from; i <= to; i++) {
-    const w = words[i].word
-    if (cur === '') { cur = w; continue }
-    if ((cur + ' ' + w).length <= maxChars) { cur += ' ' + w; continue }
-    if (w.length <= SHORT_PULLBACK && (cur + ' ' + w).length <= maxChars + SHORT_PULLBACK_ALLOWANCE) {
-      cur += ' ' + w
-      continue
-    }
-    if (lines.length + 1 >= maxLines) { cur += ' ' + w; continue } // last line absorbs the remainder
-    lines.push(cur)
-    cur = w
-  }
-  if (cur !== '') lines.push(cur)
-  return lines
+const WEAK_ENDINGS = new Set([
+  'a', 'an', 'the',
+  'my', 'your', 'our', 'their', 'its',
+  'of', 'to', 'for', 'with', 'from', 'at', 'into', 'onto', 'by', 'than', 'via', 'per',
+  'and', 'but', 'or', 'nor', 'because', 'although', 'unless', 'whether', 'if',
+  'i', 'we', 'they', 'he', 'she',
+  // "is"/"as" close a clause only before punctuation ("that's what it is."),
+  // and a word carrying punctuation is never treated as weak.
+  'is', 'are', 'was', 'were', 'am', 'as',
+  // Auxiliaries and modals lean on their verb the same way ("has | logged in").
+  'has', 'have', 'had', 'will', 'would', 'can', 'could', 'should', 'must', 'might', 'may', 'shall',
+  'do', 'does', 'did', 'be', 'been',
+  // Contracted "is" never closes a clause ("I think it's" needs its "going").
+  "it's", "that's", "there's", "here's", "what's", "where's", "who's", "he's", "she's", "let's",
+])
+
+/** Words a new caption reads well opening with: conjunctions and relatives start a clause. */
+const CLAUSE_OPENERS = new Set([
+  'and', 'but', 'or', 'so', 'because', 'although', 'though', 'unless', 'until', 'whether', 'if',
+  'which', 'who', 'whose', 'where', 'when', 'while',
+])
+
+/**
+ * Prepositions and determiners start a phrase — a weaker but still clean place
+ * to begin a caption. "in", "on" and "like" are left out: as often as not they
+ * finish a phrasal verb ("logged in") rather than start anything.
+ */
+const PHRASE_OPENERS = new Set([
+  'of', 'to', 'for', 'with', 'from', 'at', 'by', 'about', 'into', 'onto', 'through',
+  'after', 'before', 'during', 'without', 'across', 'between',
+  'a', 'an', 'the', 'my', 'your', 'our', 'their', 'its', 'this', 'that', 'these', 'those',
+])
+
+/**
+ * Prepositions — including the particle-or-preposition ones left out of
+ * WEAK_ENDINGS. Followed by a determiner or a relative ("in the", "in which")
+ * they are unmistakably prepositions, and so weak endings after all.
+ */
+const PREPOSITIONS = new Set([
+  'of', 'to', 'for', 'with', 'from', 'at', 'by', 'about', 'into', 'onto', 'through',
+  'after', 'before', 'during', 'without', 'across', 'between',
+  'in', 'on', 'over', 'under', 'around', 'behind', 'inside', 'near', 'like',
+])
+const DETERMINERS_AND_RELATIVES = new Set([
+  'a', 'an', 'the', 'my', 'your', 'our', 'their', 'its', 'his', 'her', 'this', 'that', 'these', 'those',
+  'which', 'whom', 'whose', 'what',
+])
+
+/** Lowercased word with surrounding punctuation stripped and curly apostrophes straightened. */
+function bareWord(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '')
+}
+
+/**
+ * Would a line ending on this word leave it hanging? True for the words above
+ * and for any contracted "are/have/will/would/am" ("we're", "I'll") — none of
+ * which can close a clause. A word carrying its own trailing punctuation is a
+ * break by definition ("and," is fine); a trailing hyphen is not ("once-").
+ */
+function isWeakEnding(raw: string): boolean {
+  const w = raw.trim()
+  if (/-$/.test(w)) return true
+  if (!/[\p{L}\p{N}]$/u.test(w)) return false
+  const bare = bareWord(w)
+  return WEAK_ENDINGS.has(bare) || /'(re|ve|ll|d|m)$/.test(bare)
 }
 
 /** How many characters words[from..to] occupy once joined onto one line. */
@@ -510,8 +617,7 @@ function rangeLength(words: TimedWord[], from: number, to: number): number {
 
 /**
  * Does this word close a clause? A comma, semicolon, colon, dash or ellipsis is
- * a weaker break than a full stop but still a place a reader pauses, so a cue
- * boundary lands better there than one word past it.
+ * a weaker break than a full stop but still a place a reader pauses.
  */
 function endsClause(raw: string): boolean {
   const w = raw.trim()
@@ -519,106 +625,195 @@ function endsClause(raw: string): boolean {
   return /([,;:–—]|\.\.\.|…)["'”’)\]]*$/.test(w)
 }
 
-const BOUNDARY_LOOKAROUND = 2
-/** How far a cue may overrun its line budget to keep a short tail rather than strand it. */
+/** How far a whole sentence may overrun the cue budget to stay in one cue rather than be split. */
 const SENTENCE_OVERFLOW_ALLOWANCE = 10
-/** Lower for clauses: a comma is a weaker reason to run a caption long. */
-const CLAUSE_OVERFLOW_ALLOWANCE = 6
+/** A gap this long between two words is a spoken pause — as good a place to break as a comma. */
+const PAUSE_BREAK_MS = 350
 
 /**
- * Would a cue ending here strand a word? True when the break lands on a natural
- * boundary, or clear of the last one; false when it sits a word or two past a
- * full stop or comma — the very shape these snaps exist to remove.
+ * What it costs to end a cue or a line after a given word; lower is better.
+ * The scale only matters relative to BALANCE_WEIGHT / OVERRUN_COST /
+ * EXTRA_PIECE_COST below: a weak ending costs more than a lopsided split, a
+ * plain break about as much as a moderately uneven one.
  */
-function isCleanBreak(words: TimedWord[], start: number, end: number): boolean {
-  if (endsSentence(words[end].word) || endsClause(words[end].word)) return true
-  for (let k = end - 1; k >= Math.max(start, end - BOUNDARY_LOOKAROUND); k--) {
-    if (endsSentence(words[k].word) || endsClause(words[k].word)) return false
-  }
-  return true
+const BREAK_COST = {
+  sentence: 0,
+  clause: 1,
+  pause: 1,
+  beforeClauseOpener: 2, // "…hearing aids | which is…"
+  beforePhraseOpener: 3, // "…the capital | of the nation"
+  plain: 8,
+  weak: 30, // "…our state the | building"
+} as const
+/** Weight of a piece's squared deviation from an even split, relative to its budget. */
+const BALANCE_WEIGHT = 20
+/** Cost per character a piece runs past its budget (up to the short-word allowance). */
+const OVERRUN_COST = 0.5
+/** Cost of each cue or line beyond the fewest the text could fit in. */
+const EXTRA_PIECE_COST = 4
+/** Above this many pieces a stretch is halved before being split (bounds the partition table). */
+const MAX_PARTITION_PIECES = 24
+
+function breakCost(words: TimedWord[], k: number): number {
+  if (k >= words.length - 1) return 0
+  const w = words[k].word
+  if (endsSentence(w)) return BREAK_COST.sentence
+  if (isWeakEnding(w)) return BREAK_COST.weak
+  if (endsClause(w)) return BREAK_COST.clause
+  const opener = bareWord(words[k + 1].word)
+  // "…different ways in | which", "…the speech in | the environment"
+  if (PREPOSITIONS.has(bareWord(w)) && DETERMINERS_AND_RELATIVES.has(opener)) return BREAK_COST.weak
+  if ((words[k + 1].start - words[k].end) * 1000 >= PAUSE_BREAK_MS) return BREAK_COST.pause
+  if (CLAUSE_OPENERS.has(opener)) return BREAK_COST.beforeClauseOpener
+  if (PHRASE_OPENERS.has(opener)) return BREAK_COST.beforePhraseOpener
+  return BREAK_COST.plain
 }
 
 /**
- * Find a boundary within `BOUNDARY_LOOKAROUND` words of the greedy break.
- * Returns null when there is none worth taking.
- */
-function findBoundary(
-  words: TimedWord[],
-  start: number,
-  greedyEnd: number,
-  budget: number,
-  isBoundary: (word: string) => boolean,
-  allowance: number,
-): number | null {
-  const last = words.length - 1
-
-  // Earlier: the cue is trailing the first word or two of what comes next.
-  // Free — the cue simply carries less.
-  for (let k = greedyEnd - 1; k >= Math.max(start + 1, greedyEnd - BOUNDARY_LOOKAROUND); k--) {
-    if (isBoundary(words[k].word)) return k
-  }
-
-  // Later: the next cue would open with the last word or two of this unit.
-  for (let k = greedyEnd + 1; k <= Math.min(last, greedyEnd + BOUNDARY_LOOKAROUND); k++) {
-    if (!isBoundary(words[k].word)) continue
-    if (rangeLength(words, start, k) <= budget + allowance) return k
-    // Too long to absorb: end earlier instead, so three words travel together.
-    // Only if that break is itself clean — retreating past an earlier full stop
-    // or comma would just move the stranded word rather than remove it.
-    const shifted = k - 3
-    return shifted >= start + 2 && isCleanBreak(words, start, shifted) ? shifted : null
-  }
-
-  return null
-}
-
-/**
- * Nudge a cue's last word onto a natural break when one sits within a word or
- * two of it, so a cue never trails the opening words of the next sentence
- * ("...around the place. I"), never opens with the tail of the previous one
- * ("past. This is..."), and does not strand a lone word past a comma
- * ("...when you wear earplugs, all"). Greedy wrapping produces all three,
- * because it only ever looks at line length.
+ * Split words[from..to] into consecutive pieces of at most `hardMax`
+ * characters (a single over-long word may stand alone), picking the split with
+ * the lowest total cost: where each break falls (breakCost), how evenly the
+ * pieces share the text, how far any runs past `softMax`, and how many pieces
+ * it takes. Tries the fewest pieces that can fit plus two more, capped at
+ * `maxPieces`. Returns the index of each piece's last word, or null when even
+ * the fewest exceeds `maxPieces`.
  *
- * Sentence endings are tried first and may run the line slightly longer, since
- * a full stop is the better place to break and the worse place to overshoot.
+ * Evening the pieces out is what keeps a long sentence from ending on a scrap
+ * ("…when there" / "was no conversation."): greedy filling makes every piece
+ * full except the last.
  */
-function snapCueEnd(words: TimedWord[], start: number, greedyEnd: number, maxChars: number, maxLines: number): number {
-  const last = words.length - 1
-  if (greedyEnd >= last) return greedyEnd // nothing follows this cue
-  if (endsSentence(words[greedyEnd].word)) return greedyEnd
+function partitionWords(
+  words: TimedWord[],
+  from: number,
+  to: number,
+  softMax: number,
+  hardMax: number,
+  maxPieces: number,
+): number[] | null {
+  const n = to - from + 1
+  // prefix[i] = characters in words[from..from+i-1], spaces excluded.
+  const prefix = new Array<number>(n + 1).fill(0)
+  for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i] + words[from + i].word.length
+  const len = (a: number, b: number) => prefix[b + 1] - prefix[a] + (b - a) // relative indices, inclusive
+  const breaks = Array.from({ length: n }, (_, i) => (i < n - 1 ? breakCost(words, from + i) : 0))
 
-  const budget = maxChars * maxLines
-  const atSentence = findBoundary(words, start, greedyEnd, budget, endsSentence, SENTENCE_OVERFLOW_ALLOWANCE)
-  if (atSentence !== null) return atSentence
+  // Greedy fill gives the true minimum piece count (and a split that always fits).
+  const greedyEnds: number[] = []
+  for (let start = 0; start < n; ) {
+    let end = start
+    while (end + 1 < n && len(start, end + 1) <= hardMax) end++
+    greedyEnds.push(from + end)
+    start = end + 1
+  }
+  const fewest = greedyEnds.length
+  if (fewest > maxPieces) return null
 
-  if (endsClause(words[greedyEnd].word)) return greedyEnd
-  const atClause = findBoundary(words, start, greedyEnd, budget, endsClause, CLAUSE_OVERFLOW_ALLOWANCE)
-  if (atClause !== null) return atClause
+  // A very long unpunctuated stretch (a run-on transcript) would make the
+  // table below pieces × words in size: cut it at the cheapest break near a
+  // greedy boundary and solve the halves on their own.
+  if (fewest > MAX_PARTITION_PIECES) {
+    const boundary = greedyEnds[Math.floor(fewest / 2)] - from
+    let cut = boundary
+    for (let i = boundary; i > Math.max(0, boundary - 5); i--) if (breaks[i] < breaks[cut]) cut = i
+    return [
+      ...(partitionWords(words, from, from + cut, softMax, hardMax, Infinity) ?? []),
+      ...(partitionWords(words, from + cut + 1, to, softMax, hardMax, Infinity) ?? []),
+    ]
+  }
 
-  return greedyEnd
+  const total = len(0, n - 1)
+  let best: { cost: number; ends: number[] } | null = null
+  for (let p = fewest; p <= Math.min(maxPieces, fewest + 2, n); p++) {
+    const target = total / p
+    // cost[q][i]: cheapest way to cover relative words 0..i with q pieces.
+    const cost: Float64Array[] = Array.from({ length: p + 1 }, () => new Float64Array(n).fill(Infinity))
+    const back: Int32Array[] = Array.from({ length: p + 1 }, () => new Int32Array(n).fill(-1))
+    for (let q = 1; q <= p; q++) {
+      for (let i = q - 1; i < n; i++) {
+        // Piece q covers words j+1..i; j is where piece q-1 ended (-1 for the first).
+        for (let j = q === 1 ? -1 : i - 1; j >= (q === 1 ? -1 : q - 2); j--) {
+          const l = len(j + 1, i)
+          if (l > hardMax && i > j + 1) break // only longer from here on
+          const before = q === 1 ? 0 : cost[q - 1][j]
+          if (before === Infinity) continue
+          const c =
+            before +
+            BALANCE_WEIGHT * ((l - target) / softMax) ** 2 +
+            OVERRUN_COST * Math.max(0, l - softMax) +
+            breaks[i]
+          if (c < cost[q][i]) {
+            cost[q][i] = c
+            back[q][i] = j
+          }
+        }
+      }
+    }
+    const splitCost = cost[p][n - 1] + EXTRA_PIECE_COST * (p - fewest)
+    if (splitCost === Infinity || (best && splitCost >= best.cost)) continue
+    const ends: number[] = []
+    for (let q = p, i = n - 1; q >= 1; i = back[q][i], q--) ends.unshift(from + i)
+    best = { cost: splitCost, ends }
+  }
+
+  return best?.ends ?? greedyEnds
 }
 
 /**
- * Build subtitle cues directly from word-level timestamps. The word stream is
- * first split into pause-delimited runs (`maxWordGapMs`, default 800 ms) so a
- * cue never straddles a real silence — otherwise its text would linger on
- * screen through the gap, the same problem `mergeOrphanWordCues`' gap guard
- * protects against on the SRT path. Within a run, words are grouped into lines
- * (greedy word-wrap with the same pullback tolerance as reflowCues) and lines
- * into cues (maxLines per cue). Each cue's start/end comes from the actual
- * word timestamps of its first/last word — no character-count approximation.
- * This replaces Whisper's coarse segment-level SRT timestamps with
- * word-precise timing.
+ * Lay out words[from..to] as the lines of one cue: a single line when it fits
+ * (or when only one line is allowed), otherwise the cheapest split into at most
+ * `maxLines` lines by the same rules as cue breaks — so a line ends at a comma
+ * or a sentence end rather than on "the". Falls back to a greedy wrap whose
+ * last line absorbs the remainder when no split fits.
+ */
+function layoutLines(words: TimedWord[], from: number, to: number, maxChars: number, maxLines: number): string[] {
+  const join = (a: number, b: number) => words.slice(a, b + 1).map((w) => w.word).join(' ')
+  if (maxLines === 1 || rangeLength(words, from, to) <= maxChars) return [join(from, to)]
+
+  const ends = partitionWords(words, from, to, maxChars, maxChars + SHORT_PULLBACK_ALLOWANCE, maxLines)
+  if (ends) {
+    let start = from
+    return ends.map((end) => {
+      const line = join(start, end)
+      start = end + 1
+      return line
+    })
+  }
+
+  const lines: string[] = []
+  let cur = ''
+  for (let i = from; i <= to; i++) {
+    const w = words[i].word
+    if (cur === '') cur = w
+    else if ((cur + ' ' + w).length <= maxChars || lines.length + 1 >= maxLines) cur += ' ' + w
+    else { lines.push(cur); cur = w }
+  }
+  if (cur !== '') lines.push(cur)
+  return lines
+}
+
+/**
+ * Build subtitle cues directly from word-level timestamps. Each cue's
+ * start/end comes from the actual timestamps of its first/last word — no
+ * character-count approximation — so moving a break never changes timing
+ * accuracy, only which words share a cue.
+ *
+ * 1. The word stream is split into pause-delimited runs (`maxWordGapMs`,
+ *    default 800 ms) so a cue never straddles a real silence.
+ * 2. Each run is split into sentences. A cue never runs from the end of one
+ *    sentence into the start of the next: consecutive whole sentences share a
+ *    cue only when they fit together ("Very good. Yes."), and a sentence that
+ *    fits the budget (+`SENTENCE_OVERFLOW_ALLOWANCE`) is kept whole.
+ * 3. A longer sentence is divided by `partitionWords` into evenly sized cues,
+ *    breaking at commas and pauses, before "and"/"which"/"of", and never after
+ *    a weak word ("the", "I", "it's") when there is any alternative.
+ * 4. Each cue's lines are laid out by the same rules (`layoutLines`).
  *
  * `maxCharsPerLine <= 0` disables wrapping: each pause-delimited run becomes
  * one cue (never a single cue spanning the whole video — callers wanting the
  * old segment shape should build cues from Whisper's segments instead).
  *
- * The returned cues are already sized to fit `maxCharsPerLine` × `maxLines`,
- * so running them through `reflowCues` afterwards is a near-no-op (splits are
- * rare; the primary purpose of the follow-up reflowCues pass is sentence-
- * boundary refinement and orphan folding).
+ * Callers must NOT pass the result through `reflowCues`: it would re-split any
+ * over-budget cue with character-count timing.
  */
 export function buildCuesFromWords(
   allWords: TimedWord[],
@@ -633,7 +828,9 @@ export function buildCuesFromWords(
   // faster-whisper returns words with a leading space (" Well,"). Normalise once
   // here: these cues are emitted as-is, with no re-flow pass downstream to tidy
   // up double spaces.
-  const allWordsTrimmed = allWords.map((w) => ({ ...w, word: w.word.trim() })).filter((w) => w.word !== '')
+  const allWordsTrimmed = mergeContinuationTokens(allWords)
+    .map((w) => ({ ...w, word: w.word.trim() }))
+    .filter((w) => w.word !== '')
 
   // Split into pause-delimited runs: a gap larger than maxWordGapMs between
   // consecutive words always starts a new run (and therefore a new cue).
@@ -650,69 +847,54 @@ export function buildCuesFromWords(
   if (run.length > 0) runs.push(run)
 
   const wrappingEnabled = Number.isFinite(maxChars) && maxChars > 0
+  const budget = maxChars * maxLines
   const cues: SubtitleCue[] = []
 
   for (const words of runs) {
-    if (!wrappingEnabled) {
-      // No wrapping — one cue per pause-delimited run.
+    const pushCue = (from: number, to: number, lines: string[]) => {
       cues.push({
         index: cues.length + 1,
-        startMs: Math.round(words[0].start * 1000),
-        endMs: Math.round(words[words.length - 1].end * 1000),
-        text: words.map(w => w.word).join(' '),
+        startMs: Math.round(words[from].start * 1000),
+        endMs: Math.round(words[to].end * 1000),
+        text: lines.join('\n'),
       })
+    }
+
+    if (!wrappingEnabled) {
+      // No wrapping — one cue per pause-delimited run.
+      pushCue(0, words.length - 1, [words.map((w) => w.word).join(' ')])
       continue
     }
 
-    let i = 0
-    while (i < words.length) {
-      const start = i
-      let greedyEnd = start
-      let cursor = start
-
-      // How far the line budget reaches: fill maxLines lines greedily.
-      for (let lineNum = 0; lineNum < maxLines && cursor < words.length; lineNum++) {
-        let curLine = ''
-        let lineWordCount = 0
-
-        while (cursor < words.length) {
-          const w = words[cursor]
-          if (curLine === '') {
-            curLine = w.word
-          } else if ((curLine + ' ' + w.word).length <= maxChars) {
-            curLine += ' ' + w.word
-          } else if (
-            w.word.length <= SHORT_PULLBACK &&
-            (curLine + ' ' + w.word).length <= maxChars + SHORT_PULLBACK_ALLOWANCE
-          ) {
-            curLine += ' ' + w.word
-          } else {
-            break // line is full
-          }
-          lineWordCount++
-          greedyEnd = cursor
-          cursor++
-        }
-
-        // If we consumed no words this iteration, break to avoid infinite loop
-        if (lineWordCount === 0) break
+    // Sentences as [first, last] word indices; a run's unpunctuated tail counts as one.
+    const sentences: [number, number][] = []
+    let sentenceStart = 0
+    for (let k = 0; k < words.length; k++) {
+      if (endsSentence(words[k].word) || k === words.length - 1) {
+        sentences.push([sentenceStart, k])
+        sentenceStart = k + 1
       }
+    }
 
-      // Then prefer a sentence boundary within a word or two of it.
-      const end = snapCueEnd(words, start, greedyEnd, maxChars, maxLines)
-      const cueLines = wrapWordRange(words, start, end, maxChars, maxLines)
-      if (cueLines.length === 0) {
-        i = end + 1
+    const emit = (from: number, to: number) => pushCue(from, to, layoutLines(words, from, to, maxChars, maxLines))
+
+    for (let si = 0; si < sentences.length; si++) {
+      const [first, last] = sentences[si]
+      if (rangeLength(words, first, last) <= budget + SENTENCE_OVERFLOW_ALLOWANCE) {
+        let end = last
+        while (si + 1 < sentences.length && rangeLength(words, first, sentences[si + 1][1]) <= budget) {
+          si++
+          end = sentences[si][1]
+        }
+        emit(first, end)
         continue
       }
-
-      cues.push({
-        index: cues.length + 1,
-        startMs: Math.round(words[start].start * 1000),
-        endMs: Math.round(words[end].end * 1000),
-        text: cueLines.join('\n'),
-      })
-      i = end + 1
+      const ends = partitionWords(words, first, last, budget, budget + SHORT_PULLBACK_ALLOWANCE, Infinity)
+      let from = first
+      for (const end of ends ?? [last]) {
+        emit(from, end)
+        from = end + 1
+      }
     }
   }
 

@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { formatDate } from '@/lib/utils'
 import { CardDialog, type KanbanCardData, type KanbanColumnData, type KanbanUser } from '@/components/KanbanBoard'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { useAuth } from '@/components/AuthProvider'
 import { toast } from 'sonner'
 
 type TaskMember = {
@@ -53,10 +55,14 @@ export function ProjectTasks({
   clientName?: string | null
   canEdit?: boolean
 }) {
+  const { user } = useAuth()
+  // Task deletion is system-admin only (enforced by DELETE /api/kanban/cards/[id])
+  const canDeleteTasks = user?.isSystemAdmin === true
   const [tasks, setTasks] = useState<TaskCard[]>([])
   const [loading, setLoading] = useState(true)
   const [editingTask, setEditingTask] = useState<KanbanCardData | null>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<KanbanCardData | null>(null)
   const [boardColumns, setBoardColumns] = useState<KanbanColumnData[]>([])
   const [boardUsers, setBoardUsers] = useState<KanbanUser[]>([])
   const [boardProjects, setBoardProjects] = useState<Array<{ id: string; title: string }>>([])
@@ -188,6 +194,24 @@ export function ProjectTasks({
     boardLoadedRef.current = false
     await loadTasks()
   }, [editingTask, loadTasks])
+
+  const confirmDeleteTask = useCallback(async () => {
+    const task = pendingDeleteTask
+    if (!task) return
+    try {
+      const res = await apiFetch(`/api/kanban/cards/${task.id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null)
+        throw new Error(payload?.error || 'Failed to delete task')
+      }
+      setEditingTask(null)
+      setIsAddingTask(false)
+      toast.success('Task deleted')
+      await loadTasks()
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete task')
+    }
+  }, [pendingDeleteTask, loadTasks])
 
   const handleAddTask = useCallback(async () => {
     await loadBoardData()
@@ -416,8 +440,18 @@ export function ProjectTasks({
           onSave={handleSaveTask}
           onClose={() => { setEditingTask(null); setIsAddingTask(false) }}
           isAdmin={true}
+          onDelete={canDeleteTasks ? () => setPendingDeleteTask(editingTask) : undefined}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingDeleteTask !== null}
+        onOpenChange={(open) => { if (!open) setPendingDeleteTask(null) }}
+        title={`Delete task "${pendingDeleteTask?.title ?? ''}"?`}
+        description="This will permanently delete this task and its comments."
+        confirmLabel="Delete"
+        onConfirm={confirmDeleteTask}
+      />
     </>
   )
 }

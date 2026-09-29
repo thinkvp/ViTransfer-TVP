@@ -10,8 +10,8 @@ export const dynamic = 'force-dynamic'
 
 const paymentSchema = z.object({
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  // GST net component (1A − 1B) — must be positive
-  gstAmountCents: z.number().int().min(1),
+  // GST net component (1A − 1B), signed: positive = paid to the ATO, negative = refunded by it
+  gstAmountCents: z.number().int(),
   // PAYG Income Tax Instalment component (T7) — 0 if none
   paygAmountCents: z.number().int().min(0).default(0),
   // Account for the GST net (e.g. GST Payable liability)
@@ -23,8 +23,9 @@ const paymentSchema = z.object({
 
 // POST /api/admin/accounting/bas/[id]/payment
 // Stores payment date, amounts, and target accounts on the BAS period.
+// Amounts are signed: a negative total is a refund received from the ATO.
 // No Expense records are created — reconciliation happens when the ATO bank debit
-// is matched as BAS_PAYMENT against this period.
+// (or refund deposit) is matched as BAS_PAYMENT against this period.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
@@ -49,6 +50,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
 
   const { paymentDate, gstAmountCents, paygAmountCents, gstAccountId, paygAccountId, paymentNotes } = parsed.data
+
+  if (gstAmountCents + paygAmountCents === 0) {
+    return NextResponse.json({ error: 'The payment or refund total cannot be zero' }, { status: 400 })
+  }
 
   if (paygAmountCents > 0 && !paygAccountId) {
     return NextResponse.json({ error: 'A PAYG account is required when a PAYG amount is entered' }, { status: 400 })

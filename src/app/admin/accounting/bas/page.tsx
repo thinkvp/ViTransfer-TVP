@@ -13,7 +13,67 @@ import { cn, formatDate } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
-type BasSortKey = 'label' | 'startDate' | 'quarter' | 'basis' | 'status' | 'lodgedAt'
+type BasSortKey = 'label' | 'startDate' | 'quarter' | 'basis' | 'status' | 'lodgedAt' | 'settlement'
+
+function fmtAud(cents: number) {
+  return `$${(Math.abs(cents) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+/** ATO BAS amounts are whole dollars, rounded down (mirrors the detail page). */
+function truncateBasCents(cents: number) {
+  const wholeDollarsCents = Math.floor(Math.abs(cents) / 100) * 100
+  return cents < 0 ? -wholeDollarsCents : wholeDollarsCents
+}
+
+type Settlement =
+  | { kind: 'paid'; cents: number; date: string; reconciled: boolean }
+  | { kind: 'received'; cents: number; date: string; reconciled: boolean }
+  | { kind: 'unpaid'; cents: number }
+  | { kind: 'refund'; cents: number }
+  | { kind: 'nil' }
+
+/**
+ * What a lodged period settled for. A recorded payment/refund wins (paymentAmountCents
+ * is signed, negative = refund received); otherwise fall back to label 9 from the
+ * lodge-time snapshot (8A − 8B) as the amount still outstanding either way.
+ */
+function getSettlement(p: BasPeriod): Settlement | null {
+  if (p.status !== 'LODGED') return null
+  if (p.paymentDate && p.paymentAmountCents != null) {
+    const reconciled = !!p.bankTransactionId
+    return p.paymentAmountCents < 0
+      ? { kind: 'received', cents: -p.paymentAmountCents, date: p.paymentDate, reconciled }
+      : { kind: 'paid', cents: p.paymentAmountCents, date: p.paymentDate, reconciled }
+  }
+  const calc = p.calculationJson
+  if (!calc) return null
+  const label9 = truncateBasCents(calc.label1ACents)
+    + truncateBasCents(p.paygWithholdingCents ?? 0)
+    + truncateBasCents(p.paygInstalmentCents ?? 0)
+    - truncateBasCents(calc.label1BCents)
+  if (label9 > 0) return { kind: 'unpaid', cents: label9 }
+  if (label9 < 0) return { kind: 'refund', cents: -label9 }
+  return { kind: 'nil' }
+}
+
+/** Signed amount for sorting: payments positive, refunds negative, not-lodged lowest. */
+function settlementSortValue(s: Settlement | null) {
+  if (!s) return Number.NEGATIVE_INFINITY
+  if (s.kind === 'refund' || s.kind === 'received') return -s.cents
+  if (s.kind === 'nil') return 0
+  return s.cents
+}
+
+function settlementExport(s: Settlement | null): [string, string] {
+  if (!s) return ['', '']
+  switch (s.kind) {
+    case 'paid': return [(s.cents / 100).toFixed(2), `Paid ${s.date}`]
+    case 'received': return [(-s.cents / 100).toFixed(2), `Refund received ${s.date}`]
+    case 'unpaid': return [(s.cents / 100).toFixed(2), 'Unpaid']
+    case 'refund': return [(-s.cents / 100).toFixed(2), 'Refund not yet received']
+    case 'nil': return ['0.00', 'Nil']
+  }
+}
 
 const STATUS_BADGE: Record<BasPeriodStatus, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
@@ -47,6 +107,11 @@ export default function BasPage() {
         case 'basis': r = a.basis.localeCompare(b.basis); break
         case 'status': r = a.status.localeCompare(b.status); break
         case 'lodgedAt': r = (a.lodgedAt ?? '').localeCompare(b.lodgedAt ?? ''); break
+        case 'settlement': {
+          const av = settlementSortValue(getSettlement(a)), bv = settlementSortValue(getSettlement(b))
+          r = av === bv ? 0 : av < bv ? -1 : 1
+          break
+        }
       }
       return sortDir === 'asc' ? r : -r
     })
@@ -90,8 +155,9 @@ export default function BasPage() {
         <div className="flex items-center gap-2">
           <ExportMenu
             onExportCsv={() => {
-              downloadCsv('bas-periods.csv', ['Label', 'Quarter', 'Start', 'End', 'Basis', 'Status', 'Lodged'], periods.map(p => [
+              downloadCsv('bas-periods.csv', ['Label', 'Quarter', 'Start', 'End', 'Basis', 'Status', 'Lodged', 'Paid / Refunded', 'Settlement'], periods.map(p => [
                 p.label, String(p.quarter), p.startDate, p.endDate, p.basis, STATUS_LABELS[p.status as BasPeriodStatus] ?? p.status, p.lodgedAt ? formatDate(p.lodgedAt) : '',
+                ...settlementExport(getSettlement(p)),
               ]))
             }}
             onExportPdf={() => generateReportPdf({
@@ -105,10 +171,14 @@ export default function BasPage() {
                   { header: 'Basis', nowrap: true },
                   { header: 'Status', nowrap: true },
                   { header: 'Lodged', nowrap: true },
+                  { header: 'Paid / Refunded', nowrap: true },
                 ],
-                rows: periods.map(p => ({
-                  cells: [p.label, String(p.quarter), p.startDate, p.endDate, p.basis, STATUS_LABELS[p.status as BasPeriodStatus] ?? p.status, p.lodgedAt ? formatDate(p.lodgedAt) : '—'],
-                })),
+                rows: periods.map(p => {
+                  const [amount, note] = settlementExport(getSettlement(p))
+                  return {
+                    cells: [p.label, String(p.quarter), p.startDate, p.endDate, p.basis, STATUS_LABELS[p.status as BasPeriodStatus] ?? p.status, p.lodgedAt ? formatDate(p.lodgedAt) : '—', amount ? `${amount} (${note})` : '—'],
+                  }
+                }),
               }],
             })}
             disabled={periods.length === 0}
@@ -137,6 +207,7 @@ export default function BasPage() {
                       { key: 'basis', label: 'Basis', className: 'min-w-[100px]' },
                       { key: 'status', label: 'Status', className: 'min-w-[120px]' },
                       { key: 'lodgedAt', label: 'Lodged', className: 'min-w-[120px]' },
+                      { key: 'settlement', label: 'Paid / Refunded', className: 'min-w-[150px]' },
                     ] as { key: BasSortKey; label: string; className: string }[]).map(col => (
                       <th key={col.key} className={cn('px-3 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap', col.className)}>
                         <button type="button" onClick={() => toggleSort(col.key)} className="inline-flex items-center gap-1 hover:text-foreground transition-colors">
@@ -165,6 +236,9 @@ export default function BasPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2 text-muted-foreground text-xs whitespace-nowrap min-w-[120px]">{p.lodgedAt ? p.lodgedAt.slice(0, 10) : '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap min-w-[150px]">
+                        <SettlementCell settlement={getSettlement(p)} />
+                      </td>
                       <td className="px-3 py-2 text-right whitespace-nowrap min-w-[88px]" onClick={ev => ev.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
                           <AccountingTableActionButton onClick={() => router.push(`/admin/accounting/bas/${p.id}`)} title="Edit BAS period" aria-label="Edit BAS period">
@@ -201,5 +275,22 @@ export default function BasPage() {
         }}
       />
     </>
+  )
+}
+
+function SettlementCell({ settlement: s }: { settlement: Settlement | null }) {
+  if (!s) return <span className="text-muted-foreground">—</span>
+  if (s.kind === 'nil') return <span className="text-muted-foreground text-xs">Nil</span>
+  const note = s.kind === 'paid' ? `Paid ${s.date}${s.reconciled ? '' : ' · not reconciled'}`
+    : s.kind === 'received' ? `Refund received ${s.date}${s.reconciled ? '' : ' · not reconciled'}`
+    : s.kind === 'unpaid' ? 'Not yet paid'
+    : 'Refund not yet received'
+  const outstanding = s.kind === 'unpaid' || s.kind === 'refund'
+  const isRefund = s.kind === 'refund' || s.kind === 'received'
+  return (
+    <div className="leading-tight">
+      <span className={cn('tabular-nums font-medium', isRefund && 'text-green-400')}>{fmtAud(s.cents)}</span>
+      <div className={cn('text-[11px]', outstanding ? 'text-yellow-400' : 'text-muted-foreground')}>{note}</div>
+    </div>
   )
 }
