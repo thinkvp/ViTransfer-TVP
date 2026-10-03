@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
+import { presignAlbumPhotoPreviewUrls } from '@/lib/photo-preview-presign'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
 import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
@@ -80,6 +81,8 @@ export async function GET(
   const directThumbUrls = await presignAlbumPhotoThumbnailUrls(
     album.photos.filter((p) => p.thumbnailStatus === 'READY').map((p) => p.id),
   )
+  // Lightbox previews too: paging through ~40+ photos via token URLs got the viewer banned.
+  const directPreviewUrls = await presignAlbumPhotoPreviewUrls(album.photos)
 
   const photos = await Promise.all(
     album.photos.map(async (p) => {
@@ -98,7 +101,7 @@ export async function GET(
         createdAt: p.createdAt,
         url: `/api/content/photo/${tokenValue}`,
         thumbnailUrl: directThumbUrls.get(p.id) ?? `/api/content/photo/${tokenValue}?variant=thumbnail`,
-        previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
+        previewUrl: directPreviewUrls.get(p.id) ?? `/api/content/photo/${tokenValue}?variant=preview`,
         downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
         socialDownloadUrl: `/api/content/photo/${tokenValue}?download=true&variant=social`,
         socialReady: p.socialStatus === 'READY',

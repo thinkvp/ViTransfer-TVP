@@ -97,6 +97,8 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
 
   const refreshAlbumsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshPhotosTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Latest fetchZipStatus for the upload-refresh timer (its callback is memoized on projectId only).
+  const fetchZipStatusRef = useRef<((albumId: string) => Promise<void>) | null>(null)
 
   const [togglingSocialCopiesAlbumId, setTogglingSocialCopiesAlbumId] = useState<string | null>(null)
   const [pendingDisableSocialAlbumId, setPendingDisableSocialAlbumId] = useState<string | null>(null)
@@ -171,25 +173,31 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     }
   }
 
+  // Throttled (not debounced) refresh after each finished photo: the first
+  // completion arms a timer and later ones inside the window ride along, so a
+  // 186-photo drop costs ~1 refresh per window instead of one per photo (which
+  // blew the 60/min read limits) while the grid still fills in as it goes.
   const scheduleRefreshAfterUpload = useCallback(
     (albumId: string) => {
-      onProjectDataChanged?.()
+      if (!refreshPhotosTimersRef.current.has(albumId)) {
+        refreshPhotosTimersRef.current.set(
+          albumId,
+          setTimeout(() => {
+            refreshPhotosTimersRef.current.delete(albumId)
+            void fetchPhotos(albumId)
+            void fetchZipStatusRef.current?.(albumId)
+          }, 3000)
+        )
+      }
 
-      // Debounce photos refresh per-album
-      const prevPhotoTimer = refreshPhotosTimersRef.current.get(albumId)
-      if (prevPhotoTimer) clearTimeout(prevPhotoTimer)
-      refreshPhotosTimersRef.current.set(
-        albumId,
-        setTimeout(() => {
-          void fetchPhotos(albumId)
-        }, 750)
-      )
-
-      // Debounce albums refresh (counts) globally
-      if (refreshAlbumsTimerRef.current) clearTimeout(refreshAlbumsTimerRef.current)
-      refreshAlbumsTimerRef.current = setTimeout(() => {
-        void fetchAlbums()
-      }, 1500)
+      // Albums list (counts) and the parent's storage/file panels.
+      if (!refreshAlbumsTimerRef.current) {
+        refreshAlbumsTimerRef.current = setTimeout(() => {
+          refreshAlbumsTimerRef.current = null
+          void fetchAlbums()
+          onProjectDataChanged?.()
+        }, 5000)
+      }
     },
     // fetchAlbums/fetchPhotos are stable enough for this usage; projectId changes will
     // remount the component and the timers will be cleared in cleanup.
@@ -332,6 +340,10 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
     }
   }, [expandedAlbumId])
 
+  useEffect(() => {
+    fetchZipStatusRef.current = fetchZipStatus
+  }, [fetchZipStatus])
+
   const regenerateZips = useCallback(async (albumId: string) => {
     try {
       await apiPost(`/api/albums/${albumId}/zip-regenerate`, {})
@@ -458,9 +470,12 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
       void fetchZipStatus(albumId)
 
       // Also refresh the albums list shortly after, so status/counts stay accurate.
+      // (Calls onProjectDataChanged too in case this replaced a pending upload refresh.)
       if (refreshAlbumsTimerRef.current) clearTimeout(refreshAlbumsTimerRef.current)
       refreshAlbumsTimerRef.current = setTimeout(() => {
+        refreshAlbumsTimerRef.current = null
         void fetchAlbums()
+        onProjectDataChanged?.()
       }, 1000)
     } catch (e: any) {
       toast.error(e?.message || 'Failed to delete photo')
@@ -812,10 +827,7 @@ export default function AdminAlbumManager({ projectId, projectStatus, canDelete 
                     <AlbumPhotoUploadQueue
                       albumId={album.id}
                       maxConcurrent={3}
-                      onUploadComplete={() => {
-                        scheduleRefreshAfterUpload(album.id)
-                        void fetchZipStatus(album.id)
-                      }}
+                      onUploadComplete={() => scheduleRefreshAfterUpload(album.id)}
                     />
                   </div>
                 )}

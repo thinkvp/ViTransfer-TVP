@@ -26,6 +26,7 @@ interface NotificationData {
     authorName: string
     content: string
     timecode?: string | null
+    timecodeEnd?: string | null
   }
   /**
    * Replies that landed between the quoted parent and this one, oldest first. Threads are
@@ -36,6 +37,7 @@ interface NotificationData {
     authorName: string
     content: string
     timecode?: string | null
+    timecodeEnd?: string | null
     isInternal?: boolean
   }>
   /** Replies before the quoted run-up, summarised as a count instead of being pasted in. */
@@ -47,6 +49,7 @@ interface NotificationData {
     authorName: string
     content: string
     timecode?: string | null
+    timecodeEnd?: string | null
   }
   /**
    * Current reaction tally on this comment, rendered inline under the body so a digest
@@ -144,8 +147,9 @@ function renderQuoteLine(
   timecode: string | null | undefined,
   useFullTimecode: boolean,
   isFirst: boolean,
+  timecodeEnd?: string | null,
 ): string {
-  const tc = timecode ? formatTimecodeForEmail(timecode, useFullTimecode) : ''
+  const tc = timecode ? formatTimecodeForEmail(timecode, useFullTimecode, timecodeEnd) : ''
   const spacing = isFirst ? '' : ' margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb;'
   return `
       <div style="${spacing}">
@@ -184,6 +188,7 @@ function renderThreadQuote(
       parent.timecode,
       useFullTimecode,
       true,
+      parent.timecodeEnd,
     ))
   }
 
@@ -201,6 +206,7 @@ function renderThreadQuote(
       entry.timecode,
       useFullTimecode,
       lines.length === 0,
+      entry.timecodeEnd,
     ))
   }
 
@@ -276,7 +282,7 @@ function groupNotificationsIntoThreads(notifications: NotificationData[]): Diges
  */
 function renderReactedToQuote(n: NotificationData, useFullTimecode: boolean): string {
   if (!n.reactedTo) return ''
-  const tc = n.reactedTo.timecode ? formatTimecodeForEmail(n.reactedTo.timecode, useFullTimecode) : ''
+  const tc = n.reactedTo.timecode ? formatTimecodeForEmail(n.reactedTo.timecode, useFullTimecode, n.reactedTo.timecodeEnd) : ''
   return `
     <div style="margin:0; padding:8px 12px; background:#f3f4f6; border-left:3px solid #9ca3af; border-radius:0 6px 6px 0;">
       <div style="font-size:12px; color:#6b7280; margin-bottom:3px;">${escapeHtml(n.reactedTo.authorName)}${tc ? ` &bull; ${escapeHtml(tc)}` : ''}</div>
@@ -313,7 +319,7 @@ function renderReactionItem(
   return `
     <div style="padding:10px 0;">
       <div style="font-size:13px; color:#6b7280; margin-bottom:4px;">
-        ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, accentColor, accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, useFullTimecode)}` : ''}
+        ${escapeHtml(n.videoName)}${n.videoLabel ? ` ${emailVersionPillHtml(n.videoLabel, accentColor, accentTextMode)}` : ''}${n.timecode ? ` • ${formatTimecodeForEmail(n.timecode, useFullTimecode, n.timecodeEnd)}` : ''}
       </div>
       <div style="font-size:14px; color:#111827; margin-bottom:6px;">
         <span style="font-size:16px;">${escapeHtml(n.emoji || '')}</span>

@@ -5,6 +5,15 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] - 2026-10-03
+
+### Fixed
+
+- **Tabs left open past an expired admin session no longer get the office IP banned** — when the computer woke, each open share-preview tab kept re-requesting video tokens and collected a burst of 401s, which tripped the reverse proxy's brute-force rule and banned the whole IP for 4 hours. A tab now stops all token fetching and polling at the first sign the session is gone, tells its sibling tabs to do the same, and goes to the login page on its next request. A known-expired token is now refreshed before a request is sent, not after it fails, and a page load requests its video tokens in one batch instead of one per kind. Client share pages get the same treatment for an expired share session, so a client can't trip the ban either.
+- **Summary emails now show the full time range for range comments** — admin and client digests showed only the start time (e.g. "0:12") for a comment left on a range. They now show "0:12 – 0:18" in the comment header, on replies in that thread, in quoted parent comments and on reactions. Comments already waiting in the queue pick this up too.
+- **Browsing a large album in the photo viewer no longer gets the viewer's IP banned** — each full-size photo in the share-page lightbox loaded through a unique app URL, and paging through ~40 of them looked like a site crawl to the server's intrusion protection, which banned the viewer's IP for 4 hours. Lightbox images now load straight from storage, the same way album thumbnails already did.
+- **Large photo uploads no longer trip a rate-limit lockout** — dropping ~100+ photos into an album triggered a "project-read" rate-limit lockout partway through, because the project page re-loaded itself once per finished photo. The project page now ignores photo/upload activity it doesn't display, and the album, files and activity panels (admin and client share pages) refresh at most once every few seconds during a bulk upload instead of once per file.
+
 ## [2.7.0] - 2026-09-29
 
 ### Added

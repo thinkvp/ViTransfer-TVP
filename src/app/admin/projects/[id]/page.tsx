@@ -12,7 +12,7 @@ import AdminUploadManager from '@/components/AdminUploadManager'
 import ProjectActions from '@/components/ProjectActions'
 import ShareLink from '@/components/ShareLink'
 import { ArrowLeft, Settings, Check, FolderKanban, Pencil, Plus, Video, Images, Upload, X } from 'lucide-react'
-import { apiDelete, apiFetch, apiPatch, apiPost, attemptRefresh } from '@/lib/api-client'
+import { apiDelete, apiFetch, apiPatch, apiPost, handleAdminStreamAuthError } from '@/lib/api-client'
 import { getAccessToken } from '@/lib/token-store'
 import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
 import { toast } from 'sonner'
@@ -293,6 +293,11 @@ export default function ProjectPage() {
     const handleEvent = (type: ProjectEventType) => {
       if (type === 'internal') {
         setInternalCommentsRefresh((n) => n + 1)
+      } else if (type === 'album' || type === 'upload') {
+        // Nothing in the project payload changes; AdminAlbumManager and
+        // AdminUploadManager load their own data. A bulk photo drop publishes one
+        // `album` event per photo, so refetching here tripped the 60/min
+        // project-read limit (and its lockout) partway through the upload.
       } else {
         // comment / approval / status / video all live in the project payload
         // (videos, status, feedback counts).
@@ -304,10 +309,7 @@ export default function ProjectPage() {
       token: projectSlug,
       authToken: () => getAccessToken(),
       onEvent: handleEvent,
-      onAuthError: () => {
-        // Rotate the expired admin access token so the next retry succeeds.
-        void attemptRefresh()
-      },
+      onAuthError: handleAdminStreamAuthError,
     })
 
     return () => {

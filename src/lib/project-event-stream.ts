@@ -34,8 +34,12 @@ interface OpenProjectEventStreamOptions {
    */
   authToken: string | null | (() => string | null)
   onEvent: (type: ProjectEventType) => void
-  /** Called on a 401/403 so the caller can revalidate/refresh its session before the next retry. */
-  onAuthError?: () => void
+  /**
+   * Called on a 401/403 so the caller can revalidate/refresh its session before
+   * the next retry. Return `false` when the session can't recover (no refresh
+   * token, session halted) to close the stream instead of retrying a 401.
+   */
+  onAuthError?: () => boolean | void
 }
 
 const MAX_BACKOFF_MS = 30_000
@@ -83,7 +87,10 @@ export function openProjectEventStream(options: OpenProjectEventStreamOptions): 
       })
 
       if (response.status === 401 || response.status === 403) {
-        options.onAuthError?.()
+        if (options.onAuthError?.() === false) {
+          closed = true
+          return
+        }
         // Auth won't recover on its own quickly — back off hard rather than spin.
         scheduleReconnect(MAX_BACKOFF_MS)
         return

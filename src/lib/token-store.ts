@@ -8,6 +8,7 @@ const TOKEN_CHANNEL_NAME = 'vitransfer_auth_tokens'
 
 type TokenChangeListener = (tokens: { accessToken: string | null; refreshToken: string | null }) => void
 const listeners = new Set<TokenChangeListener>()
+const sessionExpiredListeners = new Set<() => void>()
 let tokenChannel: BroadcastChannel | null = null
 let tokenChannelInitialized = false
 
@@ -101,6 +102,13 @@ function ensureTokenChannel(): BroadcastChannel | null {
         notifyListeners()
       }
 
+      if (data.type === 'expired') {
+        // A sibling window found the shared session dead (refresh rejected). It
+        // follows up with a 'clear'; listeners use this to stop their own
+        // token fetching/polling now rather than each finding out via a 401.
+        sessionExpiredListeners.forEach(fn => fn())
+      }
+
       if (data.type === 'request') {
         // A freshly-loaded sibling window is asking for the current session.
         // Only answer if we actually hold a live session — a window whose
@@ -158,7 +166,7 @@ function ensureTokenChannel(): BroadcastChannel | null {
   return tokenChannel
 }
 
-function broadcastTokens(payload: { type: 'tokens' | 'clear'; accessToken?: string | null; refreshToken?: string | null }) {
+function broadcastTokens(payload: { type: 'tokens' | 'clear' | 'expired'; accessToken?: string | null; refreshToken?: string | null }) {
   const channel = ensureTokenChannel()
   if (!channel) return
   try {
@@ -366,6 +374,18 @@ export function isCurrentWindowSessionTimedOut(): boolean {
 export function subscribe(listener: TokenChangeListener): () => void {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+/** Tell sibling windows the shared session is dead (sent before clearTokens()). */
+export function broadcastSessionExpired() {
+  broadcastTokens({ type: 'expired' })
+}
+
+/** Fires when a sibling window reports the shared session expired. */
+export function subscribeSessionExpired(listener: () => void): () => void {
+  ensureTokenChannel()
+  sessionExpiredListeners.add(listener)
+  return () => sessionExpiredListeners.delete(listener)
 }
 
 function notifyListeners() {

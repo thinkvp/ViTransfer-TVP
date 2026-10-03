@@ -12,7 +12,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess, requireMenuAccess } from '@/lib/rbac-api'
 import crypto from 'crypto'
 import { getRedis } from '@/lib/redis'
-import { getPeriodString, normalizeNotificationDataTimecode, attachThreadContext, attachReactionTallies, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, ADMIN_SEND_LOCK_KEY } from '@/worker/notification-helpers'
+import { getPeriodString, normalizeNotificationDataTimecode, attachThreadContext, attachReactionTallies, attachTimecodeRanges, sendNotificationsWithRetry, sendSummaryToRecipients, notificationBatchHash, tryAcquireSendLock, releaseSendLock, clientSendLockKey, ADMIN_SEND_LOCK_KEY } from '@/worker/notification-helpers'
 import { getFilePath, sanitizeFilenameForHeader } from '@/lib/storage'
 import { getStoredFileRecords } from '@/lib/stored-file'
 import fs from 'fs'
@@ -363,9 +363,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               // sent summary must read identically to the one the schedule would have sent.
               // Client digests never quote internal comments — see attachThreadContext.
               const notifications = await attachThreadContext(
-                await attachReactionTallies(
+                await attachReactionTallies(await attachTimecodeRanges(
                   clientPending.map((n) => normalizeNotificationDataTimecode(n.data as any)),
-                ),
+                )),
                 { includeInternal: false },
               )
 
@@ -504,9 +504,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
               })
               const period = getPeriodString(globalSettings?.adminNotificationSchedule || 'HOURLY')
               const adminNotifications = await attachThreadContext(
-                await attachReactionTallies(
+                await attachReactionTallies(await attachTimecodeRanges(
                   adminPending.map((n) => normalizeNotificationDataTimecode(n.data as any)),
-                ),
+                )),
                 { includeInternal: true },
               )
 

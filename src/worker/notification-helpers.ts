@@ -122,6 +122,57 @@ export async function attachReactionTallies(notifications: any[]): Promise<any[]
   )
 }
 
+/**
+ * Attach the out-time of every range comment in the digest, so the email shows
+ * "0:12 – 0:18" rather than just the in-time.
+ *
+ * Read live rather than from the queue row: rows queued before ranges were carried in the
+ * payload don't have it, and replies never store one of their own — they inherit the
+ * thread root's in-time but their own `timecodeEnd` is always null, so the range has to be
+ * taken from the root. Timecodes can't be edited after posting, so a live read always
+ * matches the in-time already in the payload.
+ */
+export async function attachTimecodeRanges(notifications: any[]): Promise<any[]> {
+  // The comment whose range applies to each entry's header: a reply's thread root, or the
+  // comment itself (for a reaction, the comment that was reacted to).
+  const rangeSourceId = (n: any): string | null => {
+    if (n?.type !== 'COMMENT_REACTION' && n?.isReply && typeof n?.parentCommentId === 'string') {
+      return n.parentCommentId
+    }
+    return typeof n?.commentId === 'string' ? n.commentId : null
+  }
+
+  const ids = [...new Set(notifications.map(rangeSourceId).filter((id): id is string => !!id))]
+  if (ids.length === 0) return notifications
+
+  const comments = await prisma.comment.findMany({
+    where: { id: { in: ids } },
+    // A reaction can sit on a reply, whose range lives on its parent.
+    select: { id: true, timecodeEnd: true, parent: { select: { timecodeEnd: true } } },
+  })
+
+  const endById = new Map<string, string>()
+  for (const c of comments) {
+    const end = c.timecodeEnd || c.parent?.timecodeEnd
+    if (end) endById.set(c.id, normalizeTimecodeValue(end))
+  }
+  if (endById.size === 0) return notifications
+
+  return notifications.map((n) => {
+    const sourceId = rangeSourceId(n)
+    const end = sourceId ? endById.get(sourceId) : undefined
+    if (!end || !n?.timecode) return n
+
+    const next = { ...n, timecodeEnd: end }
+    if (n.type === 'COMMENT_REACTION' && n.reactedTo?.timecode) {
+      next.reactedTo = { ...n.reactedTo, timecodeEnd: end }
+    } else if (n.isReply && n.parentComment?.timecode) {
+      next.parentComment = { ...n.parentComment, timecodeEnd: end }
+    }
+    return next
+  })
+}
+
 // How many replies preceding the new one are quoted as context. Threads run long; the
 // replies immediately before the new one are what make it readable, and everything earlier
 // is summarised as a count rather than pasted into the email.
@@ -208,6 +259,9 @@ export async function attachThreadContext(
           || (reply.userId || reply.isInternal ? 'Admin' : 'Client'),
         content: reply.content,
         timecode: reply.timecode ? normalizeTimecodeValue(reply.timecode) : null,
+        // Replies share the root's in-time, so they share its range too (set by
+        // attachTimecodeRanges, which runs first).
+        timecodeEnd: reply.timecode ? (n.timecodeEnd ?? null) : null,
         isInternal: reply.isInternal,
       })),
       threadContextOmitted: preceding.length - shown.length,

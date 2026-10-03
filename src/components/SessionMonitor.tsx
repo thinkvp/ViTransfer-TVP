@@ -3,24 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { expireCurrentWindowSession, getAccessToken, isCurrentWindowSessionTimedOut, subscribe } from '@/lib/token-store'
-import { attemptRefresh } from '@/lib/api-client'
+import { attemptRefresh, getJwtExpMs, haltAdminSession } from '@/lib/api-client'
 import { useUploadManagerActionsOptional } from '@/components/UploadManagerProvider'
 
 const INACTIVITY_TIMEOUT = 2 * 60 * 60 * 1000 // 2 hours
 const CHECK_INTERVAL = 30 * 1000 // 30 seconds
 const PROACTIVE_REFRESH_BEFORE_MS = 5 * 60 * 1000 // Refresh 5 min before access token expires
-
-/** Decode the exp claim from a JWT without verifying the signature. */
-function getJwtExpMs(token: string): number | null {
-  try {
-    const b64 = token.split('.')[1]?.replace(/-/g, '+').replace(/_/g, '/')
-    if (!b64) return null
-    const payload = JSON.parse(atob(b64))
-    return typeof payload.exp === 'number' ? payload.exp * 1000 : null
-  } catch {
-    return null
-  }
-}
 
 export default function SessionMonitor() {
   const router = useRouter()
@@ -43,6 +31,10 @@ export default function SessionMonitor() {
     didExpireRef.current = true
 
     expireCurrentWindowSession()
+    // Stop this tab's token fetching/polling before the soft navigation lands.
+    // On wake from sleep this interval races the page's own refresh timers,
+    // which would otherwise each fire tokenless requests and collect 401s.
+    haltAdminSession({ navigating: true })
     setShowWarning(false)
     router.push('/login?sessionExpired=true')
   }, [router])

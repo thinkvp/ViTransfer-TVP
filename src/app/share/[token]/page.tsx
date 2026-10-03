@@ -22,7 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Lock, Check, Mail, KeyRound, CircleHelp } from 'lucide-react'
 import { ShareHelpModal } from '@/components/ShareHelpModal'
 import { loadShareToken, saveShareToken } from '@/lib/share-token-store'
-import { apiFetch, attemptRefresh } from '@/lib/api-client'
+import { apiFetch, handleAdminStreamAuthError } from '@/lib/api-client'
 import { withCommentIdentity } from '@/lib/comment-identity'
 import { getAccessToken } from '@/lib/token-store'
 import { openProjectEventStream, type ProjectEventType } from '@/lib/project-event-stream'
@@ -749,6 +749,14 @@ export default function SharePage() {
       if (timers[key]) clearTimeout(timers[key])
       timers[key] = setTimeout(fn, 200)
     }
+    const nudgeActivity = () => window.dispatchEvent(new CustomEvent('projectActivityRefresh'))
+    // Trailing throttle for per-file events: a bulk drop publishes one per file, and
+    // a debounce that fires on every gap >200ms still refetched ~once per file and
+    // tripped the 60/min read limits (locking the viewer out for a minute).
+    const throttle = (key: string, fn: () => void) => {
+      if (timers[key]) return
+      timers[key] = setTimeout(() => { timers[key] = undefined; fn() }, 3000)
+    }
     const refetchComments = () => debounce('comments', () => { void fetchComments() })
     const refetchProject = () => debounce('project', () => {
       // Skip the echo of an action this page performed itself: e.g. approving a
@@ -766,8 +774,9 @@ export default function SharePage() {
     const handleEvent = (type: ProjectEventType) => {
       // The Project Activity feed aggregates every event kind — nudge it to refresh
       // on anything (the panel listens for this and refetches, throttled).
-      if (type !== 'internal') {
-        window.dispatchEvent(new CustomEvent('projectActivityRefresh'))
+      // album/upload nudge it from inside their throttle below (one event per file).
+      if (type !== 'internal' && type !== 'album' && type !== 'upload') {
+        nudgeActivity()
       }
       switch (type) {
         case 'comment':
@@ -781,11 +790,11 @@ export default function SharePage() {
           break
         case 'upload':
           // A file/folder was added, removed, or renamed in the Uploads area.
-          debounce('files', () => { void fetchDownloadableFiles() })
+          throttle('files', () => { nudgeActivity(); void fetchDownloadableFiles() })
           break
         case 'album':
           // An album or photo was added/removed/renamed.
-          debounce('albums', () => { void fetchAlbums(); void fetchDownloadableFiles() })
+          throttle('albums', () => { nudgeActivity(); void fetchAlbums(); void fetchDownloadableFiles() })
           break
         case 'internal':
           // Admin-only team chat — not shown on the share page; ignore.
@@ -798,13 +807,12 @@ export default function SharePage() {
       authToken: getStreamAuthToken,
       onEvent: handleEvent,
       onAuthError: () => {
-        if (isAdminSession) {
-          // Rotate the expired admin access token so the next retry succeeds.
-          void attemptRefresh()
-        } else {
-          // Session likely expired; let the existing auth flow surface the re-auth UI.
-          void fetchComments()
-        }
+        if (isAdminSession) return handleAdminStreamAuthError()
+        // Session likely expired; let the existing auth flow surface the re-auth UI.
+        // A confirmed expiry clears the share token, which re-runs this effect and
+        // closes the stream; with no token left there is nothing worth retrying.
+        void fetchComments()
+        return !!getStreamAuthToken()
       },
     })
 
@@ -1235,6 +1243,13 @@ export default function SharePage() {
       }
     }
 
+    // A sibling request already hit a 401 and is revalidating the session: wait
+    // for the verdict instead of sending this batch with a token that's likely dead
+    // (every POST 401 counts toward the reverse proxy's 401 brute-force ban).
+    if (sessionRecoveryInFlightRef.current) {
+      await sessionRecoveryInFlightRef.current.catch(() => false)
+    }
+
     const authToken = shareTokenRef.current
     if (!authToken || isVideoTokenBackoffActive()) {
       resolveEmpty(pending)
@@ -1247,7 +1262,8 @@ export default function SharePage() {
       chunks.push(pending.slice(i, i + CHUNK))
     }
 
-    await Promise.all(chunks.map(async (chunk) => {
+    // Returns false when the session or rate limit makes further chunks pointless.
+    const sendChunk = async (chunk: typeof pending): Promise<boolean> => {
       try {
         const response = await fetch(`/api/share/${token}/video-token/batch`, {
           method: 'POST',
@@ -1260,16 +1276,16 @@ export default function SharePage() {
         if (response.status === 401) {
           await handleSessionExpired(response)
           resolveEmpty(chunk)
-          return
+          return false
         }
         if (response.status === 429) {
           noteVideoTokenRateLimited(response)
           resolveEmpty(chunk)
-          return
+          return false
         }
         if (!response.ok) {
           resolveEmpty(chunk)
-          return
+          return true
         }
         const data = await response.json().catch(() => ({}))
         const results = (data && typeof (data as any).results === 'object' && (data as any).results)
@@ -1288,10 +1304,21 @@ export default function SharePage() {
           } : EMPTY_VIDEO_TOKEN_RESULT
           for (const resolve of item.resolvers) resolve(value)
         }
+        return true
       } catch {
         resolveEmpty(chunk)
+        return true
       }
-    }))
+    }
+
+    // Probe with the first chunk; only fan the rest out in parallel if it got
+    // through, so a dead session costs one POST 401 rather than one per chunk.
+    const [first, ...rest] = chunks
+    if (!(await sendChunk(first))) {
+      for (const chunk of rest) resolveEmpty(chunk)
+      return
+    }
+    await Promise.all(rest.map(sendChunk))
   }, [token, handleSessionExpired, isVideoTokenBackoffActive, noteVideoTokenRateLimited])
 
   // Request one (videoId, quality) token via the coalescing batch. Also returns the
@@ -1356,6 +1383,7 @@ export default function SharePage() {
 
     const merged: Record<string, any> = {}
     let authFailed = false
+    let unauthorizedResponse: Response | null = null
 
     await Promise.all(chunks.map(async (chunkIds) => {
       try {
@@ -1373,6 +1401,7 @@ export default function SharePage() {
           if (response.status === 401 || response.status === 403 || response.status === 404) {
             authFailed = true
           }
+          if (response.status === 401) unauthorizedResponse = response
           return
         }
         const data = await response.json().catch(() => ({}))
@@ -1385,7 +1414,19 @@ export default function SharePage() {
       }
     }))
 
-    if (authFailed) requestFilesRefresh(true)
+    // A 401 means the share session may be dead: confirm it (one revalidation probe,
+    // shared with every other 401 on the page) and drop to the re-auth form if so,
+    // rather than letting each visible tile re-POST with the dead token. Admin
+    // sessions are handled by apiFetch.
+    // (Cast: TS narrows the `let` to null since the assignment is inside a callback.)
+    const unauthorized = unauthorizedResponse as Response | null
+    if (unauthorized && !isAdminSession) {
+      await handleSessionExpired(unauthorized)
+      // Revalidation recovered the session → refetch the files it couldn't sign.
+      if (shareTokenRef.current) requestFilesRefresh(true)
+    } else if (authFailed) {
+      requestFilesRefresh(true)
+    }
 
     for (const [cacheKey, item] of items) {
       uploadAccessUrlRequestCacheRef.current.delete(cacheKey)
@@ -1399,7 +1440,7 @@ export default function SharePage() {
       uploadAccessUrlCacheRef.current.set(cacheKey, entry)
       item.resolve(entry)
     }
-  }, [isAdminSession, requestFilesRefresh, shareToken, token])
+  }, [isAdminSession, requestFilesRefresh, shareToken, token, handleSessionExpired])
 
   const getUploadAccessUrl = useCallback(async (fileId: string): Promise<UploadAccessUrlCacheEntry | null> => {
     const normalizedFileId = String(fileId || '').trim()

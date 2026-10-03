@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowLeft, CircleHelp } from 'lucide-react'
 import { ShareHelpModal } from '@/components/ShareHelpModal'
-import { apiFetch, attemptRefresh } from '@/lib/api-client'
+import { apiFetch, attemptRefresh, handleAdminStreamAuthError } from '@/lib/api-client'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
 import { useSubtitleEditor } from '@/hooks/useSubtitleEditor'
 import { SubtitleEditPanel } from '@/components/subtitle-editor/SubtitleEditPanel'
@@ -25,6 +25,7 @@ import { SubtitleTimelineStrip } from '@/components/subtitle-editor/SubtitleTime
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { useTimeDisplayMode } from '@/hooks/useTimeDisplayMode'
 import { useContentImageRefresh } from '@/hooks/useContentImageRefresh'
+import { useAdminSessionHalted } from '@/hooks/useAdminSessionHalted'
 import { useEdgeSwipeNavigation } from '@/hooks/useEdgeSwipeNavigation'
 import { cn } from '@/lib/utils'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -414,6 +415,30 @@ export default function AdminSharePage() {
 
         const request = (async () => {
           try {
+            // Queue every batched token (thumbnail / timeline / subtitles) BEFORE the first
+            // await, so across all videos they land in the same 16 ms batch window → one
+            // POST per tokenization pass. Awaiting them one kind at a time used to cost a
+            // POST per kind, which multiplied the 401 burst when a session had died.
+            // Reuse anything the sidebar pass already minted.
+            const sidebarCached = sidebarVideoCacheRef.current.get(video.id)
+            const toContentUrl = (token: string | null) => (token ? `/api/content/${token}` : null)
+            const thumbnailPromise: Promise<string | null> = sidebarCached?.thumbnailUrl
+              ? Promise.resolve(sidebarCached.thumbnailUrl)
+              : video.thumbnailPath
+                ? getAdminVideoToken(video.id, 'thumbnail').then((t) => (t ? (t.startsWith('http') ? t : `/api/content/${t}`) : null))
+                : Promise.resolve(null)
+            const timelinePromise: Promise<[string | null, string | null]> = !video.timelinePreviewsReady
+              ? Promise.resolve([null, null])
+              : (sidebarCached?.timelineVttUrl && sidebarCached?.timelineSpriteUrl)
+                ? Promise.resolve([sidebarCached.timelineVttUrl, sidebarCached.timelineSpriteUrl])
+                : Promise.all([
+                    getAdminVideoToken(video.id, 'timeline-vtt').then(toContentUrl),
+                    getAdminVideoToken(video.id, 'timeline-sprite').then(toContentUrl),
+                  ])
+            const subtitlesPromise: Promise<string | null> = video.hasSubtitles
+              ? getAdminVideoToken(video.id, 'subtitles-vtt').then(toContentUrl)
+              : Promise.resolve(null)
+
             const [response480p, response720p, response1080p, responseOriginal] = await Promise.all([
               // Only request a preview token for a resolution that actually has a preview file.
               // The content route does its own fallback when serving, but the player uses the
@@ -476,28 +501,11 @@ export default function AdminSharePage() {
               pickHls(dataOriginal)
             }
 
-            let thumbnailUrl = sidebarVideoCacheRef.current.get(video.id)?.thumbnailUrl ?? null
-            if (!thumbnailUrl && video.thumbnailPath) {
-              const thumbToken = await getAdminVideoToken(video.id, 'thumbnail')
-              thumbnailUrl = thumbToken ? (thumbToken.startsWith('http') ? thumbToken : `/api/content/${thumbToken}`) : null
-            }
-
-            let timelineVttUrl = null
-            let timelineSpriteUrl = null
-            if (video.timelinePreviewsReady) {
-              const [vttToken, spriteToken] = await Promise.all([
-                getAdminVideoToken(video.id, 'timeline-vtt'),
-                getAdminVideoToken(video.id, 'timeline-sprite'),
-              ])
-              timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
-              timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
-            }
-
-            let subtitlesVttUrl = null
-            if (video.hasSubtitles) {
-              const subtitlesToken = await getAdminVideoToken(video.id, 'subtitles-vtt')
-              subtitlesVttUrl = subtitlesToken ? `/api/content/${subtitlesToken}` : null
-            }
+            const [thumbnailUrl, [timelineVttUrl, timelineSpriteUrl], subtitlesVttUrl] = await Promise.all([
+              thumbnailPromise,
+              timelinePromise,
+              subtitlesPromise,
+            ])
 
             const tokenized = {
               ...video,
@@ -551,22 +559,19 @@ export default function AdminSharePage() {
 
         const request = (async () => {
           try {
-            let thumbnailUrl = null
-            if (video.thumbnailPath) {
-              const thumbToken = await getAdminVideoToken(video.id, 'thumbnail')
-              thumbnailUrl = thumbToken ? (thumbToken.startsWith('http') ? thumbToken : `/api/content/${thumbToken}`) : null
-            }
-
-            let timelineVttUrl = null
-            let timelineSpriteUrl = null
-            if (video.timelinePreviewsReady) {
-              const [vttToken, spriteToken] = await Promise.all([
-                getAdminVideoToken(video.id, 'timeline-vtt'),
-                getAdminVideoToken(video.id, 'timeline-sprite'),
-              ])
-              timelineVttUrl = vttToken ? `/api/content/${vttToken}` : null
-              timelineSpriteUrl = spriteToken ? `/api/content/${spriteToken}` : null
-            }
+            // Request all three together so every video's tokens share one batch POST.
+            const toContentUrl = (token: string | null) => (token ? `/api/content/${token}` : null)
+            const [thumbnailUrl, timelineVttUrl, timelineSpriteUrl] = await Promise.all([
+              video.thumbnailPath
+                ? getAdminVideoToken(video.id, 'thumbnail').then((t) => (t ? (t.startsWith('http') ? t : `/api/content/${t}`) : null))
+                : Promise.resolve(null),
+              video.timelinePreviewsReady
+                ? getAdminVideoToken(video.id, 'timeline-vtt').then(toContentUrl)
+                : Promise.resolve(null),
+              video.timelinePreviewsReady
+                ? getAdminVideoToken(video.id, 'timeline-sprite').then(toContentUrl)
+                : Promise.resolve(null),
+            ])
 
             const sidebarVideo = {
               ...video,
@@ -1003,11 +1008,20 @@ export default function AdminSharePage() {
       if (timers[key]) clearTimeout(timers[key])
       timers[key] = setTimeout(fn, 200)
     }
+    const nudgeActivity = () => window.dispatchEvent(new CustomEvent('projectActivityRefresh'))
+    // Trailing throttle for per-file events: a bulk drop publishes one per file, and
+    // a debounce that fires on every gap >200ms still refetched ~once per file and
+    // tripped the 60/min read limits (locking the viewer out for a minute).
+    const throttle = (key: string, fn: () => void) => {
+      if (timers[key]) return
+      timers[key] = setTimeout(() => { timers[key] = undefined; fn() }, 3000)
+    }
 
     const handleEvent = (type: ProjectEventType) => {
       // The activity feed aggregates every kind of event.
-      if (type !== 'internal') {
-        window.dispatchEvent(new CustomEvent('projectActivityRefresh'))
+      // album/upload nudge it from inside their throttle below (one event per file).
+      if (type !== 'internal' && type !== 'album' && type !== 'upload') {
+        nudgeActivity()
       }
       switch (type) {
         case 'comment':
@@ -1025,11 +1039,11 @@ export default function AdminSharePage() {
           break
         case 'upload':
           // A file/folder was added, removed, or renamed in the Uploads area.
-          debounce('files', () => { void fetchDownloadableFiles() })
+          throttle('files', () => { nudgeActivity(); void fetchDownloadableFiles() })
           break
         case 'album':
           // An album or photo was added/removed/renamed.
-          debounce('albums', () => { void fetchAlbums(adminShareSlug); void fetchDownloadableFiles() })
+          throttle('albums', () => { nudgeActivity(); void fetchAlbums(adminShareSlug); void fetchDownloadableFiles() })
           break
         case 'internal':
           break
@@ -1040,10 +1054,7 @@ export default function AdminSharePage() {
       token: adminShareSlug,
       authToken: () => getAccessToken(),
       onEvent: handleEvent,
-      onAuthError: () => {
-        // Rotate the expired admin access token so the next retry succeeds.
-        void attemptRefresh()
-      },
+      onAuthError: handleAdminStreamAuthError,
     })
 
     return () => {
@@ -1245,10 +1256,13 @@ export default function AdminSharePage() {
   }, [project?.videosByName, project?.slug, activeVideoName, fetchSidebarVideos, fetchTokensForVideos, fetchDownloadableFiles, fetchAlbums])
 
   // Global content-image error capture + proactive periodic token refresh +
-  // visibility-change refresh.
+  // visibility-change refresh. Stops the moment the admin session is known dead:
+  // these re-mint every token on the page and were the main source of the 401
+  // bursts (→ CrowdSec IP ban) when tabs woke after an overnight expiry.
+  const adminSessionHalted = useAdminSessionHalted()
   useContentImageRefresh({
     onRefresh: refreshAllContentTokens,
-    enabled: !loading && !!project,
+    enabled: !loading && !!project && !adminSessionHalted,
   })
 
   // Set a video as the active folder without toggling — used by the version-open

@@ -4,6 +4,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { getAlbumZipFileName } from '@/lib/album-photo-zip'
 import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
+import { presignAlbumPhotoPreviewUrls } from '@/lib/photo-preview-presign'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { batchResolveFileSizes, getStoredFileRecords, storedFileExists } from '@/lib/stored-file'
@@ -417,6 +418,8 @@ export async function GET(
     const directThumbUrls = await presignAlbumPhotoThumbnailUrls(
       album.photos.filter((p: any) => p.thumbnailStatus === 'READY').map((p: any) => p.id),
     )
+    // Same for lightbox previews, which a viewer pages through one unique path at a time.
+    const directPreviewUrls = await presignAlbumPhotoPreviewUrls(album.photos)
 
     const photos: DownloadableFile[] = await Promise.all(
       album.photos.map(async (photo: any) => {
@@ -441,7 +444,7 @@ export async function GET(
           fileName: photo.fileName,
           fileSizeBytes: photoSizeMap.get(photo.id) ?? 0,
           thumbnailUrl: directThumbUrls.get(photo.id) ?? `/api/content/photo/${tokenValue}?variant=thumbnail`,
-          previewUrl: `/api/content/photo/${tokenValue}?variant=preview`,
+          previewUrl: directPreviewUrls.get(photo.id) ?? `/api/content/photo/${tokenValue}?variant=preview`,
           downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
         } as DownloadableFile
       })
