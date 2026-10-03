@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.7.1] - 2026-10-03
 
+### Security
+
+- **Dependency security update** — Next.js 16.3.8 (critical remote-code-execution fix in `next/og`), Nodemailer 10.0.13, DOMPurify 3.4.16, undici 7.30.0, plus patched brace-expansion and fast-uri. The production dependency audit is clean again.
+
 ### Fixed
 
 - **Tabs left open past an expired admin session no longer get the office IP banned** — when the computer woke, each open share-preview tab kept re-requesting video tokens and collected a burst of 401s, which tripped the reverse proxy's brute-force rule and banned the whole IP for 4 hours. A tab now stops all token fetching and polling at the first sign the session is gone, tells its sibling tabs to do the same, and goes to the login page on its next request. A known-expired token is now refreshed before a request is sent, not after it fails, and a page load requests its video tokens in one batch instead of one per kind. Client share pages get the same treatment for an expired share session, so a client can't trip the ban either.
