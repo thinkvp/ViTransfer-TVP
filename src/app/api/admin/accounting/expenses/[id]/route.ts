@@ -5,6 +5,7 @@ import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { expenseFromDb } from '@/lib/accounting/db-mappers'
 import { deleteAccountingFile, moveAccountingFile } from '@/lib/accounting/file-storage'
+import { splitGstInclusive } from '@/lib/accounting/gst-amounts'
 // ACCOUNTING_ATTACHMENT has no project association — getStoredFilePathForProject would return null.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, getStoredFileRecords, updateStoredFilePath } from '@/lib/stored-file'
@@ -120,14 +121,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       ...((data.amountIncGst !== undefined || data.taxCode !== undefined) ? await (async () => {
         const resolvedTaxCode = data.taxCode ?? existing.taxCode
         const amountIncGstCents = data.amountIncGst !== undefined ? Math.round(data.amountIncGst * 100) : existing.amountIncGst
-        let gstAmountCents = 0
-        if (resolvedTaxCode === 'GST') {
-          const settings = await prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } })
-          const taxRate = (settings?.taxRatePercent ?? 10) / 100
-          gstAmountCents = Math.round(amountIncGstCents * taxRate / (1 + taxRate))
-        }
-        const amountExGstCents = amountIncGstCents - gstAmountCents
-        return { amountIncGst: amountIncGstCents, gstAmount: gstAmountCents, amountExGst: amountExGstCents }
+        const taxRatePercent = resolvedTaxCode === 'GST'
+          ? (await prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } }))?.taxRatePercent ?? 10
+          : 10
+        const { amountExGst, gstAmount } = splitGstInclusive(amountIncGstCents, resolvedTaxCode, taxRatePercent)
+        return { amountIncGst: amountIncGstCents, gstAmount, amountExGst }
       })() : {}),
     },
     include: { account: true, user: { select: { id: true, name: true, email: true } } },
@@ -159,14 +157,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  // Sync account and/or taxCode to the linked bank transaction
-  if ((accountChanged || taxCodeChanged) && existing.bankTransactionId) {
+  // Sync taxCode to the linked bank transaction. Never sync the account: the Expense owns
+  // the account for EXPENSE-matched transactions, and an accountId on the bank transaction
+  // makes the Chart of Accounts ledger count the same money twice.
+  if (taxCodeChanged && existing.bankTransactionId) {
     await prisma.bankTransaction.update({
       where: { id: existing.bankTransactionId },
-      data: {
-        ...(accountChanged ? { accountId: data.accountId } : {}),
-        ...(taxCodeChanged ? { taxCode: data.taxCode } : {}),
-      },
+      data: { taxCode: data.taxCode },
     })
   }
 

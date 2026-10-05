@@ -5,6 +5,7 @@ import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { moveAccountingFile } from '@/lib/accounting/file-storage'
+import { splitGstInclusive } from '@/lib/accounting/gst-amounts'
 // ACCOUNTING_ATTACHMENT has no project association.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, updateStoredFilePath } from '@/lib/stored-file'
@@ -78,17 +79,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const amountIncGst = -txn.amountCents
 
   // Calculate GST breakdown using configurable rate
-  let amountExGst: number
-  let gstAmount: number
-  if (d.taxCode === 'GST') {
-    const settings = await prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } })
-    const taxRate = (settings?.taxRatePercent ?? 10) / 100 // e.g. 0.10
-    gstAmount = Math.round(amountIncGst * taxRate / (1 + taxRate))
-    amountExGst = amountIncGst - gstAmount
-  } else {
-    gstAmount = 0
-    amountExGst = amountIncGst
-  }
+  const taxRatePercent = d.taxCode === 'GST'
+    ? (await prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } }))?.taxRatePercent ?? 10
+    : 10
+  const { amountExGst, gstAmount } = splitGstInclusive(amountIncGst, d.taxCode, taxRatePercent)
 
   if (d.transactionType === 'Expense') {
     // Create an Expense record linked to this bank transaction

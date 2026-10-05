@@ -10,7 +10,8 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { apiFetch } from '@/lib/api-client'
-import type { AccountingSettings } from '@/lib/accounting/types'
+import type { AccountingSettings, BasPeriod } from '@/lib/accounting/types'
+import { currentFinancialYearEnd } from '@/lib/accounting/financial-year'
 
 const QUARTERS = [
   { q: 1, label: 'Q1 — July to September' },
@@ -36,8 +37,9 @@ function quarterDates(quarter: number, financialYear: string): { startDate: stri
   }
 }
 
-const currentYear = new Date().getFullYear()
-const FY_YEARS = Array.from({ length: 5 }, (_, index) => String(currentYear - 2 + index))
+// Default to the current Australian FY (Oct 2026 → FY2027), not the calendar year.
+const currentFy = currentFinancialYearEnd()
+const FY_YEARS = Array.from({ length: 5 }, (_, index) => String(currentFy - 2 + index))
 
 type FormState = {
   quarter: string
@@ -52,7 +54,7 @@ export default function NewBasPage() {
   const router = useRouter()
   const [form, setForm] = useState<FormState>({
     quarter: '1',
-    financialYear: String(currentYear),
+    financialYear: String(currentFy),
     startDate: '',
     endDate: '',
     label: '',
@@ -65,12 +67,12 @@ export default function NewBasPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const initialDates = quarterDates(1, String(currentYear))
+    const initialDates = quarterDates(1, String(currentFy))
     setForm((current) => ({
       ...current,
       startDate: initialDates.startDate,
       endDate: initialDates.endDate,
-      label: `Q1 FY${currentYear}`,
+      label: `Q1 FY${currentFy}`,
     }))
   }, [])
 
@@ -120,8 +122,23 @@ export default function NewBasPage() {
 
     try {
       const fy = form.financialYear
+
+      // Skip quarters that already exist so a partly-created year can be completed.
+      const existingRes = await apiFetch('/api/admin/accounting/bas')
+      if (!existingRes.ok) {
+        setError('Could not load existing BAS periods.')
+        return
+      }
+      const existing: { periods: BasPeriod[] } = await existingRes.json()
+      const taken = new Set(existing.periods.filter((p) => p.financialYear === fy).map((p) => p.quarter))
+      const missing = [1, 2, 3, 4].filter((quarter) => !taken.has(quarter))
+      if (missing.length === 0) {
+        setError(`All four FY${fy} quarters already exist.`)
+        return
+      }
+
       const results = await Promise.all(
-        [1, 2, 3, 4].map((quarter) => {
+        missing.map((quarter) => {
           const { startDate, endDate } = quarterDates(quarter, fy)
           return apiFetch('/api/admin/accounting/bas', {
             method: 'POST',

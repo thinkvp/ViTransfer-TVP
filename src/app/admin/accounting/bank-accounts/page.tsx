@@ -90,6 +90,27 @@ function defaultPostForm(txn: BankTransaction): PostFormState {
   }
 }
 
+// Edit form for a posted MANUAL/EXPENSE transaction, prefilled from what was posted.
+// An EXPENSE posting keeps its account, GST code and supplier on the linked Expense.
+function formFromPosted(txn: BankTransaction): PostFormState {
+  return {
+    ...defaultPostForm(txn),
+    transactionType: txn.matchType === 'EXPENSE' ? 'Expense' : (txn.transactionType ?? defaultPostForm(txn).transactionType),
+    accountId: txn.expense?.accountId ?? txn.accountId ?? '',
+    taxCode: txn.expense?.taxCode ?? txn.taxCode ?? 'GST',
+    memo: txn.memo ?? '',
+    supplierName: txn.expense?.supplierName ?? '',
+  }
+}
+
+// Only MANUAL and EXPENSE postings can be edited in place; changing to/from Expense
+// (and invoice, BAS or split matches) still means Undo + re-post.
+function editTypeOptions(txn: BankTransaction): string[] {
+  if (txn.matchType === 'EXPENSE') return ['Expense']
+  const types = txnTypeOptions(txn.amountCents).filter(type => type !== 'Expense')
+  return txn.transactionType && !types.includes(txn.transactionType) ? [txn.transactionType, ...types] : types
+}
+
 function fmtAmt(cents: number) {
   const abs = (Math.abs(cents) / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   return cents < 0 ? `-$${abs}` : `$${abs}`
@@ -133,6 +154,9 @@ export default function BankAccountsPage() {
   const [postForms, setPostForms] = useState<Record<string, PostFormState>>({})
   const [posting, setPosting] = useState<string | null>(null)
   const [undoing, setUndoing] = useState<string | null>(null)
+  const [editingPostedId, setEditingPostedId] = useState<string | null>(null)
+  const [savingEdit, setSavingEdit] = useState<string | null>(null)
+  const [pendingLodgedEdit, setPendingLodgedEdit] = useState<BankTransaction | null>(null)
   const [ignoring, setIgnoring] = useState<string | null>(null)
 
   const [deletingTransaction, setDeletingTransaction] = useState(false)
@@ -464,6 +488,128 @@ export default function BankAccountsPage() {
       setExpandedId(prev => prev === txnId ? null : prev)
       void loadAccounts()
     } finally { setUndoing(null) }
+  }
+
+  async function handleSaveEdit(txn: BankTransaction, confirmLodgedPeriod = false) {
+    const form = getPostForm(txn)
+    if (!form.accountId) { toast.error('Please select an account'); return }
+    setSavingEdit(txn.id)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(txn.matchType === 'MANUAL' ? { transactionType: form.transactionType } : {}),
+          accountId: form.accountId,
+          taxCode: form.taxCode,
+          memo: form.memo || null,
+          ...(txn.matchType === 'EXPENSE' ? { supplierName: form.supplierName || null } : {}),
+          ...(confirmLodgedPeriod ? { confirmLodgedPeriod: true } : {}),
+        }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        if (res.status === 409 && d.code === 'LODGED_BAS_PERIOD') { setPendingLodgedEdit(txn); return }
+        toast.error(d.error || 'Failed to save changes')
+        return
+      }
+      if (d.transaction) setTransactions(prev => prev.map(t => t.id === txn.id ? { ...t, ...d.transaction } : t))
+      setEditingPostedId(prev => prev === txn.id ? null : prev)
+      setPostForms(prev => { const next = { ...prev }; delete next[txn.id]; return next })
+      toast.success('Transaction updated')
+    } finally { setSavingEdit(null) }
+  }
+
+  function startEditPosted(txn: BankTransaction) {
+    setPostForms(prev => ({ ...prev, [txn.id]: formFromPosted(txn) }))
+    setEditingPostedId(txn.id)
+  }
+
+  function cancelEditPosted(txnId: string) {
+    setEditingPostedId(prev => prev === txnId ? null : prev)
+    setPostForms(prev => { const next = { ...prev }; delete next[txnId]; return next })
+  }
+
+  // Type / Account / GST / Memo / Supplier fields, shared by posting and editing a posted transaction
+  function renderPostFields(t: BankTransaction, types: string[], typeDisabled = false) {
+    const form = getPostForm(t)
+    return (
+      <>
+        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,140px)_1fr_minmax(0,140px)] gap-3">
+          <div className="space-y-1">
+            <div className="h-5 flex items-center"><Label className="text-xs">Type</Label></div>
+            <Select disabled={typeDisabled} value={form.transactionType} onValueChange={v => setPostFormField(t.id, { transactionType: v })}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>{types.map(type => <SelectItem key={type} value={type}>{TYPE_LABELS[type] ?? type}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <div className="h-5 flex items-center justify-between">
+              <Label className="text-xs">Account</Label>
+              {form.suggestedAccountId && form.accountId === form.suggestedAccountId && (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 leading-none">SUGGESTED</span>
+              )}
+            </div>
+            <div className="relative">
+              {(() => {
+                const filteredAccounts = postableAccounts.filter(a => {
+                  const q = form.accountSearch.trim().toLowerCase()
+                  return !q || a.searchText.includes(q)
+                })
+
+                return (
+                  <>
+                    <Input
+                      className="h-8 text-sm"
+                      placeholder="Search account…"
+                      value={form.accountOpen ? form.accountSearch : (coaAccounts.find(x => x.id === form.accountId)?.label ?? '')}
+                      onFocus={() => setPostFormField(t.id, { accountOpen: true, accountSearch: '' })}
+                      onBlur={() => setTimeout(() => setPostFormField(t.id, { accountOpen: false }), 150)}
+                      onChange={e => setPostFormField(t.id, { accountSearch: e.target.value })}
+                    />
+                    {form.accountOpen && (
+                      <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                        {filteredAccounts.map(a => (
+                          <button key={a.id} type="button"
+                            onMouseDown={() => setPostFormField(t.id, { accountId: a.id, accountSearch: '', accountOpen: false, taxCode: a.taxCode })}
+                            className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors',
+                              form.accountId === a.id && 'bg-primary/10 font-medium'
+                            )}
+                          >{a.label}</button>
+                        ))}
+                        {filteredAccounts.length === 0 && (
+                          <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="h-5 flex items-center"><Label className="text-xs">GST</Label></div>
+            <Select value={form.taxCode} onValueChange={v => setPostFormField(t.id, { taxCode: v })}>
+              <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {TAX_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Memo <span className="text-muted-foreground">(optional)</span></Label>
+            <Input className="h-8 text-sm" placeholder="Add a note…" value={form.memo} onChange={e => setPostFormField(t.id, { memo: e.target.value })} />
+          </div>
+          {form.transactionType === 'Expense' && (
+            <div className="space-y-1">
+              <Label className="text-xs">Supplier Name <span className="text-muted-foreground">(optional)</span></Label>
+              <Input className="h-8 text-sm" placeholder="Supplier name (optional)" value={form.supplierName} onChange={e => setPostFormField(t.id, { supplierName: e.target.value })} />
+            </div>
+          )}
+        </div>
+      </>
+    )
   }
 
   function openSplitForm(txn: BankTransaction) {
@@ -1042,80 +1188,7 @@ export default function BankAccountsPage() {
                               </div>
                               {activeTab === 'UNMATCHED' ? (
                                 <div className="space-y-3">
-                                  <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,140px)_1fr_minmax(0,140px)] gap-3">
-                                    <div className="space-y-1">
-                                      <div className="h-5 flex items-center"><Label className="text-xs">Type</Label></div>
-                                      <Select value={form.transactionType} onValueChange={v => setPostFormField(t.id, { transactionType: v })}>
-                                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                                        <SelectContent>{types.map(type => <SelectItem key={type} value={type}>{TYPE_LABELS[type] ?? type}</SelectItem>)}</SelectContent>
-                                      </Select>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <div className="h-5 flex items-center justify-between">
-                                        <Label className="text-xs">Account</Label>
-                                        {form.suggestedAccountId && form.accountId === form.suggestedAccountId && (
-                                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 leading-none">SUGGESTED</span>
-                                        )}
-                                      </div>
-                                      <div className="relative">
-                                        {(() => {
-                                          const filteredAccounts = postableAccounts.filter(a => {
-                                            const q = form.accountSearch.trim().toLowerCase()
-                                            return !q || a.searchText.includes(q)
-                                          })
-
-                                          return (
-                                            <>
-                                              <Input
-                                                className="h-8 text-sm"
-                                                placeholder="Search account…"
-                                                value={form.accountOpen ? form.accountSearch : (coaAccounts.find(x => x.id === form.accountId)?.label ?? '')}
-                                                onFocus={() => setPostFormField(t.id, { accountOpen: true, accountSearch: '' })}
-                                                onBlur={() => setTimeout(() => setPostFormField(t.id, { accountOpen: false }), 150)}
-                                                onChange={e => setPostFormField(t.id, { accountSearch: e.target.value })}
-                                              />
-                                              {form.accountOpen && (
-                                                <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-52 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                                                  {filteredAccounts.map(a => (
-                                                    <button key={a.id} type="button"
-                                                      onMouseDown={() => setPostFormField(t.id, { accountId: a.id, accountSearch: '', accountOpen: false, taxCode: a.taxCode })}
-                                                      className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors',
-                                                        form.accountId === a.id && 'bg-primary/10 font-medium'
-                                                      )}
-                                                    >{a.label}</button>
-                                                  ))}
-                                                  {filteredAccounts.length === 0 && (
-                                                    <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>
-                                                  )}
-                                                </div>
-                                              )}
-                                            </>
-                                          )
-                                        })()}
-                                      </div>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <div className="h-5 flex items-center"><Label className="text-xs">GST</Label></div>
-                                      <Select value={form.taxCode} onValueChange={v => setPostFormField(t.id, { taxCode: v })}>
-                                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                                        <SelectContent>
-                                          {TAX_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.name}</SelectItem>)}
-                                        </SelectContent>
-                                      </Select>
-                                    </div>
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div className="space-y-1">
-                                      <Label className="text-xs">Memo <span className="text-muted-foreground">(optional)</span></Label>
-                                      <Input className="h-8 text-sm" placeholder="Add a note…" value={form.memo} onChange={e => setPostFormField(t.id, { memo: e.target.value })} />
-                                    </div>
-                                    {form.transactionType === 'Expense' && (
-                                      <div className="space-y-1">
-                                        <Label className="text-xs">Supplier Name <span className="text-muted-foreground">(optional)</span></Label>
-                                        <Input className="h-8 text-sm" placeholder="Supplier name (optional)" value={form.supplierName} onChange={e => setPostFormField(t.id, { supplierName: e.target.value })} />
-                                      </div>
-                                    )}
-                                  </div>
+                                  {renderPostFields(t, types)}
                                   <div className="space-y-1">
                                     <Label className="text-xs">Attachments <span className="text-muted-foreground">(optional)</span></Label>
                                     <input ref={el => { fileRefs.current[t.id] = el }} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={e => {
@@ -1272,6 +1345,17 @@ export default function BankAccountsPage() {
                                 </div>
                               ) : (
                                 <div className="space-y-3 max-w-xl">
+                                  {editingPostedId === t.id ? (
+                                    <div className="space-y-3">
+                                      {renderPostFields(t, editTypeOptions(t), t.matchType === 'EXPENSE')}
+                                      <div className="flex items-center gap-2">
+                                        <Button size="sm" onClick={() => void handleSaveEdit(t)} disabled={savingEdit === t.id || !form.accountId}>
+                                          {savingEdit === t.id && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Save
+                                        </Button>
+                                        <Button size="sm" variant="ghost" onClick={() => cancelEditPosted(t.id)} disabled={savingEdit === t.id}>Cancel</Button>
+                                      </div>
+                                    </div>
+                                  ) : (
                                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
                                     <div className="col-span-2 sm:hidden"><p className="text-xs text-muted-foreground">Description</p><p className="whitespace-normal wrap-break-word">{t.description}</p></div>
                                     {(t.transactionType || t.matchType === 'INVOICE_PAYMENT' || t.matchType === 'BAS_PAYMENT') && <div><p className="text-xs text-muted-foreground">Type</p><p>{t.matchType === 'SPLIT' ? 'Split' : t.matchType === 'BAS_PAYMENT' ? (t.amountCents > 0 ? 'BAS Refund' : 'BAS Payment') : t.matchType === 'INVOICE_PAYMENT' ? 'Receive Payment' : TYPE_LABELS[t.transactionType!] ?? t.transactionType}</p></div>}
@@ -1295,6 +1379,7 @@ export default function BankAccountsPage() {
                                     {t.memo && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Memo</p><p>{t.memo}</p></div>}
                                     {t.expense && <div className="col-span-2 sm:col-span-3"><p className="text-xs text-muted-foreground">Expense</p><p>{t.expense.supplierName ? `${t.expense.supplierName} · ` : ''}{fmtAud(t.expense.amountIncGst)}</p></div>}
                                   </div>
+                                  )}
                                   {/* Attachments */}
                                   {(() => {
                                     const allItems: AttachmentItem[] = (t.attachments ?? []).map(a => ({ id: a.id, name: a.originalName }))
@@ -1337,11 +1422,18 @@ export default function BankAccountsPage() {
                                       </table>
                                     </div>
                                   )}
-                                  <div className="flex items-center gap-2">
-                                    <Button size="sm" variant="outline" onClick={() => void handleUndo(t.id)} disabled={isUndoing || isDeletingTxn}>
-                                      {isUndoing ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5 mr-1.5" />}Undo
-                                    </Button>
-                                  </div>
+                                  {editingPostedId !== t.id && (
+                                    <div className="flex items-center gap-2">
+                                      {(t.matchType === 'MANUAL' || t.matchType === 'EXPENSE') && (
+                                        <Button size="sm" variant="outline" onClick={() => startEditPosted(t)} disabled={isUndoing || isDeletingTxn}>
+                                          <Pencil className="w-3.5 h-3.5 mr-1.5" />Edit
+                                        </Button>
+                                      )}
+                                      <Button size="sm" variant="outline" onClick={() => void handleUndo(t.id)} disabled={isUndoing || isDeletingTxn}>
+                                        {isUndoing ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5 mr-1.5" />}Undo
+                                      </Button>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -1779,6 +1871,18 @@ export default function BankAccountsPage() {
           const a = pendingDeleteAccount!
           setPendingDeleteAccount(null)
           void handleDeleteAccount(a)
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingLodgedEdit !== null}
+        onOpenChange={(v) => { if (!v) setPendingLodgedEdit(null) }}
+        title="Edit a transaction in a lodged BAS period?"
+        description="This transaction falls in a BAS period that has already been lodged. Changing its account or GST code will change the figures for that period, which may no longer match what was lodged with the ATO."
+        confirmLabel="Save anyway"
+        onConfirm={async () => {
+          const t = pendingLodgedEdit
+          if (t) await handleSaveEdit(t, true)
         }}
       />
 

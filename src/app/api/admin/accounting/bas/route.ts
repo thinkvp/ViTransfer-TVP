@@ -65,18 +65,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'startDate must be before endDate' }, { status: 400 })
   }
 
-  const period = await prisma.basPeriod.create({
-    data: {
-      label: d.label,
-      startDate: d.startDate,
-      endDate: d.endDate,
-      quarter: d.quarter,
-      financialYear: d.financialYear,
-      basis: settings.reportingBasis,
-      notes: d.notes ?? null,
-      paygInstalmentCents: settings.basPaygInstalmentDefaultCents ?? null,
-    },
-  })
+  let period
+  try {
+    period = await prisma.basPeriod.create({
+      data: {
+        label: d.label,
+        startDate: d.startDate,
+        endDate: d.endDate,
+        quarter: d.quarter,
+        financialYear: d.financialYear,
+        basis: settings.reportingBasis,
+        notes: d.notes ?? null,
+        paygInstalmentCents: settings.basPaygInstalmentDefaultCents ?? null,
+      },
+    })
+  } catch (error: any) {
+    if (error?.code === 'P2002') {
+      return NextResponse.json(
+        { error: `A BAS period for Q${d.quarter} FY${d.financialYear} already exists.` },
+        { status: 409 }
+      )
+    }
+    throw error
+  }
 
   const res = NextResponse.json({ period: basPeriodFromDb(period) }, { status: 201 })
   res.headers.set('Cache-Control', 'no-store')

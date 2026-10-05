@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] - 2026-10-05
+
+### Added
+
+- **Posted bank transactions can now be edited in place** — an Edit button on posted Transfer, Deposit, Receive Payment and Expense transactions changes the account, GST code, memo and supplier without Undo and re-posting, which deleted the attachments and the linked expense. Invoice, BAS and split matches, and changing to or from Expense, still use Undo. Changing the account or GST code of a transaction in a lodged BAS period asks for confirmation first.
+
+### Fixed
+
+- **The expense form no longer loses unsaved edits when you click outside it** — clicking off the New/Edit Expense window, pressing Escape or the close button now asks "Discard changes?" first if anything was changed or a receipt was added. The Cancel button still closes straight away.
+- **Expenses no longer show twice in an account's ledger after their account is changed** — editing the account of a reconciled expense on the Expenses page also stamped it on the bank transaction, so the Chart of Accounts drill-down listed the amount twice. Existing affected transactions are corrected on upgrade. **Schema migration:** `20261005000000_clear_expense_bank_txn_account` (data only).
+
+- **New BAS Period now defaults to the current financial year** — the form picked the calendar year as the FY, so from July onwards it pointed at last year's quarters, and "Add All Quarters" failed with "4 period(s) could not be created". It now defaults to the current Australian FY, "Add All" skips quarters that already exist, and creating a duplicate quarter gives a clear "already exists" message.
+
 ## [2.7.1] - 2026-10-03
 
 ### Security

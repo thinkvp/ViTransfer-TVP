@@ -11,3 +11,17 @@ export function amountExcludingGst(amountCents: number, taxCode: GstCode, taxRat
 
   return sign * (absoluteAmount - gstAmount)
 }
+/**
+ * Split a GST-inclusive amount into ex-GST + GST parts, the way posted expenses store them.
+ * Shared by bank-transaction posting/editing and the expense editor so they can't drift.
+ */
+export function splitGstInclusive(
+  amountIncGst: number,
+  taxCode: GstCode,
+  taxRatePercent: number,
+): { amountExGst: number; gstAmount: number } {
+  if (taxCode !== 'GST') return { amountExGst: amountIncGst, gstAmount: 0 }
+  const taxRate = taxRatePercent / 100
+  const gstAmount = Math.round(amountIncGst * taxRate / (1 + taxRate))
+  return { amountExGst: amountIncGst - gstAmount, gstAmount }
+}

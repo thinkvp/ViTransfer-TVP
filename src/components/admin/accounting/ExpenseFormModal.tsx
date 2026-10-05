@@ -55,6 +55,28 @@ const STATUS_BADGE: Record<ExpenseStatus, string> = {
   RECONCILED: 'bg-green-500/15 text-green-400',
 }
 
+interface ExpenseFormState {
+  date: string
+  supplierName: string
+  description: string
+  accountId: string
+  taxCode: AccountTaxCode
+  amountIncGst: string
+  notes: string
+}
+
+function blankExpenseForm(): ExpenseFormState {
+  return {
+    date: new Date().toISOString().slice(0, 10),
+    supplierName: '',
+    description: '',
+    accountId: '',
+    taxCode: 'GST',
+    amountIncGst: '',
+    notes: '',
+  }
+}
+
 interface ExpenseFormModalProps {
   open: boolean
   expenseId?: string | null
@@ -71,15 +93,10 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
   const [expense, setExpense] = useState<Expense | null>(null)
   const [accounts, setAccounts] = useState<AccountOption[]>([])
 
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    supplierName: '',
-    description: '',
-    accountId: '',
-    taxCode: 'GST' as AccountTaxCode,
-    amountIncGst: '',
-    notes: '',
-  })
+  const [form, setForm] = useState<ExpenseFormState>(blankExpenseForm)
+  // Last loaded/blank values, to tell whether closing would throw away edits
+  const [initialForm, setInitialForm] = useState<ExpenseFormState>(form)
+  const [showDiscardDialog, setShowDiscardDialog] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -114,7 +131,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
         const e: Expense = data.expense
         setExpense(e)
         onExpenseChanged?.(e)
-        setForm({
+        const loaded: ExpenseFormState = {
           date: e.date,
           supplierName: e.supplierName ?? '',
           description: e.description,
@@ -122,7 +139,9 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
           taxCode: e.taxCode,
           amountIncGst: fmtAud(e.amountIncGst),
           notes: e.notes ?? '',
-        })
+        }
+        setForm(loaded)
+        setInitialForm(loaded)
       }
     } finally {
       setLoading(false)
@@ -156,6 +175,7 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
     if (!open) return
     setError('')
     setShowDeleteDialog(false)
+    setShowDiscardDialog(false)
     setReceiptFiles([])
     setAccountSearch('')
     setAccountOpen(false)
@@ -163,15 +183,9 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
     setLoadingLinkedTransactionAttachments(false)
     if (isNew) {
       setExpense(null)
-      setForm({
-        date: new Date().toISOString().slice(0, 10),
-        supplierName: '',
-        description: '',
-        accountId: '',
-        taxCode: 'GST',
-        amountIncGst: '',
-        notes: '',
-      })
+      const blank = blankExpenseForm()
+      setForm(blank)
+      setInitialForm(blank)
     }
     void loadAccounts()
     void loadExpense()
@@ -378,9 +392,20 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
     return !query || account.searchText.includes(query)
   })
 
+  const hasUnsavedChanges = receiptFiles.length > 0
+    || (Object.keys(form) as (keyof ExpenseFormState)[]).some(key => form[key] !== initialForm[key])
+
+  // Clicking outside, Escape and the X all land here; ask before throwing away edits.
+  // The Cancel button is an explicit discard and closes directly.
+  function guardedClose() {
+    if (saving || deleting) return
+    if (hasUnsavedChanges) { setShowDiscardDialog(true); return }
+    onClose()
+  }
+
   return (
     <>
-      <Dialog open={open} onOpenChange={v => { if (!v && !saving && !deleting) onClose() }}>
+      <Dialog open={open} onOpenChange={v => { if (!v) guardedClose() }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center justify-between gap-3 pr-6">
@@ -610,6 +635,19 @@ export function ExpenseFormModal({ open, expenseId, onClose, onSaved, onExpenseC
         open={!!linkedTransactionId}
         transactionId={linkedTransactionId}
         onOpenChange={open => { if (!open) setLinkedTransactionId(null) }}
+      />
+
+      <ConfirmDialog
+        open={showDiscardDialog}
+        onOpenChange={setShowDiscardDialog}
+        title="Discard changes?"
+        description="You have unsaved changes to this expense. Discard them and close?"
+        confirmLabel="Discard"
+        variant="default"
+        onConfirm={() => {
+          setShowDiscardDialog(false)
+          onClose()
+        }}
       />
 
       <ConfirmDialog
