@@ -14,7 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { apiFetch } from '@/lib/api-client'
-import { Plus, Pencil, Trash2, Paperclip, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown, Eye } from 'lucide-react'
+import { Plus, Pencil, Trash2, Paperclip, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowUp, ArrowDown, Eye, Landmark } from 'lucide-react'
 import type { Expense, ExpenseStatus } from '@/lib/accounting/types'
 import { EXPENSE_STATUS_LABELS } from '@/lib/accounting/types'
 import { cn, formatDate } from '@/lib/utils'
@@ -32,14 +32,17 @@ function fmtAud(cents: number) {
   return (cents / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-// Read-only rows posted straight from a bank transaction (no Expense record behind them)
+// Read-only rows posted straight from a bank transaction (no Expense record behind
+// them). They are paid and reconciled by definition, so they show as Reconciled with
+// a marker saying where to change them.
 const BANK_SOURCE_LABELS: Record<NonNullable<Expense['bankSource']>, string> = {
-  SPLIT: 'Bank split',
-  POSTING: 'Bank posting',
+  SPLIT: 'bank split',
+  POSTING: 'bank transaction',
 }
 
 function statusLabel(e: Expense): string {
-  return e.bankSource ? BANK_SOURCE_LABELS[e.bankSource] : (EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status)
+  const label = EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status
+  return e.bankSource ? `${label} (${BANK_SOURCE_LABELS[e.bankSource]})` : label
 }
 
 export default function ExpensesPage() {
@@ -319,15 +322,20 @@ export default function ExpensesPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{fmtAud(e.gstAmount)}</td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtAud(e.amountIncGst)}</td>
                       <td className="px-3 py-2">
-                        {e.bankSource ? (
-                          <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-amber-500/10 text-amber-400" title="Posted directly from a bank transaction. Change it on the Bank Accounts page.">
-                            {BANK_SOURCE_LABELS[e.bankSource]}
-                          </span>
-                        ) : (
+                        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                           <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', STATUS_BADGE[e.status])}>
                             {EXPENSE_STATUS_LABELS[e.status]}
                           </span>
-                        )}
+                          {e.bankSource && (
+                            <span
+                              className="text-muted-foreground"
+                              title={`Posted from a ${BANK_SOURCE_LABELS[e.bankSource]} — change it on the Bank Accounts page`}
+                              aria-label={`Posted from a ${BANK_SOURCE_LABELS[e.bankSource]}`}
+                            >
+                              <Landmark className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </span>
                       </td>
                       <td className="px-3 py-2 text-right" onClick={ev => ev.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">

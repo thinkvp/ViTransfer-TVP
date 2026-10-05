@@ -7,7 +7,7 @@ import type { TranscriptionJob } from '../lib/queue'
 import { whisperTranscribe, whisperTranscribeVerbose, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
 import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, buildCuesFromWords, attachPunctuationFromTranscript, applyDraftMarker } from '../lib/subtitles'
 import { usesBritishSpelling, convertToBritishEnglish } from '../lib/american-to-british'
-import { extractAudioForTranscription } from '../lib/ffmpeg'
+import { extractAudioForTranscription, isNoAudioStreamError } from '../lib/ffmpeg'
 import { computeWaveformPeaksFromWav } from '../lib/waveform-peaks'
 import { decrypt } from '../lib/encryption'
 import { getStoredFilePath, registerStoredFiles } from '../lib/stored-file'
@@ -245,7 +245,22 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       materializedTemporary = materialized.isTemporary
       audioMp3Path = path.join(tempDir, 'audio.mp3')
       console.log(`[transcription] Extracting + caching transcription audio for video ${videoId}`)
-      await extractAudioForTranscription(materialized.localPath, audioMp3Path, 'mp3', TRANSCRIPTION_AUDIO_MP3_KBPS)
+      try {
+        await extractAudioForTranscription(materialized.localPath, audioMp3Path, 'mp3', TRANSCRIPTION_AUDIO_MP3_KBPS)
+      } catch (extractError) {
+        if (!isNoAudioStreamError(extractError)) throw extractError
+        // Silent video: no waveform to draw and nothing to caption. Finish cleanly
+        // rather than failing (and retrying) the job. When captions were wanted,
+        // end as READY with no subtitles, the same as "no speech detected".
+        console.log(`[transcription] Video ${videoId}: no audio track — no subtitles or waveform to generate`)
+        if (!subtitlesUpToDate) {
+          await prisma.video.update({
+            where: { id: videoId },
+            data: { transcriptionStatus: 'READY', transcriptionError: null },
+          })
+        }
+        return
+      }
       await storeTranscriptionAudio({ videoId, projectId: video.projectId, mp3LocalPath: audioMp3Path }).catch((e) =>
         console.warn(`[transcription] Video ${videoId}: caching transcription audio failed (non-fatal):`, e instanceof Error ? e.message : e),
       )

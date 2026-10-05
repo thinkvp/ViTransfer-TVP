@@ -3,7 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { VideoProcessingJob, enqueueVideoSubtitles } from '../lib/queue'
 import { TEMP_DIR } from './cleanup'
-import { extractAudioForTranscription } from '@/lib/ffmpeg'
+import { extractAudioForTranscription, isNoAudioStreamError } from '@/lib/ffmpeg'
 import { isTranscriptionEnabled, storeTranscriptionAudio, TRANSCRIPTION_AUDIO_MP3_KBPS } from '@/lib/transcription-audio'
 import {
   TempFiles,
@@ -249,7 +249,11 @@ export async function processVideo(job: Job<VideoProcessingJob>) {
         await extractAudioForTranscription(videoInfo.path, audioMp3Path, 'mp3', TRANSCRIPTION_AUDIO_MP3_KBPS)
         await storeTranscriptionAudio({ videoId, projectId, mp3LocalPath: audioMp3Path })
       } catch (e) {
-        console.warn(`[WORKER] Transcription audio cache failed for video ${videoId} (non-fatal):`, e instanceof Error ? e.message : e)
+        if (isNoAudioStreamError(e)) {
+          console.log(`[WORKER] Video ${videoId} has no audio track — no transcription audio to cache`)
+        } else {
+          console.warn(`[WORKER] Transcription audio cache failed for video ${videoId} (non-fatal):`, e instanceof Error ? e.message : e)
+        }
       } finally {
         await fs.promises.rm(audioMp3Path, { force: true }).catch(() => {})
       }

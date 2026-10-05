@@ -678,6 +678,9 @@ export async function extractAudioForTranscription(
     ffmpeg.on('close', (code) => {
       if (code === 0) {
         resolve()
+      } else if (/does not contain any stream|matches no streams/i.test(stderr)) {
+        // `-vn` left nothing to write: the input has no audio track (silent b-roll etc.)
+        reject(new NoAudioStreamError())
       } else {
         reject(new Error(`FFmpeg audio extraction failed: ${stderr.slice(0, 2000)}`))
       }
@@ -687,4 +690,16 @@ export async function extractAudioForTranscription(
       reject(new Error(`Failed to start FFmpeg: ${err.message}`))
     })
   })
+}
+
+/** Thrown by extractAudioForTranscription when the input has no audio track to extract. */
+export class NoAudioStreamError extends Error {
+  constructor() {
+    super('No audio track to extract')
+    this.name = 'NoAudioStreamError'
+  }
+}
+
+export function isNoAudioStreamError(error: unknown): error is NoAudioStreamError {
+  return error instanceof Error && error.name === 'NoAudioStreamError'
 }

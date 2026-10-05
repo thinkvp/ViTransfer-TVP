@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.4] - 2026-10-06
+
+### Changed
+
+- **Bank-posted spending on the Expenses page now shows as Reconciled, and refunds are no longer listed** — split lines and bank transactions posted straight to an expense account now show the green Reconciled badge, with a small bank icon pointing you to the Bank Accounts page to change them, instead of an amber "Bank split"/"Bank posting" badge. Money coming in on an expense account (a refund or payout posted as a Deposit) is no longer listed as an expense, matching QuickBooks and Xero; it still reduces that account in the P&L, BAS and ledger.
+
+### Fixed
+
+- **Videos with no audio track no longer cause subtitle job failures** — uploading a silent video logged FFmpeg errors and retried a failing background job, even with Subtitles unticked (the job still runs to build the audio waveform). A video with no audio is now recognised and the job finishes cleanly with nothing to do. If subtitles were requested, it ends with no captions, as for a video with no speech, instead of being marked Failed.
+
 ## [2.7.3] - 2026-10-05
 
 ### Added

@@ -4,9 +4,13 @@ import type { AccountTaxCode, AccountType, Expense } from '@/lib/accounting/type
 
 // Read-only "bank lines" for the Expenses list: spending posted straight from a bank
 // transaction without an Expense record — split lines on expense/COGS accounts, and
-// MANUAL (Transfer/Deposit) postings to an expense/COGS account. They are already
-// counted in the BAS, P&L and ledger from those rows; the Expenses list only shows
-// them, it never creates Expense records for them (that would double-count).
+// MANUAL (Transfer) postings to an expense/COGS account. They are already counted in
+// the BAS, P&L and ledger from those rows; the Expenses list only shows them, it never
+// creates Expense records for them (that would double-count).
+//
+// Money OUT only. Money in on an expense account (a refund or payout posted as a
+// Deposit, or a credit split line) is a deposit, not an expense — as in QuickBooks and
+// Xero it's left off this list, though it still reduces the account everywhere else.
 
 export type ExpenseListSortKey = 'date' | 'supplier' | 'description' | 'category' | 'amountExGst' | 'gstAmount' | 'amountIncGst' | 'status'
 
@@ -45,6 +49,7 @@ export async function loadExpenseBankLines(filters: ExpenseBankLineFilters, taxR
     prisma.splitLine.findMany({
       where: {
         account: accountWhere,
+        amountCents: { lt: 0 },
         ...(accountId ? { accountId } : {}),
         bankTransaction: { status: 'MATCHED', ...(date ? { date } : {}) },
       },
@@ -57,6 +62,7 @@ export async function loadExpenseBankLines(filters: ExpenseBankLineFilters, taxR
       where: {
         status: 'MATCHED',
         matchType: 'MANUAL',
+        amountCents: { lt: 0 },
         account: accountWhere,
         ...(accountId ? { accountId } : {}),
         ...(date ? { date } : {}),
@@ -73,8 +79,7 @@ export async function loadExpenseBankLines(filters: ExpenseBankLineFilters, taxR
     accountName?: string; accountCode?: string; taxCode: AccountTaxCode; bankAmountCents: number
     bankTransactionId: string; attachmentCount: number; createdAt: Date
   }): Expense => {
-    // Bank-statement sign: money out is negative, so negate to the Expense convention
-    // (a refund line on an expense account comes out negative, as on the P&L).
+    // Bank-statement sign: money out is negative, so negate to the Expense convention.
     const amountIncGst = -r.bankAmountCents
     const amountExGst = amountExcludingGst(amountIncGst, r.taxCode, taxRatePercent)
     return {
