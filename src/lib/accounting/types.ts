@@ -54,6 +54,8 @@ export interface Expense {
   notes: string | null
   attachments?: AccountingAttachment[]
   linkedTransactionAttachmentCount?: number
+  /** Set on read-only Expenses-list rows that come straight from a posted bank transaction (no Expense record) */
+  bankSource?: 'SPLIT' | 'POSTING'
   createdAt: string
   updatedAt: string
 }

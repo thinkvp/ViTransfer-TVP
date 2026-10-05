@@ -5,6 +5,7 @@ import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { expenseFromDb } from '@/lib/accounting/db-mappers'
 import { getSalesTaxRate } from '@/lib/settings'
+import { compareExpenseRows, loadExpenseBankLines, mergeSorted, type ExpenseListSortKey } from '@/lib/accounting/expense-bank-lines'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -77,7 +78,18 @@ export async function GET(request: NextRequest) {
   else if (from) where.date = { gte: from }
   else if (to) where.date = { lte: to }
 
-  const [total, rows] = await Promise.all([
+  // Spending posted straight from bank transactions (splits, Transfer/Deposit to an
+  // expense account) has no Expense record; list it read-only alongside. It's paid by
+  // definition, so it only belongs in an unfiltered or Reconciled view.
+  const bankLines = !status || status === 'RECONCILED'
+    ? (await loadExpenseBankLines({ accountId, search: supplierName, from, to }, await getSalesTaxRate()))
+      .sort(compareExpenseRows(sortKey as ExpenseListSortKey, sortDir))
+    : []
+
+  // With bank lines in play, fetch every Expense up to the end of this page and merge,
+  // so the combined list pages and sorts as one.
+  const offset = (page - 1) * pageSize
+  const [expenseTotal, rows] = await Promise.all([
     prisma.expense.count({ where }),
     prisma.expense.findMany({
       where,
@@ -90,13 +102,18 @@ export async function GET(request: NextRequest) {
         : sortKey === 'amountIncGst' ? { amountIncGst: sortDir } as const
         : sortKey === 'status' ? { status: sortDir } as const
         : { date: sortDir } as const,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
+      skip: bankLines.length > 0 ? 0 : offset,
+      take: bankLines.length > 0 ? offset + pageSize : pageSize,
     }),
   ])
 
+  const expenses = bankLines.length > 0
+    ? mergeSorted(rows.map(expenseFromDb), bankLines, compareExpenseRows(sortKey as ExpenseListSortKey, sortDir), offset + pageSize).slice(offset)
+    : rows.map(expenseFromDb)
+  const total = expenseTotal + bankLines.length
+
   const res = NextResponse.json({
-    expenses: rows.map(expenseFromDb),
+    expenses,
     pagination: { total, page, pageSize, totalPages: Math.ceil(total / pageSize) },
   })
   res.headers.set('Cache-Control', 'no-store')

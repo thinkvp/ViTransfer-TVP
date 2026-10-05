@@ -32,6 +32,16 @@ function fmtAud(cents: number) {
   return (cents / 100).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+// Read-only rows posted straight from a bank transaction (no Expense record behind them)
+const BANK_SOURCE_LABELS: Record<NonNullable<Expense['bankSource']>, string> = {
+  SPLIT: 'Bank split',
+  POSTING: 'Bank posting',
+}
+
+function statusLabel(e: Expense): string {
+  return e.bankSource ? BANK_SOURCE_LABELS[e.bankSource] : (EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status)
+}
+
 export default function ExpensesPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -174,7 +184,7 @@ export default function ExpensesPage() {
               try {
                 const all = await fetchAllExpensesForExport()
                 downloadCsv('expenses.csv', ['Date', 'Supplier', 'Description', 'Category', 'Ex GST', 'GST', 'Inc GST', 'Status'], all.map(e => [
-                  e.date, e.supplierName ?? '', e.description, e.accountName ?? '', fmtAud(e.amountExGst), fmtAud(e.gstAmount), fmtAud(e.amountIncGst), EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status,
+                  e.date, e.supplierName ?? '', e.description, e.accountName ?? '', fmtAud(e.amountExGst), fmtAud(e.gstAmount), fmtAud(e.amountIncGst), statusLabel(e),
                 ]))
               } finally { setExportLoading(false) }
             }}
@@ -197,7 +207,7 @@ export default function ExpensesPage() {
                       { header: 'Status', nowrap: true },
                     ],
                     rows: all.map(e => ({
-                      cells: [formatDate(e.date), e.supplierName ?? '—', e.description, e.accountName ?? '—', '$' + fmtAud(e.amountExGst), '$' + fmtAud(e.gstAmount), '$' + fmtAud(e.amountIncGst), EXPENSE_STATUS_LABELS[e.status as ExpenseStatus] ?? e.status],
+                      cells: [formatDate(e.date), e.supplierName ?? '—', e.description, e.accountName ?? '—', '$' + fmtAud(e.amountExGst), '$' + fmtAud(e.gstAmount), '$' + fmtAud(e.amountIncGst), statusLabel(e)],
                     })),
                   }],
                 })
@@ -274,7 +284,11 @@ export default function ExpensesPage() {
                     <tr
                       key={e.id}
                       className="border-b border-border last:border-b-0 hover:bg-muted/40 cursor-pointer"
-                      onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }}
+                      onClick={() => {
+                        if (e.bankSource) { setLinkedTransactionId(e.bankTransactionId); return }
+                        setModalExpenseId(e.id)
+                        setModalOpen(true)
+                      }}
                     >
                       <td className="px-3 py-2 tabular-nums text-xs text-muted-foreground whitespace-nowrap">{formatDate(e.date)}</td>
                       <td className="px-3 py-2 font-medium">
@@ -305,15 +319,23 @@ export default function ExpensesPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{fmtAud(e.gstAmount)}</td>
                       <td className="px-3 py-2 text-right tabular-nums font-medium">{fmtAud(e.amountIncGst)}</td>
                       <td className="px-3 py-2">
-                        <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', STATUS_BADGE[e.status])}>
-                          {EXPENSE_STATUS_LABELS[e.status]}
-                        </span>
+                        {e.bankSource ? (
+                          <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap bg-amber-500/10 text-amber-400" title="Posted directly from a bank transaction. Change it on the Bank Accounts page.">
+                            {BANK_SOURCE_LABELS[e.bankSource]}
+                          </span>
+                        ) : (
+                          <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', STATUS_BADGE[e.status])}>
+                            {EXPENSE_STATUS_LABELS[e.status]}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right" onClick={ev => ev.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          <AccountingTableActionButton onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }} title="Edit expense" aria-label="Edit expense">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </AccountingTableActionButton>
+                          {!e.bankSource && (
+                            <AccountingTableActionButton onClick={() => { setModalExpenseId(e.id); setModalOpen(true) }} title="Edit expense" aria-label="Edit expense">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </AccountingTableActionButton>
+                          )}
                           {e.bankTransactionId && (
                             <AccountingTableActionButton onClick={() => setLinkedTransactionId(e.bankTransactionId)} title="View linked bank transaction" aria-label="View linked bank transaction">
                               <Eye className="w-3.5 h-3.5" />

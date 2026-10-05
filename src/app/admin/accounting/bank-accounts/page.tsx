@@ -617,6 +617,22 @@ export default function BankAccountsPage() {
     setSplitLines([emptySplitLine(), emptySplitLine()])
   }
 
+  // Edit a posted split: the form shows unsigned amounts in the transaction's direction
+  function openEditSplit(txn: BankTransaction) {
+    const sign = txn.amountCents < 0 ? -1 : 1
+    const lines = (txn.splitLines ?? []).map((sl): SplitFormLine => ({
+      accountId: sl.accountId,
+      accountSearch: '',
+      accountOpen: false,
+      description: sl.description ?? '',
+      amountCents: ((sl.amountCents * sign) / 100).toFixed(2),
+      taxCode: sl.taxCode,
+    }))
+    while (lines.length < 2) lines.push(emptySplitLine())
+    setSplitLines(lines)
+    setSplitTxnId(txn.id)
+  }
+
   function updateSplitLine(idx: number, patch: Partial<SplitFormLine>) {
     setSplitLines(prev => prev.map((l, i) => i === idx ? { ...l, ...patch } : l))
   }
@@ -629,7 +645,7 @@ export default function BankAccountsPage() {
     setSplitLines(prev => prev.filter((_, i) => i !== idx))
   }
 
-  async function handleSplit(txn: BankTransaction) {
+  async function handleSplit(txn: BankTransaction, confirmLodgedPeriod = false) {
     const lines = splitLines.map(l => ({
       accountId: l.accountId,
       description: l.description,
@@ -640,17 +656,123 @@ export default function BankAccountsPage() {
     if (lines.some(l => l.amountCents === 0)) { toast.error('All split lines must have a non-zero amount'); return }
     setSplitting(true)
     try {
+      const isEdit = txn.status === 'MATCHED'
       const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/split`, {
-        method: 'POST',
+        method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lines }),
+        body: JSON.stringify({ lines, ...(confirmLodgedPeriod ? { confirmLodgedPeriod: true } : {}) }),
       })
-      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to split'); return }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}))
+        if (isEdit && res.status === 409 && d.code === 'LODGED_BAS_PERIOD') { setPendingLodgedEdit(txn); return }
+        toast.error(d.error || (isEdit ? 'Failed to save split' : 'Failed to split'))
+        return
+      }
+      if (isEdit) {
+        const d = await res.json().catch(() => ({}))
+        if (d.transaction) setTransactions(prev => prev.map(t => t.id === txn.id ? { ...t, ...d.transaction } : t))
+        setSplitTxnId(null)
+        toast.success('Split updated')
+        return
+      }
       setSplitTxnId(null)
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === txn.id ? null : prev)
     } finally { setSplitting(false) }
+  }
+
+  // Split form, shared by splitting a pending transaction and editing a posted split
+  function renderSplitForm(t: BankTransaction) {
+    return (
+      <div className="mt-3 p-3 rounded-lg border border-border bg-muted/20 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Split Transaction — {fmtAmt(t.amountCents)}</p>
+          <button type="button" onClick={() => setSplitTxnId(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+        </div>
+        {splitLines.map((line, idx) => {
+          const filteredAccounts = postableAccounts.filter(a => {
+            const q = line.accountSearch.trim().toLowerCase()
+            return !q || a.searchText.includes(q)
+          })
+          return (
+            <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_100px_120px_32px] sm:items-end">
+              <div className="space-y-1">
+                <Label className="text-xs">Account</Label>
+                <div className="relative">
+                  <Input
+                    className="h-8 text-sm"
+                    placeholder="Search account…"
+                    value={line.accountOpen ? line.accountSearch : (coaAccounts.find(x => x.id === line.accountId)?.label ?? '')}
+                    onFocus={() => updateSplitLine(idx, { accountOpen: true, accountSearch: '' })}
+                    onBlur={() => setTimeout(() => updateSplitLine(idx, { accountOpen: false }), 150)}
+                    onChange={e => updateSplitLine(idx, { accountSearch: e.target.value })}
+                  />
+                  {line.accountOpen && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-40 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+                      {filteredAccounts.map(a => (
+                        <button key={a.id} type="button"
+                          onMouseDown={() => updateSplitLine(idx, { accountId: a.id, accountSearch: '', accountOpen: false, taxCode: a.taxCode })}
+                          className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', line.accountId === a.id && 'bg-primary/10 font-medium')}
+                        >{a.label}</button>
+                      ))}
+                      {filteredAccounts.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Amount ($)</Label>
+                <Input type="number" min="0" step="0.01" className="h-8 text-sm" placeholder="0.00"
+                  value={line.amountCents} onChange={e => updateSplitLine(idx, { amountCents: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">GST</Label>
+                <div className="flex items-center gap-2">
+                  <Select value={line.taxCode} onValueChange={v => updateSplitLine(idx, { taxCode: v })}>
+                    <SelectTrigger className="h-8 min-w-0 flex-1 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {TAX_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {splitLines.length > 2 && (
+                    <button type="button" onClick={() => removeSplitLine(idx)} className="h-8 w-8 shrink-0 flex items-center justify-center text-muted-foreground hover:text-destructive sm:hidden"><Trash2 className="w-3.5 h-3.5" /></button>
+                  )}
+                </div>
+              </div>
+              {splitLines.length > 2 && (
+                <button type="button" onClick={() => removeSplitLine(idx)} className="hidden h-8 items-center justify-center text-muted-foreground hover:text-destructive sm:flex"><Trash2 className="w-3.5 h-3.5" /></button>
+              )}
+              <div className="sm:col-start-1 sm:col-span-3">
+                <Input className="h-8 text-sm" placeholder="Description (optional)" maxLength={2000} aria-label="Split line description"
+                  value={line.description} onChange={e => updateSplitLine(idx, { description: e.target.value })}
+                />
+              </div>
+            </div>
+          )
+        })}
+        {(() => {
+          const allocated = splitLines.reduce((s, l) => s + Math.round(parseFloat(l.amountCents || '0') * 100), 0)
+          const total = Math.abs(t.amountCents)
+          const remaining = total - allocated
+          return (
+            <div className="flex items-center justify-between text-xs">
+              <button type="button" onClick={addSplitLine} className="text-primary hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add line</button>
+              <span className={cn('tabular-nums', remaining === 0 ? 'text-emerald-600' : 'text-destructive')}>
+                Remaining: {fmtAmt(remaining * (t.amountCents < 0 ? -1 : 1))}
+              </span>
+            </div>
+          )
+        })()}
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => void handleSplit(t)} disabled={splitting}>
+            {splitting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}{t.status === 'MATCHED' ? 'Save Split' : 'Post Split'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSplitTxnId(null)}>Cancel</Button>
+        </div>
+      </div>
+    )
   }
 
   async function downloadAccountingAttachment(attachmentId: string, filename: string) {
@@ -1258,90 +1380,7 @@ export default function BankAccountsPage() {
                                   </div>
 
                                   {/* Split form */}
-                                  {splitTxnId === t.id && (
-                                    <div className="mt-3 p-3 rounded-lg border border-border bg-muted/20 space-y-3">
-                                      <div className="flex items-center justify-between">
-                                        <p className="text-sm font-medium">Split Transaction — {fmtAmt(t.amountCents)}</p>
-                                        <button type="button" onClick={() => setSplitTxnId(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
-                                      </div>
-                                      {splitLines.map((line, idx) => {
-                                        const filteredAccounts = postableAccounts.filter(a => {
-                                          const q = line.accountSearch.trim().toLowerCase()
-                                          return !q || a.searchText.includes(q)
-                                        })
-                                        return (
-                                          <div key={idx} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_100px_120px_32px] sm:items-end">
-                                            <div className="space-y-1">
-                                              <Label className="text-xs">Account</Label>
-                                              <div className="relative">
-                                                <Input
-                                                  className="h-8 text-sm"
-                                                  placeholder="Search account…"
-                                                  value={line.accountOpen ? line.accountSearch : (coaAccounts.find(x => x.id === line.accountId)?.label ?? '')}
-                                                  onFocus={() => updateSplitLine(idx, { accountOpen: true, accountSearch: '' })}
-                                                  onBlur={() => setTimeout(() => updateSplitLine(idx, { accountOpen: false }), 150)}
-                                                  onChange={e => updateSplitLine(idx, { accountSearch: e.target.value })}
-                                                />
-                                                {line.accountOpen && (
-                                                  <div className="absolute z-50 top-full left-0 right-0 mt-0.5 max-h-40 overflow-y-auto rounded-md border border-border bg-popover shadow-md">
-                                                    {filteredAccounts.map(a => (
-                                                      <button key={a.id} type="button"
-                                                        onMouseDown={() => updateSplitLine(idx, { accountId: a.id, accountSearch: '', accountOpen: false, taxCode: a.taxCode })}
-                                                        className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-accent/50 transition-colors', line.accountId === a.id && 'bg-primary/10 font-medium')}
-                                                      >{a.label}</button>
-                                                    ))}
-                                                    {filteredAccounts.length === 0 && <p className="px-3 py-2 text-sm text-muted-foreground">No accounts found.</p>}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-xs">Amount ($)</Label>
-                                              <Input type="number" min="0" step="0.01" className="h-8 text-sm" placeholder="0.00"
-                                                value={line.amountCents} onChange={e => updateSplitLine(idx, { amountCents: e.target.value })}
-                                              />
-                                            </div>
-                                            <div className="space-y-1">
-                                              <Label className="text-xs">GST</Label>
-                                              <div className="flex items-center gap-2">
-                                                <Select value={line.taxCode} onValueChange={v => updateSplitLine(idx, { taxCode: v })}>
-                                                  <SelectTrigger className="h-8 min-w-0 flex-1 text-sm"><SelectValue /></SelectTrigger>
-                                                  <SelectContent>
-                                                    {TAX_CODE_OPTIONS.map(o => <SelectItem key={o.code} value={o.code}>{o.name}</SelectItem>)}
-                                                  </SelectContent>
-                                                </Select>
-                                                {splitLines.length > 2 && (
-                                                  <button type="button" onClick={() => removeSplitLine(idx)} className="h-8 w-8 shrink-0 flex items-center justify-center text-muted-foreground hover:text-destructive sm:hidden"><Trash2 className="w-3.5 h-3.5" /></button>
-                                                )}
-                                              </div>
-                                            </div>
-                                            {splitLines.length > 2 && (
-                                              <button type="button" onClick={() => removeSplitLine(idx)} className="hidden h-8 items-center justify-center text-muted-foreground hover:text-destructive sm:flex"><Trash2 className="w-3.5 h-3.5" /></button>
-                                            )}
-                                          </div>
-                                        )
-                                      })}
-                                      {(() => {
-                                        const allocated = splitLines.reduce((s, l) => s + Math.round(parseFloat(l.amountCents || '0') * 100), 0)
-                                        const total = Math.abs(t.amountCents)
-                                        const remaining = total - allocated
-                                        return (
-                                          <div className="flex items-center justify-between text-xs">
-                                            <button type="button" onClick={addSplitLine} className="text-primary hover:underline flex items-center gap-1"><Plus className="w-3 h-3" />Add line</button>
-                                            <span className={cn('tabular-nums', remaining === 0 ? 'text-emerald-600' : 'text-destructive')}>
-                                              Remaining: {fmtAmt(remaining * (t.amountCents < 0 ? -1 : 1))}
-                                            </span>
-                                          </div>
-                                        )
-                                      })()}
-                                      <div className="flex gap-2">
-                                        <Button size="sm" onClick={() => void handleSplit(t)} disabled={splitting}>
-                                          {splitting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Post Split
-                                        </Button>
-                                        <Button size="sm" variant="ghost" onClick={() => setSplitTxnId(null)}>Cancel</Button>
-                                      </div>
-                                    </div>
-                                  )}
+                                  {splitTxnId === t.id && renderSplitForm(t)}
                                 </div>
                               ) : (
                                 <div className="space-y-3 max-w-xl">
@@ -1396,7 +1435,8 @@ export default function BankAccountsPage() {
                                       />
                                     )
                                   })()}
-                                  {(t.matchType === 'SPLIT' || t.matchType === 'BAS_PAYMENT') && t.splitLines && t.splitLines.length > 0 && (
+                                  {t.matchType === 'SPLIT' && splitTxnId === t.id && renderSplitForm(t)}
+                                  {(t.matchType === 'SPLIT' || t.matchType === 'BAS_PAYMENT') && splitTxnId !== t.id && t.splitLines && t.splitLines.length > 0 && (
                                     <div className="rounded border border-border overflow-hidden">
                                       <table className="w-full text-xs">
                                         <thead className="bg-muted/30">
@@ -1422,10 +1462,10 @@ export default function BankAccountsPage() {
                                       </table>
                                     </div>
                                   )}
-                                  {editingPostedId !== t.id && (
+                                  {editingPostedId !== t.id && splitTxnId !== t.id && (
                                     <div className="flex items-center gap-2">
-                                      {(t.matchType === 'MANUAL' || t.matchType === 'EXPENSE') && (
-                                        <Button size="sm" variant="outline" onClick={() => startEditPosted(t)} disabled={isUndoing || isDeletingTxn}>
+                                      {(t.matchType === 'MANUAL' || t.matchType === 'EXPENSE' || t.matchType === 'SPLIT') && (
+                                        <Button size="sm" variant="outline" onClick={() => t.matchType === 'SPLIT' ? openEditSplit(t) : startEditPosted(t)} disabled={isUndoing || isDeletingTxn}>
                                           <Pencil className="w-3.5 h-3.5 mr-1.5" />Edit
                                         </Button>
                                       )}
@@ -1878,11 +1918,13 @@ export default function BankAccountsPage() {
         open={pendingLodgedEdit !== null}
         onOpenChange={(v) => { if (!v) setPendingLodgedEdit(null) }}
         title="Edit a transaction in a lodged BAS period?"
-        description="This transaction falls in a BAS period that has already been lodged. Changing its account or GST code will change the figures for that period, which may no longer match what was lodged with the ATO."
+        description="This transaction falls in a BAS period that has already been lodged. Changing its account, GST code or split will change the figures for that period, which may no longer match what was lodged with the ATO."
         confirmLabel="Save anyway"
         onConfirm={async () => {
           const t = pendingLodgedEdit
-          if (t) await handleSaveEdit(t, true)
+          if (!t) return
+          if (t.matchType === 'SPLIT') await handleSplit(t, true)
+          else await handleSaveEdit(t, true)
         }}
       />
 

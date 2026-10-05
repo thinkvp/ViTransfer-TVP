@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.3] - 2026-10-05
+
+### Added
+
+- **Posted split transactions can now be edited too** — the Edit button now also appears on posted splits. It opens the split form with the current lines, so you can change accounts, amounts and GST codes, or add and remove lines, without Undo, which also deleted the transaction's attachments. Changing a split in a lodged BAS period asks for confirmation first.
+- **Split lines can have their own description** — the split form now has an optional description under each line, shown in the posted split and the BAS purchase records.
+- **Spending posted from bank transactions now shows on the Expenses page** — expense lines from posted splits, and Transfer or Deposit postings to an expense account, now appear in the Expenses list, labelled "Bank split" or "Bank posting". They are read-only there: clicking one opens its bank transaction, and changes are made on the Bank Accounts page. They were always counted in the BAS and reports; they just weren't listed.
+
+### Fixed
+
+- **Split purchases no longer show a blank description in the BAS** — a split line with no description of its own now shows the bank statement text in the BAS purchase records, as BAS sales and the account ledger already did.
+
 ## [2.7.2] - 2026-10-05
 
 ### Added

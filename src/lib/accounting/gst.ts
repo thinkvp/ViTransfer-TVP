@@ -393,7 +393,9 @@ export async function calculateBas(
       id: sl.id,
       date: (sl.bankTransaction?.date as string) ?? '',
       supplier: null,
-      description: sl.description,
+      // Split lines usually have no description of their own — fall back to the bank
+      // statement text, as income splits and the account ledger already do
+      description: sl.description || sl.bankTransaction?.description || '',
       accountCode: sl.account?.code ?? '',
       accountName: sl.account?.name ?? '',
       amountIncGstCents: -sl.amountCents,
