@@ -12,7 +12,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { apiFetch } from '@/lib/api-client'
 import { ArrowLeft, Calculator, CheckCircle, FileCheck, AlertTriangle, Info, ChevronDown, ChevronUp, CreditCard, Trash2, Loader2, ExternalLink } from 'lucide-react'
-import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord, AccountingAttachment, JournalEntry } from '@/lib/accounting/types'
+import type { BasPeriod, BasCalculation, BasIssue, BasPeriodStatus, BasSalesRecord, BasExpenseRecord, BasPriorPeriodItem, AccountingAttachment, JournalEntry } from '@/lib/accounting/types'
+import { LodgedChangesCard, PriorPeriodAdjustmentsCard } from '@/components/admin/accounting/BasChangesPanels'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { AttachmentsPanel, type AttachmentItem } from '@/components/admin/accounting/AttachmentsPanel'
 import { ExpenseFormModal } from '@/components/admin/accounting/ExpenseFormModal'
@@ -66,6 +67,9 @@ export default function BasDetailPage() {
   const [recordsTab, setRecordsTab] = useState<'sales' | 'expenses'>('sales')
   const [recordsExpanded, setRecordsExpanded] = useState(true)
   const [calculating, setCalculating] = useState(false)
+  // Un-lodged periods: outstanding changes to earlier lodged periods offered for this BAS
+  const [priorItems, setPriorItems] = useState<BasPriorPeriodItem[]>([])
+  const [savingExclusions, setSavingExclusions] = useState(false)
 
   const [g2Override, setG2Override] = useState('')
   const [g3Override, setG3Override] = useState('')
@@ -194,6 +198,18 @@ export default function BasDetailPage() {
 
   useEffect(() => { void load() }, [load])
 
+  const loadPriorItems = useCallback(async () => {
+    const res = await apiFetch(`/api/admin/accounting/bas/${id}/changes`)
+    if (!res.ok) return
+    const d = await res.json()
+    setPriorItems(d.priorPeriodItems ?? [])
+  }, [id])
+
+  const periodStatus = period?.status
+  useEffect(() => {
+    if (periodStatus && periodStatus !== 'LODGED') void loadPriorItems()
+  }, [periodStatus, loadPriorItems])
+
   // Load chart of accounts and settings defaults for payment dialog
   useEffect(() => {
     apiFetch('/api/admin/accounting/accounts?activeOnly=true')
@@ -291,8 +307,26 @@ export default function BasDetailPage() {
         setCalculation(d.calculation)
         setIssues(d.issues ?? [])
         setRecords(d.records ?? null)
+        setPriorItems(d.priorPeriodItems ?? [])
       }
     } finally { setCalculating(false) }
+  }
+
+  async function handleTogglePriorItem(key: string, include: boolean) {
+    if (!period) return
+    const excluded = new Set(period.excludedAdjustmentKeys)
+    if (include) excluded.delete(key); else excluded.add(key)
+    const excludedAdjustmentKeys = Array.from(excluded)
+    setSavingExclusions(true)
+    try {
+      const res = await apiFetch(`/api/admin/accounting/bas/${id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ excludedAdjustmentKeys }),
+      })
+      if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to save'); return }
+      setPeriod({ ...period, excludedAdjustmentKeys })
+      setPriorItems(prev => prev.map(i => i.key === key ? { ...i, included: include } : i))
+      if (calculation) await handleCalculate()
+    } finally { setSavingExclusions(false) }
   }
 
   async function handleSave() {
@@ -471,7 +505,7 @@ export default function BasDetailPage() {
       {!isLodged && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Adjustments</CardTitle>
+            <CardTitle className="text-sm">Overrides &amp; PAYG</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid grid-cols-2 gap-4">
@@ -508,6 +542,12 @@ export default function BasDetailPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {isLodged && <LodgedChangesCard periodId={id} />}
+
+      {!isLodged && (
+        <PriorPeriodAdjustmentsCard items={priorItems} saving={savingExclusions} onToggle={(key, include) => { void handleTogglePriorItem(key, include) }} />
       )}
 
       {/* Payment section — only for lodged periods */}
@@ -670,6 +710,14 @@ export default function BasDetailPage() {
                   </tbody>
                 </table>
               </div>
+
+              {calculation.priorPeriodAdjustments && (
+                <p className="px-4 py-2 text-xs text-muted-foreground border-t border-border">
+                  Includes prior-period adjustments: G1 {fmtAud(calculation.priorPeriodAdjustments.g1Cents)},
+                  1A {fmtAud(calculation.priorPeriodAdjustments.label1ACents)},
+                  1B {fmtAud(calculation.priorPeriodAdjustments.label1BCents)}.
+                </p>
+              )}
 
               {issues.length > 0 && (
                 <div className="px-4 py-3 space-y-1 border-t border-border">
@@ -886,6 +934,7 @@ export default function BasDetailPage() {
             <AlertDialogTitle>Lodge BAS?</AlertDialogTitle>
             <AlertDialogDescription>
               Marking as Lodged is permanent — you cannot edit this period afterwards. Make sure the calculation is correct.
+              {priorItems.some(i => i.included) && ` ${priorItems.filter(i => i.included).length} prior-period adjustment${priorItems.filter(i => i.included).length === 1 ? '' : 's'} will be recorded as carried into this BAS.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

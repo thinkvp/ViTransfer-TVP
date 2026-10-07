@@ -141,6 +141,8 @@ export interface BasPeriod {
   g3Override: number | null
   calculationJson: BasCalculation | null
   recordsJson: { sales: BasSalesRecord[]; expenses: BasExpenseRecord[] } | null
+  /** Un-lodged periods: prior-period adjustment keys left out of this BAS */
+  excludedAdjustmentKeys: string[]
   // PAYG amounts (cents)
   paygWithholdingCents: number | null
   paygInstalmentCents: number | null
@@ -186,8 +188,78 @@ export interface BasCalculation {
   label1ACents: number            // GST on sales
   label1BCents: number            // GST credits on purchases
   netGstCents: number             // 1A - 1B (positive = payable, negative = refund)
+  /** Prior-period adjustments already included in the labels above (null/absent = none) */
+  priorPeriodAdjustments?: BasLabelDeltas | null
   // Issues list (optional — may be returned separately)
   issues?: BasIssue[]
+}
+
+/** Signed per-label amounts (cents) — a record's contribution, or a change to it. */
+export interface BasLabelDeltas {
+  g1Cents: number
+  g3Cents: number
+  g4Cents: number
+  g10Cents: number
+  g11Cents: number
+  label1ACents: number
+  label1BCents: number
+}
+
+/**
+ * One source record (or invoice) whose BAS contribution differs from what a lodged
+ * period reported. `deltas` is live − snapshot; `resolvedDeltas` is how much of that has
+ * been carried into a later BAS or amended; `outstandingDeltas` is what is left.
+ */
+export interface BasRecordChange {
+  /** "<sourcePeriodId>|<recordKey>" — unique across periods */
+  key: string
+  sourcePeriodId: string
+  recordKey: string
+  side: 'SALES' | 'PURCHASES'
+  change: 'ADDED' | 'REMOVED' | 'CHANGED' | 'REVERTED'
+  date: string
+  description: string
+  before: { amountIncGstCents: number; gstCents: number } | null
+  after: { amountIncGstCents: number; gstCents: number } | null
+  deltas: BasLabelDeltas
+  resolvedDeltas: BasLabelDeltas
+  outstandingDeltas: BasLabelDeltas
+  outstanding: boolean
+}
+
+export interface BasAdjustmentRow {
+  id: string
+  sourcePeriodId: string
+  sourcePeriodLabel: string
+  targetPeriodId: string | null
+  targetPeriodLabel: string | null
+  resolution: 'CARRIED' | 'AMENDED'
+  recordKey: string
+  description: string
+  recordDate: string
+  deltas: BasLabelDeltas
+  createdByName: string | null
+  createdAt: string
+}
+
+/** Changes to one lodged period since it was lodged. */
+export interface BasPeriodDrift {
+  periodId: string
+  periodLabel: string
+  startDate: string
+  endDate: string
+  /** False when the period was lodged before records were snapshotted — can't be compared */
+  comparable: boolean
+  changes: BasRecordChange[]
+  outstandingTotals: BasLabelDeltas
+  outstandingCount: number
+  adjustments: BasAdjustmentRow[]
+}
+
+/** A change from an earlier lodged period offered for inclusion in an un-lodged BAS. */
+export interface BasPriorPeriodItem extends BasRecordChange {
+  sourcePeriodLabel: string
+  included: boolean
 }
 
 export interface BasIssue {
@@ -210,6 +282,8 @@ export interface BasSalesRecord {
   kind?: 'bankTransaction' | 'journal' | 'splitLine'
   /** For bankTransaction and splitLine rows: the underlying bank transaction ID */
   bankTransactionId?: string
+  /** GST, GST_FREE or INPUT_TAXED (absent on snapshots taken before this was recorded) */
+  taxCode?: string
 }
 
 export interface BasExpenseRecord {

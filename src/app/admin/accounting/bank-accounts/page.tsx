@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
@@ -156,7 +156,6 @@ export default function BankAccountsPage() {
   const [undoing, setUndoing] = useState<string | null>(null)
   const [editingPostedId, setEditingPostedId] = useState<string | null>(null)
   const [savingEdit, setSavingEdit] = useState<string | null>(null)
-  const [pendingLodgedEdit, setPendingLodgedEdit] = useState<BankTransaction | null>(null)
   const [ignoring, setIgnoring] = useState<string | null>(null)
 
   const [deletingTransaction, setDeletingTransaction] = useState(false)
@@ -211,6 +210,8 @@ export default function BankAccountsPage() {
 
   // Split transaction state
   const [splitTxnId, setSplitTxnId] = useState<string | null>(null)
+  // Memo while editing a posted split; a pending split edits its post form's memo instead
+  const [splitMemo, setSplitMemo] = useState('')
 
   // Export state
   const [txnExportLoading, setTxnExportLoading] = useState(false)
@@ -434,6 +435,20 @@ export default function BankAccountsPage() {
     }
   }
 
+  // Uploads files picked before posting; returns the first failure's message, or null
+  async function uploadPendingAttachments(txnId: string, files: File[]): Promise<string | null> {
+    for (const file of files) {
+      const fd = new FormData()
+      fd.append('file', file)
+      const uploadRes = await apiFetch(`/api/admin/accounting/transactions/${txnId}/attachments`, { method: 'POST', body: fd })
+      if (!uploadRes.ok) {
+        const d = await uploadRes.json().catch(() => ({}))
+        return d.error || `Failed to upload attachment "${file.name}"`
+      }
+    }
+    return null
+  }
+
   async function handlePost(txn: BankTransaction) {
     const form = getPostForm(txn)
     if (!form.accountId) { toast.error('Please select an account'); return }
@@ -444,19 +459,7 @@ export default function BankAccountsPage() {
         body: JSON.stringify({ transactionType: form.transactionType, accountId: form.accountId, taxCode: form.taxCode, memo: form.memo || null, supplierName: form.supplierName || null }),
       })
       if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to post'); return }
-      let attachmentUploadError: string | null = null
-      if (form.files.length > 0) {
-        for (const file of form.files) {
-          const fd = new FormData()
-          fd.append('file', file)
-          const uploadRes = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/attachments`, { method: 'POST', body: fd })
-          if (!uploadRes.ok) {
-            const d = await uploadRes.json().catch(() => ({}))
-            attachmentUploadError = d.error || `Failed to upload attachment "${file.name}"`
-            break
-          }
-        }
-      }
+      const attachmentUploadError = await uploadPendingAttachments(txn.id, form.files)
       if (attachmentUploadError) toast.error(`Transaction posted, but attachment upload failed: ${attachmentUploadError}`)
       // Remove from list without full reload so the page scroll position is preserved
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
@@ -490,7 +493,7 @@ export default function BankAccountsPage() {
     } finally { setUndoing(null) }
   }
 
-  async function handleSaveEdit(txn: BankTransaction, confirmLodgedPeriod = false) {
+  async function handleSaveEdit(txn: BankTransaction) {
     const form = getPostForm(txn)
     if (!form.accountId) { toast.error('Please select an account'); return }
     setSavingEdit(txn.id)
@@ -503,12 +506,10 @@ export default function BankAccountsPage() {
           taxCode: form.taxCode,
           memo: form.memo || null,
           ...(txn.matchType === 'EXPENSE' ? { supplierName: form.supplierName || null } : {}),
-          ...(confirmLodgedPeriod ? { confirmLodgedPeriod: true } : {}),
         }),
       })
       const d = await res.json().catch(() => ({}))
       if (!res.ok) {
-        if (res.status === 409 && d.code === 'LODGED_BAS_PERIOD') { setPendingLodgedEdit(txn); return }
         toast.error(d.error || 'Failed to save changes')
         return
       }
@@ -630,6 +631,7 @@ export default function BankAccountsPage() {
     }))
     while (lines.length < 2) lines.push(emptySplitLine())
     setSplitLines(lines)
+    setSplitMemo(txn.memo ?? '')
     setSplitTxnId(txn.id)
   }
 
@@ -645,7 +647,7 @@ export default function BankAccountsPage() {
     setSplitLines(prev => prev.filter((_, i) => i !== idx))
   }
 
-  async function handleSplit(txn: BankTransaction, confirmLodgedPeriod = false) {
+  async function handleSplit(txn: BankTransaction) {
     const lines = splitLines.map(l => ({
       accountId: l.accountId,
       description: l.description,
@@ -654,17 +656,18 @@ export default function BankAccountsPage() {
     }))
     if (lines.some(l => !l.accountId)) { toast.error('All split lines must have an account'); return }
     if (lines.some(l => l.amountCents === 0)) { toast.error('All split lines must have a non-zero amount'); return }
+    const isEdit = txn.status === 'MATCHED'
+    const form = getPostForm(txn)
+    const memo = (isEdit ? splitMemo : form.memo).trim() || null
     setSplitting(true)
     try {
-      const isEdit = txn.status === 'MATCHED'
       const res = await apiFetch(`/api/admin/accounting/transactions/${txn.id}/split`, {
         method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lines, ...(confirmLodgedPeriod ? { confirmLodgedPeriod: true } : {}) }),
+        body: JSON.stringify({ lines, memo }),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        if (isEdit && res.status === 409 && d.code === 'LODGED_BAS_PERIOD') { setPendingLodgedEdit(txn); return }
         toast.error(d.error || (isEdit ? 'Failed to save split' : 'Failed to split'))
         return
       }
@@ -675,20 +678,32 @@ export default function BankAccountsPage() {
         toast.success('Split updated')
         return
       }
+      const attachmentUploadError = await uploadPendingAttachments(txn.id, form.files)
+      if (attachmentUploadError) toast.error(`Split posted, but attachment upload failed: ${attachmentUploadError}`)
       setSplitTxnId(null)
       setTransactions(prev => prev.filter(t => t.id !== txn.id))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === txn.id ? null : prev)
+      setPostForms(prev => { const next = { ...prev }; delete next[txn.id]; return next })
     } finally { setSplitting(false) }
   }
 
-  // Split form, shared by splitting a pending transaction and editing a posted split
-  function renderSplitForm(t: BankTransaction) {
+  // Split form, shared by splitting a pending transaction and editing a posted split.
+  // `attachments` is the pending transaction's file picker; a posted split has its own panel.
+  function renderSplitForm(t: BankTransaction, attachments?: ReactNode) {
+    const isEdit = t.status === 'MATCHED'
     return (
-      <div className="mt-3 p-3 rounded-lg border border-border bg-muted/20 space-y-3">
+      <div className="p-3 rounded-lg border border-border bg-muted/20 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">Split Transaction — {fmtAmt(t.amountCents)}</p>
-          <button type="button" onClick={() => setSplitTxnId(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+          <button type="button" onClick={() => setSplitTxnId(null)} className="text-muted-foreground hover:text-foreground" aria-label="Close split"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Memo <span className="text-muted-foreground">(optional)</span></Label>
+          <Input className="h-8 text-sm" placeholder="Add a note…" maxLength={2000}
+            value={isEdit ? splitMemo : getPostForm(t).memo}
+            onChange={e => isEdit ? setSplitMemo(e.target.value) : setPostFormField(t.id, { memo: e.target.value })}
+          />
         </div>
         {splitLines.map((line, idx) => {
           const filteredAccounts = postableAccounts.filter(a => {
@@ -765,12 +780,61 @@ export default function BankAccountsPage() {
             </div>
           )
         })()}
+        {attachments}
         <div className="flex gap-2">
           <Button size="sm" onClick={() => void handleSplit(t)} disabled={splitting}>
             {splitting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}{t.status === 'MATCHED' ? 'Save Split' : 'Post Split'}
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSplitTxnId(null)}>Cancel</Button>
         </div>
+      </div>
+    )
+  }
+
+  // File picker for a pending transaction; the files upload once it's posted or split
+  function renderPendingAttachments(t: BankTransaction) {
+    const form = getPostForm(t)
+    return (
+      <div className="space-y-1">
+        <Label className="text-xs">Attachments <span className="text-muted-foreground">(optional)</span></Label>
+        <input ref={el => { fileRefs.current[t.id] = el }} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={e => {
+          const picked = Array.from(e.target.files ?? [])
+          setPostFormField(t.id, { files: [...(getPostForm(t).files), ...picked] })
+          if (fileRefs.current[t.id]) fileRefs.current[t.id]!.value = ''
+        }} />
+        <div
+          onClick={() => fileRefs.current[t.id]?.click()}
+          onDragOver={e => { e.preventDefault(); setDragOverId(t.id) }}
+          onDragEnter={e => { e.preventDefault(); setDragOverId(t.id) }}
+          onDragLeave={() => setDragOverId(null)}
+          onDrop={e => {
+            e.preventDefault()
+            setDragOverId(null)
+            const dropped = Array.from(e.dataTransfer.files)
+            if (dropped.length > 0) setPostFormField(t.id, { files: [...(getPostForm(t).files), ...dropped] })
+          }}
+          className={`flex items-center justify-center gap-1.5 border border-dashed rounded px-3 py-2 cursor-pointer transition-colors text-xs ${
+            dragOverId === t.id
+              ? 'border-primary bg-primary/10 text-foreground'
+              : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
+          }`}
+        >
+          <Paperclip className="w-3.5 h-3.5 shrink-0" />
+          <span>Drop files or click to attach</span>
+        </div>
+        {form.files.length > 0 && (
+          <div className="flex flex-col gap-0.5 mt-1">
+            {form.files.map((f, fi) => (
+              <div key={fi} className="flex items-center gap-1 text-xs text-white">
+                <Paperclip className="w-3 h-3 shrink-0" />
+                <span className="truncate max-w-[200px]">{f.name}</span>
+                <button type="button" onClick={() => setPostFormField(t.id, { files: form.files.filter((_, i) => i !== fi) })} className="text-white/60 hover:text-destructive ml-1" aria-label="Remove file">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -1309,49 +1373,10 @@ export default function BankAccountsPage() {
                                 <p className="text-sm leading-5 whitespace-normal wrap-break-word">{t.description}</p>
                               </div>
                               {activeTab === 'UNMATCHED' ? (
+                                splitTxnId === t.id ? renderSplitForm(t, renderPendingAttachments(t)) : (
                                 <div className="space-y-3">
                                   {renderPostFields(t, types)}
-                                  <div className="space-y-1">
-                                    <Label className="text-xs">Attachments <span className="text-muted-foreground">(optional)</span></Label>
-                                    <input ref={el => { fileRefs.current[t.id] = el }} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={e => {
-                                      const picked = Array.from(e.target.files ?? [])
-                                      setPostFormField(t.id, { files: [...(getPostForm(t).files), ...picked] })
-                                      if (fileRefs.current[t.id]) fileRefs.current[t.id]!.value = ''
-                                    }} />
-                                    <div
-                                      onClick={() => fileRefs.current[t.id]?.click()}
-                                      onDragOver={e => { e.preventDefault(); setDragOverId(t.id) }}
-                                      onDragEnter={e => { e.preventDefault(); setDragOverId(t.id) }}
-                                      onDragLeave={() => setDragOverId(null)}
-                                      onDrop={e => {
-                                        e.preventDefault()
-                                        setDragOverId(null)
-                                        const dropped = Array.from(e.dataTransfer.files)
-                                        if (dropped.length > 0) setPostFormField(t.id, { files: [...(getPostForm(t).files), ...dropped] })
-                                      }}
-                                      className={`flex items-center justify-center gap-1.5 border border-dashed rounded px-3 py-2 cursor-pointer transition-colors text-xs ${
-                                        dragOverId === t.id
-                                          ? 'border-primary bg-primary/10 text-foreground'
-                                          : 'border-border text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                                      }`}
-                                    >
-                                      <Paperclip className="w-3.5 h-3.5 shrink-0" />
-                                      <span>Drop files or click to attach</span>
-                                    </div>
-                                    {form.files.length > 0 && (
-                                      <div className="flex flex-col gap-0.5 mt-1">
-                                        {form.files.map((f, fi) => (
-                                          <div key={fi} className="flex items-center gap-1 text-xs text-white">
-                                            <Paperclip className="w-3 h-3 shrink-0" />
-                                            <span className="truncate max-w-[200px]">{f.name}</span>
-                                            <button type="button" onClick={() => setPostFormField(t.id, { files: form.files.filter((_, i) => i !== fi) })} className="text-white/60 hover:text-destructive ml-1" aria-label="Remove file">
-                                              <X className="w-3 h-3" />
-                                            </button>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
+                                  {renderPendingAttachments(t)}
                                   <div className="flex flex-wrap items-center gap-2 pt-1">
                                     <Button size="sm" onClick={() => void handlePost(t)} disabled={isPosting || !form.accountId}>
                                       {isPosting && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}Post
@@ -1378,10 +1403,8 @@ export default function BankAccountsPage() {
                                       {isIgnoring ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <EyeOff className="w-3.5 h-3.5 mr-1.5" />}Ignore
                                     </Button>
                                   </div>
-
-                                  {/* Split form */}
-                                  {splitTxnId === t.id && renderSplitForm(t)}
                                 </div>
+                                )
                               ) : (
                                 <div className="space-y-3 max-w-xl">
                                   {editingPostedId === t.id ? (
@@ -1911,20 +1934,6 @@ export default function BankAccountsPage() {
           const a = pendingDeleteAccount!
           setPendingDeleteAccount(null)
           void handleDeleteAccount(a)
-        }}
-      />
-
-      <ConfirmDialog
-        open={pendingLodgedEdit !== null}
-        onOpenChange={(v) => { if (!v) setPendingLodgedEdit(null) }}
-        title="Edit a transaction in a lodged BAS period?"
-        description="This transaction falls in a BAS period that has already been lodged. Changing its account, GST code or split will change the figures for that period, which may no longer match what was lodged with the ATO."
-        confirmLabel="Save anyway"
-        onConfirm={async () => {
-          const t = pendingLodgedEdit
-          if (!t) return
-          if (t.matchType === 'SPLIT') await handleSplit(t, true)
-          else await handleSaveEdit(t, true)
         }}
       />
 

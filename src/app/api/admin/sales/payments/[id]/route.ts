@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
+import { lodgedPeriodGuard, salesPaymentBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,8 +26,14 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
     // Fetch invoiceId and any linked bank transaction before deletion
     const payment = await prisma.salesPayment.findUnique({
       where: { id },
-      select: { invoiceId: true, bankTransaction: { select: { id: true } } },
+      select: {
+        invoiceId: true, paymentDate: true, excludeFromInvoiceBalance: true, source: true,
+        bankTransaction: { select: { id: true } },
+      },
     })
+
+    const lodged = await lodgedPeriodGuard(request, salesPaymentBasEffects(payment), 'Deleting this payment')
+    if (lodged) return lodged
 
     await prisma.$transaction(async (tx) => {
       // If this payment was matched from a bank transaction, return it to UNMATCHED so it

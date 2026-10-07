@@ -9,6 +9,7 @@ import { splitGstInclusive } from '@/lib/accounting/gst-amounts'
 // ACCOUNTING_ATTACHMENT has no project association — getStoredFilePathForProject would return null.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, getStoredFileRecords, updateStoredFilePath } from '@/lib/stored-file'
+import { expenseBasEffects, lodgedPeriodGuard } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -72,6 +73,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     where: { id },
     include: {
       accountingAttachments: { select: { id: true, originalName: true } },
+      bankTransaction: { select: { date: true } },
     },
   })
   if (!existing) {
@@ -105,6 +107,23 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!['EXPENSE', 'COGS'].includes(account.type)) {
       return NextResponse.json({ error: 'Account must be of type EXPENSE or COGS' }, { status: 400 })
     }
+  }
+
+  // Supplier, description and notes don't reach the BAS; everything else here can.
+  const nextAmountCents = data.amountIncGst !== undefined ? Math.round(data.amountIncGst * 100) : existing.amountIncGst
+  const basRelevantChange =
+    (data.date !== undefined && data.date !== existing.date) ||
+    (data.accountId !== undefined && data.accountId !== existing.accountId) ||
+    (data.taxCode !== undefined && data.taxCode !== existing.taxCode) ||
+    (data.status !== undefined && data.status !== existing.status) ||
+    nextAmountCents !== existing.amountIncGst
+  if (basRelevantChange) {
+    const bankTransactionDate = existing.bankTransaction?.date ?? null
+    const lodged = await lodgedPeriodGuard(request, [
+      ...expenseBasEffects({ date: existing.date, status: existing.status, bankTransactionDate }),
+      ...expenseBasEffects({ date: data.date ?? existing.date, status: data.status ?? existing.status, bankTransactionDate }),
+    ], 'Changing this expense')
+    if (lodged) return lodged
   }
 
   const updated = await prisma.expense.update({
@@ -189,6 +208,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     where: { id },
     select: {
       id: true,
+      date: true,
+      status: true,
       bankTransactionId: true,
       accountingAttachments: { select: { id: true } },
     },
@@ -204,6 +225,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       { status: 409 }
     )
   }
+
+  // An unlinked expense still counts when APPROVED (accrual) or RECONCILED without a bank
+  // transaction (cash basis, dated by the expense).
+  const lodged = await lodgedPeriodGuard(request, expenseBasEffects(existing), 'Deleting this expense')
+  if (lodged) return lodged
 
   // Delete attachment files via StoredFile
   const attachmentIds = existing.accountingAttachments.map(a => a.id)

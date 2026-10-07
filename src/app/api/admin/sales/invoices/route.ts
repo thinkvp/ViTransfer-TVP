@@ -7,6 +7,7 @@ import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
 import { nextSalesDocumentNumber } from '@/lib/sales/numbering'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 import { getDefaultTaxRatePercent, lineItemsSchema, normalizeLineItems } from '@/lib/sales/line-items'
+import { lodgedPeriodGuard, salesInvoiceBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -90,6 +91,10 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data
+
+  // A new invoice dated inside a lodged accrual quarter adds to reported sales.
+  const lodged = await lodgedPeriodGuard(request, salesInvoiceBasEffects({ issueDate: input.issueDate, status: 'OPEN' }), 'This invoice')
+  if (lodged) return lodged
 
   const created = await prisma.$transaction(async (tx) => {
     const invoiceNumber = input.invoiceNumber?.trim() || (await nextSalesDocumentNumber(tx, 'invoice'))

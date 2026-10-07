@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { journalEntryFromDb } from '@/lib/accounting/db-mappers'
+import { lodgedPeriodGuard, postingBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -76,6 +77,13 @@ export async function POST(request: NextRequest) {
 
   const account = await prisma.account.findUnique({ where: { id: d.accountId } })
   if (!account) return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+
+  const lodged = await lodgedPeriodGuard(
+    request,
+    postingBasEffects({ date: d.date, accountType: account.type, taxCode: d.taxCode }),
+    'This journal entry'
+  )
+  if (lodged) return lodged
 
   const entry = await prisma.journalEntry.create({
     data: {

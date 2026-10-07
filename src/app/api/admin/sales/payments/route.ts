@@ -5,6 +5,7 @@ import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesPaymentFromDb } from '@/lib/sales/db-mappers'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
+import { lodgedPeriodGuard, salesPaymentBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -70,6 +71,9 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data
+
+  const lodged = await lodgedPeriodGuard(request, salesPaymentBasEffects({ paymentDate: input.paymentDate }), 'This payment')
+  if (lodged) return lodged
 
   const row = await prisma.$transaction(async (tx) => {
     const created = await tx.salesPayment.create({

@@ -6,6 +6,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { deleteAccountingFile, moveAccountingFile } from '@/lib/accounting/file-storage'
 import { splitGstInclusive } from '@/lib/accounting/gst-amounts'
+import { expenseBasEffects, isLodgedPeriodConfirmed, lodgedPeriodGuard, postingLinesBasEffects } from '@/lib/accounting/bas-lodged-guard'
 // ACCOUNTING_ATTACHMENT has no project association.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, getStoredFileRecords, updateStoredFilePath } from '@/lib/stored-file'
@@ -124,17 +125,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   // Changing the account or GST code of a transaction inside a lodged BAS quarter alters
   // figures already reported to the ATO. Allowed, but only once the user confirms.
-  if ((accountChanged || taxCodeChanged) && !d.confirmLodgedPeriod) {
-    const lodged = await prisma.basPeriod.findFirst({
-      where: { status: 'LODGED', startDate: { lte: txn.date }, endDate: { gte: txn.date } },
-      select: { label: true, quarter: true, financialYear: true },
+  if (accountChanged || taxCodeChanged) {
+    const effects = expense
+      ? expenseBasEffects({ date: expense.date, status: expense.status, bankTransactionDate: txn.date })
+      : await postingLinesBasEffects(txn.date, [
+          { accountId: txn.accountId, taxCode: txn.taxCode },
+          { accountId: d.accountId, taxCode: d.taxCode },
+        ])
+    const lodged = await lodgedPeriodGuard(request, effects, 'Changing this transaction', {
+      confirmed: isLodgedPeriodConfirmed(request, d.confirmLodgedPeriod),
     })
-    if (lodged) {
-      return NextResponse.json({
-        error: `This transaction falls in a lodged BAS period (${lodged.label || `Q${lodged.quarter} ${lodged.financialYear}`}). Changing its account or GST code will alter lodged figures.`,
-        code: 'LODGED_BAS_PERIOD',
-      }, { status: 409 })
-    }
+    if (lodged) return lodged
   }
 
   const memo = d.memo === undefined ? txn.memo : (d.memo || null)

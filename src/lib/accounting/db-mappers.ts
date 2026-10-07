@@ -180,6 +180,9 @@ export function basPeriodFromDb(row: any): BasPeriod {
     g3Override: row.g3Override != null ? Number(row.g3Override) : null,
     calculationJson: row.calculationJson ?? null,
     recordsJson: row.recordsJson ?? null,
+    excludedAdjustmentKeys: Array.isArray(row.excludedAdjustmentKeys)
+      ? row.excludedAdjustmentKeys.filter((k: unknown): k is string => typeof k === 'string')
+      : [],
     paygWithholdingCents: row.paygWithholdingCents != null ? Number(row.paygWithholdingCents) : null,
     paygInstalmentCents: row.paygInstalmentCents != null ? Number(row.paygInstalmentCents) : null,
     paymentDate: row.paymentDate ?? null,

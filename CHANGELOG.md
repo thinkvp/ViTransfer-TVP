@@ -5,6 +5,18 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.5] - 2026-10-07
+
+### Added
+
+- **Lodged BAS quarters are flagged when their figures change** — if an expense, bank posting, journal, invoice or payment behind a lodged BAS is added, edited or deleted afterwards, the BAS list marks that quarter "Changed", and its page lists each change with its GST effect. Quarters lodged before this update are checked too, so they may show changes made since they were lodged. **Schema migration:** `20261006000000_bas_prior_period_adjustments`.
+- **Changes to lodged quarters carry into your next BAS** — an un-lodged BAS lists outstanding changes from earlier lodged quarters as prior-period adjustments and includes them in its figures; untick any you want to leave out. As the ATO asks for corrections, GST that increases what you owe goes to 1A and GST that decreases it goes to 1B. Lodging records them as carried, and a change you fixed by revising the original BAS can be marked as amended instead, so nothing is reported twice.
+- **Any change to a lodged BAS quarter now asks first** — the confirmation that bank-transaction edits already had now also covers expenses, journals, posting or undoing bank transactions, splits, invoices and payments. Edits that don't reach the BAS, such as notes and descriptions, don't ask.
+
+### Changed
+
+- **Splitting a bank transaction now shows a single form** — clicking Split replaces the usual Type/Account/GST form instead of opening below it, so it's clear which fields apply. The split form has its own Memo and Attachments, which are now saved with the split (before, a memo or file entered above a split was silently discarded). A posted split's memo can also be changed from its Edit form.
+
 ## [2.7.4] - 2026-10-06
 
 ### Changed

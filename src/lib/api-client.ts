@@ -8,6 +8,11 @@ import {
   subscribe,
   subscribeSessionExpired,
 } from './token-store'
+import {
+  LODGED_PERIOD_CODE,
+  LODGED_PERIOD_CONFIRM_HEADER,
+  requestLodgedPeriodConfirm,
+} from './lodged-period-confirm'
 
 let isRedirecting = false
 let refreshInFlight: Promise<boolean> | null = null
@@ -134,6 +139,44 @@ async function notifyIfReadOnlyDenied(response: Response): Promise<void> {
   }
 }
 
+/**
+ * A write that changes a lodged BAS period answers 409 `LODGED_BAS_PERIOD` (see
+ * bas-lodged-guard.ts). Ask the user here and repeat the request with the confirm header,
+ * so every accounting/sales write path gets the warning without per-page handling — the
+ * same reasoning as notifyIfReadOnlyDenied. Declining returns a 409 whose error says
+ * nothing was changed, which callers show like any other failure.
+ */
+async function confirmLodgedPeriodIfNeeded(
+  response: Response,
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  if (response.status !== 409) return response
+  // Only plain URL requests can be repeated (a Request object's body is single-use).
+  if (typeof input !== 'string' && !(input instanceof URL)) return response
+  if (new Headers(init?.headers || {}).has(LODGED_PERIOD_CONFIRM_HEADER)) return response
+  let body: { code?: unknown; error?: unknown } | null = null
+  try {
+    body = await response.clone().json()
+  } catch {
+    return response
+  }
+  if (body?.code !== LODGED_PERIOD_CODE) return response
+
+  const confirmed = await requestLodgedPeriodConfirm(
+    typeof body.error === 'string' ? body.error : 'This change affects a lodged BAS period.'
+  )
+  if (!confirmed) {
+    return new Response(JSON.stringify({ error: 'Cancelled. Nothing was changed.', code: 'LODGED_BAS_PERIOD_CANCELLED' }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  const headers = new Headers(init?.headers || {})
+  headers.set(LODGED_PERIOD_CONFIRM_HEADER, '1')
+  return apiFetch(input, { ...init, headers })
+}
+
 export async function apiFetch(
   input: RequestInfo | URL,
   init?: RequestInit
@@ -177,7 +220,7 @@ export async function apiFetch(
         const retryResponse = await fetch(input, withAuthHeader(init))
         if (retryResponse.status !== 401) {
           await notifyIfReadOnlyDenied(retryResponse)
-          return retryResponse
+          return confirmLodgedPeriodIfNeeded(retryResponse, input, init)
         }
       }
 
@@ -205,7 +248,7 @@ export async function apiFetch(
 
     await notifyIfReadOnlyDenied(response)
 
-    return response
+    return confirmLodgedPeriodIfNeeded(response, input, init)
   } catch (error) {
     console.error('[API] Request failed:', error)
     throw error

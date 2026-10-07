@@ -8,6 +8,7 @@ import { moveAccountingFile } from '@/lib/accounting/file-storage'
 // ACCOUNTING_ATTACHMENT has no project association.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, updateStoredFilePath } from '@/lib/stored-file'
+import { expenseBasEffects, lodgedPeriodGuard } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -92,6 +93,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       )
     }
     matchedExpenseAccountId = expense.accountId
+    // Reconciling marks the expense paid on the bank date (cash basis) and approved (accrual).
+    const lodged = await lodgedPeriodGuard(request, [
+      ...expenseBasEffects({ date: expense.date, status: expense.status }),
+      ...expenseBasEffects({ date: expense.date, status: 'RECONCILED', bankTransactionDate: txn.date }),
+    ], 'Matching this expense')
+    if (lodged) return lodged
     // Link the expense to this transaction
     await prisma.expense.update({
       where: { id: data.expenseId },

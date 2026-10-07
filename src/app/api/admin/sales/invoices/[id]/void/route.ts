@@ -5,6 +5,7 @@ import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
+import { lodgedPeriodGuard, salesInvoiceBasEffects, salesInvoiceChangeBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -34,6 +35,20 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   }
 
   const { version, action } = parsed.data
+
+  // Voiding drops the invoice from accrual sales; un-voiding brings it back. Paid invoices
+  // can't be voided anyway, so don't ask about those.
+  const target = await prisma.salesInvoice.findUnique({ where: { id }, select: { issueDate: true, status: true } })
+  if (target && (action === 'UNVOID' ? target.status === 'VOID' : target.status !== 'PAID' && target.status !== 'PARTIALLY_PAID')) {
+    const lodged = await lodgedPeriodGuard(
+      request,
+      action === 'UNVOID'
+        ? salesInvoiceBasEffects({ issueDate: target.issueDate, status: 'OPEN' })
+        : await salesInvoiceChangeBasEffects(id, { removing: true }),
+      action === 'UNVOID' ? 'Un-voiding this invoice' : 'Voiding this invoice'
+    )
+    if (lodged) return lodged
+  }
 
   try {
     const result = await prisma.$transaction(async (tx) => {

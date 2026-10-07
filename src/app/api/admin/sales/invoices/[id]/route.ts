@@ -7,6 +7,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { salesInvoiceFromDb } from '@/lib/sales/db-mappers'
 import { upsertSalesDocumentShareForDoc } from '@/lib/sales/server-document-share'
 import { getDefaultTaxRatePercent, lineItemsSchema, normalizeLineItems } from '@/lib/sales/line-items'
+import { lodgedPeriodGuard, salesInvoiceChangeBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -92,6 +93,18 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   }
 
   const input = parsed.data
+
+  if (input.items || input.issueDate) {
+    const lodged = await lodgedPeriodGuard(
+      request,
+      await salesInvoiceChangeBasEffects(id, {
+        issueDate: input.issueDate,
+        items: input.items ? normalizeLineItems(input.items, await getDefaultTaxRatePercent(prisma)) : undefined,
+      }),
+      'Changing this invoice'
+    )
+    if (lodged) return lodged
+  }
 
   try {
     const updated = await prisma.$transaction(async (tx) => {
@@ -211,6 +224,9 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
       { status: 409 }
     )
   }
+
+  const lodged = await lodgedPeriodGuard(request, await salesInvoiceChangeBasEffects(id, { removing: true }), 'Deleting this invoice')
+  if (lodged) return lodged
 
   try {
     await prisma.$transaction(async (tx) => {

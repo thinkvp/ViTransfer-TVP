@@ -4,7 +4,8 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { basPeriodFromDb } from '@/lib/accounting/db-mappers'
-import { calculateBas } from '@/lib/accounting/gst'
+import { calculateBasForPeriod } from '@/lib/accounting/bas-adjustments'
+import type { Prisma } from '@prisma/client'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,8 @@ const updateSchema = z.object({
   paygWithholdingCents: z.number().int().min(0).optional().nullable(),
   paygInstalmentCents: z.number().int().min(0).optional().nullable(),
   notes: z.string().trim().max(5000).optional().nullable(),
+  // Prior-period adjustment keys ("<sourcePeriodId>|<recordKey>") to leave out of this BAS
+  excludedAdjustmentKeys: z.array(z.string().max(300)).max(5000).optional(),
 })
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -79,38 +82,63 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     return NextResponse.json({ error: 'Period must be in REVIEWED status before lodging' }, { status: 400 })
   }
 
-  // Snapshot calculation at lodge time
-  let snapshotData: { calculationJson?: import('@prisma/client').Prisma.InputJsonValue; recordsJson?: import('@prisma/client').Prisma.InputJsonValue } = {}
+  // Snapshot calculation at lodge time. The lodged labels include the prior-period
+  // adjustments the user kept; recordsJson stays this period's own records, which is what
+  // later edits are compared against. Each included adjustment is recorded as CARRIED so
+  // it stops being outstanding on its source period.
+  let snapshotData: { calculationJson?: Prisma.InputJsonValue; recordsJson?: Prisma.InputJsonValue } = {}
+  let carried: Prisma.BasAdjustmentCreateManyInput[] = []
   if (data.status === 'LODGED') {
-    const { calculation, records } = await calculateBas(
-      existing.startDate,
-      existing.endDate,
-      existing.basis as 'CASH' | 'ACCRUAL',
-      data.g2Override !== undefined ? data.g2Override : existing.g2Override,
-      data.g3Override !== undefined ? data.g3Override : existing.g3Override,
-    )
+    const { calculation, records, priorPeriodItems } = await calculateBasForPeriod({
+      ...existing,
+      g2Override: data.g2Override !== undefined ? data.g2Override : existing.g2Override,
+      g3Override: data.g3Override !== undefined ? data.g3Override : existing.g3Override,
+      excludedAdjustmentKeys: data.excludedAdjustmentKeys ?? existing.excludedAdjustmentKeys,
+    })
     snapshotData = {
-      calculationJson: calculation as unknown as import('@prisma/client').Prisma.InputJsonValue,
-      recordsJson: records as unknown as import('@prisma/client').Prisma.InputJsonValue,
+      calculationJson: calculation as unknown as Prisma.InputJsonValue,
+      recordsJson: records as unknown as Prisma.InputJsonValue,
     }
+    const createdByName = authResult.name || authResult.email || null
+    carried = priorPeriodItems.filter((i) => i.included).map((i) => ({
+      sourcePeriodId: i.sourcePeriodId,
+      targetPeriodId: id,
+      resolution: 'CARRIED' as const,
+      recordKey: i.recordKey,
+      description: i.description.slice(0, 500),
+      recordDate: i.date,
+      g1Cents: i.outstandingDeltas.g1Cents,
+      g3Cents: i.outstandingDeltas.g3Cents,
+      g4Cents: i.outstandingDeltas.g4Cents,
+      g10Cents: i.outstandingDeltas.g10Cents,
+      g11Cents: i.outstandingDeltas.g11Cents,
+      label1ACents: i.outstandingDeltas.label1ACents,
+      label1BCents: i.outstandingDeltas.label1BCents,
+      createdById: authResult.id,
+      createdByName,
+    }))
   }
 
-  const updated = await prisma.basPeriod.update({
-    where: { id },
-    include: { accountingAttachments: true },
-    data: {
-      ...(data.label !== undefined ? { label: data.label } : {}),
-      ...(data.startDate !== undefined ? { startDate: data.startDate } : {}),
-      ...(data.endDate !== undefined ? { endDate: data.endDate } : {}),
-      ...(data.status !== undefined ? { status: data.status } : {}),
-      ...(data.g2Override !== undefined ? { g2Override: data.g2Override !== null ? Math.round(data.g2Override * 100) : null } : {}),
-      ...(data.g3Override !== undefined ? { g3Override: data.g3Override !== null ? Math.round(data.g3Override * 100) : null } : {}),
-      ...(data.paygWithholdingCents !== undefined ? { paygWithholdingCents: data.paygWithholdingCents } : {}),
-      ...(data.paygInstalmentCents !== undefined ? { paygInstalmentCents: data.paygInstalmentCents } : {}),
-      ...(data.notes !== undefined ? { notes: data.notes } : {}),
-      ...(data.status === 'LODGED' ? { lodgedAt: new Date(), ...snapshotData } : {}),
-    },
-  })
+  const [updated] = await prisma.$transaction([
+    prisma.basPeriod.update({
+      where: { id },
+      include: { accountingAttachments: true },
+      data: {
+        ...(data.label !== undefined ? { label: data.label } : {}),
+        ...(data.startDate !== undefined ? { startDate: data.startDate } : {}),
+        ...(data.endDate !== undefined ? { endDate: data.endDate } : {}),
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        ...(data.g2Override !== undefined ? { g2Override: data.g2Override !== null ? Math.round(data.g2Override * 100) : null } : {}),
+        ...(data.g3Override !== undefined ? { g3Override: data.g3Override !== null ? Math.round(data.g3Override * 100) : null } : {}),
+        ...(data.paygWithholdingCents !== undefined ? { paygWithholdingCents: data.paygWithholdingCents } : {}),
+        ...(data.paygInstalmentCents !== undefined ? { paygInstalmentCents: data.paygInstalmentCents } : {}),
+        ...(data.notes !== undefined ? { notes: data.notes } : {}),
+        ...(data.excludedAdjustmentKeys !== undefined ? { excludedAdjustmentKeys: data.excludedAdjustmentKeys } : {}),
+        ...(data.status === 'LODGED' ? { lodgedAt: new Date(), ...snapshotData } : {}),
+      },
+    }),
+    ...(carried.length > 0 ? [prisma.basAdjustment.createMany({ data: carried })] : []),
+  ])
 
   const res = NextResponse.json({ period: basPeriodFromDb(updated) })
   res.headers.set('Cache-Control', 'no-store')

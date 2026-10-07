@@ -2748,9 +2748,20 @@ model BasPeriod {
   g2Override    Int?                                     // cents
   g3Override    Int?                                     // cents
 
-  // Snapshot of calculation at lodge time (JSON)
+  // Snapshot of calculation at lodge time (JSON). calculationJson holds the lodged labels
+  // (including any prior-period adjustments); recordsJson holds this period's own source
+  // records only, which is what later edits are compared against.
   calculationJson Json?
   recordsJson     Json?
+
+  // Un-lodged periods only: prior-period adjustment keys ("<sourcePeriodId>|<recordKey>")
+  // the user chose to leave out of this BAS. Everything else outstanding is included.
+  excludedAdjustmentKeys Json?
+
+  // Changes to this period found after it was lodged, once resolved (carried into a later
+  // BAS or amended with the ATO) — and the adjustments this period carried in at lodgement.
+  adjustmentsFrom BasAdjustment[] @relation("BasAdjustmentSource")
+  adjustmentsInto BasAdjustment[] @relation("BasAdjustmentTarget")
 
   // PAYG amounts — entered alongside BAS figures (cents)
   paygWithholdingCents Int?                            // W2 — amount withheld from wages
@@ -2776,6 +2787,40 @@ model BasPeriod {
   @@unique([financialYear, quarter])
   @@index([startDate])
   @@index([status])
+}
+
+enum BasAdjustmentResolution {
+  CARRIED // reported as a prior-period adjustment in a later BAS (targetPeriodId)
+  AMENDED // the original BAS was revised with the ATO instead
+}
+
+// A resolved change to a lodged BAS period. The change itself is never stored: it is the
+// live recalculation minus the lodge-time snapshot, per source record. Each row records how
+// much of that difference has been dealt with, so outstanding = live − snapshot − Σ rows.
+model BasAdjustment {
+  id             String                  @id @default(cuid())
+  sourcePeriodId String
+  sourcePeriod   BasPeriod               @relation("BasAdjustmentSource", fields: [sourcePeriodId], references: [id], onDelete: Cascade)
+  targetPeriodId String?
+  targetPeriod   BasPeriod?              @relation("BasAdjustmentTarget", fields: [targetPeriodId], references: [id], onDelete: Cascade)
+  resolution     BasAdjustmentResolution
+  recordKey      String                  @db.VarChar(200) // e.g. "P|expense:<id>", "S|invoice:<id>"
+  description    String                  @db.VarChar(500)
+  recordDate     String                  // YYYY-MM-DD of the source record
+  // Label deltas in cents (signed)
+  g1Cents        Int                     @default(0)
+  g3Cents        Int                     @default(0)
+  g4Cents        Int                     @default(0)
+  g10Cents       Int                     @default(0)
+  g11Cents       Int                     @default(0)
+  label1ACents   Int                     @default(0)
+  label1BCents   Int                     @default(0)
+  createdById    String?
+  createdByName  String?                 @db.VarChar(200)
+  createdAt      DateTime                @default(now())
+
+  @@index([sourcePeriodId])
+  @@index([targetPeriodId])
 }
 
 model AccountingSettings {

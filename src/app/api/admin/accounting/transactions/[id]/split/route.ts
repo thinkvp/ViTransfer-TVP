@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
+import { isLodgedPeriodConfirmed, lodgedPeriodGuard, postingLinesBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,6 +20,8 @@ const splitLineSchema = z.object({
 
 const splitSchema = z.object({
   lines: z.array(splitLineSchema).min(2, 'At least 2 split lines required'),
+  // A note on the whole transaction; omitted leaves the stored memo unchanged
+  memo: z.string().trim().max(2000).optional().nullable(),
 })
 
 const editSplitSchema = splitSchema.extend({
@@ -108,10 +111,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const parsed = splitSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
 
-  const { lines } = parsed.data
+  const { lines, memo } = parsed.data
 
   const invalid = await validateSplitLines(lines, txn.amountCents, ownCoaAccountId)
   if (invalid) return invalid
+
+  const lodged = await lodgedPeriodGuard(request, await postingLinesBasEffects(txn.date, lines), 'Splitting this transaction')
+  if (lodged) return lodged
 
   await prisma.$transaction(async (tx) => {
     // Create split lines
@@ -134,6 +140,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         status: 'MATCHED',
         matchType: 'SPLIT',
         transactionType: txn.amountCents < 0 ? 'Expense' : 'Deposit',
+        ...(memo !== undefined ? { memo: memo || null } : {}),
       },
     })
   })
@@ -180,24 +187,21 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const parsed = editSplitSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', details: parsed.error.flatten() }, { status: 400 })
 
-  const { lines, confirmLodgedPeriod } = parsed.data
+  const { lines, memo, confirmLodgedPeriod } = parsed.data
 
   const invalid = await validateSplitLines(lines, txn.amountCents, txn.bankAccount?.coaAccountId ?? null)
   if (invalid) return invalid
 
   // Changing what a split posts inside a lodged BAS quarter alters figures already
   // reported to the ATO. Allowed, but only once the user confirms.
-  if (!confirmLodgedPeriod && splitPostingKey(lines) !== splitPostingKey(txn.splitLines)) {
-    const lodged = await prisma.basPeriod.findFirst({
-      where: { status: 'LODGED', startDate: { lte: txn.date }, endDate: { gte: txn.date } },
-      select: { label: true, quarter: true, financialYear: true },
-    })
-    if (lodged) {
-      return NextResponse.json({
-        error: `This transaction falls in a lodged BAS period (${lodged.label || `Q${lodged.quarter} ${lodged.financialYear}`}). Changing its split will alter lodged figures.`,
-        code: 'LODGED_BAS_PERIOD',
-      }, { status: 409 })
-    }
+  if (splitPostingKey(lines) !== splitPostingKey(txn.splitLines)) {
+    const lodged = await lodgedPeriodGuard(
+      request,
+      await postingLinesBasEffects(txn.date, [...txn.splitLines, ...lines]),
+      'Changing this split',
+      { confirmed: isLodgedPeriodConfirmed(request, confirmLodgedPeriod) }
+    )
+    if (lodged) return lodged
   }
 
   await prisma.$transaction([
@@ -211,6 +215,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         taxCode: line.taxCode,
       })),
     }),
+    // The memo doesn't reach the books, so it never needs the lodged-period confirm
+    ...(memo !== undefined
+      ? [prisma.bankTransaction.update({ where: { id }, data: { memo: memo || null } })]
+      : []),
   ])
 
   const updated = await prisma.bankTransaction.findUnique({ where: { id }, include: splitResponseInclude })

@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { apiFetch } from '@/lib/api-client'
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown } from 'lucide-react'
-import type { BasPeriod, BasPeriodStatus } from '@/lib/accounting/types'
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, AlertTriangle } from 'lucide-react'
+import type { BasLabelDeltas, BasPeriod, BasPeriodStatus } from '@/lib/accounting/types'
 import { AccountingTableActionButton } from '@/components/admin/accounting/AccountingTableActionButton'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
@@ -75,6 +75,17 @@ function settlementExport(s: Settlement | null): [string, string] {
   }
 }
 
+interface PeriodChanges {
+  outstandingCount: number
+  outstandingTotals: BasLabelDeltas
+}
+
+function changesTitle(c: PeriodChanges) {
+  const net = c.outstandingTotals.label1ACents - c.outstandingTotals.label1BCents
+  const effect = net === 0 ? 'no net GST change' : net > 0 ? `${fmtAud(net)} more GST payable` : `${fmtAud(-net)} less GST payable`
+  return `${c.outstandingCount} change${c.outstandingCount === 1 ? '' : 's'} since lodgement not yet carried into a later BAS (${effect})`
+}
+
 const STATUS_BADGE: Record<BasPeriodStatus, string> = {
   DRAFT: 'bg-muted text-muted-foreground',
   REVIEWED: 'bg-blue-500/15 text-blue-400',
@@ -91,6 +102,8 @@ export default function BasPage() {
   const router = useRouter()
   const [periods, setPeriods] = useState<BasPeriod[]>([])
   const [loading, setLoading] = useState(true)
+  // Lodged periods whose figures have changed since lodgement (outstanding only)
+  const [changes, setChanges] = useState<Map<string, PeriodChanges>>(new Map())
 
   const [deleting, setDeleting] = useState(false)
   const [pendingDeletePeriod, setPendingDeletePeriod] = useState<BasPeriod | null>(null)
@@ -134,6 +147,19 @@ export default function BasPage() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // Separate from load(): it recalculates every lodged period, so it can arrive later.
+  useEffect(() => {
+    let cancelled = false
+    apiFetch('/api/admin/accounting/bas/changes')
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { periods?: Array<PeriodChanges & { periodId: string }> } | null) => {
+        if (cancelled || !d?.periods) return
+        setChanges(new Map(d.periods.filter(p => p.outstandingCount > 0).map(p => [p.periodId, p])))
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   async function handleDelete(target: BasPeriod) {
     setDeleting(true)
@@ -234,6 +260,14 @@ export default function BasPage() {
                         <span className={cn('inline-flex px-2 py-0.5 rounded text-xs font-medium', STATUS_BADGE[p.status])}>
                           {STATUS_LABELS[p.status]}
                         </span>
+                        {changes.has(p.id) && (
+                          <span
+                            className="ml-1.5 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium bg-yellow-500/15 text-yellow-400"
+                            title={changesTitle(changes.get(p.id)!)}
+                          >
+                            <AlertTriangle className="w-3 h-3" />Changed
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground text-xs whitespace-nowrap min-w-[120px]">{p.lodgedAt ? p.lodgedAt.slice(0, 10) : '—'}</td>
                       <td className="px-3 py-2 whitespace-nowrap min-w-[150px]">

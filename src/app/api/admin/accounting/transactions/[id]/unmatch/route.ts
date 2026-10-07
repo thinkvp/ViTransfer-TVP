@@ -6,6 +6,7 @@ import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 import { getStoredFileRecords } from '@/lib/stored-file'
+import { expenseBasEffects, lodgedPeriodGuard, postingLinesBasEffects, salesPaymentBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -27,9 +28,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const txn = await prisma.bankTransaction.findUnique({
     where: { id },
     include: {
-      expense: { select: { id: true, accountingAttachments: { select: { id: true } } } },
-      invoicePayment: { select: { id: true, invoiceId: true } },
-      invoicePayments: { select: { id: true, invoiceId: true } },
+      expense: { select: { id: true, date: true, status: true, accountingAttachments: { select: { id: true } } } },
+      invoicePayment: { select: { id: true, invoiceId: true, paymentDate: true, excludeFromInvoiceBalance: true, source: true } },
+      invoicePayments: { select: { id: true, invoiceId: true, paymentDate: true, excludeFromInvoiceBalance: true, source: true } },
+      splitLines: { select: { accountId: true, taxCode: true } },
       accountingAttachments: { select: { id: true } },
       basPeriod: { select: { id: true } },
     },
@@ -41,6 +43,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   if (txn.status !== 'MATCHED' && txn.status !== 'EXCLUDED') {
     return NextResponse.json({ error: 'Transaction is not matched or excluded' }, { status: 409 })
+  }
+
+  // Undo removes whatever the match reported: the posting, split lines, the linked
+  // Expense, or the invoice payments.
+  if (txn.status === 'MATCHED') {
+    const lodged = await lodgedPeriodGuard(request, [
+      ...(txn.matchType === 'MANUAL' ? await postingLinesBasEffects(txn.date, [{ accountId: txn.accountId, taxCode: txn.taxCode }]) : []),
+      ...await postingLinesBasEffects(txn.date, txn.splitLines),
+      ...(txn.matchType === 'EXPENSE' && txn.expense
+        ? expenseBasEffects({ date: txn.expense.date, status: txn.expense.status, bankTransactionDate: txn.date })
+        : []),
+      ...(txn.matchType === 'INVOICE_PAYMENT'
+        ? [txn.invoicePayment, ...(txn.invoicePayments ?? [])].flatMap((p) => salesPaymentBasEffects(p))
+        : []),
+    ], 'Undoing this transaction')
+    if (lodged) return lodged
   }
 
   await prisma.$transaction(async (tx) => {

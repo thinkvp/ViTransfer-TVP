@@ -8,6 +8,7 @@ import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getAccountingSettings } from '@/lib/accounting/settings'
 import { reconciledBankDepositPaymentWhere } from '@/lib/accounting/stripe-reconcile'
+import { lodgedPeriodGuard, salesPaymentBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -188,6 +189,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       invoiceAllocations[0].amountCents += remainder
     }
   }
+
+  // The new payment(s) are cash-basis sales on the bank date. A reconcile-mode payment is
+  // excluded from the invoice balance and so never reaches a BAS.
+  const lodged = await lodgedPeriodGuard(
+    request,
+    salesPaymentBasEffects({ paymentDate: txn.date, excludeFromInvoiceBalance: !isMultiInvoice && reconcile, source: 'MANUAL' }),
+    'Matching this payment'
+  )
+  if (lodged) return lodged
 
   const updated = await prisma.$transaction(async (tx) => {
     const reference = reconcile

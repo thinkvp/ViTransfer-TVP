@@ -8,6 +8,7 @@ import { listSalesInvoiceIncomeEntries } from '@/lib/accounting/sales-income-all
 import { deleteAccountingFile } from '@/lib/accounting/file-storage'
 import { getStoredFileRecords } from '@/lib/stored-file'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
+import { expenseBasEffects, lodgedPeriodGuard, postingLinesBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -360,9 +361,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const accountId = account.id
 
   if (kind === 'journal') {
-    const je = await prisma.journalEntry.findUnique({ where: { id: entryId }, select: { id: true, accountId: true } })
+    const je = await prisma.journalEntry.findUnique({ where: { id: entryId }, select: { id: true, accountId: true, date: true, taxCode: true } })
     if (!je) return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 })
     if (je.accountId !== accountId) return NextResponse.json({ error: 'Entry does not belong to this account' }, { status: 403 })
+    const lodged = await lodgedPeriodGuard(request, await postingLinesBasEffects(je.date, [je]), 'Deleting this journal entry')
+    if (lodged) return lodged
     await prisma.journalEntry.delete({ where: { id: entryId } })
     return NextResponse.json({ ok: true })
   }
@@ -370,10 +373,20 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (kind === 'expense') {
     const expense = await prisma.expense.findUnique({
       where: { id: entryId },
-      select: { id: true, accountId: true, bankTransactionId: true, accountingAttachments: { select: { id: true } } },
+      select: {
+        id: true, accountId: true, date: true, status: true, bankTransactionId: true,
+        bankTransaction: { select: { date: true } },
+        accountingAttachments: { select: { id: true } },
+      },
     })
     if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
     if (expense.accountId !== accountId) return NextResponse.json({ error: 'Entry does not belong to this account' }, { status: 403 })
+    const lodged = await lodgedPeriodGuard(
+      request,
+      expenseBasEffects({ date: expense.date, status: expense.status, bankTransactionDate: expense.bankTransaction?.date }),
+      'Deleting this expense'
+    )
+    if (lodged) return lodged
 
     // Get attachment paths from StoredFile
     const attachmentIds = expense.accountingAttachments.map(a => a.id)
@@ -408,6 +421,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!txn) return NextResponse.json({ error: 'Transaction not found' }, { status: 404 })
   if (txn.accountId !== accountId) return NextResponse.json({ error: 'Entry does not belong to this account' }, { status: 403 })
   if (txn.status !== 'MATCHED') return NextResponse.json({ error: 'Transaction is not matched to this account' }, { status: 409 })
+  const lodged = await lodgedPeriodGuard(
+    request,
+    await postingLinesBasEffects(txn.date, [{ accountId: txn.accountId, taxCode: txn.taxCode }]),
+    'Removing this posting'
+  )
+  if (lodged) return lodged
 
   await prisma.$transaction(async (tx) => {
     if (txn.matchType === 'EXPENSE' && txn.expense) {

@@ -6,6 +6,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { moveAccountingFile } from '@/lib/accounting/file-storage'
 import { splitGstInclusive } from '@/lib/accounting/gst-amounts'
+import { expenseBasEffects, lodgedPeriodGuard, postingLinesBasEffects } from '@/lib/accounting/bas-lodged-guard'
 // ACCOUNTING_ATTACHMENT has no project association.
 // eslint-disable-next-line no-restricted-imports
 import { getStoredFilePath, updateStoredFilePath } from '@/lib/stored-file'
@@ -73,6 +74,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       { status: 400 }
     )
   }
+
+  // Posting late into a lodged quarter adds to figures already reported.
+  const lodged = await lodgedPeriodGuard(
+    request,
+    d.transactionType === 'Expense'
+      ? expenseBasEffects({ date: txn.date, status: 'RECONCILED', bankTransactionDate: txn.date })
+      : await postingLinesBasEffects(txn.date, [{ accountId: d.accountId, taxCode: d.taxCode }]),
+    'Posting this transaction'
+  )
+  if (lodged) return lodged
 
   // Negate so debit (money out, negative amountCents) yields positive expense,
   // and credit (money in, positive amountCents) yields negative expense (refund/reduction).

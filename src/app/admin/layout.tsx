@@ -5,6 +5,7 @@ import { UploadManagerProvider } from '@/components/UploadManagerProvider'
 import AdminHeader from '@/components/AdminHeader'
 import AdminMenuAccessGuard from '@/components/AdminMenuAccessGuard'
 import SessionMonitor from '@/components/SessionMonitor'
+import { LodgedPeriodConfirmHost } from '@/components/admin/accounting/LodgedPeriodConfirmHost'
 import { useEffect, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { consumePendingSwipe, runSwipeEntrance } from '@/lib/swipe-page-transition'
@@ -111,6 +112,7 @@ export default function AdminLayout({
           </div>
         </div>
         <SessionMonitor />
+        <LodgedPeriodConfirmHost />
       </div>
       </UploadManagerProvider>
     </AuthProvider>

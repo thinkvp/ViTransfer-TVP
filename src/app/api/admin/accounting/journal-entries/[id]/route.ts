@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireApiMenu, requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
 import { journalEntryFromDb } from '@/lib/accounting/db-mappers'
+import { lodgedPeriodGuard, postingLinesBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -56,6 +57,16 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }
 
   const data = parsed.data
+
+  // Description, reference and notes don't reach the BAS; date, amount and GST code do.
+  if (data.date !== existing.date || data.amountCents !== existing.amountCents || data.taxCode !== existing.taxCode) {
+    const lodged = await lodgedPeriodGuard(request, [
+      ...await postingLinesBasEffects(existing.date, [{ accountId: existing.accountId, taxCode: existing.taxCode }]),
+      ...await postingLinesBasEffects(data.date, [{ accountId: existing.accountId, taxCode: data.taxCode }]),
+    ], 'Changing this journal entry')
+    if (lodged) return lodged
+  }
+
   const entry = await prisma.journalEntry.update({
     where: { id },
     data: {
@@ -85,6 +96,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params
   const entry = await prisma.journalEntry.findUnique({ where: { id } })
   if (!entry) return NextResponse.json({ error: 'Journal entry not found' }, { status: 404 })
+
+  const lodged = await lodgedPeriodGuard(
+    request,
+    await postingLinesBasEffects(entry.date, [{ accountId: entry.accountId, taxCode: entry.taxCode }]),
+    'Deleting this journal entry'
+  )
+  if (lodged) return lodged
 
   await prisma.journalEntry.delete({ where: { id } })
   return NextResponse.json({ ok: true })

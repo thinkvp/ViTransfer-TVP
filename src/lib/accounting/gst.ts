@@ -35,7 +35,7 @@ import { getSalesTaxRate } from '@/lib/settings'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 import type { SalesLineItem } from '@/lib/sales/types'
-import type { BasSalesRecord, BasExpenseRecord } from '@/lib/accounting/types'
+import type { BasSalesRecord, BasExpenseRecord, BasLabelDeltas } from '@/lib/accounting/types'
 import { cashReceiptReportingAmountCents } from '@/lib/accounting/sales-cash-receipts'
 
 export interface BasCalculation {
@@ -51,6 +51,8 @@ export interface BasCalculation {
   label1BCents: number            // 1B = GST credits
   // Net
   netGstCents: number             // 1A - 1B (positive = payable, negative = refund)
+  /** Prior-period adjustments already included in the labels above (null/absent = none) */
+  priorPeriodAdjustments?: BasLabelDeltas | null
   // Supporting data
   totalIncomeCents: number
   totalExpenseCents: number
@@ -233,6 +235,7 @@ export async function calculateBas(
         gstCents: taxCents,
         totalIncGstCents: subtotalCents + taxCents,
         taxEnabled: inv.taxEnabled,
+        taxCode: inv.taxEnabled ? 'GST' : 'GST_FREE',
       })
     }
   } else {
@@ -280,6 +283,7 @@ export async function calculateBas(
         gstCents,
         totalIncGstCents: receipt.amountCents,
         taxEnabled: receipt.invoice?.taxEnabled ?? true,
+        taxCode: receipt.invoice && !receipt.invoice.taxEnabled ? 'GST_FREE' : 'GST',
       })
     }
   }
@@ -334,6 +338,7 @@ export async function calculateBas(
       gstCents,
       totalIncGstCents: posting.amountIncGstCents,
       taxEnabled: posting.taxCode === 'GST',
+      taxCode: posting.taxCode,
       kind: posting.kind,
       bankTransactionId: posting.bankTransactionId,
     })
