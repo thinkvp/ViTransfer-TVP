@@ -68,7 +68,7 @@
     "react-dom": "^19.2.1",
     "react-is": "^19.2.8",
     "recharts": "^3.8.1",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.5",
     "sonner": "^2.0.7",
     "stripe": "^14.24.0",
     "tailwind-merge": "^3.6.0",
@@ -106,7 +106,7 @@
     "next": {
       "postcss": ">=8.5.18"
     },
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.5",
     "uuid": ">=11.1.1",
     "@hono/node-server": ">=1.19.13",
     "hono": ">=4.13.1",

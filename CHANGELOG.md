@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Splitting a bank transaction now shows a single form** — clicking Split replaces the usual Type/Account/GST form instead of opening below it, so it's clear which fields apply. The split form has its own Memo and Attachments, which are now saved with the split (before, a memo or file entered above a split was silently discarded). A posted split's memo can also be changed from its Edit form.
 
+### Security
+
+- **Dependency security update** — sharp (image processing) and source-map-js updated to patch newly published high-severity advisories.
+
 ## [2.7.4] - 2026-10-06
 
 ### Changed
