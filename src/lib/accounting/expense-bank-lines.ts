@@ -55,7 +55,7 @@ export async function loadExpenseBankLines(filters: ExpenseBankLineFilters, taxR
       },
       include: {
         account: { select: { name: true, code: true } },
-        bankTransaction: { select: { id: true, date: true, description: true, _count: { select: { accountingAttachments: true } } } },
+        bankTransaction: { select: { id: true, date: true, description: true, memo: true, _count: { select: { accountingAttachments: true } } } },
       },
     }),
     prisma.bankTransaction.findMany({
@@ -112,8 +112,8 @@ export async function loadExpenseBankLines(filters: ExpenseBankLineFilters, taxR
       id: `split:${sl.id}`,
       bankSource: 'SPLIT',
       date: sl.bankTransaction.date,
-      // Same fallback as the BAS purchase records and the account ledger
-      description: sl.description || sl.bankTransaction.description,
+      // Same order as the BAS purchase records and the account ledger
+      description: sl.description || sl.bankTransaction.memo || sl.bankTransaction.description,
       accountId: sl.accountId,
       accountName: sl.account?.name,
       accountCode: sl.account?.code,

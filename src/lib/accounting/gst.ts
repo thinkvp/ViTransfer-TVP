@@ -85,6 +85,7 @@ interface PurchaseItem {
   date: string
   supplier: string | null
   description: string
+  bankDescription?: string
   accountCode: string
   accountName: string
   amountIncGstCents: number
@@ -101,10 +102,23 @@ interface IncomePostingItem {
   id: string
   date: string
   description: string
+  bankDescription?: string
   amountIncGstCents: number
   taxCode: string
   kind: 'bankTransaction' | 'journal' | 'splitLine'
   bankTransactionId?: string
+}
+
+// ── Labels ───────────────────────────────────────────────────────────────────
+
+/**
+ * Label for a bank-sourced record: the user's own words (split line description,
+ * then the transaction memo) before the bank statement text — the same order as the
+ * account ledger and Expenses list. The statement text is kept when it was replaced.
+ */
+function bankRecordLabel(own: Array<string | null | undefined>, bankText: string | null | undefined) {
+  const label = own.find(s => s && s.trim()) || bankText || ''
+  return { description: label, ...(bankText && bankText !== label ? { bankDescription: bankText } : {}) }
 }
 
 // ── Calculation ──────────────────────────────────────────────────────────────
@@ -183,7 +197,7 @@ export async function calculateBas(
       },
       include: {
         account: { select: { type: true, subType: true, name: true, code: true } },
-        bankTransaction: { select: { date: true, description: true } },
+        bankTransaction: { select: { date: true, description: true, memo: true } },
       },
     }),
   ])
@@ -296,7 +310,7 @@ export async function calculateBas(
     ...incomeTxns.map((t) => ({
       id: t.id,
       date: t.date as string,
-      description: t.memo ?? t.description,
+      ...bankRecordLabel([t.memo], t.description),
       amountIncGstCents: t.amountCents,
       taxCode: t.taxCode as string,
       kind: 'bankTransaction' as const,
@@ -313,7 +327,7 @@ export async function calculateBas(
     ...incomeSplits.map((s) => ({
       id: s.id,
       date: (s.bankTransaction?.date as string) ?? '',
-      description: s.description || s.bankTransaction?.description || '',
+      ...bankRecordLabel([s.description, s.bankTransaction?.memo], s.bankTransaction?.description),
       amountIncGstCents: s.amountCents,
       taxCode: s.taxCode as string,
       kind: 'splitLine' as const,
@@ -333,6 +347,7 @@ export async function calculateBas(
       id: posting.id,
       invoiceNumber: '—',
       clientName: posting.description,
+      ...(posting.bankDescription ? { bankDescription: posting.bankDescription } : {}),
       date: posting.date,
       subtotalCents: posting.amountIncGstCents - gstCents,
       gstCents,
@@ -371,7 +386,7 @@ export async function calculateBas(
       id: txn.id,
       date: txn.date as string,
       supplier: null,
-      description: txn.memo ?? txn.description,
+      ...bankRecordLabel([txn.memo], txn.description),
       accountCode: txn.account?.code ?? '',
       accountName: txn.account?.name ?? '',
       amountIncGstCents: -txn.amountCents,
@@ -398,9 +413,7 @@ export async function calculateBas(
       id: sl.id,
       date: (sl.bankTransaction?.date as string) ?? '',
       supplier: null,
-      // Split lines usually have no description of their own — fall back to the bank
-      // statement text, as income splits and the account ledger already do
-      description: sl.description || sl.bankTransaction?.description || '',
+      ...bankRecordLabel([sl.description, sl.bankTransaction?.memo], sl.bankTransaction?.description),
       accountCode: sl.account?.code ?? '',
       accountName: sl.account?.name ?? '',
       amountIncGstCents: -sl.amountCents,
@@ -443,6 +456,7 @@ export async function calculateBas(
       date: item.date,
       supplier: item.supplier,
       description: item.description,
+      ...(item.bankDescription ? { bankDescription: item.bankDescription } : {}),
       accountCode: item.accountCode,
       accountName: item.accountName,
       amountIncGstCents: item.amountIncGstCents,

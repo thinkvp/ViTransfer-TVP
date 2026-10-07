@@ -1,8 +1,8 @@
 import type { Account, AccountTaxCode, Expense, BankTransaction, JournalEntry } from '@/lib/accounting/types'
 import { amountExcludingGst } from '@/lib/accounting/gst-amounts'
 
-export type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: AccountTaxCode; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null }
-export type BankAccountTxnEntry = { id: string; description: string; reference: string | null; amountCents: number; status: string; matchType: string | null }
+export type SplitEntry = { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: AccountTaxCode; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionMemo: string | null; bankTransactionReference: string | null }
+export type BankAccountTxnEntry = { id: string; description: string; memo: string | null; reference: string | null; amountCents: number; status: string; matchType: string | null }
 export type SalesInvoiceEntry = {
   id: string
   invoiceId: string
@@ -65,6 +65,7 @@ export const ENTRY_KIND_BADGE: Record<AccountLedgerEntry['kind'], { label: strin
   split: { label: 'Split', className: 'bg-amber-500/10 text-amber-400' },
 }
 
+/** Main label for a row: the user's own words (split line description, then memo) before the bank's raw text. */
 export function getEntryDescription(row: AccountLedgerEntry): string {
   if (row.kind === 'salesInvoice') {
     const s = row.entry as SalesInvoiceEntry
@@ -72,9 +73,29 @@ export function getEntryDescription(row: AccountLedgerEntry): string {
   }
   if (row.kind === 'split') {
     const s = row.entry as SplitEntry
-    return s.description || s.bankTransactionDescription
+    return s.description || s.bankTransactionMemo || s.bankTransactionDescription
+  }
+  if (row.kind === 'bankTransaction' || row.kind === 'bankAccountTxn') {
+    const t = row.entry as { description: string; memo?: string | null }
+    return t.memo || t.description
   }
   return (row.entry as { description: string }).description
+}
+
+/** The bank's raw description when the main label replaced it, so the row still matches the statement. */
+export function getEntryBankText(row: AccountLedgerEntry): string | null {
+  const bankText = row.kind === 'split'
+    ? (row.entry as SplitEntry).bankTransactionDescription
+    : row.kind === 'bankTransaction' || row.kind === 'bankAccountTxn'
+      ? (row.entry as { description: string }).description
+      : null
+  return bankText && bankText !== getEntryDescription(row) ? bankText : null
+}
+
+/** Label plus bank text on one line, for CSV/PDF exports. */
+export function getEntryDescriptionForExport(row: AccountLedgerEntry): string {
+  const bankText = getEntryBankText(row)
+  return bankText ? `${getEntryDescription(row)} (${bankText})` : getEntryDescription(row)
 }
 
 export function getEntryReference(row: AccountLedgerEntry): string | null {

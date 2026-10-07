@@ -54,6 +54,11 @@ function shouldUseDefaultPaygInstalment(period: BasPeriod) {
   return period.status !== 'LODGED' && period.paygInstalmentCents == null && period.createdAt === period.updatedAt
 }
 
+// Hover text for a truncated record label, with the bank statement text when the label replaced it
+function recordTitle(label: string, bankDescription?: string) {
+  return bankDescription ? `${label}\nBank: ${bankDescription}` : label
+}
+
 export default function BasDetailPage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
@@ -787,7 +792,7 @@ export default function BasDetailPage() {
                         <tr key={`${r.id}-${i}`} className={cn('border-b border-border last:border-0', !isLodged && 'hover:bg-muted/30')}>
                           <td className="px-2 py-1.5">{formatDate(r.date)}</td>
                           <td className="px-2 py-1.5 font-medium">{r.invoiceNumber}</td>
-                          <td className="px-2 py-1.5 text-muted-foreground max-w-[140px] truncate">{r.clientName}</td>
+                          <td className="px-2 py-1.5 text-muted-foreground max-w-[140px] truncate" title={recordTitle(r.clientName, r.bankDescription)}>{r.clientName}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.subtotalCents)}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.gstCents)}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums font-medium">{fmtAud(r.totalIncGstCents)}</td>
@@ -880,7 +885,7 @@ export default function BasDetailPage() {
                                   >
                                     <td className="px-2 py-1.5">{formatDate(r.date)}</td>
                                     <td className="px-2 py-1.5 text-muted-foreground max-w-[120px] truncate">{r.supplier ?? '—'}</td>
-                                    <td className="px-2 py-1.5 max-w-[160px] truncate" title={r.description}>{r.description}</td>
+                                    <td className="px-2 py-1.5 max-w-[160px] truncate" title={recordTitle(r.description, r.bankDescription)}>{r.description}</td>
                                     <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{r.accountCode}</td>
                                     <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.amountIncGstCents - r.gstCents)}</td>
                                     <td className="px-2 py-1.5 text-right tabular-nums">{fmtAud(r.gstCents)}</td>

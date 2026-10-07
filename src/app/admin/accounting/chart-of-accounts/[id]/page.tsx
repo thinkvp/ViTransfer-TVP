@@ -16,6 +16,9 @@ import type { Account, Expense, BankTransaction, JournalEntry } from '@/lib/acco
 import {
   fmtAud,
   getEntryAmountExGst,
+  getEntryBankText,
+  getEntryDescription,
+  getEntryDescriptionForExport,
   type AccountLedgerEntry as Entry,
   type SalesInvoiceEntry,
   type SplitEntry,
@@ -33,6 +36,17 @@ import { toast } from 'sonner'
 function getDefaultJournalDate() {
   const date = new Date()
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// Memo / line description as the main label, with the bank's raw text underneath when it differs
+function renderEntryDescription(row: Entry) {
+  const bankText = getEntryBankText(row)
+  return (
+    <>
+      {getEntryDescription(row)}
+      {bankText && <span className="block mt-0.5 text-xs text-muted-foreground">{bankText}</span>}
+    </>
+  )
 }
 
 export default function AccountLedgerPage() {
@@ -310,11 +324,11 @@ export default function AccountLedgerPage() {
                 downloadCsv(`${account?.code ?? 'account'}-entries.csv`, ['Date', 'Type', 'Account', 'Description', 'Ref', 'Amount'], all.map(row => {
                   const amount = (getEntryAmountExGst(row, account?.type, taxRatePercent) / 100).toFixed(2)
                   if (row.kind === 'expense') { const e = row.entry as Expense; return [e.date, 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '', amount] }
-                  if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '', amount] }
+                  if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return [t.date, 'Bank Txn', t.accountName ?? account?.name ?? '', getEntryDescriptionForExport(row), t.reference ?? '', amount] }
                   if (row.kind === 'journal') { const j = row.entry as JournalEntry; return [j.date, 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '', amount] }
                   if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return [row.date, 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '', amount] }
-                  if (row.kind === 'bankAccountTxn') { const t = row.entry as BankAccountTxnEntry; return [row.date, 'Cash', account?.name ?? '', t.description, t.reference ?? '', amount] }
-                  const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '', amount]
+                  if (row.kind === 'bankAccountTxn') { const t = row.entry as BankAccountTxnEntry; return [row.date, 'Cash', account?.name ?? '', getEntryDescriptionForExport(row), t.reference ?? '', amount] }
+                  const s = row.entry as SplitEntry; return [s.bankTransactionDate, 'Split', s.accountName, getEntryDescriptionForExport(row), s.bankTransactionReference ?? '', amount]
                 }))
               }}
               onExportPdf={async () => {
@@ -335,11 +349,11 @@ export default function AccountLedgerPage() {
                     rows: all.map(row => {
                       const amount = fmtAudLocal(getEntryAmountExGst(row, account?.type, taxRatePercent))
                       if (row.kind === 'expense') { const e = row.entry as Expense; return { cells: [formatDate(e.date), 'Expense', e.accountName ?? account?.name ?? '', e.description, e.supplierName ?? '—', amount] } }
-                      if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return { cells: [formatDate(t.date), 'Bank Txn', t.accountName ?? account?.name ?? '', t.description, t.reference ?? '—', amount] } }
+                      if (row.kind === 'bankTransaction') { const t = row.entry as BankTransaction; return { cells: [formatDate(t.date), 'Bank Txn', t.accountName ?? account?.name ?? '', getEntryDescriptionForExport(row), t.reference ?? '—', amount] } }
                       if (row.kind === 'journal') { const j = row.entry as JournalEntry; return { cells: [formatDate(j.date), 'Journal', j.accountName ?? account?.name ?? '', j.description, j.reference ?? '—', amount] } }
                       if (row.kind === 'salesInvoice') { const s = row.entry as SalesInvoiceEntry; return { cells: [formatDate(row.date), 'Sales Invoice', s.accountName, `${s.invoiceNumber} - ${s.description}`, s.clientName ?? '—', amount] } }
-                      if (row.kind === 'bankAccountTxn') { const t = row.entry as BankAccountTxnEntry; return { cells: [formatDate(row.date), 'Cash', account?.name ?? '', t.description, t.reference ?? '—', amount] } }
-                      const s = row.entry as SplitEntry; return { cells: [formatDate(s.bankTransactionDate), 'Split', s.accountName, s.description || s.bankTransactionDescription, s.bankTransactionReference ?? '—', amount] }
+                      if (row.kind === 'bankAccountTxn') { const t = row.entry as BankAccountTxnEntry; return { cells: [formatDate(row.date), 'Cash', account?.name ?? '', getEntryDescriptionForExport(row), t.reference ?? '—', amount] } }
+                      const s = row.entry as SplitEntry; return { cells: [formatDate(s.bankTransactionDate), 'Split', s.accountName, getEntryDescriptionForExport(row), s.bankTransactionReference ?? '—', amount] }
                     }),
                   }],
                 })
@@ -454,7 +468,7 @@ export default function AccountLedgerPage() {
                             <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">Bank Txn</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={t.accountName ?? account?.name ?? undefined}>{!isOwn && t.accountName ? `\u2014 ${t.accountName}` : t.accountName ?? account?.name ?? '\u2014'}</td>
-                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{t.description}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{renderEntryDescription(row)}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{t.reference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">
@@ -531,7 +545,7 @@ export default function AccountLedgerPage() {
                             <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-400">Cash</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]">{account?.name ?? '—'}</td>
-                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{t.description}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{renderEntryDescription(row)}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{t.reference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(t.amountCents)}</td>
                           <td className="px-4 py-2.5 text-right">
@@ -551,7 +565,7 @@ export default function AccountLedgerPage() {
                             <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400">Split</span>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[160px]" title={s.accountName}>{!isOwnSplit && s.accountName ? `\u2014 ${s.accountName}` : s.accountName || '\u2014'}</td>
-                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{s.description || s.bankTransactionDescription}</td>
+                          <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{renderEntryDescription(row)}</td>
                           <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{s.bankTransactionReference ?? '—'}</td>
                           <td className="px-4 py-2.5 text-right tabular-nums">{fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}</td>
                           <td className="px-4 py-2.5 text-right">

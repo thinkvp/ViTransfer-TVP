@@ -13,6 +13,7 @@ import {
   fmtAud,
   getEntryAmountExGst,
   getEntryDate,
+  getEntryBankText,
   getEntryDescription,
   getEntryReference,
   type AccountLedgerEntry,
@@ -136,13 +137,17 @@ export function AccountEntriesDialog({ open, accountRef, accountLabel, from, to,
                 {entries.map((row, i) => {
                   const badge = ENTRY_KIND_BADGE[row.kind]
                   const reference = getEntryReference(row)
+                  const bankText = getEntryBankText(row)
                   return (
                     <tr key={`${row.kind}-${row.entry.id}-${i}`} className="hover:bg-accent/20 transition-colors align-top">
                       <td className="px-4 py-2.5 tabular-nums text-muted-foreground text-xs whitespace-nowrap">{formatDate(getEntryDate(row))}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={cn('text-xs px-1.5 py-0.5 rounded', badge.className)}>{badge.label}</span>
                       </td>
-                      <td className="px-4 py-2.5 whitespace-normal wrap-break-word">{getEntryDescription(row)}</td>
+                      <td className="px-4 py-2.5 whitespace-normal wrap-break-word">
+                        {getEntryDescription(row)}
+                        {bankText && <span className="block mt-0.5 text-xs text-muted-foreground">{bankText}</span>}
+                      </td>
                       <td className="px-4 py-2.5 text-muted-foreground text-xs whitespace-normal wrap-break-word">{reference ?? '—'}</td>
                       <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">
                         {fmtAud(getEntryAmountExGst(row, account?.type, taxRatePercent))}

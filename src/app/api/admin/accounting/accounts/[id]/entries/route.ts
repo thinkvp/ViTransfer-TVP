@@ -91,7 +91,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       },
       include: {
         account: { select: { code: true, name: true } },
-        bankTransaction: { select: { date: true, description: true, reference: true } },
+        bankTransaction: { select: { date: true, description: true, memo: true, reference: true } },
       },
       orderBy: { bankTransaction: { date: 'desc' } },
     }),
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             status: { not: 'EXCLUDED' },
             ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
           },
-          select: { id: true, date: true, description: true, reference: true, amountCents: true, status: true, matchType: true },
+          select: { id: true, date: true, description: true, memo: true, reference: true, amountCents: true, status: true, matchType: true },
           orderBy: { date: 'desc' },
         })
       : Promise.resolve([]),
@@ -149,8 +149,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     | { kind: 'bankTransaction'; date: string; entry: ReturnType<typeof bankTransactionFromDb> }
     | { kind: 'journal'; date: string; entry: ReturnType<typeof journalEntryFromDb> }
     | { kind: 'salesInvoice'; date: string; entry: { id: string; invoiceId: string; invoiceNumber: string; description: string; amountCents: number; clientName: string | null; labelName: string | null; accountName: string; accountCode: string; linkedBankTransactions: { id: string; date: string; description: string; amountCents: number }[] } }
-    | { kind: 'split'; date: string; entry: { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionReference: string | null } }
-    | { kind: 'bankAccountTxn'; date: string; entry: { id: string; description: string; reference: string | null; amountCents: number; status: string; matchType: string | null } }
+    | { kind: 'split'; date: string; entry: { id: string; bankTransactionId: string; description: string; amountCents: number; taxCode: string; accountName: string; accountCode: string; bankTransactionDate: string; bankTransactionDescription: string; bankTransactionMemo: string | null; bankTransactionReference: string | null } }
+    | { kind: 'bankAccountTxn'; date: string; entry: { id: string; description: string; memo: string | null; reference: string | null; amountCents: number; status: string; matchType: string | null } }
 
   const isDebitNormal = account.type === 'ASSET' || account.type === 'EXPENSE' || account.type === 'COGS'
 
@@ -180,13 +180,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       entry: {
         id: s.id,
         bankTransactionId: s.bankTransactionId,
-        description: s.description || s.bankTransaction?.description || '',
+        description: s.description || '',
         amountCents: s.amountCents,
         taxCode: s.taxCode,
         accountName: s.account?.name ?? '',
         accountCode: s.account?.code ?? '',
         bankTransactionDate: (s.bankTransaction?.date ?? '') as string,
         bankTransactionDescription: s.bankTransaction?.description ?? '',
+        bankTransactionMemo: s.bankTransaction?.memo ?? null,
         bankTransactionReference: s.bankTransaction?.reference ?? null,
       },
     })),
@@ -196,6 +197,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       entry: {
         id: t.id,
         description: t.description,
+        memo: t.memo,
         reference: t.reference,
         amountCents: Number(t.amountCents),
         status: t.status,
@@ -212,7 +214,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         r = a.kind.localeCompare(b.kind)
         break
       case 'description': {
-        const getDesc = (row: typeof a) => { const e = row.entry as any; if (row.kind === 'salesInvoice') return `${e.invoiceNumber ?? ''} ${e.description ?? ''}`; return e.description ?? e.bankTransactionDescription ?? '' }
+        const getDesc = (row: typeof a) => { const e = row.entry as any; if (row.kind === 'salesInvoice') return `${e.invoiceNumber ?? ''} ${e.description ?? ''}`; if (row.kind === 'split') return e.description || e.bankTransactionMemo || e.bankTransactionDescription || ''; return e.memo || e.description || '' }
         r = getDesc(a).localeCompare(getDesc(b))
         break
       }
@@ -293,11 +295,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     ? combined.filter(entry => {
         const fields: (string | null | undefined)[] = []
         if (entry.kind === 'expense') { const e = entry.entry as { description: string; supplierName?: string | null; amountExGst: number }; fields.push(e.description, e.supplierName, (Math.abs(e.amountExGst) / 100).toFixed(2)) }
-        else if (entry.kind === 'bankTransaction') { const t = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(t.description, t.reference, (Math.abs(t.amountCents) / 100).toFixed(2)) }
+        else if (entry.kind === 'bankTransaction') { const t = entry.entry as { description: string; memo?: string | null; reference?: string | null; amountCents: number }; fields.push(t.description, t.memo, t.reference, (Math.abs(t.amountCents) / 100).toFixed(2)) }
         else if (entry.kind === 'journal') { const j = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(j.description, j.reference, (Math.abs(j.amountCents) / 100).toFixed(2)) }
         else if (entry.kind === 'salesInvoice') { const s = entry.entry as { invoiceNumber: string; description: string; clientName?: string | null; amountCents: number }; fields.push(s.invoiceNumber, s.description, s.clientName, (Math.abs(s.amountCents) / 100).toFixed(2)) }
-        else if (entry.kind === 'bankAccountTxn') { const t = entry.entry as { description: string; reference?: string | null; amountCents: number }; fields.push(t.description, t.reference, (Math.abs(t.amountCents) / 100).toFixed(2)) }
-        else { const s = entry.entry as { description: string; bankTransactionDescription: string; bankTransactionReference?: string | null; amountCents: number }; fields.push(s.description, s.bankTransactionDescription, s.bankTransactionReference, (Math.abs(s.amountCents) / 100).toFixed(2)) }
+        else if (entry.kind === 'bankAccountTxn') { const t = entry.entry as { description: string; memo?: string | null; reference?: string | null; amountCents: number }; fields.push(t.description, t.memo, t.reference, (Math.abs(t.amountCents) / 100).toFixed(2)) }
+        else { const s = entry.entry as { description: string; bankTransactionDescription: string; bankTransactionMemo?: string | null; bankTransactionReference?: string | null; amountCents: number }; fields.push(s.description, s.bankTransactionDescription, s.bankTransactionMemo, s.bankTransactionReference, (Math.abs(s.amountCents) / 100).toFixed(2)) }
         return fields.some(f => f?.toLowerCase().includes(qMatch))
       })
     : combined

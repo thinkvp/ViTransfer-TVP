@@ -284,6 +284,8 @@ export interface BasSalesRecord {
   bankTransactionId?: string
   /** GST, GST_FREE or INPUT_TAXED (absent on snapshots taken before this was recorded) */
   taxCode?: string
+  /** Bank statement text, when the label shown is a memo or split line description instead */
+  bankDescription?: string
 }
 
 export interface BasExpenseRecord {
@@ -302,6 +304,8 @@ export interface BasExpenseRecord {
   kind: 'expense' | 'bankTransaction' | 'journal' | 'splitLine'
   /** For bankTransaction and splitLine rows: the bank transaction ID to open in LinkedBankTransactionDialog */
   bankTransactionId?: string
+  /** Bank statement text, when the label shown is a memo or split line description instead */
+  bankDescription?: string
 }
 
 export interface TaxRate {

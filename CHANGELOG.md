@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.6] - 2026-10-07
+
+### Changed
+
+- **Your memo now labels bank postings everywhere, not the bank's raw text** — account ledgers and the P&L drill-down show the memo or split line description you entered, with the bank's description in smaller text underneath; searching a ledger matches memos too, and exports include both. A split line without its own description now falls back to the transaction's memo on the BAS and Expenses pages as well, and BAS source records show the bank's description when you hover. Lodged BAS quarters keep the labels they were lodged with.
+
 ## [2.7.5] - 2026-10-07
 
 ### Added
