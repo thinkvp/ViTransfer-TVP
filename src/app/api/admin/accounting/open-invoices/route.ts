@@ -5,6 +5,7 @@ import { rateLimit } from '@/lib/rate-limit'
 import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { reconciledBankDepositPaymentWhere, stripeReconcileStartDate } from '@/lib/accounting/stripe-reconcile'
+import { getAccountingSettings } from '@/lib/accounting/settings'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -128,7 +129,17 @@ export async function GET(request: NextRequest) {
   // Optionally include PAID invoices that were settled via Stripe, so the user can reconcile
   // a bank deposit against them without double-counting revenue.
   let stripeReconcilableInvoices: typeof invoices = []
+  // The account a reconcile posts the Stripe fee to, so the dialog can say where it goes
+  let stripeFeeAccount: { code: string; name: string; taxCode: string } | null = null
   if (includeStripeReconcile) {
+    const { stripeRoundingAccountId } = await getAccountingSettings()
+    stripeFeeAccount = stripeRoundingAccountId
+      ? await prisma.account.findUnique({
+          where: { id: stripeRoundingAccountId },
+          select: { code: true, name: true, taxCode: true },
+        })
+      : null
+
     const searchFilter = search
       ? {
           OR: [
@@ -219,7 +230,7 @@ export async function GET(request: NextRequest) {
     } // end else (stripeInvoiceIds.length > 0)
   }
 
-  const res = NextResponse.json({ invoices: [...invoices, ...stripeReconcilableInvoices] })
+  const res = NextResponse.json({ invoices: [...invoices, ...stripeReconcilableInvoices], stripeFeeAccount })
   res.headers.set('Cache-Control', 'no-store')
   return res
 }

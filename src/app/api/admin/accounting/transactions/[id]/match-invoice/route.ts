@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
+import type { AccountTaxCode } from '@prisma/client'
 import { prisma } from '@/lib/db'
 import { requireApiMenuAction } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
@@ -7,8 +8,8 @@ import { recomputeInvoiceStoredStatus } from '@/lib/sales/server-invoice-status'
 import { bankTransactionFromDb } from '@/lib/accounting/db-mappers'
 import { sumLineItemsSubtotal, sumLineItemsTax } from '@/lib/sales/money'
 import { getAccountingSettings } from '@/lib/accounting/settings'
-import { reconciledBankDepositPaymentWhere } from '@/lib/accounting/stripe-reconcile'
-import { lodgedPeriodGuard, salesPaymentBasEffects } from '@/lib/accounting/bas-lodged-guard'
+import { reconciledBankDepositPaymentWhere, stripeDepositDifference, STRIPE_ROUNDING_TOLERANCE_CENTS } from '@/lib/accounting/stripe-reconcile'
+import { lodgedPeriodGuard, postingLinesBasEffects, salesPaymentBasEffects } from '@/lib/accounting/bas-lodged-guard'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -112,9 +113,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
-  // For reconcile mode (single invoice): detect rounding difference and auto-split
+  // For reconcile mode (single invoice): post the Stripe fee (or small rounding) difference
+  // as a split line to the Stripe Fees Account, using that account's tax code
   let roundingCents = 0
   let stripeRoundingAccountId: string | null = null
+  let roundingTaxCode: AccountTaxCode = 'BAS_EXCLUDED'
+  let roundingDescription = ''
   if (reconcile && !isMultiInvoice) {
     const invoice = invoices[0]
     const salesSettingsRow = await prisma.salesSettings.findUnique({
@@ -130,12 +134,29 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const taxCents = (invoice as any).taxEnabled ? sumLineItemsTax(items, defaultTaxRate) : 0
     const invoiceTotalCents = subtotalCents + taxCents
 
-    const diff = txn.amountCents - invoiceTotalCents
-    if (diff !== 0 && Math.abs(diff) <= 100) {
+    const difference = stripeDepositDifference(txn.amountCents, invoiceTotalCents)
+    if (difference.kind === 'tooLarge') {
+      return NextResponse.json({ error: difference.error }, { status: 422 })
+    }
+    if (difference.kind !== 'none') {
       const accountingSettings = await getAccountingSettings()
-      if (accountingSettings.stripeRoundingAccountId) {
-        roundingCents = diff
-        stripeRoundingAccountId = accountingSettings.stripeRoundingAccountId
+      const feeAccount = accountingSettings.stripeRoundingAccountId
+        ? await prisma.account.findUnique({
+            where: { id: accountingSettings.stripeRoundingAccountId },
+            select: { id: true, taxCode: true },
+          })
+        : null
+      if (feeAccount) {
+        roundingCents = difference.amountCents
+        stripeRoundingAccountId = feeAccount.id
+        roundingTaxCode = feeAccount.taxCode || 'BAS_EXCLUDED'
+        roundingDescription = difference.kind === 'fee' ? 'Stripe processing fees' : 'Stripe bank deposit rounding'
+      } else if (Math.abs(difference.amountCents) > STRIPE_ROUNDING_TOLERANCE_CENTS) {
+        // Up to $1.00 is still absorbed silently when no account is set (the old behaviour);
+        // a real fee would otherwise vanish from the books.
+        return NextResponse.json({
+          error: `The deposit is $${(Math.abs(difference.amountCents) / 100).toFixed(2)} less than the invoice. Set a Stripe Fees Account in Accounting Settings so the fee can be recorded.`,
+        }, { status: 422 })
       }
     }
   }
@@ -192,9 +213,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   // The new payment(s) are cash-basis sales on the bank date. A reconcile-mode payment is
   // excluded from the invoice balance and so never reaches a BAS.
+  // A GST-coded Stripe fee line also reaches the BAS, on the bank date.
   const lodged = await lodgedPeriodGuard(
     request,
-    salesPaymentBasEffects({ paymentDate: txn.date, excludeFromInvoiceBalance: !isMultiInvoice && reconcile, source: 'MANUAL' }),
+    [
+      ...salesPaymentBasEffects({ paymentDate: txn.date, excludeFromInvoiceBalance: !isMultiInvoice && reconcile, source: 'MANUAL' }),
+      ...(stripeRoundingAccountId
+        ? await postingLinesBasEffects(txn.date, [{ accountId: stripeRoundingAccountId, taxCode: roundingTaxCode }])
+        : []),
+    ],
     'Matching this payment'
   )
   if (lodged) return lodged
@@ -263,15 +290,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       } as any,
     })
 
-    // Post rounding difference as a split line (reconcile mode only)
+    // Post the fee / rounding difference as a split line (reconcile mode only)
     if (reconcile && stripeRoundingAccountId && roundingCents !== 0) {
       await tx.splitLine.create({
         data: {
           bankTransactionId: id,
           accountId: stripeRoundingAccountId,
-          description: 'Stripe bank deposit rounding',
+          description: roundingDescription,
           amountCents: roundingCents,
-          taxCode: 'BAS_EXCLUDED',
+          taxCode: roundingTaxCode,
         },
       })
     }

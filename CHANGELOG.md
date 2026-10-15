@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.7] - 2026-10-15
+
+### Fixed
+
+- **Reconciling a Stripe bank deposit now records Stripe's processing fee** — Stripe pays out the invoice total less its fee, and only gaps up to $1.00 were posted, so a real fee (e.g. $12.10 on a $715 invoice) went unrecorded and profit was overstated. The shortfall, up to 10% of the invoice, is now posted to the account set in Accounting Settings (renamed **Stripe Fees Account**) using that account's tax code, so a GST-coded fees account claims the GST credit on the BAS. The Match dialog shows the fee and account before you confirm, and refuses a deposit that's far off the invoice instead of matching it.
+
 ## [2.7.6] - 2026-10-07
 
 ### Changed

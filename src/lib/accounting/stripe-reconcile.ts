@@ -82,3 +82,47 @@ function toLocalMidnight(ymd: string): Date | null {
 export function stripeReconcileStartDate(): Date {
   return parseReconcileStartDate(process.env.STRIPE_RECONCILE_START_DATE)
 }
+
+// Difference between a Stripe bank deposit and the invoice it settles, and what reconciling
+// it posts to the Stripe Fees Account (AccountingSettings.stripeRoundingAccountId).
+//
+// Once card fees stopped being surcharged to the client, Stripe pays out the invoice total
+// less its processing fee, so the shortfall is a real expense rather than rounding. A
+// shortfall up to MAX_STRIPE_FEE_PERCENT of the invoice is posted as a fee; anything larger,
+// or a deposit more than $1.00 above the invoice, is almost certainly the wrong invoice (or a
+// batched payout), so it is refused rather than written off.
+//
+// Shared by the Match-to-Invoice dialog (preview) and the match-invoice route (enforcement)
+// so the two can't disagree. Client-safe: the only import above is type-only.
+
+export const STRIPE_ROUNDING_TOLERANCE_CENTS = 100
+export const MAX_STRIPE_FEE_PERCENT = 10
+
+export type StripeDepositDifference =
+  | { kind: 'none' }
+  // amountCents is signed in bank convention: negative = fee (money Stripe kept),
+  // positive = deposit slightly above the invoice
+  | { kind: 'fee' | 'rounding'; amountCents: number }
+  | { kind: 'tooLarge'; amountCents: number; error: string }
+
+export function stripeDepositDifference(depositCents: number, invoiceTotalCents: number): StripeDepositDifference {
+  const diff = depositCents - invoiceTotalCents
+  if (diff === 0) return { kind: 'none' }
+  if (Math.abs(diff) <= STRIPE_ROUNDING_TOLERANCE_CENTS) return { kind: diff < 0 ? 'fee' : 'rounding', amountCents: diff }
+  const fmt = (c: number) => `$${(Math.abs(c) / 100).toFixed(2)}`
+  if (diff > 0) {
+    return {
+      kind: 'tooLarge',
+      amountCents: diff,
+      error: `The deposit is ${fmt(diff)} more than the invoice — check you picked the right invoice.`,
+    }
+  }
+  if (-diff * 100 > invoiceTotalCents * MAX_STRIPE_FEE_PERCENT) {
+    return {
+      kind: 'tooLarge',
+      amountCents: diff,
+      error: `The deposit is ${fmt(diff)} less than the invoice (more than ${MAX_STRIPE_FEE_PERCENT}%) — too large to be a Stripe fee. Check you picked the right invoice.`,
+    }
+  }
+  return { kind: 'fee', amountCents: diff }
+}

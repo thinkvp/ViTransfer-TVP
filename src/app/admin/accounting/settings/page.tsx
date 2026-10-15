@@ -288,11 +288,11 @@ export default function AccountingSettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            When reconciling a Stripe bank deposit, small differences between the bank deposit amount and the original Stripe invoice amount (up to $1.00) are automatically posted as a split to the account below. Typically a &ldquo;Bank Charges&rdquo; or &ldquo;Rounding&rdquo; expense account.
+            When reconciling a Stripe bank deposit, the amount Stripe kept as processing fees (the gap between the deposit and the invoice, up to 10% of the invoice) is posted as a split to the account below, using that account&apos;s tax code. Typically a &ldquo;Stripe Fees&rdquo; or &ldquo;Bank Charges&rdquo; expense account.
           </p>
           <div className="max-w-sm space-y-1">
-            <Label>Stripe Rounding Account</Label>
-            <p className="text-xs text-muted-foreground">Receives any rounding difference on Stripe bank-deposit reconciliations (e.g. Bank Charges, Rounding).</p>
+            <Label>Stripe Fees Account</Label>
+            <p className="text-xs text-muted-foreground">Receives Stripe processing fees (and any small rounding) on Stripe bank-deposit reconciliations.</p>
             <div className="relative">
               <Input
                 placeholder="Search account…"

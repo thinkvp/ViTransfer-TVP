@@ -19,6 +19,7 @@ import { buildAccountOptions, type AccountOption } from '@/lib/accounting/accoun
 import { DateRangePreset, getThisFinancialYearDates } from '@/components/admin/accounting/DateRangePreset'
 import { ExportMenu, downloadCsv, generateReportPdf } from '@/components/admin/accounting/ExportMenu'
 import { cn, formatDate } from '@/lib/utils'
+import { stripeDepositDifference, STRIPE_ROUNDING_TOLERANCE_CENTS } from '@/lib/accounting/stripe-reconcile'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
 
@@ -183,6 +184,7 @@ export default function BankAccountsPage() {
   const [matchInvoiceTarget, setMatchInvoiceTarget] = useState<BankTransaction | null>(null)
   const [invoiceSearch, setInvoiceSearch] = useState('')
   const [openInvoices, setOpenInvoices] = useState<OpenInvoice[]>([])
+  const [stripeFeeAccount, setStripeFeeAccount] = useState<{ code: string; name: string; taxCode: string } | null>(null)
   const [loadingInvoices, setLoadingInvoices] = useState(false)
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set()) // regular multi-select
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null) // Stripe reconcile single-select
@@ -983,7 +985,7 @@ export default function BankAccountsPage() {
       const params = new URLSearchParams({ includeStripeReconcile: 'true' })
       if (q.trim()) params.set('q', q.trim())
       const res = await apiFetch(`/api/admin/accounting/open-invoices?${params}`)
-      if (res.ok) { const d = await res.json(); setOpenInvoices(d.invoices ?? []) }
+      if (res.ok) { const d = await res.json(); setOpenInvoices(d.invoices ?? []); setStripeFeeAccount(d.stripeFeeAccount ?? null) }
     } finally { setLoadingInvoices(false) }
   }, [])
 
@@ -995,6 +997,13 @@ export default function BankAccountsPage() {
     setInvoiceSearch('')
     setOpenInvoices([])
     void loadOpenInvoices('')
+  }
+
+  // What reconciling the selected Stripe-paid invoice posts beyond the payment (mirrors the route)
+  function reconcileDifference() {
+    if (!selectedInvoiceIsReconcile || !selectedInvoiceId || !matchInvoiceTarget) return null
+    const selInv = openInvoices.find(i => i.id === selectedInvoiceId)
+    return selInv ? stripeDepositDifference(matchInvoiceTarget.amountCents, selInv.totalCents) : null
   }
 
   async function handleMatchInvoice() {
@@ -1743,7 +1752,7 @@ export default function BankAccountsPage() {
                             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reconcile Stripe bank deposit</p>
                             <div className="flex-1 h-px bg-border" />
                           </div>
-                          <p className="text-xs text-muted-foreground">These invoices were already paid via Stripe. Matching will link the bank deposit for reconciliation only — it won&apos;t change the invoice or affect revenue totals.</p>
+                          <p className="text-xs text-muted-foreground">These invoices were already paid via Stripe. Matching will link the bank deposit for reconciliation only — it won&apos;t change the invoice or affect revenue totals. Any amount Stripe kept as fees is posted to your Stripe Fees Account.</p>
                           <div className="border border-border rounded-md divide-y divide-border">
                             {stripeInvoices.map(inv => (
                               <button key={inv.id} type="button"
@@ -1774,14 +1783,22 @@ export default function BankAccountsPage() {
           </div>
           <DialogFooter>
             {(() => {
-              if (!selectedInvoiceIsReconcile || !selectedInvoiceId || !matchInvoiceTarget) return null
-              const selInv = openInvoices.find(i => i.id === selectedInvoiceId)
-              if (!selInv) return null
-              const diff = matchInvoiceTarget.amountCents - selInv.totalPaidCents
-              if (diff === 0 || Math.abs(diff) > 100) return null
+              const difference = reconcileDifference()
+              if (!difference || difference.kind === 'none') return null
+              if (difference.kind === 'tooLarge') {
+                return <p className="text-xs text-destructive mr-auto max-w-xs">{difference.error}</p>
+              }
+              const amount = fmtAud(Math.abs(difference.amountCents))
+              if (!stripeFeeAccount) {
+                if (Math.abs(difference.amountCents) <= STRIPE_ROUNDING_TOLERANCE_CENTS) return null
+                return <p className="text-xs text-destructive mr-auto max-w-xs">{amount} short. Set a Stripe Fees Account in Accounting Settings so the fee can be recorded.</p>
+              }
+              const account = `${stripeFeeAccount.code} — ${stripeFeeAccount.name}`
               return (
-                <p className="text-xs text-muted-foreground mr-auto">
-                  {fmtAud(Math.abs(diff))} rounding difference will be automatically posted to your rounding account.
+                <p className="text-xs text-muted-foreground mr-auto max-w-xs">
+                  {difference.kind === 'fee'
+                    ? <>{amount} Stripe fee will be posted to {account}, {taxCodeName(stripeFeeAccount.taxCode)}.</>
+                    : <>{amount} rounding difference will be posted to {account}.</>}
                 </p>
               )
             })()}
@@ -1790,7 +1807,12 @@ export default function BankAccountsPage() {
               onClick={() => void handleMatchInvoice()}
               disabled={(() => {
                 if (matchingInvoice) return true
-                if (selectedInvoiceIsReconcile) return !selectedInvoiceId
+                if (selectedInvoiceIsReconcile) {
+                  if (!selectedInvoiceId) return true
+                  const difference = reconcileDifference()
+                  if (difference?.kind === 'tooLarge') return true
+                  return difference?.kind === 'fee' && !stripeFeeAccount && Math.abs(difference.amountCents) > STRIPE_ROUNDING_TOLERANCE_CENTS
+                }
                 if (selectedInvoiceIds.size === 0) return true
                 // For multi-invoice, require balanced total (within $1.00)
                 if (selectedInvoiceIds.size > 1) {
