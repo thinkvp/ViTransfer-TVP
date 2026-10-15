@@ -3421,7 +3421,7 @@ export default function SharePage() {
         />
       )}
       {/* Sticky breadcrumb header — spans full width above sidebar + content */}
-      <div className="shrink-0 h-12 my-[4px] border border-border bg-card rounded-lg flex items-center pl-4 pr-3 lg:pr-0 gap-1.5 text-sm overflow-x-auto z-40">
+      <div className="shrink-0 h-12 my-[4px] border border-border bg-card rounded-lg flex items-center pl-4 pr-0 gap-1.5 text-sm overflow-x-auto z-40">
 
         {/* Project section */}
         <span className="text-muted-foreground whitespace-nowrap hidden sm:inline shrink-0">Project:</span>
@@ -3535,7 +3535,7 @@ export default function SharePage() {
 
         {/* Help — pinned to the right. The header scrolls horizontally on narrow
             screens, so this sticks rather than sliding out of reach. */}
-        <div className="ml-auto self-stretch sticky right-0 shrink-0 flex items-center gap-1 pl-3 pr-1 lg:pr-3 bg-card">
+        <div className="ml-auto self-stretch sticky right-0 shrink-0 flex items-center gap-1 pl-3 pr-3 bg-card">
           <Button
             variant="ghost"
             size="sm"

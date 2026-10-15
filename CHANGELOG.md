@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Reconciling a Stripe bank deposit now records Stripe's processing fee** — Stripe pays out the invoice total less its fee, and only gaps up to $1.00 were posted, so a real fee (e.g. $12.10 on a $715 invoice) went unrecorded and profit was overstated. The shortfall, up to 10% of the invoice, is now posted to the account set in Accounting Settings (renamed **Stripe Fees Account**) using that account's tax code, so a GST-coded fees account claims the GST credit on the BAS. The Match dialog shows the fee and account before you confirm, and refuses a deposit that's far off the invoice instead of matching it.
 
+### Changed
+
+- **Clearer approval and Request Next Version wording on share pages** — the Approve Video confirmation now reads "If no changes are required, approve this video to download", and the Request Next Version hint asks clients to click it after all feedback has been submitted. The share-page header's Help button also keeps consistent right padding on every screen size.
+
 ## [2.7.6] - 2026-10-07
 
 ### Changed

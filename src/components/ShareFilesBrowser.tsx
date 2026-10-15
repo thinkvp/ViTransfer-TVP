@@ -3547,8 +3547,8 @@ export function ShareFilesBrowser({
         title="Approve Video"
         description={
           approveConfirmFile
-            ? `Approve ${approveConfirmFile.versionLabel || 'this version'} for ${approveConfirmVideoName || approveConfirmFile.fileName}? Your feedback will be locked in and the version becomes downloadable. You can still add comments.`
-            : 'Approve this version? Your feedback will be locked in and the version becomes downloadable. You can still add comments.'
+            ? `Approve ${approveConfirmFile.versionLabel || 'this version'} for ${approveConfirmVideoName || approveConfirmFile.fileName}? If no changes are required, approve this video to download.`
+            : 'Approve this version? If no changes are required, approve this video to download.'
         }
         confirmLabel={approving ? 'Approving...' : 'Approve'}
         cancelLabel="Cancel"

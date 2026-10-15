@@ -1559,8 +1559,8 @@ export function CommentSectionView({
               <DialogTitle>Approve Video</DialogTitle>
               <DialogDescription>
                 {headerVideo
-                  ? `Approve ${headerVideo.versionLabel || 'this version'} for ${headerVideoName}? Your feedback will be locked in and the version becomes downloadable. You can still add comments.`
-                  : 'Approve this version? Your feedback will be locked in and the version becomes downloadable. You can still add comments.'}
+                  ? `Approve ${headerVideo.versionLabel || 'this version'} for ${headerVideoName}? If no changes are required, approve this video to download.`
+                  : 'Approve this version? If no changes are required, approve this video to download.'}
               </DialogDescription>
             </DialogHeader>
             <div className="flex justify-end gap-2 pt-2">
@@ -1820,7 +1820,7 @@ export function CommentSectionView({
           </div>
           {showRequestNextVersion ? (
             <p className="mt-1.5 text-xs text-muted-foreground">
-              All feedback submitted? Click <span className="font-medium text-foreground">Request Next Version</span>{' '}to let us know you&apos;re done with this version.
+              Click <span className="font-medium text-foreground">Request Next Version</span>{' '}after all feedback has been submitted.
             </p>
           ) : null}
         </div>
