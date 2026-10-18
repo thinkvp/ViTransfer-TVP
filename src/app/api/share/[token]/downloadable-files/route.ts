@@ -5,7 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { getAlbumZipFileName } from '@/lib/album-photo-zip'
 import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
 import { presignAlbumPhotoPreviewUrls } from '@/lib/photo-preview-presign'
-import { presignTimelineUrls, presignVideoAssetPreviewUrls } from '@/lib/media-preview-presign'
+import { presignShareUploadPreviewUrls, presignTimelineUrls, presignVideoAssetPreviewUrls } from '@/lib/media-preview-presign'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { batchResolveFileSizes, getStoredFileRecords, storedFileExists } from '@/lib/stored-file'
@@ -177,6 +177,11 @@ export async function GET(
       .map((f) => ({ id: f.id, durationSeconds: f.mediaDurationSeconds })),
   )
 
+  // S3 mode: embed each upload's preview JPG as a direct bucket URL. Without it, the grid
+  // asks /uploads/download-tokens for a per-file /api/share/uploads/content/<token> preview —
+  // one distinct crawl-rule path per file, so a folder of 40+ photos banned the viewer.
+  const uploadPreviewUrls = await presignShareUploadPreviewUrls(uploadFiles)
+
   for (const file of uploadFiles) {
     const folderPath = String(file.folderRelativePath || '').trim()
     if (!uploadGroupsByPath.has(folderPath)) {
@@ -199,6 +204,7 @@ export async function GET(
             : undefined)
         : undefined,
       previewStatus: file.previewStatus ?? undefined,
+      thumbnailUrl: uploadPreviewUrls.get(file.id),
       hasTimelinePreviews: hasTimeline,
       timelineVttUrl: presignedTimeline?.vttUrl ?? (tokens ? `/api/content/${tokens.vttToken}` : undefined),
       timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,

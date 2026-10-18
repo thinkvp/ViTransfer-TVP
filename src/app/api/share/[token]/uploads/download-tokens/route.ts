@@ -6,6 +6,7 @@ import { generateShareUploadAccessToken } from '@/lib/share-upload-access'
 import { isShareUploadImageFileType, isShareUploadVideoFileType } from '@/lib/share-upload-video-thumbnail'
 import { enqueueShareUploadPreview } from '@/lib/queue'
 import { getStoredFileRecords } from '@/lib/stored-file'
+import { presignShareUploadPreviewUrls } from '@/lib/media-preview-presign'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -83,7 +84,7 @@ export async function POST(
   })
 
   // Resolve original + preview storage paths for the whole batch up front.
-  const [originalRecords, previewRecords] = await Promise.all([
+  const [originalRecords, previewRecords, presignedPreviews] = await Promise.all([
     getStoredFileRecords('SHARE_UPLOAD_FILE', fileIds, {
       fileRoles: ['ORIGINAL'],
       select: { entityId: true, storagePath: true, fileSize: true },
@@ -92,6 +93,9 @@ export async function POST(
       fileRoles: ['PREVIEW_IMAGE', 'PREVIEW_MP4'],
       select: { entityId: true, storagePath: true, fileSize: true },
     }),
+    // S3 mode: preview JPGs straight from the bucket (CrowdSec crawl rule — see
+    // media-preview-presign). Local mode → empty map, token URLs below.
+    presignShareUploadPreviewUrls(files),
   ])
 
   const originalByFileId = new Map<string, { storagePath: string; fileSize: bigint | number | null }>()
@@ -127,7 +131,10 @@ export async function POST(
 
       if (isPreviewable) {
         const previewStored = previewByFileId.get(file.id) ?? null
-        if (file.previewStatus === 'READY' && previewStored) {
+        const presignedPreview = presignedPreviews.get(file.id)
+        if (presignedPreview) {
+          previewUrl = presignedPreview
+        } else if (file.previewStatus === 'READY' && previewStored) {
           const thumbnailToken = await generateShareUploadAccessToken({
             projectId: file.projectId,
             fileId: file.id,

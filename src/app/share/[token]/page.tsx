@@ -2461,6 +2461,8 @@ export default function SharePage() {
     }
 
     if (file.type === 'upload-file' && file.uploadFileId) {
+      // S3 mode: the file list already carries a presigned preview — skip the token round trip.
+      if (file.thumbnailUrl) return file.thumbnailUrl
       const tokenizedUrls = await getUploadAccessUrl(file.uploadFileId)
       if (tokenizedUrls?.previewUrl) {
         return tokenizedUrls.previewUrl

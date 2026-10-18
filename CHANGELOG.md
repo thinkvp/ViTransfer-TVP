@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Browsing a video with many assets no longer gets your IP banned by the firewall** — on share pages, each asset's preview image and timeline hover sprites were loaded through their own app URL, and a few dozen of those in quick succession looked like a crawler to CrowdSec, which blocked the viewer's IP for 4 hours. With S3/R2 storage these now load straight from the bucket, as album photos already do. Local-storage installs are unchanged.
 
+- **Opening a share-page uploads folder with many photos or videos no longer gets your IP banned** — each uploaded file's preview image came from its own app URL, so a folder of 40 or more tripped the same CrowdSec crawler rule. With S3/R2 storage the previews now load straight from the bucket; downloads and playback are unchanged.
+
 ## [2.7.7] - 2026-10-15
 
 ### Fixed

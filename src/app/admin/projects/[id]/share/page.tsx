@@ -2145,6 +2145,8 @@ export default function AdminSharePage() {
       if (file.uploadFileId.startsWith('pending-')) {
         return null
       }
+      // S3 mode: the file list already carries a presigned preview — skip the token round trip.
+      if (file.thumbnailUrl) return file.thumbnailUrl
 
       const entry = await getUploadAccessUrl(file.uploadFileId)
       // Do not fall back to downloadUrl — videos without a ready preview should show the icon fallback

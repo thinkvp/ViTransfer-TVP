@@ -4,7 +4,7 @@ import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 
 /**
  * S3 mode: presign the small preview artifacts the share-page FILES grid loads in bulk
- * (video-asset posters, timeline VTT indexes and sprite sheets) straight to the bucket.
+ * (video-asset and upload posters, timeline VTT indexes and sprite sheets) straight to the bucket.
  *
  * Their token URLs (`/api/content/<token>?…`) give every asset a unique, extension-less
  * last path segment. CrowdSec's http-crawl-non_statics rule counts those as distinct
@@ -54,6 +54,42 @@ export async function presignVideoAssetPreviewUrls(
   if (eligible.length === 0) return urls
 
   const records = await getStoredFileRecords('VIDEO_ASSET', eligible.map((a) => a.id), {
+    fileRoles: ['PREVIEW_IMAGE'],
+    select: { entityId: true, storagePath: true },
+  })
+  await Promise.all(
+    records.map(async (r) => {
+      if (!r.storagePath) return
+      try {
+        urls.set(r.entityId, await s3GetPresignedStreamUrl(r.storagePath, PREVIEW_URL_TTL_SECONDS, 'image/jpeg'))
+      } catch {
+        // Best-effort; the token URL still works.
+      }
+    }),
+  )
+  return urls
+}
+
+/**
+ * Presign each share-upload file's generated preview JPG (PREVIEW_IMAGE), keyed by fileId.
+ * Mirrors the uploads download-token routes: image and video uploads only, previewStatus
+ * READY. An image whose preview isn't ready yet is left out — those routes fall back to the
+ * original behind a token URL (and enqueue the preview job), which stays the slow path.
+ */
+export async function presignShareUploadPreviewUrls(
+  files: Array<{ id: string; fileType?: string | null; previewStatus?: string | null }>,
+): Promise<Map<string, string>> {
+  const urls = new Map<string, string>()
+  if (!isS3Mode()) return urls
+
+  const eligible = files.filter((file) => {
+    if (file.previewStatus !== 'READY') return false
+    const ft = String(file.fileType || '').toLowerCase()
+    return ft.startsWith('image/') || ft.startsWith('video/')
+  })
+  if (eligible.length === 0) return urls
+
+  const records = await getStoredFileRecords('SHARE_UPLOAD_FILE', eligible.map((f) => f.id), {
     fileRoles: ['PREVIEW_IMAGE'],
     select: { entityId: true, storagePath: true },
   })
