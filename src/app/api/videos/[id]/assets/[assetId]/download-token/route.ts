@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { verifyProjectAccess } from '@/lib/project-access'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { rateLimit } from '@/lib/rate-limit'
+import { isS3Mode, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { getStoredFilePathForProject } from '@/lib/stored-file'
 import { isSubtitleAssetWithheldForViewer } from '@/lib/subtitle-delivery'
 import { buildHlsMasterUrl } from '@/lib/video-stream-url'
@@ -114,9 +115,15 @@ export async function POST(
 
     const inlineAssetUrl = `/api/content/${token}?assetId=${assetId}`
     const directAssetUrl = `${inlineAssetUrl}&download=true`
-    const previewUrl = (isPreviewableImage || isPreviewableVideo) && hasReadyGeneratedPreview
+    let previewUrl = (isPreviewableImage || isPreviewableVideo) && hasReadyGeneratedPreview
       ? `/api/content/${token}?assetId=${assetId}&assetPreview=1`
       : null
+    // S3 mode: hand the poster out as a direct bucket URL. Grids resolve one of these per
+    // asset, and a per-asset /api/content/<token> path reads as crawling to CrowdSec
+    // (see lib/media-preview-presign). Same TTL as the token; the token URL is the fallback.
+    if (previewUrl && previewImage && isS3Mode()) {
+      previewUrl = await s3GetPresignedStreamUrl(previewImage, DOWNLOAD_TOKEN_TTL, 'image/jpeg').catch(() => previewUrl)
+    }
 
     // HLS (proxy-robust segmented) playback — single rendition, served as a same-origin
     // token-scoped master playlist. This is the sole generated playback path now; the player

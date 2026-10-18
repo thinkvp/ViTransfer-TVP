@@ -2375,6 +2375,7 @@ export function ShareFilesBrowser({
                   thumbnailUrl={videoThumbnailSrc || ''}
                   vttUrl={file.timelineVttUrl!}
                   spriteBaseUrl={file.timelineSpriteBaseUrl!}
+                  spriteUrls={file.timelineSpriteUrls}
                   durationSeconds={file.durationSeconds!}
                   alt={file.fileName}
                   className="w-full h-full"

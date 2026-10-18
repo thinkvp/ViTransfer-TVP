@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Reopening an older project no longer leaves orphaned preview files behind** — projects created before 2.0.5 still had asset and share-upload preview images in the old `.previews` folder. When reopening rebuilt those previews in the new location, the old copies were left in storage, and the weekly integrity scan reported them as orphans. Rebuilding a preview now deletes the copy it replaces, unless another file record still uses it. Orphans created before this fix can be cleared with Storage → orphan cleanup.
 
+- **Browsing a video with many assets no longer gets your IP banned by the firewall** — on share pages, each asset's preview image and timeline hover sprites were loaded through their own app URL, and a few dozen of those in quick succession looked like a crawler to CrowdSec, which blocked the viewer's IP for 4 hours. With S3/R2 storage these now load straight from the bucket, as album photos already do. Local-storage installs are unchanged.
+
 ## [2.7.7] - 2026-10-15
 
 ### Fixed

@@ -5,6 +5,7 @@ import { verifyProjectAccess } from '@/lib/project-access'
 import { getAlbumZipFileName } from '@/lib/album-photo-zip'
 import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
 import { presignAlbumPhotoPreviewUrls } from '@/lib/photo-preview-presign'
+import { presignTimelineUrls, presignVideoAssetPreviewUrls } from '@/lib/media-preview-presign'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { generateVideoAccessToken } from '@/lib/video-access'
 import { batchResolveFileSizes, getStoredFileRecords, storedFileExists } from '@/lib/stored-file'
@@ -168,6 +169,14 @@ export async function GET(
     })
   )
 
+  // S3 mode: timeline VTT + sprite sheets straight from the bucket (see media-preview-presign).
+  const uploadTimelinePresigned = await presignTimelineUrls(
+    'SHARE_UPLOAD_FILE',
+    uploadFiles
+      .filter((f) => uploadTimelineTokens.get(f.id))
+      .map((f) => ({ id: f.id, durationSeconds: f.mediaDurationSeconds })),
+  )
+
   for (const file of uploadFiles) {
     const folderPath = String(file.folderRelativePath || '').trim()
     if (!uploadGroupsByPath.has(folderPath)) {
@@ -176,6 +185,7 @@ export async function GET(
 
     const tokens = uploadTimelineTokens.get(file.id)
     const hasTimeline = tokens !== undefined && tokens !== null
+    const presignedTimeline = uploadTimelinePresigned.get(file.id)
 
     uploadGroupsByPath.get(folderPath)!.push({
       type: 'upload-file',
@@ -190,8 +200,9 @@ export async function GET(
         : undefined,
       previewStatus: file.previewStatus ?? undefined,
       hasTimelinePreviews: hasTimeline,
-      timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
+      timelineVttUrl: presignedTimeline?.vttUrl ?? (tokens ? `/api/content/${tokens.vttToken}` : undefined),
       timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
+      timelineSpriteUrls: presignedTimeline?.spriteUrls,
     })
   }
 
@@ -271,11 +282,19 @@ export async function GET(
     })
   )
 
+  const videoTimelinePresigned = await presignTimelineUrls(
+    'VIDEO',
+    readyVideos
+      .filter((v) => videoTimelineTokens.get(v.id))
+      .map((v) => ({ id: v.id, durationSeconds: Number(v.duration) })),
+  )
+
   for (const [videoName, videos] of videosByName.entries()) {
     const sortedVersions = [...videos].sort((a, b) => b.version - a.version)
     const versionFiles: DownloadableFile[] = sortedVersions.map((video) => {
       const tokens = videoTimelineTokens.get(video.id)
       const hasTimeline = tokens !== undefined && tokens !== null
+      const presignedTimeline = videoTimelinePresigned.get(video.id)
       return {
         type: 'video',
         videoId: video.id,
@@ -287,8 +306,9 @@ export async function GET(
         allowApproval: video.allowApproval === true,
         isRevisionRequested: (video as any).revisionRequestedAt != null,
         hasTimelinePreviews: hasTimeline,
-        timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
+        timelineVttUrl: presignedTimeline?.vttUrl ?? (tokens ? `/api/content/${tokens.vttToken}` : undefined),
         timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
+        timelineSpriteUrls: presignedTimeline?.spriteUrls,
       }
     })
 
@@ -340,10 +360,24 @@ export async function GET(
       : []
     const assetHasPlaybackPreview = new Set(assetPlaybackPreview.map(s => s.entityId))
 
+    // S3 mode: embed each asset's poster and timeline as direct bucket URLs. Without the
+    // embedded poster, the grid POSTs a download-token per asset and loads a per-asset
+    // /api/content/<token> poster — one distinct crawl-rule path each (see media-preview-presign).
+    const assetPreviewUrls = approvedVideo ? await presignVideoAssetPreviewUrls(approvedVideo.assets) : new Map<string, string>()
+    const assetTimelinePresigned = approvedVideo
+      ? await presignTimelineUrls(
+          'VIDEO_ASSET',
+          approvedVideo.assets
+            .filter((a: any) => assetTimelineTokens.get(a.id))
+            .map((a: any) => ({ id: a.id, durationSeconds: a.mediaDurationSeconds })),
+        )
+      : new Map()
+
     const assetFiles: DownloadableFile[] = approvedVideo
       ? approvedVideo.assets.map((asset: any): DownloadableFile => {
           const tokens = assetTimelineTokens.get(asset.id)
           const hasTimeline = tokens !== undefined && tokens !== null
+          const presignedTimeline = assetTimelinePresigned.get(asset.id)
           const isVideoAsset = String(asset.fileType || '').toLowerCase().startsWith('video/')
           return {
             type: 'asset',
@@ -352,9 +386,11 @@ export async function GET(
             fileName: asset.fileName,
             fileSizeBytes: assetSizeMap.get(asset.id) ?? 0,
             durationSeconds: typeof asset.mediaDurationSeconds === 'number' ? asset.mediaDurationSeconds : undefined,
+            thumbnailUrl: assetPreviewUrls.get(asset.id),
             hasTimelinePreviews: hasTimeline,
-            timelineVttUrl: tokens ? `/api/content/${tokens.vttToken}` : undefined,
+            timelineVttUrl: presignedTimeline?.vttUrl ?? (tokens ? `/api/content/${tokens.vttToken}` : undefined),
             timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
+            timelineSpriteUrls: presignedTimeline?.spriteUrls,
             // Only meaningful for playable (video) assets; gates the lightbox player.
             playbackPreviewAvailable: isVideoAsset
               ? (asset.previewStatus === 'READY' && assetHasPlaybackPreview.has(asset.id))

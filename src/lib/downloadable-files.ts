@@ -51,6 +51,11 @@ export interface DownloadableFile {
   timelineVttUrl?: string
   /** Tokenized base URL for timeline sprite images (append sprite filename). */
   timelineSpriteBaseUrl?: string
+  /**
+   * S3 mode: sprite filename → presigned direct-to-bucket URL. Preferred over
+   * timelineSpriteBaseUrl, which stays the fallback for any name not in the map.
+   */
+  timelineSpriteUrls?: Record<string, string>
 }
 
 export interface DownloadableGroup {

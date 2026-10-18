@@ -19,6 +19,8 @@ interface VideoHoverPreviewProps {
   vttUrl: string
   /** Tokenized base URL for sprite images — sprite filename is appended. */
   spriteBaseUrl: string
+  /** Optional sprite filename → direct URL map (S3 presigns); spriteBaseUrl covers misses. */
+  spriteUrls?: Record<string, string>
   /** Video duration in seconds (used to map mouse position to time). */
   durationSeconds: number
   /** Alt text for the image. */
@@ -104,6 +106,7 @@ export default function VideoHoverPreview({
   thumbnailUrl,
   vttUrl,
   spriteBaseUrl,
+  spriteUrls,
   durationSeconds,
   alt,
   className,
@@ -120,6 +123,11 @@ export default function VideoHoverPreview({
   const [thumbnailError, setThumbnailError] = useState(!thumbnailUrl)
   const vttLoadedRef = useRef(false)
   const prevSpriteFileRef = useRef<string | null>(null)
+
+  const getSpriteUrl = useCallback(
+    (spriteFile: string) => spriteUrls?.[spriteFile] || `${spriteBaseUrl}?file=${encodeURIComponent(spriteFile)}`,
+    [spriteUrls, spriteBaseUrl],
+  )
 
   // Reset thumbnail error if a valid URL arrives later (e.g. after async preview resolution)
   useEffect(() => {
@@ -172,21 +180,24 @@ export default function VideoHoverPreview({
   // Preload all distinct sprite sheets once cues are parsed so moving across
   // sprite-file boundaries doesn't flash a black frame while the next sheet
   // downloads. URL must match the one used for display so the cache is shared.
+  // Each sheet is preloaded once: presigned spriteUrls are re-minted on every
+  // file-list refresh, and re-preloading every sheet each time is wasted bandwidth.
+  const preloadedSpritesRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (!cues || cues.length === 0) return
-    const seen = new Set<string>()
+    const seen = preloadedSpritesRef.current
     const images: HTMLImageElement[] = []
     for (const cue of cues) {
       if (seen.has(cue.spriteFile)) continue
       seen.add(cue.spriteFile)
       const img = new Image()
-      img.src = `${spriteBaseUrl}?file=${encodeURIComponent(cue.spriteFile)}`
+      img.src = getSpriteUrl(cue.spriteFile)
       images.push(img)
     }
     return () => {
       images.length = 0
     }
-  }, [cues, spriteBaseUrl])
+  }, [cues, getSpriteUrl])
 
   const handleMouseEnter = useCallback(() => {
     void loadVtt()
@@ -250,14 +261,14 @@ export default function VideoHoverPreview({
     }
 
     if (match) {
-      const url = `${spriteBaseUrl}?file=${encodeURIComponent(match.spriteFile)}`
+      const url = getSpriteUrl(match.spriteFile)
       if (prevSpriteFileRef.current !== match.spriteFile) {
         prevSpriteFileRef.current = match.spriteFile
         setActiveSpriteUrl(url)
       }
       setActiveCue(match)
     }
-  }, [hoverPercent, cues, durationSeconds, spriteBaseUrl])
+  }, [hoverPercent, cues, durationSeconds, getSpriteUrl])
 
   const handleMouseLeave = useCallback(() => {
     setHoverPercent(null)
