@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Reopening an older project no longer leaves orphaned preview files behind** — projects created before 2.0.5 still had asset and share-upload preview images in the old `.previews` folder. When reopening rebuilt those previews in the new location, the old copies were left in storage, and the weekly integrity scan reported them as orphans. Rebuilding a preview now deletes the copy it replaces, unless another file record still uses it. Orphans created before this fix can be cleared with Storage → orphan cleanup.
+
 ## [2.7.7] - 2026-10-15
 
 ### Fixed

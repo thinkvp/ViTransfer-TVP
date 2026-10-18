@@ -8,8 +8,7 @@ import { buildUploadPreviewStoragePath, buildVideoAssetPreviewStoragePath } from
 import { recalculateAndStoreProjectPreviewBytes } from '@/lib/project-total-bytes'
 import { isS3Mode, s3FileExists, s3GetFileSize, s3GetPresignedStreamUrl } from '@/lib/s3-storage'
 import { getFilePath, uploadFileFromPath } from '@/lib/storage'
-import { getStoredFilePath } from '@/lib/stored-file'
-import { registerStoredFile } from '@/lib/stored-file'
+import { getStoredFilePath, registerStoredFileReplacing } from '@/lib/stored-file'
 import type { ShareUploadPreviewJob } from '@/lib/queue'
 import { parseResolutions, packageAssetHlsFromOriginal, type Resolution, type TempFiles } from './video-processor-helpers'
 
@@ -185,7 +184,9 @@ async function updateRecordSuccess(
       previewError: null,
     } })
 
-    await registerStoredFile({
+    // Replacing: a pre-2.0.5 row points into the old `.previews/…` mirror; repointing it
+    // here must also remove that file or it lingers as an orphan.
+    await registerStoredFileReplacing({
       entityType: 'SHARE_UPLOAD_FILE', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
       storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
     })
@@ -197,7 +198,9 @@ async function updateRecordSuccess(
     } })
 
     // The asset's preview is its poster JPG; playback is the separately-registered HLS bundle.
-    await registerStoredFile({
+    // Replacing, for the same legacy `.previews/…` reason as above (reopening an older
+    // project regenerates these when its asset HLS was shed on close).
+    await registerStoredFileReplacing({
       entityType: 'VIDEO_ASSET', entityId: recordId, fileRole: 'PREVIEW_IMAGE',
       storagePath: previewPath, fileSize: previewFileSize, status: 'READY', generatedAt: new Date(),
     })

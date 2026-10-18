@@ -141,6 +141,50 @@ export async function registerStoredFile(params: RegisterStoredFileParams, db: D
   })
 }
 
+/**
+ * registerStoredFile, then delete the object the row pointed at before if the new
+ * path differs. For regenerators whose output path moved — e.g. a pre-2.0.5 row under
+ * the name-keyed `.previews/…` mirror being rewritten to `previews/{projectId}/…`.
+ * A plain upsert repoints the row and strands the old object, which the weekly
+ * integrity scan then reports as an orphan.
+ *
+ * Same shared-path guard as deleteStoredFile: if any row still references the old path
+ * (copy-to-version clones share an asset's preview), the object is kept. The delete is
+ * best-effort — a failure is logged and the new row stands.
+ */
+export async function registerStoredFileReplacing(params: RegisterStoredFileParams) {
+  const previous = await prisma.storedFile.findUnique({
+    where: {
+      entityType_entityId_fileRole: {
+        entityType: params.entityType,
+        entityId: params.entityId,
+        fileRole: params.fileRole,
+      },
+    },
+    select: { storagePath: true },
+  })
+
+  const record = await registerStoredFile(params)
+
+  const oldPath = previous?.storagePath
+  if (oldPath && oldPath !== params.storagePath) {
+    try {
+      const stillReferenced = await countStoredFilesByPath(oldPath)
+      if (stillReferenced > 0) {
+        console.log(`[StoredFile] Keeping superseded path still referenced by ${stillReferenced} row(s): ${oldPath}`)
+      } else if (DIRECTORY_FILE_ROLES.has(params.fileRole)) {
+        await deleteDirectory(oldPath)
+      } else {
+        await deleteFile(oldPath)
+      }
+    } catch (err) {
+      console.warn(`[StoredFile] Failed to delete superseded ${params.entityType}/${params.entityId}/${params.fileRole} at ${oldPath}:`, err instanceof Error ? err.message : err)
+    }
+  }
+
+  return record
+}
+
 // ---------------------------------------------------------------------------
 // Bulk register (for workers that produce multiple files at once)
 // ---------------------------------------------------------------------------
