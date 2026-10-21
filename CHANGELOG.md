@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Auto-generated captions no longer disappear before the last word finishes** — Whisper marks words as ending slightly early, so a caption could vanish mid-word ("clatteri-"). Generated captions now stay up about 0.4s past the last word, at least 1s in total, and run straight into the next caption instead of blinking off for under half a second. Existing captions keep their old timing until you click Regenerate, which overwrites any hand edits.
+
+- **Captions on long videos no longer fall apart partway through** — Whisper can derail on a long recording: once it loses punctuation or starts skipping words, it stays that way for the rest of the file (one 52-minute presentation lost every full stop from about 40 minutes on). Videos over 15 minutes are now transcribed in pieces of about 10 minutes, cut at pauses, so a bad stretch can't spread past its own piece. A piece that comes back unpunctuated, or with a long stretch of sound but no words, is retried in halves, and the retry is kept only if it's better. This also removes the 60-minute limit for the OpenAI provider. Affected videos need Regenerate.
+
+- **More US spellings are converted for British/Australian captions** — words like "personalized", "optimization" and "organizer" were left in US spelling because they weren't in the conversion list. Around 100 more -ize verbs are now covered, along with their -ization and -izer forms.
+
 ## [2.7.8] - 2026-10-18
 
 ### Fixed

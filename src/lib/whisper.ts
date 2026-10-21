@@ -160,8 +160,14 @@ export async function whisperTranscribeVerbose(params: {
   fileName: string
   mimeType: string
   timeoutMs: number
+  /**
+   * Accept a response with no words or segments as "no speech" instead of
+   * throwing. One piece of a long recording can be all music or silence; that
+   * is not a sign the server lacks verbose_json support.
+   */
+  allowEmpty?: boolean
 }): Promise<WhisperVerboseJsonResponse> {
-  const { config, fileName, mimeType, timeoutMs } = params
+  const { config, fileName, mimeType, timeoutMs, allowEmpty } = params
   const buffer = typeof params.audio === 'string' ? await readFile(params.audio) : params.audio
 
   const form = new FormData()
@@ -191,6 +197,9 @@ export async function whisperTranscribeVerbose(params: {
     const json = (await res.json()) as WhisperVerboseJsonResponse
     const hasWords = Array.isArray(json.words) && json.words.length > 0
     const hasSegments = Array.isArray(json.segments) && json.segments.length > 0
+    // `text` is always present on a real verbose_json body, even an empty one;
+    // without it this isn't the response shape we asked for.
+    if (allowEmpty && typeof json.text === 'string' && !json.text.trim()) return json
     if (!hasWords && !hasSegments) {
       throw new WhisperError('Whisper verbose_json response carried neither "words" nor "segments"')
     }

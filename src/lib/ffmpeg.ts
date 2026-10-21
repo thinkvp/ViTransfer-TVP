@@ -634,9 +634,17 @@ export async function extractAudioForTranscription(
   inputPath: string,
   outputPath: string,
   format: 'wav' | 'mp3' | 'aac' = 'wav',
-  bitrateKbps = 128
+  bitrateKbps = 128,
+  /** Extract only this stretch of the input (seconds), e.g. one transcription chunk. */
+  range?: { startSec: number; endSec: number }
 ): Promise<void> {
   const kbps = Math.max(8, Math.round(bitrateKbps))
+  // Input-side seek: with a re-encode ffmpeg decodes from the nearest seek point
+  // and discards up to startSec, so the cut is sample-accurate and the output
+  // timeline starts at 0 — chunk offsets add back exactly.
+  const rangeArgs = range
+    ? ['-ss', range.startSec.toFixed(3), '-t', Math.max(0.1, range.endSec - range.startSec).toFixed(3)]
+    : []
   const codecArgs = format === 'mp3'
     ? ['-c:a', 'libmp3lame', '-b:a', `${kbps}k`]
     : format === 'aac'
@@ -646,6 +654,7 @@ export async function extractAudioForTranscription(
       : ['-c:a', 'pcm_s16le']
   const args = [
     '-v', 'error',
+    ...rangeArgs,
     '-i', inputPath,
     '-vn', // drop video
     '-ac', '1', // mono
@@ -684,6 +693,73 @@ export async function extractAudioForTranscription(
       } else {
         reject(new Error(`FFmpeg audio extraction failed: ${stderr.slice(0, 2000)}`))
       }
+    })
+
+    ffmpeg.on('error', (err) => {
+      reject(new Error(`Failed to start FFmpeg: ${err.message}`))
+    })
+  })
+}
+
+/**
+ * Find the quiet stretches of an audio file with ffmpeg's `silencedetect`, so
+ * long audio can be cut for transcription where nobody is speaking. Also
+ * returns the input's duration as ffmpeg reports it, so the caller doesn't
+ * depend on `Video.duration` being filled in.
+ */
+export async function detectSilences(
+  inputPath: string,
+  opts: { noiseDb?: number; minSilenceSec?: number } = {}
+): Promise<{ silences: { startSec: number; endSec: number }[]; durationSec: number | null }> {
+  const noiseDb = opts.noiseDb ?? -30
+  const minSilenceSec = opts.minSilenceSec ?? 0.3
+  const args = [
+    '-hide_banner',
+    '-nostats',
+    '-i', inputPath,
+    '-vn',
+    '-af', `silencedetect=noise=${noiseDb}dB:d=${minSilenceSec}`,
+    '-f', 'null',
+    '-',
+  ]
+
+  return new Promise((resolve, reject) => {
+    const ffmpeg = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    const silences: { startSec: number; endSec: number }[] = []
+    let durationSec: number | null = null
+    let openStart: number | null = null
+    let pending = ''
+
+    const handleLine = (line: string) => {
+      const start = /silence_start:\s*(-?[\d.]+)/.exec(line)
+      if (start) openStart = Math.max(0, Number(start[1]))
+      const end = /silence_end:\s*([\d.]+)/.exec(line)
+      if (end && openStart !== null) {
+        silences.push({ startSec: openStart, endSec: Number(end[1]) })
+        openStart = null
+      }
+      const dur = /Duration:\s*(\d+):(\d+):([\d.]+)/.exec(line)
+      if (dur && durationSec === null) durationSec = Number(dur[1]) * 3600 + Number(dur[2]) * 60 + Number(dur[3])
+    }
+
+    // stderr streams one long log for a long file; parse it line by line
+    // rather than buffering the whole thing.
+    ffmpeg.stderr.on('data', (data) => {
+      pending += data.toString()
+      const lines = pending.split(/\r?\n/)
+      pending = lines.pop() ?? ''
+      lines.forEach(handleLine)
+    })
+
+    ffmpeg.on('close', (code) => {
+      if (pending) handleLine(pending)
+      if (code !== 0) {
+        reject(new Error(`FFmpeg silence detection failed (exit ${code})`))
+        return
+      }
+      // A file that ends in silence never prints its closing silence_end.
+      if (openStart !== null && durationSec !== null) silences.push({ startSec: openStart, endSec: durationSec })
+      resolve({ silences, durationSec })
     })
 
     ffmpeg.on('error', (err) => {

@@ -4,17 +4,25 @@ import fs from 'fs'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import type { TranscriptionJob } from '../lib/queue'
-import { whisperTranscribe, whisperTranscribeVerbose, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
-import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, buildCuesFromWords, attachPunctuationFromTranscript, applyDraftMarker } from '../lib/subtitles'
+import { whisperTranscribe, whisperTestConnection, type WhisperConfig } from '../lib/whisper'
+import { parseSrt, serializeSrt, serializeVtt, reflowCues, collapseRepeatedCues, mergeOrphanWordCues, applyCueHold, buildCuesFromWords, attachPunctuationFromTranscript, applyDraftMarker } from '../lib/subtitles'
 import { usesBritishSpelling, convertToBritishEnglish } from '../lib/american-to-british'
 import { extractAudioForTranscription, isNoAudioStreamError } from '../lib/ffmpeg'
+import { stitchVerboseResponses } from '../lib/transcription-chunks'
+import {
+  VIDEO_TRANSCRIBE_TIMEOUT_MS,
+  formatClock,
+  prepareTranscriptionPieces,
+  transcribePieceVerbose,
+  type PieceSource,
+} from './transcription-pieces'
 import { computeWaveformPeaksFromWav } from '../lib/waveform-peaks'
 import { decrypt } from '../lib/encryption'
 import { getStoredFilePath, registerStoredFiles } from '../lib/stored-file'
 import { uploadFileFromPath } from '../lib/storage'
 import { materializeStoragePathToLocalFile } from '../lib/storage-provider'
 import { buildVideoSubtitlesStorageRoot } from '../lib/project-storage-paths'
-import { storeTranscriptionAudio, TRANSCRIPTION_AUDIO_MP3_KBPS, OPENAI_AUDIO_UPLOAD_CAP_BYTES, OPENAI_AAC_KBPS, OPENAI_MAX_DURATION_SEC } from '../lib/transcription-audio'
+import { storeTranscriptionAudio, TRANSCRIPTION_AUDIO_MP3_KBPS } from '../lib/transcription-audio'
 import {
   recalculateAndStoreProjectTotalBytes,
   recalculateAndStoreProjectPreviewBytes,
@@ -26,7 +34,6 @@ import { TEMP_DIR } from './cleanup'
 const DEBUG = process.env.DEBUG_WORKER === 'true'
 
 const MAX_ERROR_LENGTH = 2000
-const VIDEO_TRANSCRIBE_TIMEOUT_MS = 30 * 60 * 1000 // long videos on a CPU-bound NAS
 const DICTATION_TRANSCRIBE_TIMEOUT_MS = 2 * 60 * 1000
 
 class WhisperNotConfiguredError extends Error {
@@ -163,27 +170,6 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
     return
   }
 
-  // OpenAI caps uploads at 25 MB, which limits us to ~60 min of audio. Skip
-  // longer videos before doing any work (local Whisper has no such cap and is
-  // not gated). Existing subtitle files are left in place — only the status
-  // note changes, so the admin knows why auto-captions didn't run.
-  if (config.provider === 'OPENAI' && video.duration > OPENAI_MAX_DURATION_SEC) {
-    const mins = Math.round(video.duration / 60)
-    console.log(`[transcription] Video ${videoId}: ${mins} min exceeds the OpenAI 60-minute limit — skipping`)
-    // Don't clobber a video that already has captions (e.g. generated on a local
-    // server before the provider was switched to OpenAI) — leave those in place.
-    if (video.transcriptionStatus !== 'READY') {
-      await prisma.video.update({
-        where: { id: videoId },
-        data: {
-          transcriptionStatus: 'SKIPPED',
-          transcriptionError: `Auto-captions unavailable — this video is ${mins} minutes, over the 60-minute limit for the OpenAI provider (25 MB upload cap). Use a local Whisper server to caption longer videos.`,
-        },
-      }).catch(() => {})
-    }
-    return
-  }
-
   // Decide what work is actually needed:
   //  - Subtitles are only (re)generated when forced or when none exist yet — a
   //    plain reprocess must NEVER overwrite hand-edited cues.
@@ -312,27 +298,13 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       return
     }
 
-    // Transcription input: local Whisper gets the cached mono 16 kHz 128 kbps mp3
-    // as-is (no size limit). OpenAI enforces a 25 MB upload cap, so we send a
-    // compact AAC-LC copy (mono 16 kHz 48 kbps) — transparent for speech and
-    // ~21 MB at the 60-minute ceiling (videos over that are gated out above).
-    let whisperAudioPath = audioMp3Path
-    let whisperFileName = 'audio.mp3'
-    let whisperMimeType = 'audio/mpeg'
-    if (config.provider === 'OPENAI') {
-      const aacPath = path.join(tempDir, 'audio-openai.m4a')
-      await extractAudioForTranscription(audioMp3Path, aacPath, 'aac', OPENAI_AAC_KBPS)
-      const aacBytes = (await fs.promises.stat(aacPath)).size
-      // Backstop for unknown/mis-reported durations that slip past the 60-min gate.
-      if (aacBytes > OPENAI_AUDIO_UPLOAD_CAP_BYTES) {
-        throw new Error(`Extracted audio is ${(aacBytes / 1048576).toFixed(1)} MB, over OpenAI's 25 MB upload cap — the video is too long for the OpenAI provider.`)
-      }
-      whisperAudioPath = aacPath
-      whisperFileName = 'audio.m4a'
-      whisperMimeType = 'audio/mp4'
-    }
+    const pieceSource: PieceSource = { audioMp3Path, tempDir, provider: config.provider, silences: null, nextId: 0 }
+    const pieces = await prepareTranscriptionPieces(pieceSource, video.duration)
 
-    console.log(`[transcription] Transcribing video ${videoId} via ${config.provider} (${config.model})`)
+    console.log(
+      `[transcription] Transcribing video ${videoId} via ${config.provider} (${config.model})` +
+        (pieces.length > 1 ? ` in ${pieces.length} pieces` : ''),
+    )
 
     let cues: ReturnType<typeof parseSrt>
     // Cues built from word timings are already fitted to the line budget and
@@ -350,13 +322,19 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
     // verbose_json, or answers without word timings, falls back to the plain
     // SRT path instead of failing the job.
     try {
-      const verbose = await whisperTranscribeVerbose({
-        config,
-        audio: whisperAudioPath,
-        fileName: whisperFileName,
-        mimeType: whisperMimeType,
-        timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
-      })
+      const parts: Parameters<typeof stitchVerboseResponses>[0] = []
+      for (const [i, piece] of pieces.entries()) {
+        if (pieces.length > 1) {
+          console.log(`[transcription] Video ${videoId}: piece ${i + 1}/${pieces.length} (${formatClock(piece.chunk.startSec)}–${formatClock(piece.chunk.endSec)})`)
+        }
+        parts.push(...(await transcribePieceVerbose(pieceSource, config, piece, {
+          // One piece of a long video can be all music or silence.
+          allowEmpty: pieces.length > 1,
+          depth: 0,
+          videoId,
+        })))
+      }
+      const verbose = stitchVerboseResponses(parts)
       const segments = verbose.segments ?? []
       const segmentWords = segments.flatMap((s) => s.words ?? [])
       const allWords = segmentWords.length > 0 ? segmentWords : (verbose.words ?? [])
@@ -387,15 +365,21 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
       console.warn(
         `[transcription] Video ${videoId}: verbose_json transcription failed (${verboseError instanceof Error ? verboseError.message : verboseError}) — falling back to SRT`,
       )
-      const rawSrt = await whisperTranscribe({
-        config,
-        audio: whisperAudioPath,
-        fileName: whisperFileName,
-        mimeType: whisperMimeType,
-        responseFormat: 'srt',
-        timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
-      })
-      cues = parseSrt(rawSrt)
+      cues = []
+      for (const piece of pieces) {
+        const rawSrt = await whisperTranscribe({
+          config,
+          audio: piece.path,
+          fileName: piece.fileName,
+          mimeType: piece.mimeType,
+          responseFormat: 'srt',
+          timeoutMs: VIDEO_TRANSCRIBE_TIMEOUT_MS,
+        })
+        const offsetMs = Math.round(piece.chunk.startSec * 1000)
+        for (const cue of parseSrt(rawSrt)) {
+          cues.push({ ...cue, index: cues.length + 1, startMs: cue.startMs + offsetMs, endMs: cue.endMs + offsetMs })
+        }
+      }
     }
 
     if (cues.length === 0) {
@@ -437,6 +421,8 @@ async function processVideoSubtitles(videoId: string, force: boolean) {
     if (!cuesAreWordTimed) {
       cues = reflowCues(cues, { maxCharsPerLine: config.maxCharsPerLine, maxLines: config.maxLines })
     }
+    // Whisper's end timestamps run early — hold each cue past its last word.
+    cues = applyCueHold(cues, { maxEndMs: video.duration > 0 ? video.duration * 1000 : undefined })
     const srtText = serializeSrt(cues)
     const vttText = serializeVtt(cues)
 

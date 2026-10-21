@@ -150,16 +150,43 @@ const BASE_MAP: Record<string, string> = {
   artifact: 'artefact',
 }
 
+// More -ize/-yze verbs; the British form is the same word with -ise/-yse, so
+// they're listed bare. Each one also covers -s/-d/-ing, -ization and -izer
+// (see buildMap). Only words that are -ise in British spelling — "size",
+// "seize", "prize" and "capsize" are -ize everywhere and must stay out.
+const IZE_VERBS = [
+  'agonize', 'alphabetize', 'antagonize', 'apologize', 'capitalize', 'caramelize', 'centralize',
+  'commercialize', 'compartmentalize', 'computerize', 'conceptualize', 'contextualize', 'crystallize',
+  'decentralize', 'democratize', 'deodorize', 'desensitize', 'digitize', 'dramatize', 'economize',
+  'empathize', 'energize', 'equalize', 'externalize', 'fantasize', 'fertilize', 'formalize',
+  'galvanize', 'globalize', 'harmonize', 'homogenize', 'humanize', 'hypnotize', 'hypothesize',
+  'idealize', 'idolize', 'immortalize', 'immunize', 'incentivize', 'individualize', 'industrialize',
+  'initialize', 'institutionalize', 'internalize', 'italicize', 'itemize', 'jeopardize', 'legalize',
+  'legitimize', 'localize', 'magnetize', 'marginalize', 'materialize', 'mechanize', 'mesmerize',
+  'metabolize', 'miniaturize', 'mobilize', 'moisturize', 'monetize', 'monopolize', 'motorize',
+  'nationalize', 'neutralize', 'oxidize', 'patronize', 'penalize', 'personalize', 'polarize',
+  'popularize', 'pressurize', 'privatize', 'publicize', 'randomize', 'rationalize', 'reorganize',
+  'revitalize', 'revolutionize', 'romanticize', 'sanitize', 'scrutinize', 'sensitize', 'serialize',
+  'stigmatize', 'strategize', 'subsidize', 'synthesize', 'systematize', 'tantalize', 'tenderize',
+  'terrorize', 'theorize', 'trivialize', 'urbanize', 'vandalize', 'vaporize', 'verbalize',
+  'victimize', 'vocalize', 'weaponize',
+  'catalyze', 'paralyze',
+]
+
 /**
  * Build the full lookup by expanding regular -s/-ed/-ing inflections from each
  * base stem, without clobbering any explicitly-listed irregular form.
  */
 function buildMap(): Record<string, string> {
-  const map: Record<string, string> = { ...BASE_MAP }
+  const base: Record<string, string> = { ...BASE_MAP }
+  for (const us of IZE_VERBS) {
+    if (!(us in base)) base[us] = us.replace(/ize$/, 'ise').replace(/yze$/, 'yse')
+  }
+  const map: Record<string, string> = { ...base }
   const add = (us: string, uk: string) => {
     if (!(us in map)) map[us] = uk
   }
-  for (const [us, uk] of Object.entries(BASE_MAP)) {
+  for (const [us, uk] of Object.entries(base)) {
     // plural / third-person -s
     add(`${us}s`, `${uk}s`)
     // -ize/-ise and -yze/-yse verbs get regular -d and -ing forms. The base
@@ -167,6 +194,14 @@ function buildMap(): Record<string, string> {
     if (us.endsWith('ize') || us.endsWith('yze')) {
       add(`${us}d`, `${uk}d`) // organize → organised, analyze → analysed
       add(`${us.slice(0, -1)}ing`, `${uk.slice(0, -1)}ing`) // organizing → organising
+      add(`${us}r`, `${uk}r`) // organizer → organiser
+      add(`${us}rs`, `${uk}rs`)
+    }
+    // -ize verbs' nouns: personalize → personalisation. (-yze has none: the
+    // noun of "analyze" is "analysis" in both.)
+    if (us.endsWith('ize')) {
+      add(`${us.slice(0, -1)}ation`, `${uk.slice(0, -1)}ation`)
+      add(`${us.slice(0, -1)}ations`, `${uk.slice(0, -1)}ations`)
     }
     // -our nouns/adjectives: -ed, -ing, -ful, -less variants
     if (uk.endsWith('our')) {

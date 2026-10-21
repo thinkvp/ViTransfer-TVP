@@ -342,6 +342,43 @@ export function mergeOrphanWordCues(
   return out
 }
 
+/**
+ * Hold each cue on screen a little past its last word. Whisper's word and
+ * segment end times land early — the final token of a multi-token word
+ * ("clatter|ing") and the last word before a pause are cut short — so a cue
+ * that ends exactly on that timestamp vanishes while the word is still being
+ * spoken.
+ *
+ * 1. End pad: extend every cue by `endPadMs` (default 400 ms).
+ * 2. Minimum duration: at least `minDurationMs` (default 1000 ms) on screen.
+ * 3. Chaining: when the gap left before the next cue is under `chainGapMs`
+ *    (default 500 ms), run up to the next cue instead of flashing blank.
+ * 4. Clamp: never closer than `minGapMs` (default 80 ms, ~2 frames) to the next
+ *    cue's start, nor past `maxEndMs` (the video's end) when given.
+ *
+ * Only ever extends — a cue that already touches or overlaps its successor is
+ * left as it is. Run LAST, after every pass that merges or splits cues.
+ * Applied at generation time only — manual edits are untouched.
+ */
+export function applyCueHold(
+  cues: SubtitleCue[],
+  opts: { endPadMs?: number; minDurationMs?: number; chainGapMs?: number; minGapMs?: number; maxEndMs?: number } = {},
+): SubtitleCue[] {
+  const endPadMs = opts.endPadMs ?? 400
+  const minDurationMs = opts.minDurationMs ?? 1000
+  const chainGapMs = opts.chainGapMs ?? 500
+  const minGapMs = opts.minGapMs ?? 80
+  const maxEndMs = opts.maxEndMs !== undefined && opts.maxEndMs > 0 ? Math.round(opts.maxEndMs) : Infinity
+
+  return cues.map((cue, i) => {
+    const next = cues[i + 1]
+    const limit = Math.min(next ? next.startMs - minGapMs : Infinity, maxEndMs)
+    let target = Math.max(cue.endMs + endPadMs, cue.startMs + minDurationMs)
+    if (next && limit - target < chainGapMs) target = limit
+    return { ...cue, endMs: Math.max(cue.endMs, Math.min(target, limit)) }
+  })
+}
+
 /** Plain-text transcript: cue texts joined into paragraphs, no timestamps. */
 export function cuesToTranscriptTxt(cues: SubtitleCue[]): string {
   return (
