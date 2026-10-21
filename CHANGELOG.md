@@ -5,7 +5,11 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.7.9] - 2026-10-21
+
+### Changed
+
+- **Dependency refresh** — Next.js 16.4.2, React 19.3.1, Prisma 7.10.1, the AWS SDK, Radix, the OpenAI SDK, Nodemailer, DOMPurify and the rest moved to their latest releases within their current major versions. The `effect` override is now capped to 3.x: Prisma's config loader pins `effect` 3.20.0, and the open-ended override had begun resolving to the 4.x major.
 
 ### Fixed
 
