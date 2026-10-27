@@ -367,6 +367,17 @@ export default function VideoPlayer({
   const suppressAutoDowngradeUntilRef = useRef(0)
 
   const scrubBarRef = useRef<HTMLDivElement>(null)
+  // Progress fill + playhead track; positioned only by syncTimelinePosition (see there).
+  const progressFillRef = useRef<HTMLDivElement>(null)
+  const playheadTrackRef = useRef<HTMLDivElement>(null)
+  const timelineAnimRef = useRef<{
+    anims: Animation[]
+    els: HTMLDivElement[]
+    mediaTime: number
+    wallTime: number
+    rate: number
+    duration: number
+  } | null>(null)
   // Scrub-bar width tracked in state so render-time tooltip positioning stays pure;
   // event handlers that need clientX precision still measure the live rect.
   const [scrubBarWidth, setScrubBarWidth] = useState(0)
@@ -1647,6 +1658,110 @@ export default function VideoPlayer({
       video.removeEventListener('timeupdate', onTimeUpdate)
     }
   }, [selectedVideo?.id]) // re-attach when the video (and thus the element) changes
+
+  // Timeline progress fill + playhead. Both are full-width elements shifted with
+  // translateX((fraction − 1) × 100%), and while the video plays they're driven by a
+  // compositor-side Web Animation rather than by React's ~5 Hz currentTimeSeconds ticks.
+  // On some Android phones (Motorola Edge 60 Pro / MediaTek, Chrome 155) every main-thread
+  // commit during playback stalls the video pipeline for ~1.5 frames, so a progress bar
+  // re-laid-out several times a second dropped a quarter to a third of all video frames.
+  // A running compositor animation needs no commits. React never renders these transforms;
+  // syncTimelinePosition owns them.
+  const syncTimelinePosition = useCallback(() => {
+    const els = [progressFillRef.current, playheadTrackRef.current].filter(
+      (el): el is HTMLDivElement => el !== null
+    )
+    const video = videoRef.current
+    const duration = effectiveDurationSeconds
+    const transformFor = (seconds: number) => {
+      const fraction = duration > 0 ? Math.min(1, Math.max(0, seconds / duration)) : 0
+      return `translateX(${+((fraction - 1) * 100).toFixed(3)}%)`
+    }
+    const applyStatic = (transform: string) => {
+      for (const el of els) {
+        if (el.style.transform !== transform) el.style.transform = transform
+      }
+    }
+    const stop = () => {
+      timelineAnimRef.current?.anims.forEach((a) => a.cancel())
+      timelineAnimRef.current = null
+    }
+
+    const canAnimate =
+      !!video &&
+      duration > 0 &&
+      els.length > 0 &&
+      typeof els[0].animate === 'function' &&
+      !video.paused &&
+      !video.ended &&
+      !video.seeking &&
+      video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA &&
+      video.playbackRate > 0 &&
+      !isScrubbingRef.current &&
+      !isRangeFramePreviewActiveRef.current
+
+    if (!canAnimate) {
+      // Paused, stalled, seeking or scrubbing: the playhead follows currentTimeRef, which
+      // every seek/scrub path keeps in step with currentTimeSeconds.
+      stop()
+      applyStatic(transformFor(currentTimeRef.current))
+      return
+    }
+
+    const running = timelineAnimRef.current
+    const now = performance.now()
+    if (
+      running &&
+      running.duration === duration &&
+      running.rate === video.playbackRate &&
+      running.els.length === els.length &&
+      running.els.every((el, i) => el === els[i])
+    ) {
+      const expected = running.mediaTime + ((now - running.wallTime) / 1000) * running.rate
+      if (Math.abs(expected - video.currentTime) < 0.25) return
+    }
+
+    stop()
+    const t = video.currentTime
+    const remainingMs = ((duration - t) / video.playbackRate) * 1000
+    const from = transformFor(t)
+    applyStatic(from)
+    if (!(remainingMs > 0)) return
+    timelineAnimRef.current = {
+      anims: els.map((el) =>
+        el.animate([{ transform: from }, { transform: 'translateX(0%)' }], {
+          duration: remainingMs,
+          easing: 'linear',
+          fill: 'forwards',
+        })
+      ),
+      els,
+      mediaTime: t,
+      wallTime: now,
+      rate: video.playbackRate,
+      duration,
+    }
+  }, [effectiveDurationSeconds])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const events = ['play', 'playing', 'pause', 'seeking', 'seeked', 'waiting', 'ratechange', 'ended', 'timeupdate', 'loadeddata']
+    events.forEach((ev) => video.addEventListener(ev, syncTimelinePosition))
+    return () => events.forEach((ev) => video.removeEventListener(ev, syncTimelinePosition))
+  }, [selectedVideo?.id, syncTimelinePosition])
+
+  // Scrubs, frame steps and comment-timestamp seeks move currentTimeSeconds without
+  // necessarily firing a media event, and the playhead can (re)mount; re-sync after every
+  // render. It's cheap: no DOM writes unless the position or animation actually changes.
+  useEffect(() => {
+    syncTimelinePosition()
+  })
+
+  useEffect(() => () => {
+    timelineAnimRef.current?.anims.forEach((a) => a.cancel())
+    timelineAnimRef.current = null
+  }, [])
 
   // Close quality menu on click outside
   useEffect(() => {
@@ -3676,14 +3791,15 @@ export default function VideoPlayer({
                   }
                 }}
               >
-                <div
-                  className="absolute left-0 top-0 h-full bg-primary rounded-md"
-                  style={{
-                    width: effectiveDurationSeconds > 0
-                      ? `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`
-                      : '0%'
-                  }}
-                />
+                {/* Progress fill — a full-width bar slid left by syncTimelinePosition and
+                    clipped here, so playback moves it with a compositor-only transform. */}
+                <div className="absolute inset-0 rounded-md overflow-hidden">
+                  <div
+                    ref={progressFillRef}
+                    className="h-full w-full bg-primary rounded-md"
+                    style={{ transform: 'translateX(-100%)' }}
+                  />
+                </div>
 
                 {/* Playhead thumb (YouTube-style) — visible ball at the current position
                     that grows only when the ball itself is hovered (not anywhere on the
@@ -3692,23 +3808,29 @@ export default function VideoPlayer({
                     on the parts that extend outward beyond the ball. It is pointer-events-auto
                     and grabbable: a press bubbles up to the scrub bar's existing pointer
                     handlers, so dragging the ball drives seeking exactly like dragging the
-                    bar. */}
+                    bar.
+                    The ball is pinned to the right edge of a full-width, click-through track
+                    that syncTimelinePosition slides left (anchoring it at the left would push
+                    the track past the bar's right edge and into page overflow). */}
                 {effectiveDurationSeconds > 0 && (
                   <div
-                    className="pointer-events-auto absolute top-1/2 z-25 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-md ring-2 ring-background transition-[width,height] duration-100 ease-out h-3 w-3 hover:h-[18px] hover:w-[18px] cursor-grab active:cursor-grabbing"
-                    style={{
-                      left: `${Math.min(100, Math.max(0, (currentTimeSeconds / effectiveDurationSeconds) * 100))}%`,
-                    }}
-                    onPointerEnter={(e) => {
-                      if (e.pointerType !== 'mouse' || isScrubbingRef.current) return
-                      setHoverTimelineTarget('playhead')
-                      updateHoverFromTimeSeconds(currentTimeRef.current, 96, true)
-                    }}
-                    onPointerLeave={(e) => {
-                      if (e.pointerType !== 'mouse') return
-                      if (hoveredTimelineTargetRef.current === 'playhead') setHoverTimelineTarget(null)
-                    }}
-                  />
+                    ref={playheadTrackRef}
+                    className="pointer-events-none absolute inset-0 z-25"
+                    style={{ transform: 'translateX(-100%)' }}
+                  >
+                    <div
+                      className="pointer-events-auto absolute right-0 top-1/2 translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-md ring-2 ring-background transition-[width,height] duration-100 ease-out h-3 w-3 hover:h-[18px] hover:w-[18px] cursor-grab active:cursor-grabbing"
+                      onPointerEnter={(e) => {
+                        if (e.pointerType !== 'mouse' || isScrubbingRef.current) return
+                        setHoverTimelineTarget('playhead')
+                        updateHoverFromTimeSeconds(currentTimeRef.current, 96, true)
+                      }}
+                      onPointerLeave={(e) => {
+                        if (e.pointerType !== 'mouse') return
+                        if (hoveredTimelineTargetRef.current === 'playhead') setHoverTimelineTarget(null)
+                      }}
+                    />
+                  </div>
                 )}
 
                 {/* Comment range overlay — shown when user starts typing a comment */}

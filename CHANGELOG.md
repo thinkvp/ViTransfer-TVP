@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] - 2026-10-27
+
+### Security
+
+- **Patched undici and fast-uri** — new advisories (an undici denial-of-service and integrity-check bypass, and several fast-uri URL-parsing flaws) were fixed by moving their pinned versions to undici 7.30.1 and fast-uri 3.1.9.
+
+### Fixed
+
+- **Videos no longer stutter on some Android phones** — on share pages, guest links and the admin share view, the timeline's progress bar and playhead were redrawn several times a second during playback. Some phones lose video frames every time the page redraws, so about a quarter to a third of frames were dropped (measured on a Motorola Edge 60 Pro). The playhead now moves as a GPU animation that doesn't redraw the page, and the same video now plays with no dropped frames. Desktop playback looks the same as before.
+
 ## [2.7.9] - 2026-10-21
 
 ### Changed
