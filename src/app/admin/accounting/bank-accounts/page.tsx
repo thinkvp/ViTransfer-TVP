@@ -187,8 +187,10 @@ export default function BankAccountsPage() {
   const [stripeFeeAccount, setStripeFeeAccount] = useState<{ code: string; name: string; taxCode: string } | null>(null)
   const [loadingInvoices, setLoadingInvoices] = useState(false)
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set()) // regular multi-select
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null) // Stripe reconcile single-select
-  const [selectedInvoiceIsReconcile, setSelectedInvoiceIsReconcile] = useState(false)
+  // Stripe reconcile multi-select (a payout can batch several invoices). Kept as the invoice rows,
+  // not ids, so the combined total survives a search that hides some of them.
+  const [selectedReconcileInvoices, setSelectedReconcileInvoices] = useState<Map<string, OpenInvoice>>(new Map())
+  const selectedInvoiceIsReconcile = selectedReconcileInvoices.size > 0
   const [matchingInvoice, setMatchingInvoice] = useState(false)
 
   // Expense matching dialog
@@ -992,24 +994,23 @@ export default function BankAccountsPage() {
   function openMatchInvoiceDialog(txn: BankTransaction) {
     setMatchInvoiceTarget(txn)
     setSelectedInvoiceIds(new Set())
-    setSelectedInvoiceId(null)
-    setSelectedInvoiceIsReconcile(false)
+    setSelectedReconcileInvoices(new Map())
     setInvoiceSearch('')
     setOpenInvoices([])
     void loadOpenInvoices('')
   }
 
-  // What reconciling the selected Stripe-paid invoice posts beyond the payment (mirrors the route)
+  // What reconciling the selected Stripe-paid invoices posts beyond the payments (mirrors the route)
   function reconcileDifference() {
-    if (!selectedInvoiceIsReconcile || !selectedInvoiceId || !matchInvoiceTarget) return null
-    const selInv = openInvoices.find(i => i.id === selectedInvoiceId)
-    return selInv ? stripeDepositDifference(matchInvoiceTarget.amountCents, selInv.totalCents) : null
+    if (!selectedInvoiceIsReconcile || !matchInvoiceTarget) return null
+    const combinedTotal = [...selectedReconcileInvoices.values()].reduce((s, inv) => s + inv.totalCents, 0)
+    return stripeDepositDifference(matchInvoiceTarget.amountCents, combinedTotal, selectedReconcileInvoices.size > 1)
   }
 
   async function handleMatchInvoice() {
     if (!matchInvoiceTarget) return
-    const isReconcile = selectedInvoiceIsReconcile && !!selectedInvoiceId
-    const invoiceIds = isReconcile ? [selectedInvoiceId!] : [...selectedInvoiceIds]
+    const isReconcile = selectedInvoiceIsReconcile
+    const invoiceIds = isReconcile ? [...selectedReconcileInvoices.keys()] : [...selectedInvoiceIds]
     if (invoiceIds.length === 0) return
     setMatchingInvoice(true)
     try {
@@ -1020,7 +1021,7 @@ export default function BankAccountsPage() {
       if (!res.ok) { const d = await res.json().catch(() => ({})); toast.error(d.error || 'Failed to match invoice'); return }
       const matchedId = matchInvoiceTarget.id
       setMatchInvoiceTarget(null)
-      setSelectedInvoiceIsReconcile(false)
+      setSelectedReconcileInvoices(new Map())
       setTransactions(prev => prev.filter(t => t.id !== matchedId))
       setTxnTotal(prev => Math.max(0, prev - 1))
       setExpandedId(prev => prev === matchedId ? null : prev)
@@ -1641,7 +1642,7 @@ export default function BankAccountsPage() {
       </Dialog>
 
       {/* Match Invoice Dialog */}
-      <Dialog open={!!matchInvoiceTarget} onOpenChange={open => { if (!open && !matchingInvoice) { setMatchInvoiceTarget(null); setSelectedInvoiceIsReconcile(false) } }}>
+      <Dialog open={!!matchInvoiceTarget} onOpenChange={open => { if (!open && !matchingInvoice) { setMatchInvoiceTarget(null); setSelectedReconcileInvoices(new Map()) } }}>
         <DialogContent className="max-w-2xl flex flex-col max-h-[85vh]">
           <DialogHeader>
             <DialogTitle>Match to Invoice — {matchInvoiceTarget ? fmtAmt(matchInvoiceTarget.amountCents) : ''}</DialogTitle>
@@ -1676,8 +1677,7 @@ export default function BankAccountsPage() {
                               return (
                                 <button key={inv.id} type="button"
                                   onClick={() => {
-                                    setSelectedInvoiceId(null)
-                                    setSelectedInvoiceIsReconcile(false)
+                                    setSelectedReconcileInvoices(new Map())
                                     setSelectedInvoiceIds(prev => {
                                       const next = new Set(prev)
                                       if (next.has(inv.id)) next.delete(inv.id)
@@ -1752,27 +1752,60 @@ export default function BankAccountsPage() {
                             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reconcile Stripe bank deposit</p>
                             <div className="flex-1 h-px bg-border" />
                           </div>
-                          <p className="text-xs text-muted-foreground">These invoices were already paid via Stripe. Matching will link the bank deposit for reconciliation only — it won&apos;t change the invoice or affect revenue totals. Any amount Stripe kept as fees is posted to your Stripe Fees Account.</p>
+                          <p className="text-xs text-muted-foreground">These invoices were already paid via Stripe. Matching will link the bank deposit for reconciliation only — it won&apos;t change the invoice or affect revenue totals. If Stripe paid out several invoices in one deposit, select them all. Any amount Stripe kept as fees is posted to your Stripe Fees Account.</p>
                           <div className="border border-border rounded-md divide-y divide-border">
-                            {stripeInvoices.map(inv => (
-                              <button key={inv.id} type="button"
-                                onClick={() => { setSelectedInvoiceId(inv.id); setSelectedInvoiceIsReconcile(true); setSelectedInvoiceIds(new Set()) }}
-                                className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start justify-between gap-3',
-                                  selectedInvoiceId === inv.id && selectedInvoiceIsReconcile && 'bg-primary/10 border-l-2 border-primary'
-                                )}
-                              >
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium">{inv.invoiceNumber}</p>
-                                  <p className="text-xs text-muted-foreground truncate">{[inv.clientName, inv.projectTitle].filter(Boolean).join(' · ')}</p>
-                                  <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <p className="text-sm font-medium tabular-nums">{fmtAud(inv.totalCents)}</p>
-                                  <p className="text-xs text-muted-foreground">Paid via Stripe</p>
-                                </div>
-                              </button>
-                            ))}
+                            {stripeInvoices.map(inv => {
+                              const isChecked = selectedReconcileInvoices.has(inv.id)
+                              return (
+                                <button key={inv.id} type="button"
+                                  onClick={() => {
+                                    setSelectedInvoiceIds(new Set())
+                                    setSelectedReconcileInvoices(prev => {
+                                      const next = new Map(prev)
+                                      if (next.has(inv.id)) next.delete(inv.id)
+                                      else next.set(inv.id, inv)
+                                      return next
+                                    })
+                                  }}
+                                  className={cn('w-full text-left px-3 py-2.5 hover:bg-accent/40 transition-colors flex items-start gap-3',
+                                    isChecked && 'bg-primary/10 border-l-2 border-primary'
+                                  )}
+                                >
+                                  <div className="mt-0.5 shrink-0">
+                                    <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center transition-colors',
+                                      isChecked ? 'bg-primary border-primary' : 'border-border bg-background'
+                                    )}>
+                                      {isChecked && <Check className="w-2.5 h-2.5 text-primary-foreground" />}
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 min-w-0 flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium">{inv.invoiceNumber}</p>
+                                      <p className="text-xs text-muted-foreground truncate">{[inv.clientName, inv.projectTitle].filter(Boolean).join(' · ')}</p>
+                                      <p className="text-xs text-muted-foreground">{formatDate(inv.issueDate)}{inv.dueDate ? ` · Due ${formatDate(inv.dueDate)}` : ''}</p>
+                                    </div>
+                                    <div className="text-right shrink-0">
+                                      <p className="text-sm font-medium tabular-nums">{fmtAud(inv.totalCents)}</p>
+                                      <p className="text-xs text-muted-foreground">Paid via Stripe</p>
+                                    </div>
+                                  </div>
+                                </button>
+                              )
+                            })}
                           </div>
+                          {/* Combined total for a batched payout — the gap is the Stripe fee, explained in the footer */}
+                          {selectedReconcileInvoices.size > 1 && (() => {
+                            const selectedTotal = [...selectedReconcileInvoices.values()].reduce((s, inv) => s + inv.totalCents, 0)
+                            const diff = (matchInvoiceTarget?.amountCents ?? 0) - selectedTotal
+                            return (
+                              <div className="px-3 py-2 rounded-md text-xs flex items-center justify-between gap-2 bg-muted/40 text-muted-foreground">
+                                <span>{selectedReconcileInvoices.size} invoices selected · Total: {fmtAud(selectedTotal)}</span>
+                                <span className="font-medium tabular-nums">
+                                  {diff === 0 ? '✓ Balanced' : diff < 0 ? `${fmtAud(-diff)} short` : `${fmtAud(diff)} over`}
+                                </span>
+                              </div>
+                            )
+                          })()}
                         </div>
                       )}
                     </>
@@ -1802,13 +1835,12 @@ export default function BankAccountsPage() {
                 </p>
               )
             })()}
-            <Button variant="outline" onClick={() => { setMatchInvoiceTarget(null); setSelectedInvoiceIsReconcile(false) }} disabled={matchingInvoice}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setMatchInvoiceTarget(null); setSelectedReconcileInvoices(new Map()) }} disabled={matchingInvoice}>Cancel</Button>
             <Button
               onClick={() => void handleMatchInvoice()}
               disabled={(() => {
                 if (matchingInvoice) return true
                 if (selectedInvoiceIsReconcile) {
-                  if (!selectedInvoiceId) return true
                   const difference = reconcileDifference()
                   if (difference?.kind === 'tooLarge') return true
                   return difference?.kind === 'fee' && !stripeFeeAccount && Math.abs(difference.amountCents) > STRIPE_ROUNDING_TOLERANCE_CENTS

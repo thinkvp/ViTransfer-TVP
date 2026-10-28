@@ -5,6 +5,12 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **One Stripe bank deposit can now be reconciled against several invoices** — Stripe often pays out more than one invoice in a single deposit, but Match to Invoice only let you pick one Stripe-paid invoice. You can now tick every invoice in the payout; the difference between their combined total and the deposit is posted to your Stripe Fees Account as one fee line, using the same 10% limit as before.
+
 ## [2.8.0] - 2026-10-27
 
 ### Security

@@ -118,7 +118,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         where: {
           status: 'MATCHED',
           matchType: 'INVOICE_PAYMENT',
-          invoicePayment: { invoiceId: { in: salesInvoiceIds } },
+          // Single-invoice matches link via invoicePayment; multi-invoice matches only via invoicePayments
+          OR: [
+            { invoicePayment: { invoiceId: { in: salesInvoiceIds } } },
+            { invoicePayments: { some: { invoiceId: { in: salesInvoiceIds } } } },
+          ],
         },
         select: {
           id: true,
@@ -126,21 +130,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           description: true,
           amountCents: true,
           invoicePayment: { select: { invoiceId: true } },
+          invoicePayments: { select: { invoiceId: true } },
         },
         orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
       })
     : []
 
   const invoiceTransactionsByInvoiceId = invoiceLinkedTransactions.reduce<Record<string, { id: string; date: string; description: string; amountCents: number }[]>>((acc, transaction) => {
-    const invoiceId = transaction.invoicePayment?.invoiceId
-    if (!invoiceId) return acc
-    if (!acc[invoiceId]) acc[invoiceId] = []
-    acc[invoiceId].push({
-      id: transaction.id,
-      date: transaction.date,
-      description: transaction.description,
-      amountCents: Number(transaction.amountCents),
-    })
+    const invoiceIds = new Set([transaction.invoicePayment?.invoiceId, ...transaction.invoicePayments.map(p => p.invoiceId)])
+    for (const invoiceId of invoiceIds) {
+      if (!invoiceId) continue
+      if (!acc[invoiceId]) acc[invoiceId] = []
+      acc[invoiceId].push({
+        id: transaction.id,
+        date: transaction.date,
+        description: transaction.description,
+        amountCents: Number(transaction.amountCents),
+      })
+    }
     return acc
   }, {})
 

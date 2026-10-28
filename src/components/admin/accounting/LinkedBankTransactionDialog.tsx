@@ -185,6 +185,23 @@ export function LinkedBankTransactionDialog({ open, transactionId, onOpenChange,
               </div>
             )}
 
+            {!transaction.invoicePayment && (transaction.invoicePayments?.length ?? 0) > 0 && (
+              <div>
+                <p className="text-xs text-muted-foreground">Invoices</p>
+                <div className="space-y-0.5">
+                  {transaction.invoicePayments!.map(p => p.invoiceId ? (
+                    <div key={p.id} className="flex items-center gap-2">
+                      <Link href={`/admin/sales/invoices/${p.invoiceId}`} prefetch={false} className="text-primary hover:underline underline-offset-2">
+                        {p.invoiceNumber ?? p.invoiceId}
+                        {p.clientName ? ` — ${p.clientName}` : ''}
+                      </Link>
+                      <span className="text-xs text-muted-foreground tabular-nums">{fmtAud(p.amountCents)}</span>
+                    </div>
+                  ) : null)}
+                </div>
+              </div>
+            )}
+
             {transaction.expense && (
               <div>
                 <p className="text-xs text-muted-foreground">Linked Expense</p>

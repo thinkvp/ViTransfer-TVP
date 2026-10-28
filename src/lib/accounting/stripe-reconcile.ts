@@ -8,8 +8,9 @@ import type { Prisma } from '@prisma/client'
 // payment, this one linked to the BankTransaction — so the link, not the exclude flag, is what
 // separates "paid via Stripe" from "paid via Stripe and already reconciled".
 //
-// Both link directions are checked: SalesPayment.bankTransactionId (set on every invoice match)
-// and the BankTransaction.invoicePaymentId back-relation (set on single-invoice matches only).
+// Both link directions are checked: SalesPayment.bankTransactionId (set on every invoice match,
+// including multi-invoice reconciles of a batched payout) and the BankTransaction.invoicePaymentId
+// back-relation (set on single-invoice matches only).
 //
 // Two call sites depend on this agreeing exactly: the Match-to-Invoice list hides invoices that
 // satisfy it, and the match-invoice route rejects them. Keep both on this helper — if the list
@@ -105,23 +106,27 @@ export type StripeDepositDifference =
   | { kind: 'fee' | 'rounding'; amountCents: number }
   | { kind: 'tooLarge'; amountCents: number; error: string }
 
-export function stripeDepositDifference(depositCents: number, invoiceTotalCents: number): StripeDepositDifference {
+// A payout that batches several invoices is checked against their combined total (multiple=true
+// only changes the wording of the error).
+export function stripeDepositDifference(depositCents: number, invoiceTotalCents: number, multiple = false): StripeDepositDifference {
   const diff = depositCents - invoiceTotalCents
   if (diff === 0) return { kind: 'none' }
   if (Math.abs(diff) <= STRIPE_ROUNDING_TOLERANCE_CENTS) return { kind: diff < 0 ? 'fee' : 'rounding', amountCents: diff }
   const fmt = (c: number) => `$${(Math.abs(c) / 100).toFixed(2)}`
+  const subject = multiple ? 'the selected invoices' : 'the invoice'
+  const invoiceWord = multiple ? 'invoices' : 'invoice'
   if (diff > 0) {
     return {
       kind: 'tooLarge',
       amountCents: diff,
-      error: `The deposit is ${fmt(diff)} more than the invoice — check you picked the right invoice.`,
+      error: `The deposit is ${fmt(diff)} more than ${subject} — check you picked the right ${invoiceWord}.`,
     }
   }
   if (-diff * 100 > invoiceTotalCents * MAX_STRIPE_FEE_PERCENT) {
     return {
       kind: 'tooLarge',
       amountCents: diff,
-      error: `The deposit is ${fmt(diff)} less than the invoice (more than ${MAX_STRIPE_FEE_PERCENT}%) — too large to be a Stripe fee. Check you picked the right invoice.`,
+      error: `The deposit is ${fmt(diff)} less than ${subject} (more than ${MAX_STRIPE_FEE_PERCENT}%) — too large to be a Stripe fee. Check you picked the right ${invoiceWord}.`,
     }
   }
   return { kind: 'fee', amountCents: diff }

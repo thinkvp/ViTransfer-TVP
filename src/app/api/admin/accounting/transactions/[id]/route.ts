@@ -42,6 +42,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           invoice: { select: { invoiceNumber: true, client: { select: { name: true } } } },
         },
       },
+      // Multi-invoice matches link only this way (invoicePaymentId stays null)
+      invoicePayments: {
+        select: {
+          id: true,
+          amountCents: true,
+          paymentDate: true,
+          invoiceId: true,
+          invoice: { select: { invoiceNumber: true, client: { select: { name: true } } } },
+        },
+      },
       splitLines: { include: { account: true } },
       accountingAttachments: { orderBy: { uploadedAt: 'asc' } },
       basPeriod: { select: { id: true, label: true, quarter: true, financialYear: true } },

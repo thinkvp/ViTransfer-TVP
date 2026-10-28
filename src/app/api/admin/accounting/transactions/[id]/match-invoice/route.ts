@@ -18,18 +18,27 @@ const bodySchema = z.object({
   // Array of invoice IDs — one or more invoices to match against the deposit.
   // A single ID replicates the previous single-invoice behaviour.
   invoiceIds: z.string().trim().min(1).array().min(1),
-  // When true (single-invoice only), the invoice may already be PAID (via Stripe) and the
-  // bank deposit is being reconciled against it. The resulting SalesPayment will have
-  // excludeFromInvoiceBalance=true so it does not double-count revenue.
+  // When true, the invoices are already PAID (via Stripe) and the bank deposit is being
+  // reconciled against them — one invoice, or several when Stripe batched them into one
+  // payout. The resulting SalesPayments have excludeFromInvoiceBalance=true so they do not
+  // double-count revenue.
   reconcile: z.boolean().optional(),
 })
+
+function invoiceTotalCents(invoice: { itemsJson: unknown; taxEnabled: boolean }, taxRatePercent: number): number {
+  const items = Array.isArray(invoice.itemsJson) ? (invoice.itemsJson as any[]) : []
+  const subtotalCents = sumLineItemsSubtotal(items)
+  const taxCents = invoice.taxEnabled ? sumLineItemsTax(items, taxRatePercent) : 0
+  return subtotalCents + taxCents
+}
 
 // POST /api/admin/accounting/transactions/[id]/match-invoice
 // Matches a bank deposit to one or more open invoices by creating SalesPayment records.
 // Single invoice: creates one payment for the full bank transaction amount.
 // Multiple invoices: creates one payment per invoice at its outstanding balance;
 //   the sum must match the bank transaction amount (within $1.00 rounding tolerance).
-// When reconcile=true (single invoice only), also accepts PAID invoices (Stripe-paid).
+// When reconcile=true, accepts PAID (Stripe-paid) invoices instead: one payment per invoice
+//   at its total, with the Stripe fee on the combined total posted as one split line.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await requireApiMenuAction(request, 'accounting', 'manageAccounting')
   if (authResult instanceof Response) return authResult
@@ -59,10 +68,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const { invoiceIds, reconcile } = parsed.data
   const isMultiInvoice = invoiceIds.length > 1
-
-  if (reconcile && isMultiInvoice) {
-    return NextResponse.json({ error: 'Reconcile mode is only supported for a single invoice' }, { status: 400 })
-  }
 
   // Look up all specified invoices in one query
   const invoices = await prisma.salesInvoice.findMany({
@@ -94,13 +99,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   // leave two bank deposits both claiming the same invoice. Revenue totals would survive
   // (both payments are excludeFromInvoiceBalance) but the audit trail would not.
   if (reconcile) {
-    const invoice = invoices[0]
     const alreadyReconciled = await prisma.salesPayment.findFirst({
-      where: { invoiceId: invoice.id, ...reconciledBankDepositPaymentWhere() },
-      select: { id: true },
+      where: { invoiceId: { in: invoiceIds }, ...reconciledBankDepositPaymentWhere() },
+      select: { invoiceId: true },
     })
     if (alreadyReconciled) {
-      return NextResponse.json({ error: `Invoice ${invoice.invoiceNumber} has already been reconciled against a bank deposit` }, { status: 409 })
+      const invoice = invoices.find(i => i.id === alreadyReconciled.invoiceId)
+      return NextResponse.json({ error: `Invoice ${invoice?.invoiceNumber ?? alreadyReconciled.invoiceId} has already been reconciled against a bank deposit` }, { status: 409 })
     }
   }
 
@@ -113,28 +118,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
-  // For reconcile mode (single invoice): post the Stripe fee (or small rounding) difference
-  // as a split line to the Stripe Fees Account, using that account's tax code
+  const salesSettings = (reconcile || isMultiInvoice)
+    ? await prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } }).catch(() => null)
+    : null
+  const taxRatePercent = Number.isFinite(Number(salesSettings?.taxRatePercent)) ? Number(salesSettings!.taxRatePercent) : 10
+
+  // For reconcile mode: post the Stripe fee (or small rounding) difference between the deposit
+  // and the invoices' combined total as a split line to the Stripe Fees Account, using that
+  // account's tax code
   let roundingCents = 0
   let stripeRoundingAccountId: string | null = null
   let roundingTaxCode: AccountTaxCode = 'BAS_EXCLUDED'
   let roundingDescription = ''
-  if (reconcile && !isMultiInvoice) {
-    const invoice = invoices[0]
-    const salesSettingsRow = await prisma.salesSettings.findUnique({
-      where: { id: 'default' },
-      select: { taxRatePercent: true },
-    }).catch(() => null)
-    const defaultTaxRate = Number.isFinite(Number(salesSettingsRow?.taxRatePercent))
-      ? Number(salesSettingsRow!.taxRatePercent)
-      : 10
-
-    const items = Array.isArray((invoice as any).itemsJson) ? (invoice as any).itemsJson : []
-    const subtotalCents = sumLineItemsSubtotal(items)
-    const taxCents = (invoice as any).taxEnabled ? sumLineItemsTax(items, defaultTaxRate) : 0
-    const invoiceTotalCents = subtotalCents + taxCents
-
-    const difference = stripeDepositDifference(txn.amountCents, invoiceTotalCents)
+  const reconcileTotals = reconcile
+    ? invoices.map(invoice => ({ invoice, totalCents: invoiceTotalCents(invoice, taxRatePercent) }))
+    : []
+  if (reconcile) {
+    const combinedTotalCents = reconcileTotals.reduce((s, r) => s + r.totalCents, 0)
+    const difference = stripeDepositDifference(txn.amountCents, combinedTotalCents, isMultiInvoice)
     if (difference.kind === 'tooLarge') {
       return NextResponse.json({ error: difference.error }, { status: 422 })
     }
@@ -161,21 +162,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
   }
 
-  // For multi-invoice: pre-compute each invoice's outstanding balance and validate sum
-  const salesSettings = isMultiInvoice
-    ? await prisma.salesSettings.findUnique({ where: { id: 'default' }, select: { taxRatePercent: true } }).catch(() => null)
-    : null
-  const multiTaxRate = Number.isFinite(Number(salesSettings?.taxRatePercent)) ? Number(salesSettings!.taxRatePercent) : 10
-
   const invoiceAllocations: { invoiceId: string; clientId: string | null; amountCents: number }[] = []
 
-  if (isMultiInvoice) {
+  if (isMultiInvoice && reconcile) {
+    // Each reconcile payment carries its invoice's total; the fee split (if any) covers the
+    // gap to the deposit. Without a split, the small difference rides on the first payment,
+    // as the single-invoice path does.
+    for (const { invoice, totalCents } of reconcileTotals) {
+      invoiceAllocations.push({ invoiceId: invoice.id, clientId: invoice.clientId, amountCents: totalCents })
+    }
+    const remainder = txn.amountCents - roundingCents - invoiceAllocations.reduce((s, a) => s + a.amountCents, 0)
+    if (remainder !== 0) invoiceAllocations[0].amountCents += remainder
+  } else if (isMultiInvoice) {
     for (const invoice of invoices) {
-      // Compute invoice total from line items
-      const items = Array.isArray((invoice as any).itemsJson) ? (invoice as any).itemsJson : []
-      const subtotalCents = sumLineItemsSubtotal(items)
-      const taxCents = (invoice as any).taxEnabled ? sumLineItemsTax(items, multiTaxRate) : 0
-      const totalCents = subtotalCents + taxCents
+      const totalCents = invoiceTotalCents(invoice, taxRatePercent)
 
       // Compute already-paid amount (exclude invoiceBalance=false payments + Stripe payments)
       const [manualPaid, stripePaid] = await Promise.all([
@@ -217,7 +217,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const lodged = await lodgedPeriodGuard(
     request,
     [
-      ...salesPaymentBasEffects({ paymentDate: txn.date, excludeFromInvoiceBalance: !isMultiInvoice && reconcile, source: 'MANUAL' }),
+      ...salesPaymentBasEffects({ paymentDate: txn.date, excludeFromInvoiceBalance: !!reconcile, source: 'MANUAL' }),
       ...(stripeRoundingAccountId
         ? await postingLinesBasEffects(txn.date, [{ accountId: stripeRoundingAccountId, taxCode: roundingTaxCode }])
         : []),
@@ -232,7 +232,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       : (txn.description ?? '')
 
     if (isMultiInvoice) {
-      // Create one SalesPayment per invoice at its outstanding balance
+      // Create one SalesPayment per invoice at its outstanding balance (or, reconciling, its total)
       for (const alloc of invoiceAllocations) {
         await tx.salesPayment.create({
           data: {
@@ -244,9 +244,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             clientId: alloc.clientId,
             invoiceId: alloc.invoiceId,
             bankTransactionId: id,
+            ...(reconcile ? { excludeFromInvoiceBalance: true } : {}),
           } as any,
         })
-        await recomputeInvoiceStoredStatus(tx, alloc.invoiceId, { createdByUserId: authResult.id })
+        if (!reconcile) await recomputeInvoiceStoredStatus(tx, alloc.invoiceId, { createdByUserId: authResult.id })
+      }
+
+      if (reconcile && stripeRoundingAccountId && roundingCents !== 0) {
+        await tx.splitLine.create({
+          data: {
+            bankTransactionId: id,
+            accountId: stripeRoundingAccountId,
+            description: roundingDescription,
+            amountCents: roundingCents,
+            taxCode: roundingTaxCode,
+          },
+        })
       }
 
       // Match the bank transaction (no primary invoicePaymentId for multi-invoice)
