@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { apiPost } from '@/lib/api-client'
-import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
+import { RecipientsEditor, type EditableRecipient, type RecipientsEditorHandle } from '@/components/RecipientsEditor'
 
 export type CreatedClient = {
   id: string
@@ -33,6 +33,7 @@ export function ClientCreateForm({ onCreated, onCancel, idPrefix = 'client' }: P
   })
 
   const [recipients, setRecipients] = useState<EditableRecipient[]>([])
+  const recipientsEditorRef = useRef<RecipientsEditorHandle>(null)
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -44,6 +45,10 @@ export function ClientCreateForm({ onCreated, onCancel, idPrefix = 'client' }: P
       return
     }
 
+    // A contact typed into the add/edit form but not confirmed still gets saved.
+    const recipientsToSave = recipientsEditorRef.current ? recipientsEditorRef.current.commitPending() : recipients
+    if (!recipientsToSave) return
+
     setLoading(true)
     try {
       const res = await apiPost('/api/clients', {
@@ -52,7 +57,7 @@ export function ClientCreateForm({ onCreated, onCancel, idPrefix = 'client' }: P
         phone: formData.phone.trim() ? formData.phone.trim() : null,
         website: formData.website.trim() ? formData.website.trim() : null,
         notes: formData.notes.trim() ? formData.notes.trim() : null,
-        recipients: recipients.map((r) => ({
+        recipients: recipientsToSave.map((r) => ({
           name: r.name?.trim() ? r.name.trim() : null,
           email: r.email?.trim() ? r.email.trim() : null,
           phone: r.phone?.trim() ? r.phone.trim() : null,
@@ -138,6 +143,7 @@ export function ClientCreateForm({ onCreated, onCancel, idPrefix = 'client' }: P
       </div>
 
       <RecipientsEditor
+        ref={recipientsEditorRef}
         label="Client Contacts"
         description="These recipients can be added to projects when creating a new project"
         value={recipients}

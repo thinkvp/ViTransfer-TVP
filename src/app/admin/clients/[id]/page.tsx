@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowDown, ArrowLeft, ArrowUp, ChevronLeft, ChevronRight, AlertTriangle, FolderSync, ChevronsLeft, ChevronsRight, Save } from 'lucide-react'
@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { apiFetch, apiPatch, apiPost } from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
-import { RecipientsEditor, type EditableRecipient } from '@/components/RecipientsEditor'
+import { RecipientsEditor, type EditableRecipient, type RecipientsEditorHandle } from '@/components/RecipientsEditor'
 import { ClientFileUpload } from '@/components/ClientFileUpload'
 import { ClientFileList } from '@/components/ClientFileList'
 import { Switch } from '@/components/ui/switch'
@@ -98,6 +98,7 @@ export default function ClientDetailPage() {
   const [savedFormData, setSavedFormData] = useState(formData)
 
   const [recipients, setRecipients] = useState<EditableRecipient[]>([])
+  const recipientsEditorRef = useRef<RecipientsEditorHandle>(null)
   const [savedRecipients, setSavedRecipients] = useState<EditableRecipient[]>([])
   const [fileRefresh, setFileRefresh] = useState(0)
 
@@ -511,6 +512,10 @@ export default function ClientDetailPage() {
       return
     }
 
+    // A contact typed into the add/edit form but not confirmed still gets saved.
+    const recipientsToSave = recipientsEditorRef.current ? recipientsEditorRef.current.commitPending() : recipients
+    if (!recipientsToSave) return
+
     setSaving(true)
     try {
       const patchResult = await apiPatch<any>(`/api/clients/${clientId}`, {
@@ -519,7 +524,7 @@ export default function ClientDetailPage() {
         phone: formData.phone.trim() ? formData.phone.trim() : null,
         website: formData.website.trim() ? formData.website.trim() : null,
         notes: formData.notes.trim() ? formData.notes.trim() : null,
-        recipients: recipients.map((r) => ({
+        recipients: recipientsToSave.map((r) => ({
           id: r.id,
           name: r.name?.trim() ? r.name.trim() : null,
           email: r.email?.trim() ? r.email.trim() : null,
@@ -668,6 +673,7 @@ export default function ClientDetailPage() {
                 </div>
 
                 <RecipientsEditor
+                  ref={recipientsEditorRef}
                   label="Client Contacts"
                   value={recipients}
                   onChange={setRecipients}

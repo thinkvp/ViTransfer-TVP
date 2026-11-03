@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -52,6 +52,29 @@ interface RecipientsEditorProps {
   addMode?: 'inline' | 'dialog'
   clientRecipients?: ClientRecipientPickItem[]
   clientName?: string
+  ref?: React.Ref<RecipientsEditorHandle>
+}
+
+export interface RecipientsEditorHandle {
+  /**
+   * Fold a half-filled add form or an open edit into the list, so a parent form's save
+   * doesn't silently drop a contact the user typed but never confirmed with Add/Save.
+   * Returns the list to persist (also pushed through onChange), or null if the pending
+   * contact failed validation — the error has been toasted and the save should stop.
+   */
+  commitPending: () => EditableRecipient[] | null
+}
+
+type DraftResult = { ok: true; next: EditableRecipient[] } | { ok: false; error: string }
+
+/** Enter in a contact field confirms that contact instead of submitting the surrounding form. */
+function onEnterConfirm(confirm: () => void) {
+  return (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'Enter' || (e.target as HTMLElement).tagName !== 'INPUT') return
+    e.preventDefault()
+    e.stopPropagation()
+    confirm()
+  }
 }
 
 function normalizeEmail(email: string | null | undefined): string {
@@ -76,6 +99,7 @@ export function RecipientsEditor({
   addMode = 'inline',
   clientRecipients,
   clientName,
+  ref,
 }: RecipientsEditorProps) {
   const recipients = useMemo(() => value || [], [value])
   const [showAddForm, setShowAddForm] = useState(false)
@@ -165,47 +189,53 @@ export function RecipientsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addMode, showAddForm])
 
-  const addRecipient = () => {
+  const applyAddDraft = (base: EditableRecipient[]): DraftResult => {
     const name = newName.trim()
     const email = newEmail.trim()
     const phone = sanitizeContactPhoneInput(newPhone).trim()
 
-    if (!name && !email) {
-      toast.error('Please enter at least a name or email address')
-      return
-    }
-
-    if (email && !email.includes('@')) {
-      toast.error('Please enter a valid email address')
-      return
-    }
+    if (!name && !email) return { ok: false, error: 'Please enter at least a name or email address' }
+    if (email && !email.includes('@')) return { ok: false, error: 'Please enter a valid email address' }
 
     const emailKey = normalizeEmail(email)
-    if (emailKey && recipients.some((r) => normalizeEmail(r.email) === emailKey)) {
-      toast.error('That email is already in the list')
-      return
+    if (emailKey && base.some((r) => normalizeEmail(r.email) === emailKey)) {
+      return { ok: false, error: 'That email is already in the list' }
     }
 
-    const next: EditableRecipient[] = [
-      ...recipients,
-      {
-        name: name || null,
-        email: email || null,
-        phone: phone || null,
-        displayColor: showDisplayColor ? (normalizeHexDisplayColor(newDisplayColor) || newDisplayColor || generateRandomHexDisplayColor()) : null,
-        ...(showAlsoAddToClient ? { alsoAddToClient: newAlsoAddToClient } : {}),
-        isPrimary: recipients.length === 0,
-        receiveNotifications: true,
-      },
-    ]
+    return {
+      ok: true,
+      next: [
+        ...base,
+        {
+          name: name || null,
+          email: email || null,
+          phone: phone || null,
+          displayColor: showDisplayColor ? (normalizeHexDisplayColor(newDisplayColor) || newDisplayColor || generateRandomHexDisplayColor()) : null,
+          ...(showAlsoAddToClient ? { alsoAddToClient: newAlsoAddToClient } : {}),
+          isPrimary: base.length === 0,
+          receiveNotifications: true,
+        },
+      ],
+    }
+  }
 
-    onChange(next)
+  const resetAddForm = () => {
     setNewName('')
     setNewEmail('')
     setNewPhone('')
     setNewDisplayColor(generateRandomHexDisplayColor())
     setNewAlsoAddToClient(false)
     setShowAddForm(false)
+  }
+
+  const addRecipient = () => {
+    const result = applyAddDraft(recipients)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    onChange(result.next)
+    resetAddForm()
   }
 
   const cancelAdd = () => {
@@ -275,25 +305,16 @@ export function RecipientsEditor({
     setEditDisplayColor('')
   }
 
-  const saveEdit = () => {
-    if (editingIdx === null) return
-
+  const applyEditDraft = (base: EditableRecipient[], idx: number): DraftResult => {
     const name = editName.trim()
     const email = editEmail.trim()
     const phone = sanitizeContactPhoneInput(editPhone).trim()
-    if (!name && !email) {
-      toast.error('Please enter at least a name or email address')
-      return
-    }
-    if (email && !email.includes('@')) {
-      toast.error('Please enter a valid email address')
-      return
-    }
+    if (!name && !email) return { ok: false, error: 'Please enter at least a name or email address' }
+    if (email && !email.includes('@')) return { ok: false, error: 'Please enter a valid email address' }
 
     const emailKey = normalizeEmail(email)
-    if (emailKey && recipients.some((r, i) => i !== editingIdx && normalizeEmail(r.email) === emailKey)) {
-      toast.error('That email is already in the list')
-      return
+    if (emailKey && base.some((r, i) => i !== idx && normalizeEmail(r.email) === emailKey)) {
+      return { ok: false, error: 'That email is already in the list' }
     }
 
     let nextColor: string | null | undefined = undefined
@@ -301,30 +322,68 @@ export function RecipientsEditor({
       const rawColor = String(editDisplayColor || '').trim()
       if (rawColor) {
         const normalized = normalizeHexDisplayColor(rawColor)
-        if (!normalized) {
-          toast.error('Invalid display colour. Use a hex value like #RRGGBB.')
-          return
-        }
+        if (!normalized) return { ok: false, error: 'Invalid display colour. Use a hex value like #RRGGBB.' }
         nextColor = normalized
       } else {
         nextColor = null
       }
     }
 
-    const next = recipients.map((r, i) => {
-      if (i !== editingIdx) return r
-      return {
-        ...r,
-        name: name || null,
-        email: email || null,
-        phone: phone || null,
-        displayColor: showDisplayColor ? nextColor : (r.displayColor ?? null),
-      }
-    })
+    return {
+      ok: true,
+      next: base.map((r, i) => {
+        if (i !== idx) return r
+        return {
+          ...r,
+          name: name || null,
+          email: email || null,
+          phone: phone || null,
+          displayColor: showDisplayColor ? nextColor : (r.displayColor ?? null),
+        }
+      }),
+    }
+  }
 
-    onChange(next)
+  const saveEdit = () => {
+    if (editingIdx === null) return
+    const result = applyEditDraft(recipients, editingIdx)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    onChange(result.next)
     cancelEdit()
   }
+
+  useImperativeHandle(ref, () => ({
+    commitPending: () => {
+      let next = recipients
+      const hasAddDraft = showAddForm && Boolean(newName.trim() || newEmail.trim())
+      if (editingIdx === null && !hasAddDraft) return next
+
+      if (editingIdx !== null) {
+        const result = applyEditDraft(next, editingIdx)
+        if (!result.ok) {
+          toast.error(`Unsaved contact edit: ${result.error}`)
+          return null
+        }
+        next = result.next
+      }
+      if (hasAddDraft) {
+        const result = applyAddDraft(next)
+        if (!result.ok) {
+          toast.error(`Unsaved new contact: ${result.error}`)
+          return null
+        }
+        next = result.next
+      }
+
+      onChange(next)
+      if (editingIdx !== null) cancelEdit()
+      if (hasAddDraft) resetAddForm()
+      return next
+    },
+  }))
 
   const removeRecipient = (idx: number) => {
     const next = recipients.filter((_, i) => i !== idx)
@@ -481,7 +540,7 @@ export function RecipientsEditor({
               </div>
 
               {editingIdx === idx && (
-                <div className="border-t border-border p-3">
+                <div className="border-t border-border p-3" onKeyDown={onEnterConfirm(saveEdit)}>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label htmlFor={`edit-recipient-name-${idx}`}>Contact Name</Label>
@@ -624,7 +683,7 @@ export function RecipientsEditor({
               </div>
             )}
 
-            <div className="border-t border-border pt-4">
+            <div className="border-t border-border pt-4" onKeyDown={onEnterConfirm(addRecipient)}>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="new-recipient-name">Contact Name</Label>
@@ -716,7 +775,7 @@ export function RecipientsEditor({
           </DialogContent>
         </Dialog>
       ) : showAddForm ? (
-        <div className="border rounded-lg bg-card p-4 space-y-3">
+        <div className="border rounded-lg bg-card p-4 space-y-3" onKeyDown={onEnterConfirm(addRecipient)}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="new-recipient-name">Contact Name</Label>
