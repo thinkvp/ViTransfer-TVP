@@ -87,6 +87,19 @@ type PersistedCollapse = {
   showDone: string[]
 }
 
+// Global "hide projects whose feedback is all done" toggle — a plain boolean kept apart
+// from the collapse tree so it survives that key's version bumps.
+const HIDE_DONE_PROJECTS_STORAGE_KEY = 'vt-feedback-hide-done-projects'
+
+function readHideDoneProjects(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem(HIDE_DONE_PROJECTS_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 function readPersistedCollapse(): PersistedCollapse | null {
   if (typeof window === 'undefined') return null
   try {
@@ -161,6 +174,18 @@ export default function ProjectFeedbackList() {
   const [collapsedVersions, setCollapsedVersions] = useState<Set<string>>(new Set())
   const [showDoneVersions, setShowDoneVersions] = useState<Set<string>>(new Set())
   const initialisedCollapse = useRef(false)
+  // Lazy read is hydration-safe: the card renders nothing until its fetch completes.
+  const [hideDoneProjects, setHideDoneProjects] = useState(readHideDoneProjects)
+
+  const toggleHideDoneProjects = () => {
+    const next = !hideDoneProjects
+    setHideDoneProjects(next)
+    try {
+      window.localStorage.setItem(HIDE_DONE_PROJECTS_STORAGE_KEY, next ? '1' : '0')
+    } catch {
+      // Ignore quota/availability errors — persistence is best-effort.
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -292,6 +317,8 @@ export default function ProjectFeedbackList() {
   if (projects.length === 0) return null
 
   const totalOpen = projects.reduce((sum, p) => sum + p.unresolvedCount, 0)
+  const doneProjectCount = projects.filter((p) => p.unresolvedCount === 0).length
+  const visibleProjects = hideDoneProjects ? projects.filter((p) => p.unresolvedCount > 0) : projects
 
   return (
     <Card>
@@ -310,9 +337,27 @@ export default function ProjectFeedbackList() {
             </span>
           )}
         </CardTitle>
+        {doneProjectCount > 0 && (
+          <button
+            type="button"
+            onClick={toggleHideDoneProjects}
+            title={
+              hideDoneProjects
+                ? `Show ${doneProjectCount} project${doneProjectCount === 1 ? '' : 's'} with only done feedback`
+                : 'Hide projects whose feedback is all done'
+            }
+            className="flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {hideDoneProjects ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            {hideDoneProjects ? `Show done projects (${doneProjectCount})` : 'Hide done projects'}
+          </button>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
-        {projects.map((proj) => {
+        {visibleProjects.length === 0 && (
+          <p className="text-sm text-muted-foreground">No open feedback.</p>
+        )}
+        {visibleProjects.map((proj) => {
           const projCollapsed = collapsedProjects.has(proj.id)
           const projDone = proj.unresolvedCount === 0
           return (
