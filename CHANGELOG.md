@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.2] - 2026-11-04
+
+### Added
+
+- **Hide projects whose feedback is all done** — the feedback list on the dashboard has a new "Hide done projects" toggle, so only projects with open feedback stay in view. Your choice is remembered in this browser.
+
+### Fixed
+
+- **A contact you've typed but not added is no longer lost when you save a client** — on the new-client and edit-client screens, clicking Create Client or Save Changes with the contact form still filled in used to discard that contact. Save now adds it (and any contact edit left open) along with everything else, or stops with an error if it isn't valid. Pressing Enter in a contact field now adds the contact instead of submitting the whole form.
+
 ## [2.8.1] - 2026-10-28
 
 ### Added
