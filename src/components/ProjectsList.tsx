@@ -683,6 +683,7 @@ export default function ProjectsList({ projects, onFilteredProjectsChange, analy
 
                             <td className="px-3 py-2">
                               <ProjectStatusPicker
+                                projectId={project.id}
                                 value={effectiveStatus}
                                 disabled={isUpdatingStatus || !canChangeProjectStatuses}
                                 stopPropagation

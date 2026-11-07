@@ -1,4 +1,5 @@
 import { downloadZip } from 'client-zip'
+import { paceContentRequest } from '@/lib/download-pacing'
 
 export type ZipEntry = {
   url: string
@@ -108,7 +109,8 @@ async function* streamZipInputs(
   signal: AbortSignal | undefined
 ) {
   const startFetch = (entry: ZipEntry): Promise<Response> => {
-    const request = fetch(entry.url, signal ? { signal } : undefined).then((response) => {
+    // Paced: each entry is a distinct /api/content/<token> path (see download-pacing.ts).
+    const request = paceContentRequest(signal).then(() => fetch(entry.url, signal ? { signal } : undefined)).then((response) => {
       if (!response.ok) {
         throw new Error(`Failed to fetch "${entry.fileName}": HTTP ${response.status}`)
       }

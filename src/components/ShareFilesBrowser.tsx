@@ -72,6 +72,29 @@ const isSelectableDownloadableFile = (file: DownloadableFile, isAdmin = false): 
   return isAdmin || file.isApproved === true
 }
 
+// The files a folder contributes to a bulk selection (root "Select all", the folder card's
+// checkbox, "Select folder"). A video folder contributes its delivery only: the approved
+// version plus the video's assets, and nothing until a version is approved. Admins can still
+// download any version one at a time, but For Review / Reviewed folders and superseded
+// versions must never be swept into a bulk download.
+// An album contributes its ZIPs (full resolution, plus social sizes when built) rather than
+// every photo as well — otherwise the full-res photos came down twice, and one request per
+// photo on a large album is the burst pattern that trips the IPS. The individual photos are
+// the fallback only while no ZIP is ready, so the album is never silently skipped.
+const getGroupSelectableFiles = (group: DownloadableGroup, isAdmin = false): DownloadableFile[] => {
+  const files = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+  if (group.groupType === 'video') {
+    const approved = files.find((file) => file.type === 'video' && file.isApproved === true)
+    if (!approved) return []
+    return [approved, ...files.filter((file) => file.type !== 'video')]
+  }
+  if (group.groupType === 'album') {
+    const zips = files.filter((file) => file.type === 'album-zip')
+    return zips.length > 0 ? zips : files.filter((file) => file.type === 'album-photo')
+  }
+  return files.filter((file) => isSelectableDownloadableFile(file, isAdmin))
+}
+
 const getVersionNumberFromLabel = (label?: string): number | null => {
   if (!label) return null
   const match = String(label).match(/\d+/)
@@ -136,6 +159,12 @@ type ShareFilesBrowserProps = {
   projectId?: string | null
   /** Admin users can interact with all versions regardless of approval status. */
   isAdmin?: boolean
+  /**
+   * The project's status is APPROVED. Signing off approves every approvable video, so a video
+   * folder with no approved version is view-only: it moves to a "View Only" section and its
+   * detail view drops the Approve / Request next version actions (the API refuses them anyway).
+   */
+  projectApproved?: boolean
 }
 
 function getFileTypeIcon(file: DownloadableFile) {
@@ -509,6 +538,7 @@ export function ShareFilesBrowser({
   onRequestNextVersion,
   projectId,
   isAdmin = false,
+  projectApproved = false,
 }: ShareFilesBrowserProps) {
   // Initialise from the parent's requested folder so a freshly-mounted browser
   // (e.g. after switching from the player back to FILES) opens the right folder
@@ -950,17 +980,26 @@ export function ShareFilesBrowser({
   // Root Videos section is split into "For Review" / "Reviewed" / "Approved" (mirrors
   // VideoSidebar's own grouping), so a folder moves section the moment any of its
   // versions is approved or its latest version has the next version requested.
+  // Once the project is approved, unapproved folders are "View Only" instead (see projectApproved).
   const rootVideoGroupsForReview = useMemo(
-    () => rootVideoGroups.filter((group) => {
+    () => projectApproved ? [] : rootVideoGroups.filter((group) => {
       const files = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
       return !files.some((f) => f.type === 'video' && f.isApproved === true) && !isVideoGroupReviewed(group)
     }),
-    [rootVideoGroups]
+    [rootVideoGroups, projectApproved]
   )
 
   const rootVideoGroupsReviewed = useMemo(
-    () => rootVideoGroups.filter((group) => isVideoGroupReviewed(group)),
-    [rootVideoGroups]
+    () => projectApproved ? [] : rootVideoGroups.filter((group) => isVideoGroupReviewed(group)),
+    [rootVideoGroups, projectApproved]
+  )
+
+  const rootVideoGroupsViewOnly = useMemo(
+    () => !projectApproved ? [] : rootVideoGroups.filter((group) => {
+      const files = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
+      return !files.some((f) => f.type === 'video' && f.isApproved === true)
+    }),
+    [rootVideoGroups, projectApproved]
   )
 
   const rootVideoGroupsApproved = useMemo(
@@ -1408,9 +1447,7 @@ export function ShareFilesBrowser({
   }
 
   const toggleGroup = (group: DownloadableGroup, checked: boolean) => {
-    const fileKeys = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-      .filter((file) => isSelectableDownloadableFile(file, isAdmin))
-      .map(getDownloadableFileKey)
+    const fileKeys = getGroupSelectableFiles(group, isAdmin).map(getDownloadableFileKey)
     setSelectedFileIds((prev) => {
       const next = new Set(prev)
       if (checked) {
@@ -1479,6 +1516,11 @@ export function ShareFilesBrowser({
         ...(group.mainFile ? [group.mainFile] : []),
         ...group.subFiles,
       ])
+  // A video folder's detail view has no multi-select: its hero offers "Download video" and
+  // "Everything", and each asset row its own Download. The toolbar's selection controls are
+  // hidden there, because a selection the page can't show (the hero has no checkbox, other
+  // versions aren't part of the delivery) only made the "N files selected" count confusing.
+  const isVideoFolderView = openFolder?.groupType === 'video'
   const selectedUploadFilesInContext = useMemo(() => {
     if (!isUploadsContext) return [] as DownloadableFile[]
     return visibleFiles.filter((file) => file.type === 'upload-file' && selectedFileIds.has(getDownloadableFileKey(file)))
@@ -1505,8 +1547,7 @@ export function ShareFilesBrowser({
   const rootViewAllKeys = useMemo(() => {
     if (openFolder) return null
     return groups
-      .flatMap((g) => [...(g.mainFile ? [g.mainFile] : []), ...g.subFiles])
-      .filter((file) => isSelectableDownloadableFile(file, isAdmin))
+      .flatMap((g) => getGroupSelectableFiles(g, isAdmin))
       .map(getDownloadableFileKey)
   }, [openFolder, groups, isAdmin])
 
@@ -2424,6 +2465,7 @@ export function ShareFilesBrowser({
             <div className={cn('relative rounded-md overflow-hidden bg-black/85', compact ? 'aspect-4/3' : 'aspect-16/10')}>
               {showTimelineHover ? (
                 <VideoHoverPreview
+                  key={fileKey}
                   thumbnailUrl={videoThumbnailSrc || ''}
                   vttUrl={file.timelineVttUrl!}
                   spriteBaseUrl={file.timelineSpriteBaseUrl!}
@@ -2618,6 +2660,10 @@ export function ShareFilesBrowser({
       <>
         {scrub && fileHasTimelineHover(file) ? (
           <VideoHoverPreview
+            // Keyed by file: the component caches the loaded VTT cues, and the
+            // video detail view reuses this slot when switching videos — without
+            // a key it kept scrubbing the previously viewed video's sprites.
+            key={fileKey}
             thumbnailUrl={posterSrc || ''}
             vttUrl={file.timelineVttUrl!}
             spriteBaseUrl={file.timelineSpriteBaseUrl!}
@@ -2670,6 +2716,8 @@ export function ShareFilesBrowser({
     file.allowApproval === true &&
     // Once the next version is requested, approval of that version is off the table.
     file.isRevisionRequested !== true &&
+    // A signed-off project takes no further approvals (the approve API refuses them).
+    !projectApproved &&
     Boolean(onApproveVideo) &&
     !groupHasApprovedVersion
 
@@ -2706,13 +2754,14 @@ export function ShareFilesBrowser({
     setContextMenu({ x: event.clientX, y: event.clientY, file, imageList: list })
   }
 
-  const statusPill = (tone: 'success' | 'warning' | 'info', Icon: typeof Check, text: string) => (
+  const statusPill = (tone: 'success' | 'warning' | 'info' | 'muted', Icon: typeof Check, text: string) => (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
         tone === 'success' && 'bg-success/15 text-success',
         tone === 'warning' && 'bg-warning/15 text-warning',
-        tone === 'info' && 'bg-primary/15 text-primary'
+        tone === 'info' && 'bg-primary/15 text-primary',
+        tone === 'muted' && 'bg-muted text-muted-foreground'
       )}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -2744,7 +2793,6 @@ export function ShareFilesBrowser({
 
   const renderDeliveryAssetRow = (file: DownloadableFile, assets: DownloadableFile[]) => {
     const fileKey = getDownloadableFileKey(file)
-    const isSelected = selectedFileIds.has(fileKey)
     const openMode = getAssetOpenMode(file)
     const kind = getDownloadableFileKind(file)
     const hasPreview = (kind === 'image' || kind === 'video') && Boolean(getResolvedPreviewSrc(file) || fileHasTimelineHover(file))
@@ -2762,19 +2810,12 @@ export function ShareFilesBrowser({
         key={fileKey}
         ref={(node) => registerFilePreviewCardRef(fileKey, node)}
         data-file-preview-key={fileKey}
-        className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 @lg:px-4', isSelected && 'bg-primary/5')}
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 @lg:px-4"
         onContextMenu={(event) => openVersionContextMenu(event, file, assets)}
       >
-        {/* Checkbox, thumbnail and name stay together; only the actions wrap below
-            them when the column is too narrow. */}
+        {/* Thumbnail and name stay together; only the actions wrap below them when the
+            column is too narrow. The thumbnail and name open the asset (view / play). */}
         <div className="flex min-w-[min(100%,15rem)] flex-1 items-center gap-3">
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={(event) => toggleFile(fileKey, event.target.checked)}
-          className={cn('h-4 w-4 shrink-0 cursor-pointer', FILES_CHECKBOX_CLASS)}
-          aria-label={`Select ${file.fileName}`}
-        />
         <button
           type="button"
           className={cn(
@@ -2811,22 +2852,6 @@ export function ShareFilesBrowser({
         {sizeLabel ? (
           <span className="hidden text-xs text-muted-foreground tabular-nums @lg:block">{sizeLabel}</span>
         ) : null}
-        {openMode ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="shrink-0"
-            onClick={() => openAsset(file, assets)}
-            aria-label={`${openMode === 'play' ? 'Play' : 'View'} ${file.fileName}`}
-            title={openMode === 'play' ? 'Play' : 'View'}
-          >
-            {openMode === 'play' ? <Play className="fill-current" /> : <Eye />}
-          </Button>
-        ) : (
-          // Same width as the Open button, so sizes and Download buttons line up.
-          <span aria-hidden className="w-8 shrink-0" />
-        )}
         <Button
           type="button"
           variant="outline"
@@ -2867,9 +2892,15 @@ export function ShareFilesBrowser({
     const masterSpec = joinMeta([heroExt, heroResolution, heroSize])
     const canWatch = Boolean(onOpenVideoVersion && hero.videoId)
 
+    // Signed-off project, but this video has no approved version: approval was off for it,
+    // or changes were requested and the project was approved anyway. Either way it is view-only.
+    const isViewOnly = !approved && projectApproved
+
     let pill: React.ReactNode
     if (approved) {
       pill = statusPill('success', Check, joinMeta(['Approved', formatShortDate(approved.approvedAt)]))
+    } else if (isViewOnly) {
+      pill = statusPill('muted', Eye, 'View only')
     } else if (latest.isRevisionRequested) {
       pill = statusPill('info', RotateCcw, joinMeta(['Changes requested', formatShortDate(latest.revisionRequestedAt)]))
     } else {
@@ -2880,7 +2911,7 @@ export function ShareFilesBrowser({
     // Mirrors the comment panel's Request Next Version rules (and the API's): client only,
     // latest version, nothing approved, not already requested, at least one comment on it.
     const canRequestNext = Boolean(
-      !isAdmin && onRequestNextVersion && !approved && hero === latest && latest.videoId && !latest.isRevisionRequested
+      !isAdmin && onRequestNextVersion && !approved && !isViewOnly && hero === latest && latest.videoId && !latest.isRevisionRequested
     )
     const latestFeedbackCount = latest.feedbackCount ?? 0
     const canShare = Boolean(projectId && hero.videoId)
@@ -2888,6 +2919,10 @@ export function ShareFilesBrowser({
     let note: { icon: typeof Info; text: string } | null = null
     if (approved) {
       note = null
+    } else if (isViewOnly) {
+      note = latest.isRevisionRequested
+        ? { icon: Info, text: 'The project has been approved. Changes were requested on this version, so it isn’t available to download.' }
+        : { icon: Info, text: 'The project has been approved. This video was shared for viewing only, so there’s no download.' }
     } else if (anyApprovable) {
       note = {
         icon: Lock,
@@ -2999,7 +3034,7 @@ export function ShareFilesBrowser({
                       <span className="flex flex-col">
                         <span className="text-sm font-semibold">Watch {hero.versionLabel || 'video'}</span>
                         <span className="text-[11px] font-normal text-muted-foreground">
-                          {joinMeta([heroDuration, latest.isRevisionRequested ? 'add more comments' : 'leave feedback'])}
+                          {joinMeta([heroDuration, isViewOnly ? 'add a comment' : latest.isRevisionRequested ? 'add more comments' : 'leave feedback'])}
                         </span>
                       </span>
                     </Button>
@@ -3059,7 +3094,7 @@ export function ShareFilesBrowser({
           <>
             {assets.length > 0 ? (
               <section className="space-y-2">
-                {sectionHeader('Also included', 'Tick several to download together')}
+                {sectionHeader('Also included')}
                 <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
                   {assets.map((file) => renderDeliveryAssetRow(file, assets))}
                 </div>
@@ -3124,7 +3159,9 @@ export function ShareFilesBrowser({
                 const fileKey = getDownloadableFileKey(file)
                 const isLatest = getDownloadableFileKey(file) === getDownloadableFileKey(latest)
                 const badge = isLatest
-                  ? file.isRevisionRequested
+                  ? isViewOnly
+                    ? versionBadge('muted', 'Latest · view only')
+                    : file.isRevisionRequested
                     ? versionBadge('info', 'Latest · changes requested')
                     : versionBadge('warning', 'Latest · for review')
                   : file.isRevisionRequested
@@ -3386,18 +3423,21 @@ export function ShareFilesBrowser({
     success: 'bg-success/15 text-success ring-success/30',
     violet: 'bg-violet-500/15 text-violet-400 ring-violet-500/30',
     sky: 'bg-sky-500/15 text-sky-400 ring-sky-500/30',
+    muted: 'bg-muted-foreground/15 text-muted-foreground ring-muted-foreground/30',
   } as const
   const rootSectionBandClass: Record<keyof typeof rootSectionToneClass, string> = {
-    warning: 'from-warning/12 border-l-warning',
-    info: 'from-primary/12 border-l-primary',
-    success: 'from-success/12 border-l-success',
-    violet: 'from-violet-500/12 border-l-violet-500',
-    sky: 'from-sky-500/12 border-l-sky-500',
+    warning: 'bg-warning/12 border-l-warning',
+    info: 'bg-primary/12 border-l-primary',
+    success: 'bg-success/12 border-l-success',
+    violet: 'bg-violet-500/12 border-l-violet-500',
+    sky: 'bg-sky-500/12 border-l-sky-500',
+    muted: 'bg-muted-foreground/10 border-l-muted-foreground/60',
   }
 
   // Root-level section (For Review / Reviewed / Approved / Albums / Additional Files):
-  // a band tinted in the same colour as the folder badges (accent edge on the left, fading
-  // out to the right) holding an icon tile, the title with a count, and a one-line description.
+  // a full-width band with a flat tint in the same colour as the folder badges (accent edge
+  // on the left) holding an icon tile, the title with a count, and a one-line description.
+  // The sidebar's section labels (VideoSidebar SidebarSectionBanner) are the compact twin.
   const renderRootSection = (
     tone: keyof typeof rootSectionToneClass,
     Icon: typeof Check,
@@ -3406,7 +3446,7 @@ export function ShareFilesBrowser({
     groups: DownloadableGroup[],
   ) => (
     <section key={title} className="space-y-3">
-      <div className={cn('flex items-center gap-3 rounded-r-lg border-l-[3px] bg-linear-to-r to-transparent to-80% py-2.5 pl-3 pr-3', rootSectionBandClass[tone])}>
+      <div className={cn('flex items-center gap-3 rounded-r-lg border-l-[3px] py-2.5 pl-3 pr-3', rootSectionBandClass[tone])}>
         <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset', rootSectionToneClass[tone])}>
           <Icon className="h-[18px] w-[18px]" />
         </span>
@@ -3428,7 +3468,8 @@ export function ShareFilesBrowser({
 
   const renderRootFolderCard = (group: DownloadableGroup) => {
     const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
-    const hasSelectableFiles = groupFiles.some((f) => isSelectableDownloadableFile(f, isAdmin))
+    const groupSelectableFiles = getGroupSelectableFiles(group, isAdmin)
+    const hasSelectableFiles = groupSelectableFiles.length > 0
     const uploadFolderPath = group.groupType === 'uploads' ? getUploadsFolderPathFromGroup(group.name) : ''
     const displayGroupName = group.groupType === 'uploads'
       ? getUploadsFolderLabelFromGroup(group.name)
@@ -3437,9 +3478,10 @@ export function ShareFilesBrowser({
     const groupHasApprovedVideo = groupVideoFiles.some((file) => file.isApproved === true)
     const groupIsReviewed = isVideoGroupReviewed(group)
     const showVideoFolderApprovedBadge = group.groupType === 'video' && groupHasApprovedVideo
-    const showVideoFolderReviewedBadge = group.groupType === 'video' && !groupHasApprovedVideo && groupIsReviewed
-    const showVideoFolderForReviewBadge = group.groupType === 'video' && !groupHasApprovedVideo && !groupIsReviewed
-    const groupFileKeys = groupFiles.map(getDownloadableFileKey)
+    const showVideoFolderViewOnlyBadge = group.groupType === 'video' && !groupHasApprovedVideo && projectApproved
+    const showVideoFolderReviewedBadge = group.groupType === 'video' && !groupHasApprovedVideo && !projectApproved && groupIsReviewed
+    const showVideoFolderForReviewBadge = group.groupType === 'video' && !groupHasApprovedVideo && !projectApproved && !groupIsReviewed
+    const groupFileKeys = groupSelectableFiles.map(getDownloadableFileKey)
     const allChecked = groupFileKeys.length > 0 && groupFileKeys.every((key) => selectedFileIds.has(key))
     const someChecked = groupFileKeys.some((key) => selectedFileIds.has(key))
     const folderPreview = folderPreviewByName?.[group.name] || null
@@ -3493,6 +3535,12 @@ export function ShareFilesBrowser({
           {showVideoFolderApprovedBadge ? (
             <div className="absolute bottom-2 left-2 rounded bg-emerald-600/90 px-1.5 py-0.5 text-[11px] leading-none text-white font-semibold tracking-wide">
               APPROVED
+            </div>
+          ) : null}
+
+          {showVideoFolderViewOnlyBadge ? (
+            <div className="absolute bottom-2 left-2 rounded bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground font-semibold tracking-wide ring-1 ring-inset ring-border" title="Shared for viewing only">
+              VIEW ONLY
             </div>
           ) : null}
 
@@ -3620,7 +3668,7 @@ export function ShareFilesBrowser({
                   <ArrowLeft className="w-4 h-4" />
                   <span className="hidden @xl:inline">Back</span>
                 </Button>
-                {selectedCount > 0 ? (
+                {selectedCount > 0 && !isVideoFolderView ? (
                   <span className="hidden @xl:inline text-xs @2xl:text-sm text-muted-foreground truncate">
                     {selectedCount} file{selectedCount === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedTotalSizeBytes)}
                   </span>
@@ -3667,6 +3715,7 @@ export function ShareFilesBrowser({
                 <Folder className="w-4 h-4" />
               </Button>
             ) : null}
+            {!isVideoFolderView ? (
             <Button
               type="button"
               variant="outline"
@@ -3683,6 +3732,7 @@ export function ShareFilesBrowser({
               {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
               <Files className="w-4 h-4" />
             </Button>
+            ) : null}
             {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
               <Button
                 type="button"
@@ -3697,6 +3747,7 @@ export function ShareFilesBrowser({
                 <Trash2 className="w-4 h-4" />
               </Button>
             ) : null}
+            {!isVideoFolderView ? (
             <Button
               type="button"
               size="sm"
@@ -3709,6 +3760,7 @@ export function ShareFilesBrowser({
               <Download className="w-4 h-4" />
               <span className="text-xs font-semibold tabular-nums">{selectedCount}</span>
             </Button>
+            ) : null}
           </div>
           <div className="hidden @xl:flex items-center gap-2 ml-auto">
             {isUploadsContext && canUploadToProjects && onUploadFiles ? (
@@ -3743,6 +3795,7 @@ export function ShareFilesBrowser({
                 <span className="sr-only">Folder</span>
               </Button>
             ) : null}
+            {!isVideoFolderView ? (
             <Button
               type="button"
               variant="outline"
@@ -3759,6 +3812,7 @@ export function ShareFilesBrowser({
               {allVisibleSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
               <Files className="w-4 h-4" />
             </Button>
+            ) : null}
             {openFolder?.groupType === 'uploads' && canDeleteUploads && onDeleteUploadFile ? (
               <Button
                 type="button"
@@ -3772,6 +3826,7 @@ export function ShareFilesBrowser({
                 <span>Delete ({selectedUploadFilesInContext.length})</span>
               </Button>
             ) : null}
+            {!isVideoFolderView ? (
             <Button
               type="button"
               size="sm"
@@ -3786,6 +3841,7 @@ export function ShareFilesBrowser({
                   : 'Preparing…'
                 : `Download (${selectedCount})`}
             </Button>
+            ) : null}
             {onCloseFilesView ? (
               <Button
                 type="button"
@@ -3831,6 +3887,9 @@ export function ShareFilesBrowser({
               : null}
             {rootVideoGroupsApproved.length > 0
               ? renderRootSection('success', CheckCircle2, 'Approved', 'Signed off and ready to download', rootVideoGroupsApproved)
+              : null}
+            {rootVideoGroupsViewOnly.length > 0
+              ? renderRootSection('muted', Eye, 'View Only', 'Shared for viewing · no download', rootVideoGroupsViewOnly)
               : null}
             {rootAlbumGroups.length > 0
               ? renderRootSection('violet', Images, 'Albums', 'Photo albums to view and download', rootAlbumGroups)
@@ -4318,8 +4377,7 @@ export function ShareFilesBrowser({
                 isGroupSelected={
                   contextMenu.group
                     ? (() => {
-                        const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
-                          .filter((f) => isSelectableDownloadableFile(f, isAdmin))
+                        const files = getGroupSelectableFiles(contextMenu.group, isAdmin)
                         return files.length > 0 && files.every((f) => selectedFileIds.has(getDownloadableFileKey(f)))
                       })()
                     : false
@@ -4418,8 +4476,8 @@ export function ShareFilesBrowser({
                 }}
                 onSelectFolder={() => {
                   if (!contextMenu.group) return
-                  const files = [...(contextMenu.group.mainFile ? [contextMenu.group.mainFile] : []), ...contextMenu.group.subFiles]
-                    .filter((f) => isSelectableDownloadableFile(f, isAdmin))
+                  const files = getGroupSelectableFiles(contextMenu.group, isAdmin)
+                  if (files.length === 0) return
                   const allKeys = files.map((f) => getDownloadableFileKey(f))
                   const allSelected = allKeys.every((k) => selectedFileIds.has(k))
                   setSelectedFileIds((prev) => {

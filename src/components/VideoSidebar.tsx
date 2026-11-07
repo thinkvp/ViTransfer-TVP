@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  Eye,
   FileClock,
   Images,
   Check,
@@ -16,6 +17,8 @@ import {
   Upload,
   Folder,
   File,
+  Files,
+  RotateCcw,
   FileArchive,
   FileAudio,
   FileImage,
@@ -59,6 +62,38 @@ type DownloadProgressSnapshot = {
 
 const SIDEBAR_CHECKBOX_CLASS = 'w-3.5 h-3.5 shrink-0 rounded accent-primary/75 opacity-70 checked:opacity-100 transition-opacity'
 const UPLOADS_GROUP_PREFIX = 'UPLOADS / '
+
+// Section labels in the review sidebar: a compact version of the main view's root-section
+// banners (ShareFilesBrowser renderRootSection) — same tones, icons, flat tint and accent
+// edge, minus the description and count.
+const SECTION_TONE_CLASS = {
+  warning: { band: 'bg-warning/12 border-l-warning', tile: 'bg-warning/15 text-warning ring-warning/30' },
+  info: { band: 'bg-primary/12 border-l-primary', tile: 'bg-primary/15 text-primary ring-primary/30' },
+  success: { band: 'bg-success/12 border-l-success', tile: 'bg-success/15 text-success ring-success/30' },
+  violet: { band: 'bg-violet-500/12 border-l-violet-500', tile: 'bg-violet-500/15 text-violet-400 ring-violet-500/30' },
+  sky: { band: 'bg-sky-500/12 border-l-sky-500', tile: 'bg-sky-500/15 text-sky-400 ring-sky-500/30' },
+  muted: { band: 'bg-muted-foreground/10 border-l-muted-foreground/60', tile: 'bg-muted-foreground/15 text-muted-foreground ring-muted-foreground/30' },
+} as const
+
+function SidebarSectionBanner({
+  tone,
+  icon: Icon,
+  title,
+}: {
+  tone: keyof typeof SECTION_TONE_CLASS
+  icon: typeof Play
+  title: string
+}) {
+  const toneClass = SECTION_TONE_CLASS[tone]
+  return (
+    <div className={cn('mx-2 mt-2 flex items-center gap-2 rounded-r-md border-l-[3px] py-1.5 pl-2 pr-2', toneClass.band)}>
+      <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-md ring-1 ring-inset', toneClass.tile)}>
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <span className="truncate text-sm font-semibold text-foreground">{title}</span>
+    </div>
+  )
+}
 
 const isSelectableDownloadableFile = (file: DownloadableFile): boolean => {
   if (file.type !== 'video') return true
@@ -186,6 +221,12 @@ interface VideoSidebarProps {
   onClearCompletedTransfers?: () => void
   /** Whether the project has any videos with allowApproval=true, used for empty state messages. */
   hasApprovableVideos?: boolean
+  /**
+   * The project's status is APPROVED. Signing off a project approves every approvable video,
+   * so any video still without an approved version is view-only (approval off, or changes
+   * requested) — those move out of For Review / Reviewed into a "View Only" section.
+   */
+  projectApproved?: boolean
   /** Whether the desktop tab bar should be rendered inside the sidebar. */
   showDesktopTabBar?: boolean
   /** Render the UPLOADS section (one card per top-level folder) inside the VIEW layout. */
@@ -255,6 +296,7 @@ export default function VideoSidebar({
   onCancelActiveTransfers,
   onClearCompletedTransfers,
   hasApprovableVideos = false,
+  projectApproved = false,
   showDesktopTabBar = true,
   showUploadsInView = false,
   onUploadsSelect,
@@ -783,9 +825,14 @@ export default function VideoSidebar({
     const latest = [...g.videos].sort((a: any, b: any) => ((b as any).version ?? 0) - ((a as any).version ?? 0))[0]
     return Boolean((latest as any)?.revisionRequestedAt)
   }
-  const forReviewGroups = sortedVideoGroups(videoGroups.filter(g => !g.videos.some((v: any) => v.approved === true) && !isReviewedGroup(g)))
-  const reviewedGroups = sortedVideoGroups(videoGroups.filter(isReviewedGroup))
-  const approvedGroups = sortedVideoGroups(videoGroups.filter(g => g.videos.some((v: any) => v.approved === true)))
+  const groupHasApproved = (g: VideoGroup) => g.videos.some((v: any) => v.approved === true)
+  // Once the project is approved nothing is waiting on the client, so unapproved groups are
+  // "View Only" rather than For Review / Reviewed. Keep in sync with ShareFilesBrowser and
+  // the share page ordering helper.
+  const forReviewGroups = projectApproved ? [] : sortedVideoGroups(videoGroups.filter(g => !groupHasApproved(g) && !isReviewedGroup(g)))
+  const reviewedGroups = projectApproved ? [] : sortedVideoGroups(videoGroups.filter(isReviewedGroup))
+  const approvedGroups = sortedVideoGroups(videoGroups.filter(groupHasApproved))
+  const viewOnlyGroups = projectApproved ? sortedVideoGroups(videoGroups.filter(g => !groupHasApproved(g))) : []
   const flatAlphabeticalGroups = sortedVideoGroups(videoGroups)
   // Show bottom section: FILES for hideApprovalGrouping; APPROVED section whenever there are approved videos, albums, or downloadable files
   const showBottomSection = hideApprovalGrouping ? showFiles : (approvedGroups.length > 0 || hasAlbums || showFiles)
@@ -794,13 +841,13 @@ export default function VideoSidebar({
   useEffect(() => {
     if (hasManualRatio || hideApprovalGrouping) return
     const topCount = Math.max(forReviewGroups.length + reviewedGroups.length, 1)
-    const bottomCount = approvedGroups.length + albumsList.length
+    const bottomCount = approvedGroups.length + viewOnlyGroups.length + albumsList.length
     if (bottomCount === 0) return
     // Bottom items are taller (thumbnail + name + file listings) — weight ~3x
     const bottomWeight = bottomCount * 3
     const newRatio = bottomWeight / (topCount + bottomWeight)
     setFilesRatio(Math.max(0.2, Math.min(0.8, newRatio)))
-  }, [forReviewGroups.length, reviewedGroups.length, approvedGroups.length, albumsList.length, hideApprovalGrouping, hasManualRatio])
+  }, [forReviewGroups.length, reviewedGroups.length, approvedGroups.length, viewOnlyGroups.length, albumsList.length, hideApprovalGrouping, hasManualRatio])
 
   useEffect(() => {
     if (transferPanelVersion > 0 && hasTransferItems) {
@@ -1137,6 +1184,8 @@ export default function VideoSidebar({
         {isActive && (
           hasApprovedVideo ? (
             <CheckCircle2 className="w-4 h-4 shrink-0 text-success mt-0.5" />
+          ) : projectApproved ? (
+            <Eye className="w-4 h-4 shrink-0 text-muted-foreground mt-0.5" />
           ) : isGroupReviewed ? (
             <FileClock className="w-4 h-4 shrink-0 text-primary mt-0.5" />
           ) : (
@@ -2149,15 +2198,11 @@ export default function VideoSidebar({
               {desktopActiveTabValue === 'for-review' && (
                 <div className="overflow-y-auto overflow-x-hidden flex-1 min-h-0 bg-muted/70">
                   <nav className="pb-2">
-                    {/* The scroll area is the lighter surface edge-to-edge; only the section
-                        labels get the darker base band (with divider lines), so the items sit
-                        on the lift and empty space below stays lighter too. */}
+                    {/* Section labels are compact tinted banners matching the main view's
+                        root sections (same tones and icons), so both read as one system. */}
                     {forReviewGroups.length > 0 && (
                       <div>
-                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-warning uppercase tracking-wider flex items-center gap-2">
-                          <Play className="w-3 h-3" />
-                          For Review
-                        </div>
+                        <SidebarSectionBanner tone="warning" icon={Play} title="For Review" />
                         <div className="space-y-1 px-2 py-2">
                           {forReviewGroups.map(g => renderVideoButton(g))}
                         </div>
@@ -2166,10 +2211,7 @@ export default function VideoSidebar({
 
                     {reviewedGroups.length > 0 && (
                       <div>
-                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
-                          <FileClock className="w-3 h-3" />
-                          Reviewed
-                        </div>
+                        <SidebarSectionBanner tone="info" icon={RotateCcw} title="Reviewed" />
                         <div className="space-y-1 px-2 py-2">
                           {reviewedGroups.map(g => renderVideoButton(g))}
                         </div>
@@ -2178,22 +2220,25 @@ export default function VideoSidebar({
 
                     {approvedGroups.length > 0 && (
                       <div>
-                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-success uppercase tracking-wider flex items-center gap-2">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Approved
-                        </div>
+                        <SidebarSectionBanner tone="success" icon={CheckCircle2} title="Approved" />
                         <div className="space-y-1 px-2 py-2">
                           {approvedGroups.map(g => renderVideoButton(g))}
                         </div>
                       </div>
                     )}
 
+                    {viewOnlyGroups.length > 0 && (
+                      <div>
+                        <SidebarSectionBanner tone="muted" icon={Eye} title="View Only" />
+                        <div className="space-y-1 px-2 py-2">
+                          {viewOnlyGroups.map(g => renderVideoButton(g))}
+                        </div>
+                      </div>
+                    )}
+
                     {hasAlbums && (
                       <div>
-                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
-                          <Images className="w-3 h-3" />
-                          Albums
-                        </div>
+                        <SidebarSectionBanner tone="violet" icon={Images} title="Albums" />
                         <div className="space-y-1 px-2 py-2">
                           {albumsList.map(a => renderAlbumButton(a))}
                         </div>
@@ -2202,10 +2247,7 @@ export default function VideoSidebar({
 
                     {showUploadsInView && hasUploadFolders && (
                       <div>
-                        <div className="px-3 py-2 bg-card border-y border-border text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
-                          <Upload className="w-3 h-3" />
-                          Additional Files
-                        </div>
+                        <SidebarSectionBanner tone="sky" icon={Files} title="Additional Files" />
                         <div className="space-y-1 px-2 py-2">
                           {uploadFolderEntries.map(renderUploadFolderButton)}
                         </div>
@@ -2640,7 +2682,12 @@ export default function VideoSidebar({
                             <Check className="h-4 w-4 text-success-foreground" />
                           </div>
                         )}
-                        {!hasApprovedVideo && isReviewedGroup(group) && (
+                        {!hasApprovedVideo && projectApproved && (
+                          <div className="absolute bottom-1 right-1 h-6 w-6 rounded-full bg-muted flex items-center justify-center shadow" title="View only">
+                            <Eye className="h-4 w-4 text-muted-foreground" />
+                          </div>
+                        )}
+                        {!hasApprovedVideo && !projectApproved && isReviewedGroup(group) && (
                           <div className="absolute bottom-1 right-1 h-6 w-6 rounded-full bg-primary flex items-center justify-center shadow" title="Reviewed — next version requested">
                             <FileClock className="h-4 w-4 text-primary-foreground" />
                           </div>

@@ -12,6 +12,7 @@ import { enqueueShareUploadPreview, getVideoQueue, getAlbumPhotoZipQueue, getAlb
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
 import { publishProjectEvent } from '@/lib/project-events'
 import { lockCommentsForApprovedProject } from '@/lib/comment-locks'
+import { approveVideosForProjectApproval, planProjectApprovalVideos, type ProjectApprovalVideoPlan } from '@/lib/project-approval-videos'
 import { getAlbumZipStoragePath, getAlbumZipJobId, AlbumZipVariant } from '@/lib/album-photo-zip'
 import { isS3Mode } from '@/lib/s3-storage'
 import {
@@ -584,6 +585,18 @@ export async function PATCH(
       if (forbidden) return forbidden
     }
 
+    // Marking a project Approved also approves the latest approvable version of each video
+    // that has none approved yet (see project-approval-videos.ts). Approving a video on its
+    // own needs Projects Full Control, so the status change can't be used to get around that.
+    let approvalVideoPlan: ProjectApprovalVideoPlan | null = null
+    if (validatedBody.status === 'APPROVED' && currentProject.status !== 'APPROVED') {
+      approvalVideoPlan = await planProjectApprovalVideos(id)
+      if (approvalVideoPlan.toApprove.length > 0) {
+        const forbidden = requireActionAccess(authResult, 'projectsFullControl')
+        if (forbidden) return forbidden
+      }
+    }
+
     // Track status transitions so we can trigger side effects (e.g. sending approval email)
     let previousStatus: string | null = null
     if (validatedBody.status !== undefined) {
@@ -689,8 +702,8 @@ export async function PATCH(
     if (validatedBody.status !== undefined) {
       updateData.status = validatedBody.status
 
-      // When approving project, just set the status and timestamp
-      // Video approvals are handled separately by the admin
+      // Approving the project also approves its approvable videos — done after the update,
+      // alongside the comment lock (see approvalVideoPlan below).
       if (validatedBody.status === 'APPROVED') {
         updateData.approvedAt = new Date()
       }
@@ -1152,6 +1165,17 @@ export async function PATCH(
       // (see lockCommentsForApprovedProject). Moving the status back off APPROVED does not
       // unlock — a lock, once applied, is permanent.
       if (validatedBody.status === 'APPROVED') {
+        if (approvalVideoPlan && approvalVideoPlan.toApprove.length > 0) {
+          const approvedIds = await approveVideosForProjectApproval({
+            projectId: project.id,
+            plan: approvalVideoPlan,
+            admin: { id: admin.id, name: admin.name, email: admin.email },
+          })
+          if (approvedIds.length > 0) {
+            console.log(`[PROJECT UPDATE] Approving project ${project.id} also approved ${approvedIds.length} video(s)`)
+            await publishProjectEvent(project.id, 'video')
+          }
+        }
         await lockCommentsForApprovedProject({ projectId: project.id })
         await publishProjectEvent(project.id, 'comment')
       }

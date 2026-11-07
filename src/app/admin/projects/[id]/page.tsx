@@ -576,6 +576,9 @@ export default function ProjectPage() {
     try {
       await apiPatch(`/api/projects/${id}`, { status: nextStatus })
       setProject((prev: any) => prev ? { ...prev, status: nextStatus } : prev)
+      // Approving the project also approves its approvable videos — reload so the
+      // video list shows them approved.
+      if (nextStatus === 'APPROVED') await fetchProject()
     } catch (error) {
       toast.error('Failed to update project status')
     } finally {
@@ -629,6 +632,7 @@ export default function ProjectPage() {
 	                    </CardTitle>
                   </div>
                   <ProjectStatusPicker
+                    projectId={id}
                     value={project.status}
                     disabled={isUpdatingStatus || !canChangeProjectStatuses}
                     visibleStatuses={permissions.projectVisibility.statuses}

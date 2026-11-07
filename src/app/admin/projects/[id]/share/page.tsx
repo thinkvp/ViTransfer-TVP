@@ -1076,7 +1076,8 @@ export default function AdminSharePage() {
 
       const forReview = names.filter((n) => !isApprovedGroup(n)).sort(byName)
       const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
-      const videoNames = [...forReview, ...approved]
+      // An approved project lists its unapproved videos as "View Only", below Approved.
+      const videoNames = project?.status === 'APPROVED' ? [...approved, ...forReview] : [...forReview, ...approved]
       if (videoNames.length === 0) return
 
       if (!activeVideoName) {
@@ -1132,7 +1133,7 @@ export default function AdminSharePage() {
         }
       }
     }
-  }, [project?.videosByName, project?.enableVideos, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
+  }, [project?.videosByName, project?.enableVideos, project?.status, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
 
   // Tokenize active videos lazily
   useEffect(() => {
@@ -2319,7 +2320,7 @@ export default function AdminSharePage() {
     const isApprovedGroup = (n: string) => (project.videosByName[n] || []).some((v: any) => v?.approved === true)
     const forReview = names.filter((n) => !isApprovedGroup(n)).sort(byName)
     const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
-    return [...forReview, ...approved]
+    return project.status === 'APPROVED' ? [...approved, ...forReview] : [...forReview, ...approved]
   })() : []
   const mediaOptions = [
     ...videoNames.map((name) => ({ value: `video:${name}`, label: name })),
@@ -2504,6 +2505,7 @@ export default function AdminSharePage() {
           onCancelActiveTransfers={cancelActiveTransfersCombined}
           onClearCompletedTransfers={clearCompletedTransfersCombined}
           hasApprovableVideos={hasApprovableVideos}
+          projectApproved={project.status === 'APPROVED'}
           showDesktopTabBar={false}
           desktopActiveTab="for-review"
           showUploadsInView
@@ -2596,6 +2598,7 @@ export default function AdminSharePage() {
                 onRenameUploadFolder={handleRenameUploadFolder}
                 isAdmin={true}
                 projectId={project?.id ? String(project.id) : null}
+                projectApproved={project?.status === 'APPROVED'}
               />
               </div>
               <div

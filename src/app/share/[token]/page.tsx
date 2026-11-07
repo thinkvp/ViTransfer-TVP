@@ -1125,7 +1125,11 @@ export default function SharePage() {
       const forReview = names.filter((n) => !isApprovedGroup(n) && !isReviewedGroup(n)).sort(byName)
       const reviewed = names.filter((n) => isReviewedGroup(n)).sort(byName)
       const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
-      const videoNames = [...forReview, ...reviewed, ...approved]
+      // An approved project has no For Review / Reviewed groups: its unapproved videos sit in
+      // "View Only", below Approved (VideoSidebar projectApproved).
+      const videoNames = project?.status === 'APPROVED'
+        ? [...approved, ...[...forReview, ...reviewed].sort(byName)]
+        : [...forReview, ...reviewed, ...approved]
       if (videoNames.length === 0) return
 
       // Determine which video should be active
@@ -1186,7 +1190,7 @@ export default function SharePage() {
         }
       }
     }
-  }, [project?.videosByName, project?.enableVideos, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
+  }, [project?.videosByName, project?.enableVideos, project?.status, activeVideoName, urlVideoName, urlVersion, urlTimestamp, activeAlbumId])
 
   // True when the project has at least one video or album to show in VIEW mode.
   const hasViewContent = useMemo(() => {
@@ -3434,7 +3438,7 @@ export default function SharePage() {
     const isApprovedGroup = (n: string) => (project.videosByName[n] || []).some((v: any) => v?.approved === true)
     const forReview = names.filter((n) => !isApprovedGroup(n)).sort(byName)
     const approved = names.filter((n) => isApprovedGroup(n)).sort(byName)
-    return [...forReview, ...approved]
+    return project.status === 'APPROVED' ? [...approved, ...forReview] : [...forReview, ...approved]
   })() : []
   const mediaOptions = [
     ...videoNames.map((name) => ({ value: `video:${name}`, label: name })),
@@ -3632,6 +3636,7 @@ export default function SharePage() {
         onCancelActiveTransfers={cancelActiveTransfersCombined}
         onClearCompletedTransfers={clearCompletedTransfersCombined}
         hasApprovableVideos={hasApprovableVideos}
+        projectApproved={project.status === 'APPROVED'}
         showDesktopTabBar={false}
         desktopActiveTab="for-review"
         showUploadsInView={true}
@@ -3710,6 +3715,7 @@ export default function SharePage() {
               onApproveVideo={handleApproveVideo}
               onRequestNextVersion={isAdminSession ? undefined : handleRequestNextVersion}
               projectId={project?.id ?? null}
+              projectApproved={project?.status === 'APPROVED'}
               shareSlug={token}
               shareToken={shareToken}
               transferItems={transferItemsCombined}

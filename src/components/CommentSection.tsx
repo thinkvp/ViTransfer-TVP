@@ -6,7 +6,7 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock, FileClock, History, Info, MessageCircle, Share2, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Eye, FileClock, History, Info, MessageCircle, Share2, X } from 'lucide-react'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -1384,18 +1384,25 @@ export function CommentSectionView({
         </Dialog>
 
                 {/* Approval Status Banner */}
+        {/* Project signed off, but this video has no approved version. Approving a project
+            approves every approvable video, so this is a view-only video: approval was off
+            for it, or changes were requested and the project was approved anyway. Say which,
+            in a neutral tone — there is nothing for the client to do. */}
         {approvalSignedOff && isProjectApprovedOnly && (
-                    <div className="bg-primary border-b border-border py-3 px-4 shrink-0">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="min-w-0">
-                  <h3 className="text-white font-medium">
-                    Project Approved
-                  </h3>
-                  <p className="text-sm text-white/80">
-                    Downloads were not enabled for this version. Your feedback is locked in, but you can still add comments.
-                  </p>
-                </div>
+          <div className="bg-muted/60 border-b border-border py-3 px-4 shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <Eye className="w-8 h-8 text-muted-foreground shrink-0" />
+              <div className="min-w-0">
+                <h3 className="text-foreground font-medium">
+                  Project Approved
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {isHeaderVideoRevisionRequested
+                    ? 'Changes were requested on this version, so it isn’t available to download. You can still leave comments.'
+                    : !approvalEnabledForHeaderVideo
+                      ? 'This video was shared for viewing only, so there’s no download. You can still leave comments.'
+                      : 'This version wasn’t approved for download. You can still leave comments.'}
+                </p>
               </div>
             </div>
           </div>

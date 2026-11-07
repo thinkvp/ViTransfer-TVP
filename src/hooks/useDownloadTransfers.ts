@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import type { DownloadableFile } from '@/lib/downloadable-files'
 import type { DownloadQueueItem } from '@/lib/download-queue'
 import { downloadFilesAsZip, pickZipSaveTarget } from '@/lib/download-zip-stream'
+import { paceContentRequest } from '@/lib/download-pacing'
 import {
   calculateTransferSummary,
   createTransferId,
@@ -190,6 +191,8 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
             throw new Error('Unable to prepare this download.')
           }
 
+          // Each dispatch is a distinct /api/content/<token> request (see download-pacing.ts).
+          await paceContentRequest(signal)
           dispatchBrowserDownload(target)
 
           itemsAfterUpdate = updateTransferItems((items) =>
@@ -520,6 +523,8 @@ export function useDownloadTransfers({ projectTitle, resolveDownloadTarget }: Us
 
           let response: Response
           try {
+            // Paced across all three workers (see download-pacing.ts).
+            await paceContentRequest(signal)
             response = await fetch(target.url, { signal })
             if (!response.ok || !response.body) throw new Error(`Server returned ${response.status}.`)
           } catch (error) {
