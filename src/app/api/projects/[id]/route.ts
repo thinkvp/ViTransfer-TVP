@@ -35,6 +35,7 @@ import { getUserPermissions, isVisibleProjectStatusForUser, requireActionAccess,
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
 import { isStartDateDue, parseProjectStartDateInput } from '@/lib/project-start-date'
 import { sendPushNotification } from '@/lib/push-notifications'
+import { SHARE_PASSWORD_MIN_LENGTH } from '@/lib/share-password'
 import { z } from 'zod'
 export const runtime = 'nodejs'
 
@@ -768,6 +769,14 @@ export async function PATCH(
         } else {
           // Setting/updating password - only if different from current
           if (validatedBody.sharePassword !== currentPassword) {
+            // Only checked when the password changes, so saving other settings
+            // never fails on a pre-existing short password.
+            if (validatedBody.sharePassword.length < SHARE_PASSWORD_MIN_LENGTH) {
+              return NextResponse.json(
+                { error: `Share password must be at least ${SHARE_PASSWORD_MIN_LENGTH} characters` },
+                { status: 400 }
+              )
+            }
             updateData.sharePassword = encrypt(validatedBody.sharePassword)
             passwordWasChanged = true
           }

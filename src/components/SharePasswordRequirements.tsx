@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react'
 import { Check, X } from 'lucide-react'
+import { SHARE_PASSWORD_MIN_LENGTH } from '@/lib/share-password'
 
 interface SharePasswordRequirementsProps {
   password: string
@@ -15,16 +16,8 @@ interface Requirement {
 
 const requirements: Requirement[] = [
   {
-    label: 'At least 8 characters',
-    test: (pwd) => pwd.length >= 8,
-  },
-  {
-    label: 'One letter (A-Z or a-z)',
-    test: (pwd) => /[A-Za-z]/.test(pwd),
-  },
-  {
-    label: 'One number (0-9)',
-    test: (pwd) => /[0-9]/.test(pwd),
+    label: `At least ${SHARE_PASSWORD_MIN_LENGTH} characters`,
+    test: (pwd) => pwd.length >= SHARE_PASSWORD_MIN_LENGTH,
   },
 ]
 

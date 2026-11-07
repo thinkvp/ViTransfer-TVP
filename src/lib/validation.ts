@@ -2,6 +2,7 @@ import { z } from 'zod'
 import DOMPurify from 'isomorphic-dompurify'
 import { isValidTimecode } from '@/lib/timecode'
 import { PROJECT_DESCRIPTION_MAX } from '@/lib/project-description'
+import { SHARE_PASSWORD_MIN_LENGTH } from '@/lib/share-password'
 import { ensureDomPurifyHooksRegistered } from '@/lib/security/dompurify-config'
 
 /**
@@ -144,10 +145,8 @@ export const createProjectSchema = z.object({
     .max(200)
     .optional(),
   sharePassword: z.string()
-    .min(8, 'Share password must be at least 8 characters')
+    .min(SHARE_PASSWORD_MIN_LENGTH, `Share password must be at least ${SHARE_PASSWORD_MIN_LENGTH} characters`)
     .max(255, 'Share password must not exceed 255 characters')
-    .regex(/[A-Za-z]/, 'Share password must contain at least one letter')
-    .regex(/[0-9]/, 'Share password must contain at least one number')
     .optional()
     .or(z.literal('')),
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
@@ -171,10 +170,8 @@ export const updateProjectSchema = z.object({
     })
     .optional(),
   sharePassword: z.string()
-    .min(8, 'Share password must be at least 8 characters')
+    .min(SHARE_PASSWORD_MIN_LENGTH, `Share password must be at least ${SHARE_PASSWORD_MIN_LENGTH} characters`)
     .max(255, 'Share password must not exceed 255 characters')
-    .regex(/[A-Za-z]/, 'Share password must contain at least one letter')
-    .regex(/[0-9]/, 'Share password must contain at least one number')
     .optional()
     .or(z.literal('')),
   authMode: z.enum(['PASSWORD', 'OTP', 'BOTH', 'NONE']).optional(),
