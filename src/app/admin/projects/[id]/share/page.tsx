@@ -2595,6 +2595,7 @@ export default function AdminSharePage() {
                 onDeleteUploadFolder={handleDeleteUploadFolder}
                 onRenameUploadFolder={handleRenameUploadFolder}
                 isAdmin={true}
+                projectId={project?.id ? String(project.id) : null}
               />
               </div>
               <div

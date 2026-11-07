@@ -102,6 +102,8 @@ export async function GET(
       select: {
         id: true,
         name: true,
+        notes: true,
+        createdAt: true,
         socialCopiesEnabled: true,
         photos: {
           where: { status: 'READY' },
@@ -132,6 +134,17 @@ export async function GET(
       where: { projectId: projectMeta.id, allowApproval: true },
     }),
   ])
+  // Client-visible comment count per version. Request Next Version needs at least one
+  // (the request-next-version route enforces the same rule).
+  const feedbackCountRows = readyVideos.length > 0
+    ? await prisma.comment.groupBy({
+        by: ['videoId'],
+        where: { videoId: { in: readyVideos.map((v) => v.id) }, isInternal: false },
+        _count: { _all: true },
+      })
+    : []
+  const feedbackCountByVideoId = new Map(feedbackCountRows.map((row) => [row.videoId, row._count._all]))
+
   const uploadGroupsByPath = new Map<string, DownloadableFile[]>()
 
   const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `share:${Date.now()}`)
@@ -311,6 +324,14 @@ export async function GET(
         isApproved: video.approved === true,
         allowApproval: video.allowApproval === true,
         isRevisionRequested: (video as any).revisionRequestedAt != null,
+        createdAt: video.createdAt ? video.createdAt.toISOString() : undefined,
+        approvedAt: video.approved && video.approvedAt ? video.approvedAt.toISOString() : undefined,
+        revisionRequestedAt: video.revisionRequestedAt ? video.revisionRequestedAt.toISOString() : undefined,
+        width: video.width > 0 ? video.width : undefined,
+        height: video.height > 0 ? video.height : undefined,
+        codec: video.codec || undefined,
+        notes: video.videoNotes?.trim() || undefined,
+        feedbackCount: feedbackCountByVideoId.get(video.id) ?? 0,
         hasTimelinePreviews: hasTimeline,
         timelineVttUrl: presignedTimeline?.vttUrl ?? (tokens ? `/api/content/${tokens.vttToken}` : undefined),
         timelineSpriteBaseUrl: tokens ? `/api/content/${tokens.spriteToken}` : undefined,
@@ -392,6 +413,8 @@ export async function GET(
             fileName: asset.fileName,
             fileSizeBytes: assetSizeMap.get(asset.id) ?? 0,
             durationSeconds: typeof asset.mediaDurationSeconds === 'number' ? asset.mediaDurationSeconds : undefined,
+            width: typeof asset.mediaWidth === 'number' && asset.mediaWidth > 0 ? asset.mediaWidth : undefined,
+            height: typeof asset.mediaHeight === 'number' && asset.mediaHeight > 0 ? asset.mediaHeight : undefined,
             thumbnailUrl: assetPreviewUrls.get(asset.id),
             hasTimelinePreviews: hasTimeline,
             timelineVttUrl: presignedTimeline?.vttUrl ?? (tokens ? `/api/content/${tokens.vttToken}` : undefined),
@@ -496,6 +519,8 @@ export async function GET(
       albumGroups.push({
         name: album.name,
         groupType: 'album',
+        notes: album.notes?.trim() || undefined,
+        createdAt: album.createdAt.toISOString(),
         subFiles: [...zips, ...photos],
       })
     }

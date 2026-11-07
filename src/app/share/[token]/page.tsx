@@ -1710,6 +1710,37 @@ export default function SharePage() {
     void fetchDownloadableFiles()
   }, [project?.id, isAdminSession, shareToken, markVideoApproved, fetchProjectData, fetchDownloadableFiles, loadCommentIdentity])
 
+  // "Request Next Version" from the files view. Same request the comment panel sends;
+  // client sessions only (the route rejects admins without a share token and guests).
+  const handleRequestNextVersion = useCallback(async (file: DownloadableFile) => {
+    if (!file.videoId) throw new Error('Video ID is missing')
+    if (!project?.id) throw new Error('Project not loaded')
+
+    const identity = loadCommentIdentity()
+    const response = await fetch(`/api/projects/${project.id}/request-next-version`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(shareToken ? { Authorization: `Bearer ${shareToken}` } : {}),
+      },
+      body: JSON.stringify({
+        selectedVideoId: file.videoId,
+        recipientId: identity.recipientId || null,
+        authorName: identity.authorName || null,
+      }),
+    })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.error || 'Failed to request next version')
+    }
+
+    // No videoId in the detail: that would mark the video locally APPROVED.
+    window.dispatchEvent(new CustomEvent('videoApprovalChanged', { detail: {} }))
+    void fetchProjectData()
+    void fetchDownloadableFiles()
+  }, [project?.id, shareToken, fetchProjectData, fetchDownloadableFiles, loadCommentIdentity])
+
   const handleUploadFiles = useCallback(async (folderPath: string, files: File[]) => {
     if (!Array.isArray(files) || files.length === 0) return
     uploadCancelRequestedRef.current = false
@@ -3677,6 +3708,8 @@ export default function SharePage() {
               resolveDocumentViewUrl={resolveDownloadableViewUrl}
               onPreviewTokenExpired={() => requestFilesRefresh(true)}
               onApproveVideo={handleApproveVideo}
+              onRequestNextVersion={isAdminSession ? undefined : handleRequestNextVersion}
+              projectId={project?.id ?? null}
               shareSlug={token}
               shareToken={shareToken}
               transferItems={transferItemsCombined}

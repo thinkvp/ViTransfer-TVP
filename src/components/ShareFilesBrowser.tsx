@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { GuestVideoLinkDialog } from '@/components/GuestVideoLinkDialog'
 import { InputDialog } from '@/components/ui/input-dialog'
 import { toast } from 'sonner'
 import {
@@ -27,9 +28,11 @@ import { ZIP_DOWNLOAD_THRESHOLD_BYTES } from '@/lib/transfer-state'
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   CheckSquare,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Download,
   Eye,
   File,
@@ -40,7 +43,13 @@ import {
   FileText,
   FileVideo,
   Folder,
+  Images,
+  Info,
+  Lock,
   Pencil,
+  RotateCcw,
+  MessageSquare,
+  Share2,
   MoreHorizontal,
   Play,
   Plus,
@@ -121,6 +130,10 @@ type ShareFilesBrowserProps = {
   onRenameUploadFolder?: (folderPath: string, folderName: string) => Promise<void>
   onPreviewTokenExpired?: () => void
   onApproveVideo?: (file: DownloadableFile) => Promise<void>
+  /** Client share page only: lodge "Request Next Version" for the latest video version. */
+  onRequestNextVersion?: (file: DownloadableFile) => Promise<void>
+  /** Project id, for the Share Video (view-only guest link) dialog. */
+  projectId?: string | null
   /** Admin users can interact with all versions regardless of approval status. */
   isAdmin?: boolean
 }
@@ -162,6 +175,56 @@ function formatDuration(value: number | undefined): string | null {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
   }
   return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+/** "4 Nov", or "4 Nov 2025" outside the current year. */
+function formatShortDate(value: string | undefined): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return date.toLocaleDateString('en-AU', sameYear
+    ? { day: 'numeric', month: 'short' }
+    : { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/** Short quality label from pixel dimensions: "1080p", "720p", "4K". */
+function formatResolutionLabel(width?: number, height?: number): string | null {
+  if (!width || !height) return null
+  const shortSide = Math.min(width, height)
+  if (shortSide >= 2160) return '4K'
+  return `${shortSide}p`
+}
+
+function formatCodecLabel(codec?: string): string | null {
+  const value = String(codec || '').trim().toLowerCase()
+  if (!value) return null
+  if (value === 'h264' || value === 'avc' || value === 'avc1') return 'H.264'
+  if (value === 'hevc' || value === 'h265' || value === 'hvc1') return 'H.265'
+  if (value.startsWith('prores')) return 'ProRes'
+  if (value === 'dnxhd' || value === 'dnxhr') return 'DNxHD'
+  return value.toUpperCase()
+}
+
+function joinMeta(parts: Array<string | null | undefined | false>): string {
+  return parts.filter((part): part is string => typeof part === 'string' && part.length > 0).join(' · ')
+}
+
+function getFileSizeBytes(file: DownloadableFile): number {
+  const raw = typeof file.fileSizeBytes === 'string' ? Number(file.fileSizeBytes) : file.fileSizeBytes
+  return Number.isFinite(raw) && (raw as number) > 0 ? Number(raw) : 0
+}
+
+function getAssetKindLabel(file: DownloadableFile): string {
+  const ext = String(file.fileName || '').split('.').pop()?.toLowerCase() || ''
+  if (ext === 'srt' || ext === 'vtt') return 'Subtitles'
+  const kind = getDownloadableFileKind(file)
+  if (kind === 'video') return 'Video'
+  if (kind === 'image') return 'Image'
+  if (kind === 'audio') return 'Audio'
+  if (kind === 'archive') return 'Archive'
+  if (kind === 'document') return 'Document'
+  return 'File'
 }
 
 function getFileExtensionLabel(fileName: string): string | null {
@@ -443,6 +506,8 @@ export function ShareFilesBrowser({
   onRenameUploadFolder,
   onPreviewTokenExpired,
   onApproveVideo,
+  onRequestNextVersion,
+  projectId,
   isAdmin = false,
 }: ShareFilesBrowserProps) {
   // Initialise from the parent's requested folder so a freshly-mounted browser
@@ -464,6 +529,10 @@ export function ShareFilesBrowser({
   const [approveConfirmVideoName, setApproveConfirmVideoName] = useState<string>('')
   const [approving, setApproving] = useState(false)
   const approvingRef = useRef(false)
+  const [requestNextFile, setRequestNextFile] = useState<DownloadableFile | null>(null)
+  const [requestingNext, setRequestingNext] = useState(false)
+  const requestingNextRef = useRef(false)
+  const [shareVideoId, setShareVideoId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{
     x: number
     y: number
@@ -489,7 +558,6 @@ export function ShareFilesBrowser({
   const [showDeleteSelectedDialog, setShowDeleteSelectedDialog] = useState(false)
   const [pendingDeleteFileId, setPendingDeleteFileId] = useState<string | null>(null)
   const [pendingDeleteFolderPath, setPendingDeleteFolderPath] = useState<string | null>(null)
-  const [videoAssetsThumbnailSize, setVideoAssetsThumbnailSize] = useState<'small' | 'default' | 'large'>('default')
   const [albumPhotosThumbnailSize, setAlbumPhotosThumbnailSize] = useState<'small' | 'default' | 'large'>('default')
   const [uploadsThumbnailSize, setUploadsThumbnailSize] = useState<'small' | 'default' | 'large'>('default')
   const [pendingUploadFolderPath, setPendingUploadFolderPath] = useState<string>('')
@@ -503,6 +571,13 @@ export function ShareFilesBrowser({
   const lastPreviewTokenRefreshAtRef = useRef(0)
   const uploadVideoDurationRequestRef = useRef<Map<string, Promise<number | null>>>(new Map())
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null)
+
+  // Each folder opens at its top — otherwise a folder inherits the previous view's
+  // scroll offset and a video folder's header can open scrolled out of sight.
+  useEffect(() => {
+    scrollAreaRef.current?.scrollTo({ top: 0 })
+  }, [openFolderName])
   const folderCardObserverRef = useRef<IntersectionObserver | null>(null)
   const fileCardObserverRef = useRef<IntersectionObserver | null>(null)
   const folderCardNodesRef = useRef<Map<string, Element>>(new Map())
@@ -1237,7 +1312,10 @@ export function ShareFilesBrowser({
 
     filesInOpenFolder.forEach((file) => {
       const fileKey = getDownloadableFileKey(file)
-      if (!visibleFileKeys.has(fileKey)) return
+      // Video-version posters resolve from the share page's in-memory thumbnail map (no
+      // request), and the same version can appear in both the hero and the versions list,
+      // so they skip the visibility gate the per-file card observer provides.
+      if (file.type !== 'video' && !visibleFileKeys.has(fileKey)) return
       if (previewUrlByFileKey[fileKey] !== undefined) return
       const fileKind = getDownloadableFileKind(file)
       if (fileKind !== 'image' && fileKind !== 'video') return
@@ -1484,8 +1562,15 @@ export function ShareFilesBrowser({
         : filesInOpenFolder
       : groups.flatMap((group) => [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles])
     const selectedFiles = scopedFiles.filter((file) => selectedFileIds.has(getDownloadableFileKey(file)))
-      .filter((file) => file.type !== 'video' || isAdmin || file.isApproved !== false)
+    await downloadFileSet(selectedFiles)
+  }
+
+  // Bulk-download a set of files: ZIP when small enough, otherwise a folder download
+  // (File System Access) or one-by-one, via the page's transfer hook.
+  const downloadFileSet = async (files: DownloadableFile[]) => {
+    const selectedFiles = files.filter((file) => file.type !== 'video' || isAdmin || file.isApproved !== false)
     if (!selectedFiles.length) return
+    const totalSizeBytes = selectedFiles.reduce((total, file) => total + getFileSizeBytes(file), 0)
 
     // Annotate each file with the FSA download folder path so runBulkFsaDownload can
     // recreate the group/folder structure inside the user-chosen directory.
@@ -1509,7 +1594,7 @@ export function ShareFilesBrowser({
 
     // If the selection exceeds the bulk-download threshold but the browser doesn't support
     // the File System Access API (Firefox, Safari), show a "use Chrome or Edge" advisory.
-    const isBulkThreshold = selectedTotalSizeBytes > ZIP_DOWNLOAD_THRESHOLD_BYTES
+    const isBulkThreshold = totalSizeBytes > ZIP_DOWNLOAD_THRESHOLD_BYTES
     const isFsaAvailable = typeof window !== 'undefined' && 'showDirectoryPicker' in window
     if (isBulkThreshold && !isFsaAvailable) {
       setBulkFsaUnsupportedFiles(annotatedFiles)
@@ -1712,6 +1797,24 @@ export function ShareFilesBrowser({
     }
   }, [approveConfirmFile, onApproveVideo])
 
+  const handleRequestNextVersion = useCallback(async () => {
+    const file = requestNextFile
+    if (!file || !onRequestNextVersion) return
+    if (requestingNextRef.current) return
+    requestingNextRef.current = true
+    setRequestingNext(true)
+    try {
+      await onRequestNextVersion(file)
+      setRequestNextFile(null)
+      toast.success('Next version requested')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Request failed')
+    } finally {
+      requestingNextRef.current = false
+      setRequestingNext(false)
+    }
+  }, [requestNextFile, onRequestNextVersion])
+
   const openFolderVideoVersions = useMemo(() => {
     if (openFolder?.groupType !== 'video') return [] as DownloadableFile[]
     return [...filesInOpenFolder.filter((file) => file.type === 'video')].sort(compareVideoVersionDesc)
@@ -1727,57 +1830,6 @@ export function ShareFilesBrowser({
     return openFolderVideoVersions.find((file) => file.isApproved === true) ?? null
   }, [openFolder?.groupType, openFolderVideoVersions])
 
-  const openFolderVideoApprovalBannerMessage = useMemo(() => {
-    if (openFolder?.groupType !== 'video') return null
-    if (openFolderVideoVersions.length === 0) return null
-
-    const approvedVersion = openFolderApprovedVideoVersion
-    if (approvedVersion) {
-      const versionLabel = String(approvedVersion.versionLabel || '').trim() || 'Approved version'
-      return openFolderVideoAssets.length > 0
-        ? `${versionLabel} and associated Additional Assets are available for download.`
-        : `${versionLabel} is available for download.`
-    }
-
-    // Revision-requested ("Reviewed") versions can no longer be approved, so they don't
-    // count as approvable for the prompt below.
-    const hasApprovableVersion = openFolderVideoVersions.some((file) => file.allowApproval === true && file.isRevisionRequested !== true)
-    const latestIsRevisionRequested = openFolderVideoVersions[0]?.isRevisionRequested === true
-
-    if (openFolderVideoVersions.length === 1) {
-      return hasApprovableVersion
-        ? 'Approve this video to download.'
-        : latestIsRevisionRequested
-          ? 'A new version of this video has been requested.'
-          : 'Download is not enabled for this video.'
-    }
-
-    return hasApprovableVersion
-      ? 'Approve a version to enable downloads.'
-      : latestIsRevisionRequested
-        ? 'A new version of this video has been requested.'
-        : 'Download is not currently enabled for any versions of this video.'
-  }, [openFolder?.groupType, openFolderApprovedVideoVersion, openFolderVideoAssets.length, openFolderVideoVersions])
-
-  const openFolderBannerMessage = useMemo(() => {
-    if (openFolder?.groupType === 'video') {
-      return openFolderVideoApprovalBannerMessage
-    }
-    if (openFolder?.groupType === 'album') {
-      return 'Download full album ZIPs or individual photos.'
-    }
-    return null
-  }, [openFolder?.groupType, openFolderVideoApprovalBannerMessage])
-
-  const openFolderBannerClassName = useMemo(() => {
-    if (openFolder?.groupType === 'video' && openFolderApprovedVideoVersion) {
-      return 'mx-1 rounded-md bg-success-visible px-3 py-2 text-sm font-medium text-foreground'
-    }
-    if (openFolder?.groupType === 'album') {
-      return 'mx-1 rounded-md bg-success-visible px-3 py-2 text-sm font-medium text-foreground'
-    }
-    return 'mx-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white'
-  }, [openFolder?.groupType, openFolderApprovedVideoVersion])
 
   const openFolderAlbumZips = useMemo(() => {
     if (openFolder?.groupType !== 'album') return [] as DownloadableFile[]
@@ -2536,6 +2588,844 @@ export function ShareFilesBrowser({
     )
   }
 
+  // ── Video folder view ────────────────────────────────────────────────────────
+  // One video (all its versions) laid out as a delivery page: a hero for the version
+  // that matters (the approved one, else the latest), then either the extras that ship
+  // with the approval or the version history to review/approve from.
+
+  const getResolvedPreviewSrc = (file: DownloadableFile): string | null => {
+    const resolved = previewUrlByFileKey[getDownloadableFileKey(file)]
+    if (typeof resolved === 'string' && resolved.length > 0) return resolved
+    const inline = file.thumbnailUrl || file.previewUrl || null
+    return typeof inline === 'string' && inline.length > 0 ? inline : null
+  }
+
+  const fileHasTimelineHover = (file: DownloadableFile): boolean =>
+    file.hasTimelinePreviews === true &&
+    typeof file.timelineVttUrl === 'string' && file.timelineVttUrl.length > 0 &&
+    typeof file.timelineSpriteBaseUrl === 'string' && file.timelineSpriteBaseUrl.length > 0 &&
+    typeof file.durationSeconds === 'number' && file.durationSeconds > 0
+
+  const renderMediaThumb = (
+    file: DownloadableFile,
+    options: { posterFallback?: string | null; scrub?: boolean; showPlay?: boolean; versionBadge?: boolean; iconClassName?: string } = {}
+  ) => {
+    const { posterFallback = null, scrub = true, showPlay = false, versionBadge = false, iconClassName = 'h-6 w-6' } = options
+    const fileKey = getDownloadableFileKey(file)
+    const posterSrc = getResolvedPreviewSrc(file) || posterFallback
+    const FileTypeIcon = getFileTypeIcon(file)
+    return (
+      <>
+        {scrub && fileHasTimelineHover(file) ? (
+          <VideoHoverPreview
+            thumbnailUrl={posterSrc || ''}
+            vttUrl={file.timelineVttUrl!}
+            spriteBaseUrl={file.timelineSpriteBaseUrl!}
+            spriteUrls={file.timelineSpriteUrls}
+            durationSeconds={file.durationSeconds!}
+            alt={file.fileName}
+            className="h-full w-full"
+          />
+        ) : posterSrc ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={posterSrc}
+            alt={file.fileName}
+            className="h-full w-full object-contain"
+            loading="lazy"
+            onError={() => {
+              if (file.type === 'video') {
+                // Version posters come from a fixed map — re-resolving would return the
+                // same broken URL, so settle on the icon instead of looping.
+                setPreviewUrlByFileKey((prev) => (prev[fileKey] === null ? prev : { ...prev, [fileKey]: null }))
+                return
+              }
+              invalidatePreviewForFileKey(fileKey)
+            }}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+            <FileTypeIcon className={iconClassName} />
+          </div>
+        )}
+        {showPlay ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-black/65 text-white shadow-lg">
+              <Play className="h-5 w-5 fill-current" />
+            </span>
+          </div>
+        ) : null}
+        {versionBadge && file.versionLabel ? (
+          <div className="pointer-events-none absolute right-2 top-2 rounded-md bg-black/80 px-1.5 py-0.5 text-sm font-semibold leading-tight text-white">
+            {file.versionLabel}
+          </div>
+        ) : null}
+      </>
+    )
+  }
+
+  const isVersionApprovable = (file: DownloadableFile): boolean =>
+    file.type === 'video' &&
+    file.isApproved !== true &&
+    file.allowApproval === true &&
+    // Once the next version is requested, approval of that version is off the table.
+    file.isRevisionRequested !== true &&
+    Boolean(onApproveVideo) &&
+    !groupHasApprovedVersion
+
+  const watchVersion = (file: DownloadableFile) => {
+    if (file.type !== 'video' || !file.videoId || !onOpenVideoVersion) return
+    onOpenVideoVersion(file, openFolder?.name || null)
+  }
+
+  const requestApproveVersion = (file: DownloadableFile) => {
+    if (approving) return
+    setApproveConfirmFile(file)
+    setApproveConfirmVideoName(openFolder?.name || file.fileName)
+  }
+
+  const getAssetOpenMode = (file: DownloadableFile): 'play' | 'view' | null => {
+    const kind = getDownloadableFileKind(file)
+    if (kind === 'video') return isAssetPlaybackPurged(file) ? null : 'play'
+    if (kind === 'audio') return 'play'
+    if (kind === 'image') return 'view'
+    if (isViewableDocumentFile(file) && resolveDocumentViewUrl) return 'view'
+    return null
+  }
+
+  const openAsset = (file: DownloadableFile, list: DownloadableFile[]) => {
+    const kind = getDownloadableFileKind(file)
+    if (isViewableDocumentFile(file) && resolveDocumentViewUrl) openDocumentViewer(file, list)
+    else if (kind === 'image') openImageLightbox(file, list)
+    else if (kind === 'video') openVideoLightbox(file, list)
+    else if (kind === 'audio') openAudioLightbox(file, list)
+  }
+
+  const openVersionContextMenu = (event: React.MouseEvent, file: DownloadableFile, list: DownloadableFile[]) => {
+    event.preventDefault()
+    setContextMenu({ x: event.clientX, y: event.clientY, file, imageList: list })
+  }
+
+  const statusPill = (tone: 'success' | 'warning' | 'info', Icon: typeof Check, text: string) => (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
+        tone === 'success' && 'bg-success/15 text-success',
+        tone === 'warning' && 'bg-warning/15 text-warning',
+        tone === 'info' && 'bg-primary/15 text-primary'
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {text}
+    </span>
+  )
+
+  const versionBadge = (tone: 'warning' | 'info' | 'muted', text: string) => (
+    <span
+      className={cn(
+        'inline-flex items-center whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11px] font-semibold leading-tight',
+        tone === 'warning' && 'bg-warning/15 text-warning',
+        tone === 'info' && 'bg-primary/15 text-primary',
+        tone === 'muted' && 'bg-muted text-muted-foreground'
+      )}
+    >
+      {text}
+    </span>
+  )
+
+  // Full-width stacked buttons in a narrow column, side by side once there's room.
+  const bigActionClass = 'h-auto w-full justify-start gap-3 px-4 py-2.5 text-left @md:w-auto'
+  const sectionHeader = (title: string, hint?: string) => (
+    <div className="flex items-baseline justify-between gap-3 px-1">
+      <h4 className="shrink-0 text-base font-bold text-foreground">{title}</h4>
+      {hint ? <span className="text-right text-xs text-muted-foreground">{hint}</span> : null}
+    </div>
+  )
+
+  const renderDeliveryAssetRow = (file: DownloadableFile, assets: DownloadableFile[]) => {
+    const fileKey = getDownloadableFileKey(file)
+    const isSelected = selectedFileIds.has(fileKey)
+    const openMode = getAssetOpenMode(file)
+    const kind = getDownloadableFileKind(file)
+    const hasPreview = (kind === 'image' || kind === 'video') && Boolean(getResolvedPreviewSrc(file) || fileHasTimelineHover(file))
+    const assetMeta = joinMeta([
+      getAssetKindLabel(file),
+      getFileExtensionLabel(file.fileName),
+      kind === 'video'
+        ? formatResolutionLabel(file.width, file.height)
+        : kind === 'image' && file.width && file.height ? `${file.width}×${file.height}` : null,
+      kind === 'video' || kind === 'audio' ? formatDuration(file.durationSeconds) : null,
+    ])
+    const sizeLabel = formatFileSize(file.fileSizeBytes)
+    return (
+      <div
+        key={fileKey}
+        ref={(node) => registerFilePreviewCardRef(fileKey, node)}
+        data-file-preview-key={fileKey}
+        className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5 @lg:px-4', isSelected && 'bg-primary/5')}
+        onContextMenu={(event) => openVersionContextMenu(event, file, assets)}
+      >
+        {/* Checkbox, thumbnail and name stay together; only the actions wrap below
+            them when the column is too narrow. */}
+        <div className="flex min-w-[min(100%,15rem)] flex-1 items-center gap-3">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={(event) => toggleFile(fileKey, event.target.checked)}
+          className={cn('h-4 w-4 shrink-0 cursor-pointer', FILES_CHECKBOX_CLASS)}
+          aria-label={`Select ${file.fileName}`}
+        />
+        <button
+          type="button"
+          className={cn(
+            'relative h-11 w-16 shrink-0 overflow-hidden rounded-md border border-border @lg:w-20',
+            hasPreview ? 'bg-black/85' : 'bg-muted',
+            openMode ? 'cursor-pointer' : 'cursor-default'
+          )}
+          onClick={() => { if (openMode) openAsset(file, assets) }}
+          tabIndex={openMode ? 0 : -1}
+          aria-label={openMode ? `Open ${file.fileName}` : file.fileName}
+        >
+          {renderMediaThumb(file, { iconClassName: 'h-5 w-5' })}
+        </button>
+        <div className="min-w-0 flex-1">
+          {openMode ? (
+            <button
+              type="button"
+              className="block max-w-full text-left text-sm font-semibold text-foreground hover:underline"
+              title={file.fileName}
+              onClick={() => openAsset(file, assets)}
+            >
+              <span className="line-clamp-2 wrap-anywhere">{file.fileName}</span>
+            </button>
+          ) : (
+            <p className="line-clamp-2 text-sm font-semibold text-foreground wrap-anywhere" title={file.fileName}>{file.fileName}</p>
+          )}
+          <p className="truncate text-xs text-muted-foreground">
+            {assetMeta}
+            {sizeLabel ? <span className="@lg:hidden"> · {sizeLabel}</span> : null}
+          </p>
+        </div>
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+        {sizeLabel ? (
+          <span className="hidden text-xs text-muted-foreground tabular-nums @lg:block">{sizeLabel}</span>
+        ) : null}
+        {openMode ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="shrink-0"
+            onClick={() => openAsset(file, assets)}
+            aria-label={`${openMode === 'play' ? 'Play' : 'View'} ${file.fileName}`}
+            title={openMode === 'play' ? 'Play' : 'View'}
+          >
+            {openMode === 'play' ? <Play className="fill-current" /> : <Eye />}
+          </Button>
+        ) : (
+          // Same width as the Open button, so sizes and Download buttons line up.
+          <span aria-hidden className="w-8 shrink-0" />
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="shrink-0"
+          onClick={() => void onDownloadFile(file)}
+          aria-label={`Download ${file.fileName}`}
+        >
+          <Download />
+          <span className="hidden @lg:inline">Download</span>
+        </Button>
+        </div>
+      </div>
+    )
+  }
+
+  const renderVideoFolderView = () => {
+    const versions = openFolderVideoVersions
+    if (versions.length === 0) {
+      return <p className="px-1 text-xs text-muted-foreground italic">No video versions available.</p>
+    }
+
+    const folderName = openFolder?.name || ''
+    const approved = openFolderApprovedVideoVersion
+    const latest = versions[0]
+    const hero = approved || latest
+    const heroKey = getDownloadableFileKey(hero)
+    const heroExt = getFileExtensionLabel(hero.fileName)
+    const heroResolution = formatResolutionLabel(hero.width, hero.height)
+    const heroDuration = formatDuration(hero.durationSeconds)
+    const heroSize = formatFileSize(hero.fileSizeBytes)
+    const heroMeta = joinMeta([
+      heroExt,
+      formatCodecLabel(hero.codec),
+      hero.width && hero.height ? `${hero.width}×${hero.height}` : null,
+      heroDuration,
+    ])
+    const masterSpec = joinMeta([heroExt, heroResolution, heroSize])
+    const canWatch = Boolean(onOpenVideoVersion && hero.videoId)
+
+    let pill: React.ReactNode
+    if (approved) {
+      pill = statusPill('success', Check, joinMeta(['Approved', formatShortDate(approved.approvedAt)]))
+    } else if (latest.isRevisionRequested) {
+      pill = statusPill('info', RotateCcw, joinMeta(['Changes requested', formatShortDate(latest.revisionRequestedAt)]))
+    } else {
+      pill = statusPill('warning', Clock, joinMeta(['For review', formatShortDate(latest.createdAt)]))
+    }
+
+    const heroApprovable = !approved && isVersionApprovable(hero)
+    // Mirrors the comment panel's Request Next Version rules (and the API's): client only,
+    // latest version, nothing approved, not already requested, at least one comment on it.
+    const canRequestNext = Boolean(
+      !isAdmin && onRequestNextVersion && !approved && hero === latest && latest.videoId && !latest.isRevisionRequested
+    )
+    const latestFeedbackCount = latest.feedbackCount ?? 0
+    const canShare = Boolean(projectId && hero.videoId)
+    const anyApprovable = !approved && versions.some(isVersionApprovable)
+    let note: { icon: typeof Info; text: string } | null = null
+    if (approved) {
+      note = null
+    } else if (anyApprovable) {
+      note = {
+        icon: Lock,
+        text: `Download unlocks when you approve${heroApprovable ? '' : ' a version'}: the full-quality master${masterSpec ? ` (${masterSpec})` : ''} plus any extras the studio has added.`,
+      }
+    } else if (latest.isRevisionRequested) {
+      note = { icon: Info, text: 'Changes have been requested. The next version will appear here once it is ready.' }
+    } else {
+      note = { icon: Lock, text: 'Downloads are not enabled for this video yet.' }
+    }
+    const NoteIcon = note?.icon ?? null
+
+    const assets = openFolderVideoAssets
+    const deliveryFiles = approved ? [approved, ...assets] : []
+    const deliveryBytes = deliveryFiles.reduce((total, file) => total + getFileSizeBytes(file), 0)
+    const deliveryIsZip = deliveryBytes > 0 && deliveryBytes <= ZIP_DOWNLOAD_THRESHOLD_BYTES
+
+    return (
+      <div className="space-y-6 px-1 pt-2">
+        {/* Hero */}
+        <div className="flex flex-col gap-4 @xl:flex-row @xl:items-start @xl:gap-6">
+          <div
+            role={canWatch ? 'button' : undefined}
+            tabIndex={canWatch ? 0 : undefined}
+            aria-label={canWatch ? `Watch ${folderName} ${hero.versionLabel || ''}`.trim() : undefined}
+            className={cn(
+              'relative aspect-video w-full shrink-0 overflow-hidden rounded-xl border border-border bg-black/85 shadow-sm @xl:w-60 @3xl:w-80',
+              canWatch && 'cursor-pointer'
+            )}
+            onClick={() => watchVersion(hero)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                watchVersion(hero)
+              }
+            }}
+            onContextMenu={(event) => openVersionContextMenu(event, hero, versions)}
+          >
+            {renderMediaThumb(hero, {
+              posterFallback: folderPreviewByName?.[folderName] || null,
+              showPlay: canWatch,
+              versionBadge: true,
+              iconClassName: 'h-10 w-10',
+            })}
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex items-center gap-2">
+              {pill}
+              {canShare ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-8 shrink-0"
+                  onClick={() => setShareVideoId(hero.videoId || null)}
+                  title="Share a view-only link to this version"
+                >
+                  <Share2 className="h-4 w-4" />
+                  Share
+                </Button>
+              ) : null}
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-xl font-semibold leading-tight text-foreground @2xl:text-2xl wrap-break-word">
+                {folderName}
+                {hero.versionLabel ? <span className="font-normal text-muted-foreground"> · {hero.versionLabel}</span> : null}
+              </h3>
+              {heroMeta ? <p className="text-sm text-muted-foreground">{heroMeta}</p> : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {approved ? (
+                <>
+                  <Button type="button" className={bigActionClass} onClick={() => void onDownloadFile(approved)}>
+                    <Download className="h-5! w-5!" />
+                    <span className="flex flex-col">
+                      <span className="text-sm font-semibold">Download video</span>
+                      {masterSpec ? <span className="text-[11px] font-normal opacity-85">{masterSpec}</span> : null}
+                    </span>
+                  </Button>
+                  {assets.length > 0 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={bigActionClass}
+                      disabled={isDownloadBusy}
+                      onClick={() => void downloadFileSet(deliveryFiles)}
+                    >
+                      <FileArchive className="h-5! w-5!" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-semibold">
+                          {isDownloadBusy
+                            ? activeProgress ? `Downloading… ${Math.round(activeProgress.percent)}%` : 'Preparing…'
+                            : deliveryIsZip ? 'Everything (ZIP)' : 'Everything'}
+                        </span>
+                        <span className="text-[11px] font-normal text-muted-foreground">
+                          {joinMeta([`${deliveryFiles.length} files`, deliveryBytes > 0 ? formatFileSize(deliveryBytes) : null])}
+                        </span>
+                      </span>
+                    </Button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  {canWatch ? (
+                    <Button type="button" variant="outline" className={bigActionClass} onClick={() => watchVersion(hero)}>
+                      <Play className="h-4! w-4! fill-current" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-semibold">Watch {hero.versionLabel || 'video'}</span>
+                        <span className="text-[11px] font-normal text-muted-foreground">
+                          {joinMeta([heroDuration, latest.isRevisionRequested ? 'add more comments' : 'leave feedback'])}
+                        </span>
+                      </span>
+                    </Button>
+                  ) : null}
+                  {heroApprovable ? (
+                    <Button
+                      type="button"
+                      variant="success"
+                      className={bigActionClass}
+                      disabled={approving}
+                      onClick={() => requestApproveVersion(hero)}
+                    >
+                      <Check className="h-5! w-5!" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-semibold">Approve {hero.versionLabel || 'video'}</span>
+                        <span className="text-[11px] font-normal opacity-85">unlocks the download</span>
+                      </span>
+                    </Button>
+                  ) : null}
+                  {canRequestNext && latestFeedbackCount > 0 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={bigActionClass}
+                      disabled={requestingNext}
+                      onClick={() => setRequestNextFile(latest)}
+                    >
+                      <RotateCcw className="h-5! w-5!" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-semibold">Request next version</span>
+                        <span className="text-[11px] font-normal text-muted-foreground">
+                          {joinMeta([`${latestFeedbackCount} ${latestFeedbackCount === 1 ? 'comment' : 'comments'}`, 'locks in your feedback'])}
+                        </span>
+                      </span>
+                    </Button>
+                  ) : null}
+                  {canRequestNext && latestFeedbackCount === 0 ? (
+                    <span className="inline-flex items-center gap-1.5 self-center text-xs text-muted-foreground">
+                      <MessageSquare className="h-3.5 w-3.5 shrink-0" />
+                      Leave feedback to request changes
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </div>
+
+            {note && NoteIcon ? (
+              <p className="flex items-start gap-1.5 text-sm text-muted-foreground">
+                <NoteIcon className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{note.text}</span>
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        {approved ? (
+          <>
+            {assets.length > 0 ? (
+              <section className="space-y-2">
+                {sectionHeader('Also included', 'Tick several to download together')}
+                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+                  {assets.map((file) => renderDeliveryAssetRow(file, assets))}
+                </div>
+              </section>
+            ) : null}
+
+            {versions.length > 1 ? (
+              <section className="space-y-2">
+                {sectionHeader('Other versions', 'Not part of the delivery')}
+                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+                  {versions.filter((file) => file !== approved).map((file) => {
+                    const fileKey = getDownloadableFileKey(file)
+                    const reason = file.isRevisionRequested
+                      ? 'Changes requested, then replaced'
+                      : `Not available, ${approved.versionLabel || 'another version'} was approved`
+                    return (
+                      <div
+                        key={fileKey}
+                        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 @lg:px-4"
+                        onContextMenu={(event) => openVersionContextMenu(event, file, versions)}
+                      >
+                        <div className="flex min-w-[min(100%,15rem)] flex-1 items-center gap-3">
+                        <div className="relative h-12 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-black/85 opacity-60 grayscale @lg:h-14 @lg:w-24">
+                          {renderMediaThumb(file, { scrub: false, iconClassName: 'h-5 w-5' })}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm">
+                            <span className="font-semibold text-foreground">{folderName}{file.versionLabel ? ` · ${file.versionLabel}` : ''}</span>
+                            {formatShortDate(file.createdAt) ? <span className="text-muted-foreground"> · {formatShortDate(file.createdAt)}</span> : null}
+                          </p>
+                          <p className="mt-0.5 flex items-start gap-1.5 text-xs text-muted-foreground @lg:text-sm">
+                            <Lock className="mt-px h-3.5 w-3.5 shrink-0 @lg:mt-0.5" />
+                            <span>{reason}</span>
+                          </p>
+                        </div>
+                        </div>
+                        {isAdmin ? (
+                          <div className="ml-auto flex shrink-0 items-center gap-2">
+                            <Button type="button" variant="outline" size="xs" onClick={() => void onDownloadFile(file)} aria-label={`Download ${file.versionLabel || file.fileName}`} title="Download (admin)">
+                              <Download />
+                            </Button>
+                            {onOpenVideoVersion ? (
+                              <Button type="button" variant="outline" size="xs" onClick={() => watchVersion(file)}>
+                                <Play className="fill-current" />
+                                <span className="hidden @lg:inline">Watch</span>
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            ) : null}
+          </>
+        ) : (
+          <section className="space-y-2">
+            {sectionHeader('Versions', versions.length > 1 ? 'Newest first' : undefined)}
+            <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
+              {versions.map((file) => {
+                const fileKey = getDownloadableFileKey(file)
+                const isLatest = getDownloadableFileKey(file) === getDownloadableFileKey(latest)
+                const badge = isLatest
+                  ? file.isRevisionRequested
+                    ? versionBadge('info', 'Latest · changes requested')
+                    : versionBadge('warning', 'Latest · for review')
+                  : file.isRevisionRequested
+                    ? versionBadge('info', 'Changes requested')
+                    : versionBadge('muted', 'Earlier cut')
+                const description = file.notes || joinMeta([formatDuration(file.durationSeconds), formatResolutionLabel(file.width, file.height)])
+                const canWatchVersion = Boolean(onOpenVideoVersion && file.videoId)
+                // The hero already carries the latest version's Approve button.
+                const showRowApprove = isVersionApprovable(file) && fileKey !== heroKey
+                return (
+                  <div
+                    key={fileKey}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-3 @lg:px-4"
+                    onContextMenu={(event) => openVersionContextMenu(event, file, versions)}
+                  >
+                    {/* Thumbnail and details stay together; only the buttons wrap below
+                        them when the column is too narrow. */}
+                    <div className="flex min-w-[min(100%,15rem)] flex-1 items-center gap-3">
+                    <div
+                      className={cn(
+                        'relative h-12 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-black/85 @lg:h-14 @lg:w-24',
+                        canWatchVersion && 'cursor-pointer'
+                      )}
+                      onClick={() => watchVersion(file)}
+                    >
+                      {renderMediaThumb(file, {
+                        posterFallback: isLatest ? folderPreviewByName?.[folderName] || null : null,
+                        iconClassName: 'h-5 w-5',
+                      })}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-sm font-semibold text-foreground">{file.versionLabel || 'Version'}</span>
+                        {formatShortDate(file.createdAt) ? (
+                          <span className="text-sm text-muted-foreground">· {formatShortDate(file.createdAt)}</span>
+                        ) : null}
+                        {badge}
+                      </div>
+                      {description ? (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground @lg:text-sm" title={file.notes || undefined}>{description}</p>
+                      ) : null}
+                    </div>
+                    </div>
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      {showRowApprove ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          className="border-success/50 text-success hover:border-success hover:bg-success/10 hover:text-success"
+                          disabled={approving}
+                          onClick={() => requestApproveVersion(file)}
+                          aria-label={`Approve ${file.versionLabel || 'this version'}`}
+                        >
+                          <Check />
+                          <span className="hidden @lg:inline">Approve</span>
+                        </Button>
+                      ) : null}
+                      {isAdmin ? (
+                        <Button type="button" variant="outline" size="xs" onClick={() => void onDownloadFile(file)} aria-label={`Download ${file.versionLabel || file.fileName}`} title="Download (admin)">
+                          <Download />
+                        </Button>
+                      ) : null}
+                      {canWatchVersion ? (
+                        <Button type="button" variant="outline" size="xs" onClick={() => watchVersion(file)} aria-label={`Watch ${file.versionLabel || 'version'}`}>
+                          <Play className="fill-current" />
+                          <span className="hidden @lg:inline">Watch</span>
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )}
+      </div>
+    )
+  }
+
+  const renderAlbumFolderView = () => {
+    const albumName = openFolder?.name || ''
+    const photos = openFolderAlbumPhotos
+    const zips = openFolderAlbumZips
+    const fullZip = zips.find((file) => file.variant === 'full') ?? null
+    const socialZip = zips.find((file) => file.variant === 'social') ?? null
+    const photoCountLabel = `${photos.length} ${photos.length === 1 ? 'photo' : 'photos'}`
+    const photoBytes = photos.reduce((total, file) => total + getFileSizeBytes(file), 0)
+    const albumMeta = joinMeta([photoCountLabel, photoBytes > 0 ? `${formatFileSize(photoBytes)} in total` : null])
+    const albumNotes = String(openFolder?.notes || '').trim()
+    const coverPhotos = photos.slice(0, 3)
+    const extraPhotoCount = Math.max(0, photos.length - coverPhotos.length)
+
+    const renderCoverCell = (file: DownloadableFile, index: number, className: string) => {
+      const src = getResolvedPreviewSrc(file)
+      const showMore = index === coverPhotos.length - 1 && extraPhotoCount > 0
+      return (
+        <button
+          key={getDownloadableFileKey(file)}
+          type="button"
+          className={cn('relative min-h-0 overflow-hidden bg-black/60', className)}
+          onClick={() => openImageLightbox(file, photos)}
+          aria-label={`View ${file.fileName}`}
+        >
+          {src ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <FileImage className="mx-auto h-6 w-6 text-muted-foreground" />
+          )}
+          {showMore ? (
+            <span className="absolute inset-0 flex items-center justify-center bg-black/55 text-sm font-semibold text-white">
+              +{extraPhotoCount}
+            </span>
+          ) : null}
+        </button>
+      )
+    }
+
+    return (
+      <div className="space-y-6 px-1 pt-2">
+        {/* Header */}
+        <div className="flex flex-col gap-4 @xl:flex-row @xl:items-start @xl:gap-6">
+          <div
+            className={cn(
+              'grid aspect-4/3 w-full shrink-0 gap-0.5 overflow-hidden rounded-xl border border-border bg-black/85 shadow-sm @xl:w-60 @3xl:w-80',
+              coverPhotos.length >= 3 ? 'grid-cols-3 grid-rows-2' : coverPhotos.length === 2 ? 'grid-cols-2' : 'grid-cols-1'
+            )}
+          >
+            {coverPhotos.length === 0 ? (
+              <div className="flex items-center justify-center">
+                <FileImage className="h-10 w-10 text-muted-foreground" />
+              </div>
+            ) : (
+              coverPhotos.map((file, index) =>
+                renderCoverCell(file, index, coverPhotos.length >= 3 && index === 0 ? 'col-span-2 row-span-2' : '')
+              )
+            )}
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-3">
+            <div>{statusPill('info', FileImage, joinMeta([photoCountLabel, formatShortDate(openFolder?.createdAt)]))}</div>
+            <div className="space-y-1">
+              <h3 className="text-xl font-semibold leading-tight text-foreground @2xl:text-2xl wrap-break-word">{albumName}</h3>
+              {albumMeta ? <p className="text-sm text-muted-foreground">{albumMeta}</p> : null}
+            </div>
+
+            {fullZip || socialZip ? (
+              <div className="flex flex-wrap gap-2">
+                {fullZip ? (
+                  <Button type="button" className={bigActionClass} onClick={() => void onDownloadFile(fullZip)}>
+                    <Download className="h-5! w-5!" />
+                    <span className="flex flex-col">
+                      <span className="text-sm font-semibold">Full resolution</span>
+                      <span className="text-[11px] font-normal opacity-85">
+                        {joinMeta(['ZIP', photoCountLabel, formatFileSize(fullZip.fileSizeBytes)])}
+                      </span>
+                    </span>
+                  </Button>
+                ) : null}
+                {socialZip ? (
+                  <Button
+                    type="button"
+                    variant={fullZip ? 'outline' : 'default'}
+                    className={bigActionClass}
+                    onClick={() => void onDownloadFile(socialZip)}
+                  >
+                    <FileArchive className="h-5! w-5!" />
+                    <span className="flex flex-col">
+                      <span className="text-sm font-semibold">Social sized</span>
+                      <span className={cn('text-[11px] font-normal', fullZip ? 'text-muted-foreground' : 'opacity-85')}>
+                        {joinMeta(['ZIP', '2048 px long edge', formatFileSize(socialZip.fileSizeBytes)])}
+                      </span>
+                    </span>
+                  </Button>
+                ) : null}
+              </div>
+            ) : (
+              <p className="flex items-start gap-1.5 text-sm text-muted-foreground">
+                <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>The album ZIPs are still being prepared. You can download photos one at a time below.</span>
+              </p>
+            )}
+
+            {albumNotes ? (
+              <p className="whitespace-pre-line text-sm text-muted-foreground wrap-break-word">{albumNotes}</p>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Photos */}
+        <section className="space-y-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1">
+            <h4 className="text-base font-bold text-foreground">Photos</h4>
+            <span className="text-xs text-muted-foreground">Tick several to get one ZIP · click to view</span>
+            <div className="ml-auto">
+          <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
+            <button
+              type="button"
+              className={cn(
+                'px-2 py-1 text-[11px] font-semibold transition-colors',
+                albumPhotosThumbnailSize === 'small'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-card text-muted-foreground hover:text-foreground'
+              )}
+              onClick={() => setAlbumPhotosThumbnailSize('small')}
+            >
+              Small
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                albumPhotosThumbnailSize === 'default'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-card text-muted-foreground hover:text-foreground'
+              )}
+              onClick={() => setAlbumPhotosThumbnailSize('default')}
+            >
+              Default
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
+                albumPhotosThumbnailSize === 'large'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-card text-muted-foreground hover:text-foreground'
+              )}
+              onClick={() => setAlbumPhotosThumbnailSize('large')}
+            >
+              Large
+            </button>
+          </div>
+            </div>
+          </div>
+          {photos.length > 0 ? (
+            <div className={cn(
+              'grid',
+              albumPhotosThumbnailSize === 'large'
+                ? 'grid-cols-1 @md:grid-cols-2 @3xl:grid-cols-3 @6xl:grid-cols-4 gap-3'
+                : albumPhotosThumbnailSize === 'default'
+                  ? 'grid-cols-2 @xl:grid-cols-3 @3xl:grid-cols-4 @6xl:grid-cols-5 gap-3'
+                  : 'grid-cols-2 @md:grid-cols-4 @3xl:grid-cols-6 @6xl:grid-cols-8 gap-2.5'
+            )}>
+              {photos.map((file) => renderOpenFolderFileCard(file, albumPhotosThumbnailSize === 'small', photos))}
+            </div>
+          ) : (
+            <p className="px-1 text-xs text-muted-foreground italic">No photos available.</p>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  const rootSectionToneClass = {
+    warning: 'bg-warning/15 text-warning ring-warning/30',
+    info: 'bg-primary/15 text-primary ring-primary/30',
+    success: 'bg-success/15 text-success ring-success/30',
+    violet: 'bg-violet-500/15 text-violet-400 ring-violet-500/30',
+    sky: 'bg-sky-500/15 text-sky-400 ring-sky-500/30',
+  } as const
+  const rootSectionBandClass: Record<keyof typeof rootSectionToneClass, string> = {
+    warning: 'from-warning/12 border-l-warning',
+    info: 'from-primary/12 border-l-primary',
+    success: 'from-success/12 border-l-success',
+    violet: 'from-violet-500/12 border-l-violet-500',
+    sky: 'from-sky-500/12 border-l-sky-500',
+  }
+
+  // Root-level section (For Review / Reviewed / Approved / Albums / Additional Files):
+  // a band tinted in the same colour as the folder badges (accent edge on the left, fading
+  // out to the right) holding an icon tile, the title with a count, and a one-line description.
+  const renderRootSection = (
+    tone: keyof typeof rootSectionToneClass,
+    Icon: typeof Check,
+    title: string,
+    description: string,
+    groups: DownloadableGroup[],
+  ) => (
+    <section key={title} className="space-y-3">
+      <div className={cn('flex items-center gap-3 rounded-r-lg border-l-[3px] bg-linear-to-r to-transparent to-80% py-2.5 pl-3 pr-3', rootSectionBandClass[tone])}>
+        <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset', rootSectionToneClass[tone])}>
+          <Icon className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h4 className="text-base font-bold leading-tight text-foreground @lg:text-lg">{title}</h4>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold leading-none text-muted-foreground tabular-nums">
+              {groups.length}
+            </span>
+          </div>
+          <p className="truncate text-xs text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-3 @sm:grid-cols-2 @xl:grid-cols-3 @3xl:grid-cols-4 @6xl:grid-cols-5">
+        {groups.map((group) => renderRootFolderCard(group))}
+      </div>
+    </section>
+  )
+
   const renderRootFolderCard = (group: DownloadableGroup) => {
     const groupFiles = [...(group.mainFile ? [group.mainFile] : []), ...group.subFiles]
     const hasSelectableFiles = groupFiles.some((f) => isSelectableDownloadableFile(f, isAdmin))
@@ -2709,7 +3599,7 @@ export function ShareFilesBrowser({
   }
 
   return (
-    <div className="border border-border rounded-lg bg-card overflow-hidden flex-1 min-h-0 flex flex-col">
+    <div className="@container border border-border rounded-lg bg-card overflow-hidden flex-1 min-h-0 flex flex-col">
       <input
         ref={uploadInputRef}
         type="file"
@@ -2722,23 +3612,23 @@ export function ShareFilesBrowser({
         }}
       />
       <div className="px-4 py-3 border-b border-border flex flex-col gap-2">
-        <div className="min-w-0 flex items-center justify-between gap-2 sm:flex-1">
+        <div className="min-w-0 flex items-center justify-between gap-2 @xl:flex-1">
           <div className="min-w-0">
             {openFolder ? (
               <div className="flex items-center gap-2 min-w-0">
-                <Button type="button" variant="outline" size="sm" className="px-2 sm:px-3" onClick={navigateBackFolder}>
+                <Button type="button" variant="outline" size="sm" className="px-2 @xl:px-3" onClick={navigateBackFolder}>
                   <ArrowLeft className="w-4 h-4" />
-                  <span className="hidden sm:inline">Back</span>
+                  <span className="hidden @xl:inline">Back</span>
                 </Button>
                 {selectedCount > 0 ? (
-                  <span className="hidden sm:inline text-xs sm:text-sm text-muted-foreground truncate">
+                  <span className="hidden @xl:inline text-xs @2xl:text-sm text-muted-foreground truncate">
                     {selectedCount} file{selectedCount === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedTotalSizeBytes)}
                   </span>
                 ) : null}
               </div>
             ) : (
               selectedCount > 0 ? (
-                <span className="hidden sm:inline text-xs sm:text-sm text-muted-foreground truncate">
+                <span className="hidden @xl:inline text-xs @2xl:text-sm text-muted-foreground truncate">
                   {selectedCount} file{selectedCount === 1 ? '' : 's'} selected, {formatSelectedTotalSize(selectedTotalSizeBytes)}
                 </span>
               ) : (
@@ -2746,7 +3636,7 @@ export function ShareFilesBrowser({
               )
             )}
           </div>
-          <div className="ml-auto flex items-center gap-2 sm:hidden">
+          <div className="ml-auto flex items-center gap-2 @xl:hidden">
             {isUploadsContext && canUploadToProjects && onUploadFiles ? (
               <Button
                 type="button"
@@ -2820,7 +3710,7 @@ export function ShareFilesBrowser({
               <span className="text-xs font-semibold tabular-nums">{selectedCount}</span>
             </Button>
           </div>
-          <div className="hidden sm:flex items-center gap-2 ml-auto">
+          <div className="hidden @xl:flex items-center gap-2 ml-auto">
             {isUploadsContext && canUploadToProjects && onUploadFiles ? (
               <Button
                 type="button"
@@ -2914,6 +3804,7 @@ export function ShareFilesBrowser({
       </div>
 
       <div
+        ref={scrollAreaRef}
         className="flex-1 min-h-0 overflow-y-auto px-1.5 pt-1.5 pb-4 bg-muted/70"
         onDragOverCapture={(event) => {
           if (!isUploadsContext) return
@@ -2931,207 +3822,29 @@ export function ShareFilesBrowser({
         }}
       >
         {!openFolder ? (
-          <div className="space-y-5">
-            {rootVideoGroups.length > 0 ? (
-              <section className="space-y-4">
-                {rootVideoGroupsForReview.length > 0 ? (
-                  <div className="space-y-2">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos — For Review</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {rootVideoGroupsForReview.map((group) => renderRootFolderCard(group))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {rootVideoGroupsReviewed.length > 0 ? (
-                  <div className="space-y-2">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos — Reviewed</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {rootVideoGroupsReviewed.map((group) => renderRootFolderCard(group))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {rootVideoGroupsApproved.length > 0 ? (
-                  <div className="space-y-2">
-                    <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos — Approved</h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {rootVideoGroupsApproved.map((group) => renderRootFolderCard(group))}
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
-
-            {rootAlbumGroups.length > 0 ? (
-              <section className={cn('space-y-2', rootVideoGroups.length > 0 && 'border-t border-border/70 pt-4')}>
-                <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                  {rootAlbumGroups.map((group) => renderRootFolderCard(group))}
-                </div>
-              </section>
-            ) : null}
-
-            {rootUploadsSectionGroups.length > 0 ? (
-              <section className={cn('space-y-2', (rootVideoGroups.length > 0 || rootAlbumGroups.length > 0) && 'border-t border-border/70 pt-4')}>
-                <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Additional Files</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                  {rootUploadsSectionGroups.map((group) => renderRootFolderCard(group))}
-                </div>
-              </section>
-            ) : null}
+          <div className="space-y-8 pt-1">
+            {rootVideoGroupsForReview.length > 0
+              ? renderRootSection('warning', Play, 'For Review', 'Videos waiting for your feedback or approval', rootVideoGroupsForReview)
+              : null}
+            {rootVideoGroupsReviewed.length > 0
+              ? renderRootSection('info', RotateCcw, 'Reviewed', 'Changes requested · the next version is on its way', rootVideoGroupsReviewed)
+              : null}
+            {rootVideoGroupsApproved.length > 0
+              ? renderRootSection('success', CheckCircle2, 'Approved', 'Signed off and ready to download', rootVideoGroupsApproved)
+              : null}
+            {rootAlbumGroups.length > 0
+              ? renderRootSection('violet', Images, 'Albums', 'Photo albums to view and download', rootAlbumGroups)
+              : null}
+            {rootUploadsSectionGroups.length > 0
+              ? renderRootSection('sky', Files, 'Additional Files', 'Other files and folders shared on this project', rootUploadsSectionGroups)
+              : null}
           </div>
         ) : (
           <div className="space-y-5">
-            {openFolderBannerMessage ? (
-              <div className={openFolderBannerClassName}>
-                {openFolderBannerMessage}
-              </div>
-            ) : null}
             {openFolder?.groupType === 'video' ? (
-              <>
-                <section className="space-y-2">
-                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Videos</h4>
-                  {openFolderVideoVersions.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {openFolderVideoVersions.map((file) => renderOpenFolderFileCard(file, false, openFolderVideoVersions))}
-                    </div>
-                  ) : (
-                    <p className="px-1 text-xs text-muted-foreground italic">No video versions available.</p>
-                  )}
-                </section>
-
-                {openFolderApprovedVideoVersion ? (
-                  <section className="space-y-2 border-t border-border/70 pt-4">
-                    <div className="px-1 flex items-center gap-2">
-                      <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Additional Assets</h4>
-                      <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
-                        <button
-                          type="button"
-                          className={cn(
-                            'px-2 py-1 text-[11px] font-semibold transition-colors',
-                            videoAssetsThumbnailSize === 'small'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-card text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => setVideoAssetsThumbnailSize('small')}
-                        >
-                          Small
-                        </button>
-                        <button
-                          type="button"
-                          className={cn(
-                            'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
-                            videoAssetsThumbnailSize === 'default'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-card text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => setVideoAssetsThumbnailSize('default')}
-                        >
-                          Default
-                        </button>
-                        <button
-                          type="button"
-                          className={cn(
-                            'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
-                            videoAssetsThumbnailSize === 'large'
-                              ? 'bg-primary text-primary-foreground'
-                              : 'bg-card text-muted-foreground hover:text-foreground'
-                          )}
-                          onClick={() => setVideoAssetsThumbnailSize('large')}
-                        >
-                          Large
-                        </button>
-                      </div>
-                    </div>
-                    {openFolderVideoAssets.length > 0 ? (
-                      <div className={cn(
-                        'grid',
-                        videoAssetsThumbnailSize === 'large'
-                          ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
-                          : videoAssetsThumbnailSize === 'default'
-                            ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3'
-                            : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
-                      )}>
-                        {openFolderVideoAssets.map((file) => renderOpenFolderFileCard(file, videoAssetsThumbnailSize === 'small', openFolderVideoAssets))}
-                      </div>
-                    ) : (
-                      <p className="px-1 text-xs text-muted-foreground italic">There are currently no Additional Assets for this video.</p>
-                    )}
-                  </section>
-                ) : null}
-              </>
+              renderVideoFolderView()
             ) : openFolder?.groupType === 'album' ? (
-              <>
-                <section className="space-y-2">
-                  <h4 className="px-1 text-base sm:text-lg font-bold tracking-wider text-white">Albums</h4>
-                  {openFolderAlbumZips.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3">
-                      {openFolderAlbumZips.map((file) => renderOpenFolderFileCard(file))}
-                    </div>
-                  ) : (
-                    <p className="px-1 text-xs text-muted-foreground italic">No album ZIPs available.</p>
-                  )}
-                </section>
-
-                <section className="space-y-2 border-t border-border/70 pt-4">
-                  <div className="px-1 flex items-center gap-2">
-                    <h4 className="text-base sm:text-lg font-bold tracking-wider text-white">Photos</h4>
-                    <div className="ml-auto inline-flex items-center rounded-md border border-border overflow-hidden">
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors',
-                          albumPhotosThumbnailSize === 'small'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setAlbumPhotosThumbnailSize('small')}
-                      >
-                        Small
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
-                          albumPhotosThumbnailSize === 'default'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setAlbumPhotosThumbnailSize('default')}
-                      >
-                        Default
-                      </button>
-                      <button
-                        type="button"
-                        className={cn(
-                          'px-2 py-1 text-[11px] font-semibold transition-colors border-l border-border',
-                          albumPhotosThumbnailSize === 'large'
-                            ? 'bg-primary text-primary-foreground'
-                            : 'bg-card text-muted-foreground hover:text-foreground'
-                        )}
-                        onClick={() => setAlbumPhotosThumbnailSize('large')}
-                      >
-                        Large
-                      </button>
-                    </div>
-                  </div>
-                  {openFolderAlbumPhotos.length > 0 ? (
-                    <div className={cn(
-                      'grid',
-                      albumPhotosThumbnailSize === 'large'
-                        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-3'
-                        : albumPhotosThumbnailSize === 'default'
-                          ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-3'
-                          : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8 gap-2.5'
-                    )}>
-                      {openFolderAlbumPhotos.map((file) => renderOpenFolderFileCard(file, albumPhotosThumbnailSize === 'small', openFolderAlbumPhotos))}
-                    </div>
-                  ) : (
-                    <p className="px-1 text-xs text-muted-foreground italic">No photos available.</p>
-                  )}
-                </section>
-              </>
+              renderAlbumFolderView()
             ) : (
               <section className="space-y-2">
                 <div className="px-1 flex items-center gap-2">
@@ -3556,6 +4269,32 @@ export function ShareFilesBrowser({
         variant="default"
         onConfirm={handleApproveVideo}
         loading={approving}
+      />
+
+      {/* Request next version dialog */}
+      <ConfirmDialog
+        open={requestNextFile !== null}
+        onOpenChange={(v) => { if (!v) setRequestNextFile(null) }}
+        title="Request Next Version"
+        description={
+          requestNextFile
+            ? `Request the next version of ${openFolder?.name || requestNextFile.fileName}? Your feedback on ${requestNextFile.versionLabel || 'this version'} will be locked in, but you can still add comments.`
+            : 'Request the next version? Your feedback on this version will be locked in, but you can still add comments.'
+        }
+        confirmLabel={requestingNext ? 'Requesting...' : 'Request Next Version'}
+        cancelLabel="Cancel"
+        variant="default"
+        onConfirm={handleRequestNextVersion}
+        loading={requestingNext}
+      />
+
+      <GuestVideoLinkDialog
+        open={shareVideoId !== null}
+        onOpenChange={(v) => { if (!v) setShareVideoId(null) }}
+        projectId={projectId}
+        videoId={shareVideoId}
+        isAdminView={isAdmin}
+        shareToken={shareToken}
       />
 
       {/* Right-click context menu */}

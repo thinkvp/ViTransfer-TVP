@@ -15,6 +15,19 @@ export interface DownloadableFile {
   allowApproval?: boolean
   /** Whether the client requested the next version of this video version ("Reviewed"). */
   isRevisionRequested?: boolean
+  /** ISO timestamps for video versions: uploaded, approved, next version requested. */
+  createdAt?: string
+  approvedAt?: string
+  revisionRequestedAt?: string
+  /** Pixel dimensions (video versions and video/image assets). */
+  width?: number
+  height?: number
+  /** Source codec for video versions (e.g. "h264"). */
+  codec?: string
+  /** Client-facing version notes (Video.videoNotes). */
+  notes?: string
+  /** Video versions: client-visible comments on this version (Request Next Version needs one). */
+  feedbackCount?: number
   /** Set for type 'video' and 'asset' */
   videoId?: string
   /** Set for type 'asset' */
@@ -65,6 +78,9 @@ export interface DownloadableGroup {
   mainFile?: DownloadableFile
   /** For video groups: the approved version's assets (shown indented). For album groups: the zip files. */
   subFiles: DownloadableFile[]
+  /** Album groups: the studio's album notes and when the album was created (ISO). */
+  notes?: string
+  createdAt?: string
 }
 
 export interface DownloadableFilesResult {
