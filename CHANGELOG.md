@@ -5,6 +5,20 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.4] - 2026-11-07
+
+### Changed
+
+- **Marking a project Approved now approves its videos** — each video without an approved version gets its latest version approved, which unlocks the client's download. Versions with approval turned off, still processing, or with a next version requested are left alone. The status picker now shows which videos will and won't be approved before you confirm, and approving videos this way needs the Projects Full Control permission.
+- **Videos that can't be approved show as "View Only" on an approved project** — on the share page they move out of For Review / Reviewed into a grey View Only section, and the banner says why there's no download (shared for viewing only, or changes were requested) instead of "Downloads were not enabled".
+- **Simpler downloads on a video's page** — Select all, Download (N) and the asset checkboxes are gone from a video's own page; use Download video, Everything, or each file's Download button. Elsewhere, Select all now only picks up approved videos (approved version plus its extras) and an album's ZIPs instead of every photo.
+- **Sidebar section labels match the main view** — For Review, Approved, Albums and the rest use the same colours and icons in both places, and the heading bands are an even tint across their full width.
+
+### Fixed
+
+- **Hover-scrubbing a video showed another video's thumbnails** — switching between videos on the share page kept the previous video's scrub frames.
+- **Large multi-file downloads could get the viewer's IP banned** — downloading many small files at once looked like crawling to the server's intrusion protection. Bulk downloads are now paced so this can't happen; a selection of many tiny files takes a little longer.
+
 ## [2.8.3] - 2026-11-07
 
 ### Changed
