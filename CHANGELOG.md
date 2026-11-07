@@ -5,6 +5,19 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.3] - 2026-11-07
+
+### Changed
+
+- **A video's files page on the share page has been redesigned** — opening a video now shows one clear header with its status, specs and the next step: Watch and Approve while it's in review, or Download video and Everything once approved. Share (the view-only video link) and Request next version are now right there too, so clients don't have to open the player to find them. Extras that come with the approved version are listed underneath with their own Download buttons, and earlier versions show why they aren't part of the delivery. Thumbnail hover-scrubbing and opening extras (images, video, audio, documents) work as before.
+- **Albums on the share page get the same treatment** — opening an album now shows a cover made from its first photos, the photo count and total size, any album notes, and the Full resolution and Social sized ZIPs as two clear download buttons. The photo grid underneath works as before.
+- **Clearer sections on the share page's Files view** — For Review, Reviewed, Approved, Albums and Additional Files now each have a coloured heading band with an icon, a count and a one-line description, in the same colours as the folder badges.
+- **Share passwords can now be anything 4 characters or longer** — the old rules (at least 8 characters, with a letter and a number) are gone, so a simple word or a 4-digit PIN works. Existing share passwords keep working unchanged.
+
+### Security
+
+- **Patched qs and minimatch** — two new moderate denial-of-service advisories were fixed by moving qs (used by Stripe) to 6.17.1 and the pinned minimatch (used when building ZIPs, and by the linter) to 11.0.5.
+
 ## [2.8.2] - 2026-11-04
 
 ### Added
