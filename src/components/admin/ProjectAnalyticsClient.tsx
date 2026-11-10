@@ -34,6 +34,7 @@ interface AlbumStats {
   photoCount: number
   fullResDownloads: number
   socialDownloads: number
+  guestViews?: number
 }
 
 interface AuthActivity {
@@ -74,6 +75,15 @@ interface AlbumDownloadActivity {
   variant: string | null
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
+  viaGuestLink?: boolean
+  ipAddress: string | null
+  createdAt: Date
+}
+
+interface AlbumViewActivity {
+  id: string
+  type: 'ALBUM_VIEW'
+  albumName: string
   ipAddress: string | null
   createdAt: Date
 }
@@ -86,6 +96,7 @@ interface PhotoDownloadActivity {
   variant: string | null
   email?: string | null
   accessMethod?: 'OTP' | 'PASSWORD' | 'GUEST' | 'NONE' | null
+  viaGuestLink?: boolean
   ipAddress: string | null
   createdAt: Date
 }
@@ -143,7 +154,7 @@ interface StatusChangeActivity {
 }
 
 type Activity = AuthActivity | DownloadActivity | EmailActivity | EmailOpenActivity | StatusChangeActivity
-  | ViewActivity | ApprovalActivity | AlbumDownloadActivity | PhotoDownloadActivity
+  | ViewActivity | ApprovalActivity | AlbumDownloadActivity | PhotoDownloadActivity | AlbumViewActivity
 
 function getAuthVisitorLabel(event: AuthActivity): string {
   if (event.email) return event.email
@@ -168,6 +179,7 @@ function getEventMetaValue(event: Activity): string {
   if (event.type === 'DOWNLOAD') return event.email || event.ipAddress || '—'
   if (event.type === 'ALBUM_DOWNLOAD') return event.email || event.ipAddress || '—'
   if (event.type === 'PHOTO_DOWNLOAD') return event.email || event.ipAddress || '—'
+  if (event.type === 'ALBUM_VIEW') return event.ipAddress || '—'
   if (event.type === 'VIEW') {
     if (event.accessMethod === 'OTP' && event.email) return event.email
     return event.ipAddress || '—'
@@ -192,7 +204,7 @@ function hasExpandableDetails(event: Activity): boolean {
   if (event.type === 'AUTH') return false
   if (event.type === 'STATUS_CHANGE') return false
   if (event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED') return false
-  if (event.type === 'ALBUM_DOWNLOAD' || event.type === 'PHOTO_DOWNLOAD') return false
+  if (event.type === 'ALBUM_DOWNLOAD' || event.type === 'PHOTO_DOWNLOAD' || event.type === 'ALBUM_VIEW') return false
   if (event.type === 'DOWNLOAD') {
     return Boolean(event.assetFileNames && event.assetFileNames.length > 0)
   }
@@ -244,8 +256,13 @@ function getMainText(event: Activity): string {
       : `${getAuthVisitorLabel(event)} accessed project`
   }
   if (event.type === 'VIEW') return `${getViewVisitorLabel(event)} viewed "${event.videoName} (${event.versionLabel})"`
-  if (event.type === 'ALBUM_DOWNLOAD') return `${event.albumName} - ${getPhotoVariantLabel(event.variant)}`
-  if (event.type === 'PHOTO_DOWNLOAD') return `${event.photoFileName || 'Photo'} from ${event.albumName} - ${getPhotoVariantLabel(event.variant)}`
+  if (event.type === 'ALBUM_VIEW') return `Guest User viewed album "${event.albumName}" via guest link`
+  if (event.type === 'ALBUM_DOWNLOAD') {
+    return `${event.albumName} - ${getPhotoVariantLabel(event.variant)}${event.viaGuestLink ? ' (guest link)' : ''}`
+  }
+  if (event.type === 'PHOTO_DOWNLOAD') {
+    return `${event.photoFileName || 'Photo'} from ${event.albumName} - ${getPhotoVariantLabel(event.variant)}${event.viaGuestLink ? ' (guest link)' : ''}`
+  }
   if (event.type === 'VIDEO_APPROVED') return `Video approved "${event.videoName} (${event.versionLabel})"`
   if (event.type === 'VIDEO_UNAPPROVED') return `Video unapproved "${event.videoName} (${event.versionLabel})"`
   if (event.type === 'EMAIL') return getEmailActionLabel(event.description, 'sent')
@@ -636,6 +653,15 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                               {album.socialDownloads}
                             </span>
                           </div>
+                          {album.guestViews ? (
+                            <div className="flex items-center justify-between gap-2 text-xs sm:text-sm bg-accent/50 rounded px-2 py-1.5">
+                              <span className="text-muted-foreground truncate">Guest link views</span>
+                              <span className="font-medium whitespace-nowrap shrink-0 inline-flex items-center gap-1">
+                                <Eye className="w-3 h-3 text-muted-foreground" />
+                                {album.guestViews}
+                              </span>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -706,7 +732,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                               </div>
                             )}
                           </div>
-                        ) : event.type === 'ALBUM_DOWNLOAD' || event.type === 'PHOTO_DOWNLOAD' ? null
+                        ) : event.type === 'ALBUM_DOWNLOAD' || event.type === 'PHOTO_DOWNLOAD' || event.type === 'ALBUM_VIEW' ? null
                         : event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED' ? null
                         : event.type === 'EMAIL' ? (
                           <div className="space-y-2">
@@ -797,7 +823,7 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap inline-flex items-center justify-center ${
                                       event.type === 'AUTH'
                                         ? getAccessMethodColor((event as AuthActivity).accessMethod)
-                                        : event.type === 'VIEW' || event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED'
+                                        : event.type === 'VIEW' || event.type === 'ALBUM_VIEW' || event.type === 'VIDEO_APPROVED' || event.type === 'VIDEO_UNAPPROVED'
                                           ? 'bg-lime-800 text-lime-200'
                                         : event.type === 'EMAIL' || event.type === 'EMAIL_OPEN'
                                           ? 'bg-warning-visible text-warning'
@@ -821,6 +847,11 @@ export default function ProjectAnalyticsClient({ id }: { id: string }) {
                                     <>
                                       <Play className="w-3 h-3 inline mr-1" />
                                       Video View
+                                    </>
+                                  ) : event.type === 'ALBUM_VIEW' ? (
+                                    <>
+                                      <Images className="w-3 h-3 inline mr-1" />
+                                      Album View
                                     </>
                                   ) : event.type === 'ALBUM_DOWNLOAD' ? (
                                     <>

@@ -2621,7 +2621,7 @@ export default function AdminSharePage() {
                   activity, instead of cramming both into one viewport (the activity
                   panel's fixed 420px was crushing the files browser to a sliver). */}
               <div className="flex-1 min-w-0 min-h-0 max-lg:flex-none max-lg:h-[70dvh] flex flex-col">
-              <ShareAlbumViewer shareSlug={String(project.slug)} shareToken={null} albumId={activeAlbumId} />
+              <ShareAlbumViewer shareSlug={String(project.slug)} shareToken={null} albumId={activeAlbumId} isAdminView />
               </div>
               <div
                 ref={activityPanelResize.containerRef}

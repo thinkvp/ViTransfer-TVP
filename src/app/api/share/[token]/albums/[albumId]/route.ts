@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { generateAlbumPhotoAccessToken, presignAlbumPhotoThumbnailUrls } from '@/lib/photo-access'
-import { presignAlbumPhotoPreviewUrls } from '@/lib/photo-preview-presign'
 import { enqueueAlbumThumbnailJob } from '@/lib/album-photo-thumbnail'
-import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
+import { buildAlbumPhotoPayloads, enqueueMissingAlbumZips, getAlbumZipReadiness } from '@/lib/album-share'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -75,85 +72,29 @@ export async function GET(
 
   const sessionId = accessCheck.shareTokenSessionId || (accessCheck.isAdmin ? `admin:${Date.now()}` : `guest:${Date.now()}`)
 
-  // S3 mode: presign thumbnails directly so the gallery grid loads each <img> from R2
-  // without proxying through /api/content/photo. The token is still minted below for the
-  // full-size, preview and download URLs (used on demand in the lightbox).
-  const directThumbUrls = await presignAlbumPhotoThumbnailUrls(
-    album.photos.filter((p) => p.thumbnailStatus === 'READY').map((p) => p.id),
-  )
-  // Lightbox previews too: paging through ~40+ photos via token URLs got the viewer banned.
-  const directPreviewUrls = await presignAlbumPhotoPreviewUrls(album.photos)
-
-  const photos = await Promise.all(
-    album.photos.map(async (p) => {
-      const tokenValue = await generateAlbumPhotoAccessToken({
-        photoId: p.id,
-        albumId: album.id,
-        projectId: album.projectId,
-        request,
-        sessionId,
-      })
-
-      return {
-        id: p.id,
-        fileName: p.fileName,
-        fileSize: '0', // From StoredFile if needed
-        createdAt: p.createdAt,
-        url: `/api/content/photo/${tokenValue}`,
-        thumbnailUrl: directThumbUrls.get(p.id) ?? `/api/content/photo/${tokenValue}?variant=thumbnail`,
-        previewUrl: directPreviewUrls.get(p.id) ?? `/api/content/photo/${tokenValue}?variant=preview`,
-        downloadUrl: `/api/content/photo/${tokenValue}?download=true`,
-        socialDownloadUrl: `/api/content/photo/${tokenValue}?download=true&variant=social`,
-        socialReady: p.socialStatus === 'READY',
-        thumbnailReady: p.thumbnailStatus === 'READY',
-      }
-    })
-  )
+  // Thumbnails and lightbox previews are presigned direct-to-R2 in S3 mode (CrowdSec: paging
+  // through ~40+ token URLs bans the viewer). Full-size/download URLs stay token URLs.
+  const photos = await buildAlbumPhotoPayloads({
+    photos: album.photos,
+    albumId: album.id,
+    projectId: album.projectId,
+    request,
+    sessionId,
+  })
 
   if (album.photos.some((p) => p.thumbnailStatus !== 'READY')) {
     void enqueueAlbumThumbnailJob({ albumId: album.id, delayMs: 500 }).catch(() => {})
   }
 
-  const projectStoragePath = album.project.storagePath
-    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
-  const albumFolderName = album.storageFolderName || album.name
-
-  const fullZipStoragePath = getAlbumZipStoragePath({
-    projectStoragePath,
-    albumFolderName,
-    albumName: album.name,
-    variant: 'full',
-  })
-  const socialZipStoragePath = getAlbumZipStoragePath({
-    projectStoragePath,
-    albumFolderName,
-    albumName: album.name,
-    variant: 'social',
-  })
-
-  const fullZipReady = photos.length === 0 ? false : await albumZipExists(fullZipStoragePath)
-  const socialZipReady = !album.socialCopiesEnabled ? false : (photos.length === 0 ? false : await albumZipExists(socialZipStoragePath))
+  const zipReadiness = photos.length === 0
+    ? { fullReady: false, socialReady: false }
+    : await getAlbumZipReadiness(album)
+  const fullZipReady = zipReadiness.fullReady
+  const socialZipReady = zipReadiness.socialReady
 
   // Best-effort: if ZIPs are missing, enqueue generation so they can become available without manual admin action.
-  if (photos.length > 0 && (!fullZipReady || (album.socialCopiesEnabled && !socialZipReady))) {
-    try {
-      const { getAlbumPhotoZipQueue } = await import('@/lib/queue')
-      const q = getAlbumPhotoZipQueue()
-      const delayMs = 10_000
-
-      if (!fullZipReady) {
-        const jobId = getAlbumZipJobId({ albumId: album.id, variant: 'full' })
-        await q.remove(jobId).catch(() => {})
-        await q.add('generate-album-zip', { albumId: album.id, variant: 'full' }, { jobId, delay: delayMs }).catch(() => {})
-      }
-      if (album.socialCopiesEnabled && !socialZipReady) {
-        const jobId = getAlbumZipJobId({ albumId: album.id, variant: 'social' })
-        await q.remove(jobId).catch(() => {})
-        await q.add('generate-album-zip', { albumId: album.id, variant: 'social' }, { jobId, delay: delayMs }).catch(() => {})
-      }
-    } catch {
-      // ignore
-    }
+  if (photos.length > 0) {
+    await enqueueMissingAlbumZips(album, zipReadiness)
   }
 
   return NextResponse.json({

@@ -3756,6 +3756,7 @@ export default function SharePage() {
               shareSlug={token}
               shareToken={shareToken}
               albumId={activeAlbumId}
+              isAdminView={isAdminSession}
             />
             </div>
             <div

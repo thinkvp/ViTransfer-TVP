@@ -68,6 +68,7 @@ export type SecurityEventType =
   | 'TOKEN_SESSION_MISMATCH'
   | 'SUSPICIOUS_ACTIVITY'
   | 'GUEST_VIDEO_LINK_VIEWED'
+  | 'GUEST_ALBUM_LINK_VIEWED'
   | 'BLOCKED_IP_ATTEMPT'
   | 'RATE_LIMIT_HIT'
 
@@ -266,6 +267,12 @@ export const SECURITY_EVENT_METADATA: Record<SecurityEventType, SecurityEventMet
   GUEST_VIDEO_LINK_VIEWED: {
     label: 'Guest Video Link Viewed',
     description: 'A guest viewed a video via a video-only guest link.',
+    category: 'Video Access',
+    severity: 'INFO',
+  },
+  GUEST_ALBUM_LINK_VIEWED: {
+    label: 'Guest Album Link Viewed',
+    description: 'A guest viewed a photo album via an album guest link.',
     category: 'Video Access',
     severity: 'INFO',
   },

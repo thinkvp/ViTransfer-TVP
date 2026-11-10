@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
 import { verifyProjectAccess } from '@/lib/project-access'
-import { albumZipExists, getAlbumZipJobId, getAlbumZipStoragePath } from '@/lib/album-photo-zip'
-import { buildProjectStorageRoot } from '@/lib/project-storage-paths'
-import { getAlbumPhotoZipQueue } from '@/lib/queue'
+import { getAlbumZipReadiness } from '@/lib/album-share'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -65,55 +63,7 @@ export async function GET(
     return NextResponse.json({ error: 'Album not found' }, { status: 404 })
   }
 
-  const projectStoragePath = album.project.storagePath
-    || buildProjectStorageRoot(album.project.client?.name || album.project.companyName || 'Client', album.project.title)
-  const albumFolderName = album.storageFolderName || album.name
-
-  const fullZipStoragePath = getAlbumZipStoragePath({
-    projectStoragePath,
-    albumFolderName,
-    albumName: album.name,
-    variant: 'full',
-  })
-  const socialZipStoragePath = getAlbumZipStoragePath({
-    projectStoragePath,
-    albumFolderName,
-    albumName: album.name,
-    variant: 'social',
-  })
-
-  const [fullExists, socialExists] = await Promise.all([
-    albumZipExists(fullZipStoragePath),
-    album.socialCopiesEnabled ? albumZipExists(socialZipStoragePath) : Promise.resolve(false),
-  ])
-
-  let fullZipQueuedOrActive = false
-  let socialZipQueuedOrActive = false
-  try {
-    const zipQueue = getAlbumPhotoZipQueue()
-    const fullJobId = getAlbumZipJobId({ albumId, variant: 'full' })
-    const socialJobId = getAlbumZipJobId({ albumId, variant: 'social' })
-
-    const [fullJob, socialJob] = await Promise.all([
-      zipQueue.getJob(fullJobId),
-      zipQueue.getJob(socialJobId),
-    ])
-
-    const pendingStates = new Set(['active', 'waiting', 'delayed', 'prioritized', 'waiting-children'])
-
-    const [fullState, socialState] = await Promise.all([
-      fullJob ? fullJob.getState().catch(() => null) : Promise.resolve(null),
-      socialJob ? socialJob.getState().catch(() => null) : Promise.resolve(null),
-    ])
-
-    fullZipQueuedOrActive = Boolean(fullState && pendingStates.has(fullState))
-    socialZipQueuedOrActive = Boolean(socialState && pendingStates.has(socialState))
-  } catch {
-    // If queue state cannot be read, fall back to file-existence readiness only.
-  }
-
-  const fullReady = fullExists && !fullZipQueuedOrActive
-  const socialReady = album.socialCopiesEnabled && socialExists && !socialZipQueuedOrActive
+  const { fullReady, socialReady } = await getAlbumZipReadiness(album, { includeQueueState: true })
 
   return NextResponse.json({
     zip: {

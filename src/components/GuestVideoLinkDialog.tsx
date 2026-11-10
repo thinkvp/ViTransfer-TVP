@@ -8,15 +8,22 @@ import { apiFetch } from '@/lib/api-client'
 import { formatDateTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
-interface GuestVideoLinkDialogProps {
+interface GuestLinkAuthProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  projectId: string | null | undefined
-  /** The video version the view-only link is for. */
-  videoId: string | null | undefined
   /** Admin session: authenticate with the admin bearer token instead of the share token. */
   isAdminView?: boolean
   shareToken?: string | null
+}
+
+interface GuestVideoLinkDialogProps extends GuestLinkAuthProps {
+  projectId: string | null | undefined
+  /** The video version the view-only link is for. */
+  videoId: string | null | undefined
+}
+
+interface GuestAlbumLinkDialogProps extends GuestLinkAuthProps {
+  albumId: string | null | undefined
 }
 
 /**
@@ -24,14 +31,60 @@ interface GuestVideoLinkDialogProps {
  * (/gv/…) for one video version. Used by the comment panel header and the share page's
  * files view.
  */
-export function GuestVideoLinkDialog({
+export function GuestVideoLinkDialog({ projectId, videoId, ...rest }: GuestVideoLinkDialogProps) {
+  return (
+    <GuestLinkDialog
+      {...rest}
+      endpoint="/api/guest-video-links"
+      ids={projectId && videoId ? { projectId, videoId } : null}
+      copy={{
+        title: 'Share Video',
+        description: 'View-only link for the currently selected video version. The viewer cannot access other videos, see or leave comments, approve videos or download videos.',
+        heading: 'Video-only link (expires in 14 days)',
+        noun: 'Video Link',
+      }}
+    />
+  )
+}
+
+/**
+ * "Share Album" dialog: the album counterpart of GuestVideoLinkDialog (/ga/… links). Album
+ * guest links allow downloads; they never expose other albums, videos or comments.
+ */
+export function GuestAlbumLinkDialog({ albumId, ...rest }: GuestAlbumLinkDialogProps) {
+  return (
+    <GuestLinkDialog
+      {...rest}
+      endpoint="/api/guest-album-links"
+      ids={albumId ? { albumId } : null}
+      copy={{
+        title: 'Share Album',
+        description: 'Guest link for this album. The viewer can browse and download its photos, but cannot see other albums, videos or comments.',
+        heading: 'Album-only link (expires in 14 days)',
+        noun: 'Album Link',
+      }}
+    />
+  )
+}
+
+interface GuestLinkDialogProps extends GuestLinkAuthProps {
+  endpoint: '/api/guest-video-links' | '/api/guest-album-links'
+  /** Identifies the shared item; sent as query params (GET) and in the POST body. Null = nothing selected. */
+  ids: Record<string, string> | null
+  copy: { title: string; description: string; heading: string; noun: string }
+}
+
+function GuestLinkDialog({
   open,
   onOpenChange,
-  projectId,
-  videoId,
   isAdminView = false,
   shareToken,
-}: GuestVideoLinkDialogProps) {
+  endpoint,
+  ids,
+  copy: text,
+}: GuestLinkDialogProps) {
+  // Stable string key so effects/callbacks don't re-run on every parent render.
+  const idsKey = ids ? new URLSearchParams(ids).toString() : ''
   const [generating, setGenerating] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [loadingExisting, setLoadingExisting] = useState(false)
@@ -65,10 +118,10 @@ export function GuestVideoLinkDialog({
   ), [isAdminView, shareToken])
 
   const postLink = async (action: 'generate' | 'refreshExpiry') => {
-    const response = await authedFetch('/api/guest-video-links', {
+    const response = await authedFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, projectId, videoId }),
+      body: JSON.stringify({ action, ...Object.fromEntries(new URLSearchParams(idsKey)) }),
     })
 
     const data = await response.json().catch(() => ({}))
@@ -84,7 +137,7 @@ export function GuestVideoLinkDialog({
   }
 
   const generate = async () => {
-    if (!projectId || !videoId) return
+    if (!idsKey) return
     setGenerating(true)
     setError(null)
     setCopied(false)
@@ -98,7 +151,7 @@ export function GuestVideoLinkDialog({
   }
 
   const refreshExpiry = async () => {
-    if (!projectId || !videoId || !url) return
+    if (!idsKey || !url) return
     setRefreshing(true)
     setError(null)
     setCopied(false)
@@ -112,7 +165,7 @@ export function GuestVideoLinkDialog({
   }
 
   const loadExisting = useCallback(async () => {
-    if (!projectId || !videoId) return
+    if (!idsKey) return
 
     setLoadingExisting(true)
     setUrl(null)
@@ -122,12 +175,9 @@ export function GuestVideoLinkDialog({
     setCheckedExisting(false)
     setMissing(false)
     try {
-      const response = await authedFetch(
-        `/api/guest-video-links?projectId=${encodeURIComponent(projectId)}&videoId=${encodeURIComponent(videoId)}`,
-        { cache: 'no-store' }
-      )
+      const response = await authedFetch(`${endpoint}?${idsKey}`, { cache: 'no-store' })
 
-      // 404 = no link for this version yet; any other failure is treated the same way so
+      // 404 = no link for this item yet; any other failure is treated the same way so
       // the viewer can still generate one.
       if (!response.ok) {
         setCheckedExisting(true)
@@ -146,7 +196,7 @@ export function GuestVideoLinkDialog({
     } finally {
       setLoadingExisting(false)
     }
-  }, [projectId, videoId, authedFetch])
+  }, [endpoint, idsKey, authedFetch])
 
   useEffect(() => {
     if (!open) return
@@ -168,10 +218,8 @@ export function GuestVideoLinkDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85dvh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Share Video</DialogTitle>
-          <DialogDescription>
-            View-only link for the currently selected video version. The viewer cannot access other videos, see or leave comments, approve videos or download videos.
-          </DialogDescription>
+          <DialogTitle>{text.title}</DialogTitle>
+          <DialogDescription>{text.description}</DialogDescription>
         </DialogHeader>
 
         <div className="mt-2 space-y-4">
@@ -179,7 +227,7 @@ export function GuestVideoLinkDialog({
             'rounded-md border p-3',
             expired ? 'border-destructive/60 bg-destructive/5' : 'border-border bg-muted/30'
           )}>
-            <div className="text-sm font-medium text-foreground">Video-only link (expires in 14 days)</div>
+            <div className="text-sm font-medium text-foreground">{text.heading}</div>
 
             {expired ? (
               <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-destructive">
@@ -193,15 +241,15 @@ export function GuestVideoLinkDialog({
 
             <div className="mt-3 flex items-center gap-2">
               {!url && checkedExisting && missing ? (
-                <Button type="button" variant="default" onClick={generate} disabled={generating || !videoId}>
-                  {generating ? 'Generating…' : 'Generate Video Link'}
+                <Button type="button" variant="default" onClick={generate} disabled={generating || !idsKey}>
+                  {generating ? 'Generating…' : `Generate ${text.noun}`}
                 </Button>
               ) : null}
 
               {url ? (
                 <>
                   <Button type="button" variant="outline" onClick={copy}>
-                    {copied ? 'Copied Video Link' : 'Copy Video Link'}
+                    {copied ? `Copied ${text.noun}` : `Copy ${text.noun}`}
                   </Button>
                   <Button
                     type="button"

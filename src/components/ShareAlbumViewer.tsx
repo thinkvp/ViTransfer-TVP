@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { ChevronLeft, ChevronRight, Download } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, Share2 } from 'lucide-react'
 import Image from 'next/image'
 import { apiFetch } from '@/lib/api-client'
+import { paceContentRequest } from '@/lib/download-pacing'
+import { GuestAlbumLinkDialog } from '@/components/GuestVideoLinkDialog'
 
 function LazyAlbumThumbnail({ src, alt }: { src: string; alt: string }) {
   const ref = useRef<HTMLDivElement | null>(null)
@@ -78,15 +80,52 @@ type ShareAlbumPhoto = {
   socialReady: boolean
 }
 
-export function ShareAlbumViewer({
-  shareSlug,
-  shareToken,
-  albumId,
-}: {
-  shareSlug: string
-  shareToken: string | null
-  albumId: string
-}) {
+type ShareAlbumViewerProps =
+  | {
+      /** Share page (client or admin preview) for `albumId` within project `shareSlug`. */
+      shareSlug: string
+      shareToken: string | null
+      albumId: string
+      /** Admin session: the Share dialog authenticates as the admin rather than with the share token. */
+      isAdminView?: boolean
+      guestToken?: undefined
+      onLoadResult?: undefined
+    }
+  | {
+      /** Public guest album link (/ga/<token>): no share auth, no Share button. */
+      guestToken: string
+      /** Reports the HTTP status (and payload when OK) of the album load so the page can show expiry/errors. */
+      onLoadResult?: (status: number, data: any | null) => void
+      shareSlug?: undefined
+      shareToken?: undefined
+      albumId?: undefined
+      isAdminView?: undefined
+    }
+
+// Wrapped so the global is never invoked detached from window.
+const plainFetch: typeof fetch = (input, init) => fetch(input, init)
+
+const ZIP_POLL_MIN_MS = 5000
+const ZIP_POLL_MAX_MS = 30000
+
+export function ShareAlbumViewer(props: ShareAlbumViewerProps) {
+  const { shareSlug, shareToken, albumId, guestToken, onLoadResult } = props
+  const isGuest = typeof guestToken === 'string'
+  const isAdminView = props.isAdminView ?? shareToken === null
+  const apiBase = isGuest
+    ? `/api/guest-album-links/${encodeURIComponent(guestToken)}`
+    : `/api/share/${shareSlug}/albums/${albumId}`
+  // Guest pages are public: plain fetch, so a stray admin token is never attached and a
+  // 401 can never trigger the admin session-expiry flow.
+  const request = isGuest ? plainFetch : apiFetch
+  // Share needs an identity the guest-link API accepts (admin session or share JWT). Without
+  // one every Generate click would be a 401 POST — and bursts of those trip CrowdSec.
+  const canShare = !isGuest && (isAdminView || Boolean(shareToken))
+  const onLoadResultRef = useRef(onLoadResult)
+  useEffect(() => {
+    onLoadResultRef.current = onLoadResult
+  }, [onLoadResult])
+
   const [album, setAlbum] = useState<ShareAlbum | null>(null)
   const [photos, setPhotos] = useState<ShareAlbumPhoto[]>([])
   const [loading, setLoading] = useState(false)
@@ -95,6 +134,7 @@ export function ShareAlbumViewer({
   const zipPollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [viewerPhoto, setViewerPhoto] = useState<ShareAlbumPhoto | null>(null)
   const [showDownloadModal, setShowDownloadModal] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
 
   const headers = useMemo(() => {
     const authToken = shareToken
@@ -105,18 +145,20 @@ export function ShareAlbumViewer({
     setLoading(true)
     setError(null)
     try {
-      const res = await apiFetch(`/api/share/${shareSlug}/albums/${albumId}`, {
+      const res = await request(apiBase, {
         cache: 'no-store',
         headers,
       })
 
       if (!res.ok) {
         const data = await res.json().catch(() => null)
+        onLoadResultRef.current?.(res.status, null)
         const msg = data && typeof data === 'object' && 'error' in data ? String((data as any).error || '') : ''
         throw new Error(msg || 'Failed to load album')
       }
 
       const data = await res.json()
+      onLoadResultRef.current?.(res.status, data)
       setAlbum(data.album || null)
       setPhotos(data.photos || [])
     } catch (e) {
@@ -126,7 +168,7 @@ export function ShareAlbumViewer({
     } finally {
       setLoading(false)
     }
-  }, [albumId, headers, shareSlug])
+  }, [apiBase, headers, request])
 
   useEffect(() => {
     void fetchAlbum()
@@ -153,13 +195,20 @@ export function ShareAlbumViewer({
 
     if (zip.fullReady && (zip.socialReady || album?.socialCopiesEnabled === false)) return
 
+    // Fixed-URL poll (one CrowdSec bucket entry however often it runs), backing off from 5s
+    // to 30s so a tab left open on an album whose ZIP never builds stays cheap.
+    let delayMs = ZIP_POLL_MIN_MS
     const tick = async () => {
       try {
-        const res = await apiFetch(`/api/share/${shareSlug}/albums/${albumId}/zip-status`, {
+        const res = await request(`${apiBase}/zip-status`, {
           cache: 'no-store',
           headers,
         })
 
+        if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 410) {
+          delayMs = 0 // Access is gone; stop polling.
+          return
+        }
         if (!res.ok) return
         const data = await res.json().catch(() => null)
         const nextFull = Boolean(data?.zip?.fullReady)
@@ -176,9 +225,12 @@ export function ShareAlbumViewer({
       } catch {
         // ignore
       } finally {
-        zipPollTimeoutRef.current = setTimeout(() => {
-          void tick()
-        }, 5000)
+        if (delayMs > 0) {
+          zipPollTimeoutRef.current = setTimeout(() => {
+            void tick()
+          }, delayMs)
+          delayMs = Math.min(ZIP_POLL_MAX_MS, Math.round(delayMs * 1.5))
+        }
       }
     }
 
@@ -190,11 +242,11 @@ export function ShareAlbumViewer({
         zipPollTimeoutRef.current = null
       }
     }
-  }, [album?.zip, album?.socialCopiesEnabled, albumId, headers, loading, photos.length, shareSlug])
+  }, [album?.zip, album?.socialCopiesEnabled, apiBase, headers, loading, photos.length, request])
 
   const requestZip = async (variant: 'full' | 'social') => {
     try {
-      const res = await apiFetch(`/api/share/${shareSlug}/albums/${albumId}/download-zip-token`, {
+      const res = await request(`${apiBase}/download-zip-token`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -211,14 +263,19 @@ export function ShareAlbumViewer({
 
       const data = await res.json()
       if (data?.url) {
-        triggerDownload(data.url)
+        await triggerDownload(data.url)
+      } else if (res.status === 202) {
+        setError('The archive is still being prepared. Please try again in a moment.')
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Download failed')
     }
   }
 
-  const triggerDownload = (url: string) => {
+  // Every download is a distinct one-off content URL; pace them so rapid clicks can never
+  // overflow CrowdSec's distinct-path bucket (see download-pacing.ts).
+  const triggerDownload = async (url: string) => {
+    await paceContentRequest()
     const link = document.createElement('a')
     link.href = url
     link.rel = 'noopener'
@@ -279,7 +336,30 @@ export function ShareAlbumViewer({
           <h2 className="text-xl font-semibold truncate">{album?.name || 'Album'}</h2>
           {album?.notes && <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap wrap-break-word">{album.notes}</p>}
         </div>
+        {canShare && album ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 self-start sm:self-auto"
+            onClick={() => setShareOpen(true)}
+            title="Share a guest link to this album"
+          >
+            <Share2 className="h-4 w-4" />
+            Share
+          </Button>
+        ) : null}
       </div>
+
+      {canShare ? (
+        <GuestAlbumLinkDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          albumId={albumId}
+          isAdminView={isAdminView}
+          shareToken={shareToken}
+        />
+      ) : null}
 
       {error && (
         <div className="p-3 bg-destructive/10 border border-destructive rounded-md">
@@ -366,7 +446,7 @@ export function ShareAlbumViewer({
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => triggerDownload(viewerPhoto.socialDownloadUrl)}
+                      onClick={() => void triggerDownload(viewerPhoto.socialDownloadUrl)}
                       disabled={!viewerPhoto.socialReady}
                       className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
                     >
@@ -377,7 +457,7 @@ export function ShareAlbumViewer({
                   <Button
                     type="button"
                     variant="default"
-                    onClick={() => triggerDownload(viewerPhoto.downloadUrl)}
+                    onClick={() => void triggerDownload(viewerPhoto.downloadUrl)}
                     className="w-full sm:w-auto whitespace-normal sm:whitespace-nowrap h-auto sm:h-10"
                   >
                     <Download className="w-4 h-4 mr-2" />

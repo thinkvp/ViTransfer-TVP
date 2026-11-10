@@ -234,10 +234,10 @@ export function PushNotificationsSection({
                   <div className="flex items-center justify-between pt-3 border-t">
                     <div className="space-y-0.5">
                       <Label htmlFor="notifyGuestVideoLinkAccess" className="text-sm font-normal">
-                        Guest Video Link Accessed
+                        Guest Link Accessed
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        When a guest opens a direct video link
+                        When a guest opens a direct video or album link
                       </p>
                     </div>
                     <Switch

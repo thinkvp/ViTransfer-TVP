@@ -9,7 +9,7 @@ import {
 } from '@/lib/pinned-system-notifications'
 
 // Security/auth events (UNAUTHORIZED_OTP, FAILED_LOGIN, SUCCESSFUL_ADMIN_LOGIN,
-// FAILED_SHARE_PASSWORD, SHARE_ACCESS, GUEST_VIDEO_LINK_ACCESS, PASSWORD_RESET_* etc.)
+// FAILED_SHARE_PASSWORD, SHARE_ACCESS, GUEST_VIDEO_LINK_ACCESS, GUEST_ALBUM_LINK_ACCESS, PASSWORD_RESET_* etc.)
 // are implicitly excluded for non-system-admin users because they are not in
 // PROJECT_TYPES or SALES_TYPES — the positive-inclusion allow-list below.
 

@@ -157,6 +157,17 @@ export function buildAdminWebPushNotification(payload: PushNotificationPayload):
       return { title, body: body || payload.message, url }
     }
 
+    case 'GUEST_ALBUM_LINK_ACCESS': {
+      const album = getDetail(payload.details, ['Album', 'albumName'])
+      const title = 'Guest album link opened'
+      const body = joinParts([
+        projectTitle ? `Project: ${projectTitle}` : null,
+        album ? `Album: ${album}` : null,
+        ip ? `IP: ${ip}` : null,
+      ])
+      return { title, body: body || payload.message, url }
+    }
+
     case 'FAILED_LOGIN': {
       const email = getDetail(payload.details, ['Email/Username', 'Email', 'email'])
       const title = 'Admin login failed'

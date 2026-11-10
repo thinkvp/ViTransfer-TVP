@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isGuestAlbumLinkSessionId } from '@/lib/guest-album-link'
 import { prisma } from '@/lib/db'
 import { requireApiAuth } from '@/lib/auth'
 import { rateLimit } from '@/lib/rate-limit'
@@ -449,21 +450,34 @@ export async function GET(
       createdAt: chg.createdAt,
     }))
 
-    const albumDownloadEvents = albumAnalytics.map((event) => {
-      const access = event.sessionId ? accessBySessionId.get(event.sessionId) : undefined
-      const eventDetails = (event as any).details as Record<string, unknown> | null | undefined
-      return {
+    const albumDownloadEvents = albumAnalytics
+      .filter((event) => event.eventType === 'PHOTO_DOWNLOAD' || event.eventType === 'ALBUM_DOWNLOAD')
+      .map((event) => {
+        const access = event.sessionId ? accessBySessionId.get(event.sessionId) : undefined
+        return {
+          id: event.id,
+          type: event.eventType === 'PHOTO_DOWNLOAD' ? 'PHOTO_DOWNLOAD' as const : 'ALBUM_DOWNLOAD' as const,
+          albumName: event.album?.name || 'Album',
+          photoFileName: event.photo?.fileName || null,
+          variant: event.variant || 'full',
+          email: access?.accessMethod === 'OTP' ? access.email || null : null,
+          accessMethod: access?.accessMethod || null,
+          viaGuestLink: isGuestAlbumLinkSessionId(event.sessionId),
+          ipAddress: event.ipAddress || null,
+          createdAt: event.createdAt,
+        }
+      })
+
+    // Guest album link opens (deduped per link + IP at record time).
+    const albumViewEvents = albumAnalytics
+      .filter((event) => event.eventType === 'ALBUM_VIEW')
+      .map((event) => ({
         id: event.id,
-        type: event.eventType === 'PHOTO_DOWNLOAD' ? 'PHOTO_DOWNLOAD' as const : 'ALBUM_DOWNLOAD' as const,
+        type: 'ALBUM_VIEW' as const,
         albumName: event.album?.name || 'Album',
-        photoFileName: event.photo?.fileName || null,
-        variant: event.variant || 'full',
-        email: access?.accessMethod === 'OTP' ? access.email || null : null,
-        accessMethod: access?.accessMethod || null,
         ipAddress: event.ipAddress || null,
         createdAt: event.createdAt,
-      }
-    })
+      }))
 
     // Build album stats: per-album photo count + download counts per variant
     const albumStats = projectAlbums.map((album) => {
@@ -472,11 +486,13 @@ export async function GET(
       )
       const fullResDownloads = albumEvents.filter((e) => e.variant !== 'social').length
       const socialDownloads = albumEvents.filter((e) => e.variant === 'social').length
+      const guestViews = albumAnalytics.filter((e) => e.albumId === album.id && e.eventType === 'ALBUM_VIEW').length
       return {
         albumName: album.name,
         photoCount: album._count.photos,
         fullResDownloads,
         socialDownloads,
+        guestViews,
       }
     })
 
@@ -487,6 +503,7 @@ export async function GET(
       ...approvalEvents,
       ...downloadEvents,
       ...albumDownloadEvents,
+      ...albumViewEvents,
       ...emailEvents,
       ...emailOpenEvents,
       ...statusChangeEvents,

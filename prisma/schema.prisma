@@ -317,6 +317,7 @@ model Project {
   notificationQueue NotificationQueue[] // Pending notifications
   sharePageAccesses SharePageAccess[] // Share page authentication tracking
   guestVideoShareLinks GuestVideoShareLink[] // Per-video-version guest-only share links
+  guestAlbumShareLinks GuestAlbumShareLink[] // Per-album guest-only share links
   emailEvents       ProjectEmailEvent[] // Logged client email notifications
   emailTracking     EmailTracking[] // Email open tracking pixels
   commentFiles      CommentFile[] // Files uploaded with comments
@@ -561,6 +562,7 @@ model Album {
 
   photos AlbumPhoto[]
   analytics AlbumAnalytics[]
+  guestAlbumShareLinks GuestAlbumShareLink[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1990,7 +1992,7 @@ model AlbumAnalytics {
   photoId String?
   photo   AlbumPhoto? @relation(fields: [photoId], references: [id], onDelete: SetNull)
 
-  // Event types: ALBUM_DOWNLOAD, PHOTO_DOWNLOAD
+  // Event types: ALBUM_DOWNLOAD, PHOTO_DOWNLOAD, ALBUM_VIEW (guest album link opened)
   eventType String
 
   // Optional: full or social variants for album/photo downloads
@@ -2120,6 +2122,29 @@ model GuestVideoShareLink {
   @@index([expiresAt])
   @@index([projectId])
   @@index([videoId])
+}
+
+model GuestAlbumShareLink {
+  id String @id @default(cuid())
+
+  // Random, non-guessable token used in the public URL (/ga/<token>).
+  token String @unique
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  albumId String
+  album   Album  @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  // Link expiry (14 days from generation / last refresh).
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([projectId, albumId])
+  @@index([expiresAt])
+  @@index([projectId])
+  @@index([albumId])
 }
 
 model PasskeyCredential {

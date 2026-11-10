@@ -9,6 +9,7 @@ export interface PushNotificationPayload {
     | 'FAILED_SHARE_PASSWORD'
     | 'SHARE_ACCESS'
     | 'GUEST_VIDEO_LINK_ACCESS'
+    | 'GUEST_ALBUM_LINK_ACCESS'
     | 'CLIENT_COMMENT'
     | 'ADMIN_SHARE_COMMENT'
     | 'COMMENT_REACTION'
@@ -108,6 +109,8 @@ export async function sendPushNotification(payload: PushNotificationPayload): Pr
       'FAILED_SHARE_PASSWORD': 'notifyFailedSharePasswordAttempt',
       'SHARE_ACCESS': 'notifySuccessfulShareAccess',
       'GUEST_VIDEO_LINK_ACCESS': 'notifyGuestVideoLinkAccess',
+      // One "Guest Link Accessed" toggle covers both video and album guest links.
+      'GUEST_ALBUM_LINK_ACCESS': 'notifyGuestVideoLinkAccess',
       'CLIENT_COMMENT': 'notifyClientComments',
       'ADMIN_SHARE_COMMENT': 'notifyClientComments',
       'COMMENT_REACTION': 'notifyCommentReactions',

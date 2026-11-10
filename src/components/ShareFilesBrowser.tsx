@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { GuestVideoLinkDialog } from '@/components/GuestVideoLinkDialog'
+import { GuestAlbumLinkDialog, GuestVideoLinkDialog } from '@/components/GuestVideoLinkDialog'
 import { InputDialog } from '@/components/ui/input-dialog'
 import { toast } from 'sonner'
 import {
@@ -563,6 +563,7 @@ export function ShareFilesBrowser({
   const [requestingNext, setRequestingNext] = useState(false)
   const requestingNextRef = useRef(false)
   const [shareVideoId, setShareVideoId] = useState<string | null>(null)
+  const [shareAlbumId, setShareAlbumId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{
     x: number
     y: number
@@ -3254,6 +3255,9 @@ export function ShareFilesBrowser({
     const albumNotes = String(openFolder?.notes || '').trim()
     const coverPhotos = photos.slice(0, 3)
     const extraPhotoCount = Math.max(0, photos.length - coverPhotos.length)
+    const albumId = [...zips, ...photos].map((file) => file.albumId).find((id): id is string => typeof id === 'string' && id.length > 0) ?? null
+    // The guest-link API needs an admin session or a share JWT; without one, Generate would only 401.
+    const canShareAlbum = Boolean(albumId && (isAdmin || shareToken))
 
     const renderCoverCell = (file: DownloadableFile, index: number, className: string) => {
       const src = getResolvedPreviewSrc(file)
@@ -3303,7 +3307,22 @@ export function ShareFilesBrowser({
           </div>
 
           <div className="min-w-0 flex-1 space-y-3">
-            <div>{statusPill('info', FileImage, joinMeta([photoCountLabel, formatShortDate(openFolder?.createdAt)]))}</div>
+            <div className="flex items-center gap-2">
+              {statusPill('info', FileImage, joinMeta([photoCountLabel, formatShortDate(openFolder?.createdAt)]))}
+              {canShareAlbum ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto h-8 shrink-0"
+                  onClick={() => setShareAlbumId(albumId)}
+                  title="Share a guest link to this album"
+                >
+                  <Share2 className="h-4 w-4" />
+                  Share
+                </Button>
+              ) : null}
+            </div>
             <div className="space-y-1">
               <h3 className="text-xl font-semibold leading-tight text-foreground @2xl:text-2xl wrap-break-word">{albumName}</h3>
               {albumMeta ? <p className="text-sm text-muted-foreground">{albumMeta}</p> : null}
@@ -4352,6 +4371,14 @@ export function ShareFilesBrowser({
         onOpenChange={(v) => { if (!v) setShareVideoId(null) }}
         projectId={projectId}
         videoId={shareVideoId}
+        isAdminView={isAdmin}
+        shareToken={shareToken}
+      />
+
+      <GuestAlbumLinkDialog
+        open={shareAlbumId !== null}
+        onOpenChange={(v) => { if (!v) setShareAlbumId(null) }}
+        albumId={shareAlbumId}
         isAdminView={isAdmin}
         shareToken={shareToken}
       />
