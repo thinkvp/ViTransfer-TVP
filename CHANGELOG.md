@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.5] - 2026-11-10
+
+### Added
+
+- **Share links for albums** — albums on the share page now have a Share button, like videos, so clients and admins can create a guest link to one album that expires after 14 days (Refresh Expiry extends it). Unlike video guest links, guests can download the photos individually or as the album ZIPs; they can't see other albums, videos or comments. Opening a link notifies admins (under the "Guest Link Accessed" setting, which now covers both videos and albums) and appears as an Album View on the project's analytics page; repeat opens from the same IP within 6 hours count once. **Schema migration:** `20261109000000_guest_album_share_links`
+
+### Security
+
+- **Clients could fake their IP address with a Cloudflare header** — the app always trusted `CF-Connecting-IP`, even when Cloudflare wasn't in front of it, so anyone could pick the IP used for rate limits, login lockouts and security logs. The header is now ignored unless you set `TRUST_CF_CONNECTING_IP=true`. **If you run behind Cloudflare's proxy (orange cloud) or a Cloudflare Tunnel, set it to `true` when you upgrade.**
+
 ## [2.8.4] - 2026-11-07
 
 ### Changed
