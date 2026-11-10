@@ -301,9 +301,15 @@ export function getClientIpAddress(request: NextRequest): string {
     return false
   }
 
-  // Prefer CF-Connecting-IP (set by Cloudflare, not spoofable by clients)
-  const cfIp = normalizeIp(request.headers.get('cf-connecting-ip'))
-  if (cfIp) return cfIp
+  // CF-Connecting-IP is only trustworthy when every request reaches the app
+  // through Cloudflare (proxied DNS or a Cloudflare Tunnel), because Cloudflare
+  // overwrites it at the edge. Without Cloudflare in front, any client can send
+  // the header and choose their own IP (rate-limit / lockout bypass, forged
+  // security events), so it is opt-in via TRUST_CF_CONNECTING_IP.
+  if (process.env.TRUST_CF_CONNECTING_IP === 'true') {
+    const cfIp = normalizeIp(request.headers.get('cf-connecting-ip'))
+    if (cfIp) return cfIp
+  }
 
   const xff = request.headers.get('x-forwarded-for')
   const chain = parseXForwardedFor(xff)

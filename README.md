@@ -558,6 +558,7 @@ The source code will be built into Docker images locally instead of pulling from
 | `HTTPS_ENABLED` | No | Enable HTTPS enforcement (HSTS) | `false` (compose default) | `true` for production |
 | `CLOUDFLARE_TUNNEL` | No | Enable Cloudflare script/connect CSP | `false` | `true` |
 | `TRUSTED_PROXIES` | No | Comma-separated proxy IPs for `X-Forwarded-For` peeling | — | `192.168.1.1` |
+| `TRUST_CF_CONNECTING_IP` | No | Use Cloudflare's `CF-Connecting-IP` as client IP (only when fully behind Cloudflare) | `false` | `true` |
 | `NEXT_PUBLIC_TUS_ENDPOINT` | No | Custom TUS origin for connect-src | — | `https://uploads.example.com` |
 
 The app and worker containers run as non-root user `911:911` by default. If you replace the named volumes with Linux bind mounts, update the compose `user:` value to match the owner of those host directories.
@@ -663,6 +664,10 @@ TRUSTED_PROXIES=173.245.48.0/20,...
 ```
 
 If `TRUSTED_PROXIES` is not set, the app falls back to the left-most `X-Forwarded-For` entry (with a console warning) to preserve functionality. For production deployments, always configure this explicitly.
+
+#### Cloudflare client IP (`TRUST_CF_CONNECTING_IP`)
+
+Set `TRUST_CF_CONNECTING_IP=true` only when **all** traffic reaches the app through Cloudflare (proxied/orange-cloud DNS or a Cloudflare Tunnel). The app then uses Cloudflare's `CF-Connecting-IP` header as the client IP. Leave it `false` (the default) for DNS-only or direct setups — otherwise any client can send that header and choose their own IP.
 
 ---
 
