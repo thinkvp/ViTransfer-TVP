@@ -2879,7 +2879,6 @@ export function ShareFilesBrowser({
     const approved = openFolderApprovedVideoVersion
     const latest = versions[0]
     const hero = approved || latest
-    const heroKey = getDownloadableFileKey(hero)
     const heroExt = getFileExtensionLabel(hero.fileName)
     const heroResolution = formatResolutionLabel(hero.width, hero.height)
     const heroDuration = formatDuration(hero.durationSeconds)
@@ -3170,8 +3169,9 @@ export function ShareFilesBrowser({
                     : versionBadge('muted', 'Earlier cut')
                 const description = file.notes || joinMeta([formatDuration(file.durationSeconds), formatResolutionLabel(file.width, file.height)])
                 const canWatchVersion = Boolean(onOpenVideoVersion && file.videoId)
-                // The hero already carries the latest version's Approve button.
-                const showRowApprove = isVersionApprovable(file) && fileKey !== heroKey
+                // Every approvable row gets its own Approve, including the latest one the
+                // hero also offers, so the Versions list reads consistently.
+                const showRowApprove = isVersionApprovable(file)
                 return (
                   <div
                     key={fileKey}
