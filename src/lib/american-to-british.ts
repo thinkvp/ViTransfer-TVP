@@ -15,7 +15,8 @@
  *   - meter     → a "meter" is a measuring device in British English too
  *   - tire      → "tire" also means to grow weary
  *   - check     → "check" is a valid British verb
- *   - practice  → US "practice" collides with the British noun/verb split
+ *   - practice  → British splits noun "practice" / verb "practise"; handled by
+ *                 context in fixPracticeNounVerb instead of the lookup
  *   - license   → same noun/verb ambiguity
  *   - draft     → "draft" is valid British English (distinct from "draught")
  *   - curb      → "curb" is a valid British verb
@@ -148,6 +149,12 @@ const BASE_MAP: Record<string, string> = {
   maneuver: 'manoeuvre',
   aging: 'ageing',
   artifact: 'artefact',
+
+  // The -ed/-ing forms are always the verb, so British is unambiguously -s-
+  // ("a practised eye", "practising daily"). The base word is handled by
+  // fixPracticeNounVerb below.
+  practiced: 'practised',
+  practicing: 'practising',
 }
 
 // More -ize/-yze verbs; the British form is the same word with -ise/-yse, so
@@ -239,9 +246,61 @@ export function usesBritishSpelling(language: string | null | undefined): boolea
   return BRITISH_ENGLISH_LOCALES.has(normalized)
 }
 
+// practice (noun) / practise (verb). Whisper emits either spelling for either
+// sense, so a plain lookup can't fix it — we use the neighbouring word instead.
+// Only clear-cut contexts are rewritten; anything else is left as transcribed.
+//
+// Words that make the next "practice/practise" a noun: determiners,
+// possessives, prepositions and common noun modifiers ("best practice",
+// "medical practice", "at practice", "after practice").
+const PRACTICE_NOUN_BEFORE = [
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'my', 'your', 'his', 'her', 'its', 'our',
+  'their', 'some', 'any', 'no', 'more', 'much', 'less', 'every', 'each', 'of', 'in', 'into', 'at',
+  'for', 'from', 'after', 'before', 'during', 'with', 'without', 'best', 'good', 'bad', 'better',
+  'common', 'standard', 'general', 'private', 'medical', 'legal', 'clinical', 'dental', 'normal',
+  'usual', 'regular', 'daily', 'weekly', 'team', 'training', 'football', 'footy', 'netball',
+  'cricket', 'soccer', 'rugby', 'music', 'band', 'choir', 'industry', 'business', 'professional',
+  "it's", "that's",
+]
+// Words that make a preceding "practice/practise" a noun ("practice session",
+// "practice makes perfect").
+const PRACTICE_NOUN_AFTER = [
+  'session', 'sessions', 'round', 'rounds', 'match', 'matches', 'game', 'games', 'run', 'runs',
+  'test', 'tests', 'exam', 'exams', 'drill', 'drills', 'area', 'areas', 'track', 'range', 'manager',
+  'managers', 'nurse', 'nurses', 'owner', 'owners', 'makes', 'material', 'materials',
+]
+// Words that make the next "practice/practise" a verb. "to" is deliberately
+// absent ("going to practice" is usually the noun).
+const PRACTICE_VERB_BEFORE = [
+  'i', 'we', 'you', 'they', "i'll", "we'll", "you'll", "they'll", 'will', 'would', 'can', 'could',
+  'should', 'must', 'might', 'may', "don't", "didn't", "can't", "won't", "couldn't", "shouldn't",
+  'never', 'always', 'often', 'regularly', 'also', 'still', 'please', "let's",
+]
+
+const wordAlt = (words: string[]) => words.map((w) => w.replace(/'/g, "['’]")).join('|')
+
+const PRACTISE_AS_NOUN_BEFORE = new RegExp(`\\b(${wordAlt(PRACTICE_NOUN_BEFORE)})(\\s+)(practis)(es?)\\b`, 'gi')
+const PRACTISE_AS_NOUN_AFTER = new RegExp(`\\b(practis)(es?)(\\s+)(${wordAlt(PRACTICE_NOUN_AFTER)})\\b`, 'gi')
+const PRACTICE_AS_VERB = new RegExp(`\\b(${wordAlt(PRACTICE_VERB_BEFORE)})(\\s+)(practic)(e)\\b`, 'gi')
+
+/** "practis"/"practic" stem swap, keeping the source token's casing. */
+function swapStem(stem: string, to: 'c' | 's'): string {
+  const last = stem[stem.length - 1]
+  const upper = last === last.toUpperCase()
+  return stem.slice(0, -1) + (upper ? to.toUpperCase() : to)
+}
+
+function fixPracticeNounVerb(text: string): string {
+  return text
+    .replace(PRACTISE_AS_NOUN_BEFORE, (_m, before, sp, stem, end) => `${before}${sp}${swapStem(stem, 'c')}${end}`)
+    .replace(PRACTISE_AS_NOUN_AFTER, (_m, stem, end, sp, after) => `${swapStem(stem, 'c')}${end}${sp}${after}`)
+    .replace(PRACTICE_AS_VERB, (_m, before, sp, stem, end) => `${before}${sp}${swapStem(stem, 's')}${end}`)
+}
+
 /** Convert US spellings in `text` to British, preserving case and punctuation. */
 export function convertToBritishEnglish(text: string): string {
-  return text.replace(PATTERN, (match) =>
+  const converted = text.replace(PATTERN, (match) =>
     applyCase(match, AMERICAN_TO_BRITISH[match.toLowerCase()]),
   )
+  return fixPracticeNounVerb(converted)
 }

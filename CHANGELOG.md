@@ -5,6 +5,16 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **The latest version now has its own Approve button in the Versions list** — on a video's share page, the newest version's row shows Approve like earlier versions do, instead of relying only on the button at the top.
+
+### Fixed
+
+- **Subtitles spell "practice" and "practise" the Australian/British way** — with an en-AU/en-GB transcription language, the noun is now "practice" ("medical practice", "practice session") and the verb "practise" ("I practise"), based on the surrounding words. "Practiced/practicing" become "practised/practising". Existing subtitles are unchanged until regenerated.
+
 ## [2.8.5] - 2026-11-10
 
 ### Added
