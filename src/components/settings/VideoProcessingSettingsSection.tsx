@@ -4,12 +4,21 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { ScheduleSelector } from '@/components/ScheduleSelector'
+import { TimePicker24h } from '@/components/ui/time-picker-24h'
 import { UPLOAD_CATEGORIES, getCategoryExtensions, parseCustomExtensions } from '@/lib/upload-policy'
 
 const RESOLUTION_OPTIONS = [
   { value: '480p', label: '480p (854×480 or 480×854 for vertical)' },
   { value: '720p', label: '720p (1280×720 or 720×1280 for vertical)' },
   { value: '1080p', label: '1080p (1920×1080 or 1080×1920 for vertical)' },
+] as const
+
+const FEEDBACK_REMINDER_OPTIONS = [
+  { days: 7, label: '1 week before' },
+  { days: 3, label: '3 days before' },
+  { days: 2, label: '2 days before' },
+  { days: 1, label: '1 day before' },
+  { days: 0, label: 'On the due day' },
 ] as const
 
 interface VideoProcessingSettingsSectionProps {
@@ -44,6 +53,12 @@ interface VideoProcessingSettingsSectionProps {
   // Client system email toggles
   clientEmailProjectApproved: boolean
   setClientEmailProjectApproved: (value: boolean) => void
+  clientEmailFeedbackReminders: boolean
+  setClientEmailFeedbackReminders: (value: boolean) => void
+  feedbackReminderDaysBefore: number[]
+  setFeedbackReminderDaysBefore: (value: number[]) => void
+  feedbackReminderTime: string
+  setFeedbackReminderTime: (value: string) => void
 
   show: boolean
   setShow: (value: boolean) => void
@@ -77,6 +92,12 @@ export function VideoProcessingSettingsSection({
   setDefaultClientNotificationDay,
   clientEmailProjectApproved,
   setClientEmailProjectApproved,
+  clientEmailFeedbackReminders,
+  setClientEmailFeedbackReminders,
+  feedbackReminderDaysBefore,
+  setFeedbackReminderDaysBefore,
+  feedbackReminderTime,
+  setFeedbackReminderTime,
   show,
   setShow,
   hideCollapse,
@@ -319,6 +340,57 @@ export function VideoProcessingSettingsSection({
                 </div>
                 <Switch id="clientEmailProjectApproved" checked={clientEmailProjectApproved} onCheckedChange={setClientEmailProjectApproved} />
               </div>
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-0.5 flex-1">
+                  <Label htmlFor="clientEmailFeedbackReminders">Feedback deadline reminders</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Remind clients before a video version&apos;s feedback deadline. Skipped for versions the client has already commented on, approved, or requested the next version of.
+                  </p>
+                </div>
+                <Switch id="clientEmailFeedbackReminders" checked={clientEmailFeedbackReminders} onCheckedChange={setClientEmailFeedbackReminders} />
+              </div>
+
+              {clientEmailFeedbackReminders && (
+                <div className="space-y-3 rounded-md border border-border bg-background/50 p-3">
+                  <div className="space-y-2">
+                    <Label className="text-sm">Send a reminder</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {FEEDBACK_REMINDER_OPTIONS.map((opt) => {
+                        const selected = feedbackReminderDaysBefore.includes(opt.days)
+                        return (
+                          <button
+                            key={opt.days}
+                            type="button"
+                            onClick={() => {
+                              const next = selected
+                                ? feedbackReminderDaysBefore.filter((d) => d !== opt.days)
+                                : [...feedbackReminderDaysBefore, opt.days]
+                              setFeedbackReminderDaysBefore(next.sort((a, b) => b - a))
+                            }}
+                            className={
+                              selected
+                                ? 'rounded-full border border-primary bg-primary/15 px-3 py-1 text-xs font-medium text-primary'
+                                : 'rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted'
+                            }
+                            aria-pressed={selected}
+                          >
+                            {opt.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {feedbackReminderDaysBefore.length === 0 && (
+                      <p className="text-xs text-warning">No reminder times selected, so no reminders will be sent.</p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Label className="text-sm">At</Label>
+                    <TimePicker24h value={feedbackReminderTime} onChange={setFeedbackReminderTime} className="w-28" />
+                    <span className="text-xs text-muted-foreground">server time (checked every 15 minutes)</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

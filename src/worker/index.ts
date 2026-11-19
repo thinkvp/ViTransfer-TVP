@@ -32,6 +32,7 @@ import { processHlsReconcile } from './hls-reconcile'
 import { processProjectKeyDateReminders } from './project-key-date-reminders'
 import { processUserKeyDateReminders } from './user-key-date-reminders'
 import { processSalesReminders } from './sales-reminders'
+import { processFeedbackDeadlineReminders } from './feedback-deadline-reminders'
 import { processAutoStartProjectsOnShootingKeyDate } from './auto-start-projects-on-shooting'
 import { reconcileAllProjectsStorageTotals } from '@/lib/project-total-bytes'
 import { reconcileAccountingFilesBytes } from '@/lib/accounting/file-storage'
@@ -607,6 +608,21 @@ async function main() {
     }
   )
 
+  // Client feedback deadline reminders. Every 15 minutes; the processor itself waits
+  // for the admin-configured time of day (Settings.feedbackReminderTime).
+  await notificationQueue.add(
+    'feedback-deadline-reminders',
+    {},
+    {
+      repeat: {
+        pattern: '*/15 * * * *',
+      },
+      jobId: 'feedback-deadline-reminders',
+      removeOnComplete: true,
+      removeOnFail: true,
+    }
+  )
+
   // Sales reminder emails (weekdays @ 9am server/container time)
   await notificationQueue.add(
     'sales-reminders',
@@ -1031,6 +1047,15 @@ async function main() {
 
       if (job.name === 'user-key-date-reminders') {
         await processUserKeyDateReminders()
+        return
+      }
+
+      if (job.name === 'feedback-deadline-reminders') {
+        try {
+          await processFeedbackDeadlineReminders()
+        } catch (e) {
+          console.warn('[FEEDBACK-REMINDER] Run failed (continuing):', e instanceof Error ? e.message : e)
+        }
         return
       }
 

@@ -9,6 +9,7 @@ import { isS3Mode } from '@/lib/s3-storage'
 import { allocateUniqueStorageName, buildProjectStorageRoot, buildVideoOriginalStoragePath } from '@/lib/project-storage-paths'
 import { checkBodySize } from '@/lib/api-guard'
 import { registerStoredFile } from '@/lib/stored-file'
+import { isValidFeedbackDueDate, todayYmd } from '@/lib/feedback-deadline'
 export const runtime = 'nodejs'
 
 
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes, allowApproval, autoGenerateSubtitles } = body
+    const { projectId, versionLabel, originalFileName, originalFileSize, name, mimeType, videoNotes, allowApproval, autoGenerateSubtitles, feedbackDueDate } = body
 
     // Validate required fields
     if (!name || !name.trim()) {
@@ -68,6 +69,21 @@ export async function POST(request: NextRequest) {
 
     if (autoGenerateSubtitles !== undefined && typeof autoGenerateSubtitles !== 'boolean') {
       return NextResponse.json({ error: 'autoGenerateSubtitles must be a boolean' }, { status: 400 })
+    }
+
+    // Optional client feedback deadline (date only). Empty/null = none.
+    const normalizedFeedbackDueDate =
+      typeof feedbackDueDate === 'string' && feedbackDueDate.trim() ? feedbackDueDate.trim() : null
+    if (feedbackDueDate != null && typeof feedbackDueDate !== 'string') {
+      return NextResponse.json({ error: 'feedbackDueDate must be a YYYY-MM-DD string' }, { status: 400 })
+    }
+    if (normalizedFeedbackDueDate) {
+      if (!isValidFeedbackDueDate(normalizedFeedbackDueDate)) {
+        return NextResponse.json({ error: 'feedbackDueDate must be a valid YYYY-MM-DD date' }, { status: 400 })
+      }
+      if (normalizedFeedbackDueDate < todayYmd()) {
+        return NextResponse.json({ error: 'Feedback deadline cannot be in the past' }, { status: 400 })
+      }
     }
 
     // Validate uploaded file
@@ -160,6 +176,7 @@ export async function POST(request: NextRequest) {
         videoNotes: trimmedVideoNotes ? trimmedVideoNotes : null,
         allowApproval: allowApproval ?? true,
         autoGenerateSubtitles: autoGenerateSubtitles ?? false,
+        feedbackDueDate: normalizedFeedbackDueDate,
         status: 'UPLOADING',
         duration: 0,
         width: 0,

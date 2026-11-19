@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { normalizeReminderDaysBefore } from '@/lib/feedback-deadline'
 import { prisma } from '@/lib/db'
 import { requireApiUser } from '@/lib/auth'
 import { encrypt } from '@/lib/encryption'
@@ -235,6 +236,9 @@ export async function PATCH(request: NextRequest) {
       defaultClientNotificationTime,
       defaultClientNotificationDay,
       clientEmailProjectApproved,
+      clientEmailFeedbackReminders,
+      feedbackReminderDaysBefore,
+      feedbackReminderTime,
       emailCustomFooterText,
       accentColor,
       accentTextMode,
@@ -668,6 +672,9 @@ export async function PATCH(request: NextRequest) {
       defaultClientNotificationTime,
       defaultClientNotificationDay: defaultClientNotificationDay !== undefined ? defaultClientNotificationDay : null,
       clientEmailProjectApproved: typeof clientEmailProjectApproved === 'boolean' ? clientEmailProjectApproved : undefined,
+      clientEmailFeedbackReminders: typeof clientEmailFeedbackReminders === 'boolean' ? clientEmailFeedbackReminders : undefined,
+      feedbackReminderDaysBefore: Array.isArray(feedbackReminderDaysBefore) ? normalizeReminderDaysBefore(feedbackReminderDaysBefore) : undefined,
+      feedbackReminderTime: typeof feedbackReminderTime === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(feedbackReminderTime) ? feedbackReminderTime : undefined,
       emailCustomFooterText,
       accentColor: typeof accentColor === 'string' ? (accentColor.trim() || null) : accentColor,
       accentTextMode: accentTextMode === 'LIGHT' || accentTextMode === 'DARK' ? accentTextMode : undefined,

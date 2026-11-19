@@ -659,7 +659,12 @@ export default function SharePage() {
               // flipping approval (which is what invalidates the token cache) — the
               // "Reviewed" state must reflect live for other viewers of this page.
               return tokenized && tokenCacheRef.current.has(String(v.id))
-                ? { ...tokenized, revisionRequestedAt: (v as any).revisionRequestedAt ?? null }
+                ? {
+                    ...tokenized,
+                    revisionRequestedAt: (v as any).revisionRequestedAt ?? null,
+                    feedbackDueDate: (v as any).feedbackDueDate ?? null,
+                    feedbackDueExtendedAt: (v as any).feedbackDueExtendedAt ?? null,
+                  }
                 : v
             })
           }
@@ -2453,6 +2458,9 @@ export default function SharePage() {
               // Reviewed state also changes without re-tokenization (see approval
               // comment above) — keep the sidebar tick/grouping live too.
               revisionRequestedAt: f.revisionRequestedAt ?? null,
+              // Feedback deadlines can be set/extended live by the studio.
+              feedbackDueDate: f.feedbackDueDate ?? null,
+              feedbackDueExtendedAt: f.feedbackDueExtendedAt ?? null,
             }
           : v
       })
@@ -2631,6 +2639,8 @@ export default function SharePage() {
         const overlayVolatileFields = (tokenized: any) => ({
           ...tokenized,
           revisionRequestedAt: video.revisionRequestedAt ?? null,
+          feedbackDueDate: video.feedbackDueDate ?? null,
+          feedbackDueExtendedAt: video.feedbackDueExtendedAt ?? null,
         })
 
         const cached = tokenCacheRef.current.get(video.id)
@@ -4309,6 +4319,7 @@ function ShareFeedbackGrid({
               clientName={project.clientName}
               clientEmail={project.clientEmail}
               isApproved={isApproved}
+              projectStatus={project.status}
               restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
               useFullTimecode={effectiveUseFullTimecode}
               videos={readyVideos as any}

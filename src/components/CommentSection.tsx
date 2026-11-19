@@ -6,7 +6,8 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Eye, FileClock, History, Info, MessageCircle, Share2, X } from 'lucide-react'
+import { AlertTriangle, CalendarClock, CheckCircle2, ChevronDown, Clock, Eye, FileClock, History, Info, MessageCircle, Share2, X } from 'lucide-react'
+import { describeFeedbackDeadline, formatFeedbackDueDate, getFeedbackDeadlineStatus, isFeedbackDeadlineActive } from '@/lib/feedback-deadline'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -40,6 +41,8 @@ interface CommentSectionProps {
   clientName: string
   clientEmail?: string
   isApproved: boolean
+  /** Project status — feedback deadlines are hidden on closed / on-hold projects. */
+  projectStatus?: string | null
   restrictToLatestVersion?: boolean
   useFullTimecode?: boolean
   videos?: Video[]
@@ -109,6 +112,7 @@ export function CommentSectionView({
   clientName,
   clientEmail,
   isApproved,
+  projectStatus,
   restrictToLatestVersion = false,
   useFullTimecode = false,
   videos = [],
@@ -944,6 +948,26 @@ export function CommentSectionView({
     !hasLocallyApprovedVideoInGroup
   )
 
+  // Feedback deadline for the version in the header. Same rule as the reminder emails
+  // (src/lib/feedback-deadline.ts), plus this session's optimistic approve / request state.
+  const headerFeedbackDueDate = (() => {
+    if (!headerVideo) return null
+    if (hasAnyApprovedVideo || isHeaderVideoLocallyApproved || isHeaderVideoRevisionRequested) return null
+    const group = sortedVideoVersions.map((v: any) => ({
+      id: String(v.id),
+      version: Number(v.version) || 0,
+      approved: v.approved === true,
+      revisionRequestedAt: v.revisionRequestedAt ?? null,
+      feedbackDueDate: v.feedbackDueDate ?? null,
+    }))
+    const self = group.find((v) => v.id === String(headerVideo.id))
+    if (!self) return null
+    const status = projectStatus ?? (isApproved ? 'APPROVED' : null)
+    return isFeedbackDeadlineActive(self, group, status) ? (self.feedbackDueDate as string) : null
+  })()
+  const headerFeedbackDeadline = headerFeedbackDueDate ? getFeedbackDeadlineStatus(headerFeedbackDueDate) : null
+  const headerFeedbackExtended = Boolean((headerVideo as any)?.feedbackDueExtendedAt)
+
   const showApproveVideoButton = Boolean(
     showVideoActions &&
     showApproveButton &&
@@ -1514,6 +1538,51 @@ export function CommentSectionView({
             onShowShortcuts={handleOpenShortcuts}
           />
         )}
+
+        {headerFeedbackDueDate && headerFeedbackDeadline ? (
+          <div
+            className={cn(
+              'border-b border-border shrink-0 px-4 py-2.5 flex items-center gap-2 text-sm',
+              headerFeedbackDeadline.status === 'overdue'
+                ? 'bg-destructive/10'
+                : headerFeedbackDeadline.status === 'today'
+                ? 'bg-warning/10'
+                : 'bg-muted/20'
+            )}
+          >
+            <CalendarClock
+              className={cn(
+                'w-4 h-4 shrink-0',
+                headerFeedbackDeadline.status === 'overdue'
+                  ? 'text-destructive'
+                  : headerFeedbackDeadline.status === 'today'
+                  ? 'text-warning'
+                  : 'text-muted-foreground'
+              )}
+            />
+            <p className="min-w-0 flex-1">
+              <span className="text-muted-foreground">Feedback requested by </span>
+              <span className="font-medium text-foreground">{formatFeedbackDueDate(headerFeedbackDueDate)}</span>
+              <span
+                className={cn(
+                  'ml-1.5 text-xs',
+                  headerFeedbackDeadline.status === 'overdue'
+                    ? 'text-destructive font-medium'
+                    : headerFeedbackDeadline.status === 'today'
+                    ? 'text-warning font-medium'
+                    : 'text-muted-foreground'
+                )}
+              >
+                · {describeFeedbackDeadline(headerFeedbackDueDate)}
+              </span>
+            </p>
+            {headerFeedbackExtended ? (
+              <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                Extended
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         {showVideoNotes && headerVideoNotes ? (
           <div className="border-b border-border bg-muted/20 shrink-0">

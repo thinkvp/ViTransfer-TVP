@@ -14,6 +14,8 @@ import { VideoAssetList } from './VideoAssetList'
 import { withDownloadTracking } from '@/lib/download-url'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
+import { Input } from './ui/input'
+import { addDaysYmd, describeFeedbackDeadline, formatFeedbackDueDate, getFeedbackDeadlineStatus, isValidFeedbackDueDate, todayYmd } from '@/lib/feedback-deadline'
 
 interface VideoListProps {
   videos: Video[]
@@ -40,6 +42,15 @@ export default function VideoList({
   const effectiveCanApprove = canApprove ?? isAdmin
   const effectiveCanManageAllowApproval = canManageAllowApproval ?? isAdmin
 
+  // Only the newest READY version of a name can owe feedback, so only it shows a
+  // deadline chip (mirrors isFeedbackDeadlineActive's "latest version" rule).
+  const latestReadyVersionByName = new Map<string, number>()
+  for (const v of initialVideos) {
+    if (v.status !== 'READY') continue
+    latestReadyVersionByName.set(v.name, Math.max(latestReadyVersionByName.get(v.name) ?? 0, v.version))
+  }
+  const isLatestVersion = (v: Video) => (latestReadyVersionByName.get(v.name) ?? v.version) <= v.version
+
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -50,6 +61,9 @@ export default function VideoList({
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null)
   const [notesEditValue, setNotesEditValue] = useState('')
   const [savingNotesId, setSavingNotesId] = useState<string | null>(null)
+  const [editingDeadlineId, setEditingDeadlineId] = useState<string | null>(null)
+  const [deadlineEditValue, setDeadlineEditValue] = useState('')
+  const [savingDeadlineId, setSavingDeadlineId] = useState<string | null>(null)
   const [savingAllowApprovalId, setSavingAllowApprovalId] = useState<string | null>(null)
   const [savingRevisionRequestedId, setSavingRevisionRequestedId] = useState<string | null>(null)
   const [assetRefreshTrigger, setAssetRefreshTrigger] = useState(0)
@@ -287,6 +301,57 @@ export default function VideoList({
       toast.error('Failed to update version notes')
     } finally {
       setSavingNotesId(null)
+    }
+  }
+
+  const handleStartEditDeadline = (videoId: string, current: string) => {
+    setEditingDeadlineId(videoId)
+    setDeadlineEditValue(current)
+  }
+
+  const handleCancelEditDeadline = () => {
+    setEditingDeadlineId(null)
+    setDeadlineEditValue('')
+  }
+
+  const handleSaveDeadline = async (videoId: string) => {
+    const next = deadlineEditValue.trim()
+    if (next && !isValidFeedbackDueDate(next)) {
+      toast.error('Please pick a valid date')
+      return
+    }
+    const previous = (videos.find(v => v.id === videoId)?.feedbackDueDate as string | null | undefined) || ''
+    if (next === previous) {
+      handleCancelEditDeadline()
+      return
+    }
+
+    setSavingDeadlineId(videoId)
+    try {
+      await apiPatch(`/api/videos/${videoId}`, { feedbackDueDate: next || null })
+      const extended = Boolean(next && previous && next > previous)
+      setVideos(prev => prev.map(v => {
+        if (v.id !== videoId) return v
+        const extendedAt = extended
+          ? new Date().toISOString()
+          : next && previous
+          ? null
+          : next
+          ? v.feedbackDueExtendedAt ?? null
+          : null
+        return { ...v, feedbackDueDate: next || null, feedbackDueExtendedAt: extendedAt }
+      }))
+      toast.success(
+        !next ? 'Feedback deadline removed'
+          : extended ? `Deadline extended to ${formatFeedbackDueDate(next)}`
+          : `Deadline set to ${formatFeedbackDueDate(next)}`
+      )
+      handleCancelEditDeadline()
+      onRefresh?.()
+    } catch (error) {
+      toast.error(error instanceof Error && error.message ? error.message : 'Failed to update feedback deadline')
+    } finally {
+      setSavingDeadlineId(null)
     }
   }
 
@@ -567,6 +632,25 @@ export default function VideoList({
                   </span>
                 )}
 
+                {!video.approved && !video.revisionRequestedAt && isLatestVersion(video) && isValidFeedbackDueDate(video.feedbackDueDate) && (() => {
+                  const due = video.feedbackDueDate as string
+                  const state = getFeedbackDeadlineStatus(due)
+                  const tone = state?.status === 'overdue'
+                    ? 'bg-destructive-visible text-destructive border-destructive-visible'
+                    : state?.status === 'today'
+                    ? 'bg-warning-visible text-warning border-warning-visible'
+                    : 'bg-muted text-muted-foreground border-border'
+                  return (
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap border ${tone}`}
+                      title={`Feedback due ${formatFeedbackDueDate(due, { withYear: true })} (${describeFeedbackDeadline(due)})`}
+                    >
+                      {state?.status === 'overdue' ? 'Overdue' : `Due ${formatFeedbackDueDate(due)}`}
+                      {video.feedbackDueExtendedAt ? ' · Extended' : ''}
+                    </span>
+                  )
+                })()}
+
                 {isAdmin && video.status === 'READY' && !video.approved && (
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground whitespace-nowrap">Approvable?</span>
@@ -662,6 +746,110 @@ export default function VideoList({
                 </div>
               </div>
             )
+          )}
+
+          {/* Feedback Deadline */}
+          {video.status === 'READY' && isExpanded && (
+            <div className="pt-3">
+              <div className="flex items-center gap-2">
+                <p className="text-muted-foreground text-xs sm:text-sm">Feedback Deadline</p>
+                {isAdmin && editingId !== video.id && (
+                  editingDeadlineId === video.id ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-success hover:text-success hover:bg-success-visible"
+                        onClick={() => handleSaveDeadline(video.id)}
+                        disabled={savingDeadlineId === video.id}
+                        title="Save feedback deadline"
+                      >
+                        <Check className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive-visible"
+                        onClick={handleCancelEditDeadline}
+                        disabled={savingDeadlineId === video.id}
+                        title="Cancel"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
+                      onClick={() => handleStartEditDeadline(video.id, (video.feedbackDueDate as string) || '')}
+                      title={video.feedbackDueDate ? 'Change or extend feedback deadline' : 'Set feedback deadline'}
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </Button>
+                  )
+                )}
+              </div>
+
+              {editingDeadlineId === video.id ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Input
+                    type="date"
+                    value={deadlineEditValue}
+                    onChange={(e) => setDeadlineEditValue(e.target.value)}
+                    disabled={savingDeadlineId === video.id}
+                    className="w-auto"
+                  />
+                  {[3, 7].map((days) => {
+                    // Extend from the current deadline, or from today if none / already passed.
+                    const today = todayYmd()
+                    const base = isValidFeedbackDueDate(deadlineEditValue) && deadlineEditValue >= today ? deadlineEditValue : today
+                    return (
+                      <button
+                        key={days}
+                        type="button"
+                        disabled={savingDeadlineId === video.id}
+                        onClick={() => setDeadlineEditValue(addDaysYmd(base, days) || '')}
+                        className="h-8 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                      >
+                        {days === 7 ? '+1 week' : `+${days} days`}
+                      </button>
+                    )
+                  })}
+                  {deadlineEditValue ? (
+                    <button
+                      type="button"
+                      disabled={savingDeadlineId === video.id}
+                      onClick={() => setDeadlineEditValue('')}
+                      className="h-8 px-1 text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-sm mt-1">
+                  {isValidFeedbackDueDate(video.feedbackDueDate) ? (
+                    <>
+                      {formatFeedbackDueDate(video.feedbackDueDate as string, { withYear: true })}
+                      <span className="text-muted-foreground">
+                        {' · '}
+                        {video.approved
+                          ? 'Approved'
+                          : video.revisionRequestedAt
+                          ? 'Changes requested'
+                          : !isLatestVersion(video)
+                          ? 'Superseded by a newer version'
+                          : describeFeedbackDeadline(video.feedbackDueDate as string)}
+                        {video.feedbackDueExtendedAt ? ' · Extended' : ''}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">No deadline</span>
+                  )}
+                </p>
+              )}
+            </div>
           )}
 
           {/* Version Notes */}

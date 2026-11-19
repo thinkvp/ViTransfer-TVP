@@ -221,6 +221,7 @@ export async function GET(
         timelinePreviewSpritesPath: undefined,
         hasSubtitles: previews.has('SUBTITLES_VTT'),
         hasWaveformPeaks: previews.has('WAVEFORM_PEAKS'),
+        feedbackDueLastReminderAt: undefined,
       }
     })
 

@@ -32,6 +32,9 @@ export interface Video {
   allowApproval?: boolean
   // Set when the client requested the next version (share-page "Reviewed" state)
   revisionRequestedAt?: string | null
+  // Optional client feedback deadline (YYYY-MM-DD) — see src/lib/feedback-deadline.ts
+  feedbackDueDate?: string | null
+  feedbackDueExtendedAt?: string | null
   timelinePreviewsReady?: boolean
   createdAt?: string // serialized DateTime
 

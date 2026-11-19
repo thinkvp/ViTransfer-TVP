@@ -20,6 +20,7 @@ import {
 	renderProjectApprovedEmail,
 	renderProjectGeneralNotificationEmail,
 	renderNewItemsReadyEmail,
+	renderFeedbackReminderEmail,
 	firstWordName,
 	renderEmailShell,
 } from '../src/lib/email'
@@ -56,6 +57,7 @@ async function main() {
 			videoName: 'Cut A',
 			versionLabel: 'v3',
 			videoNotes: 'Please focus on pacing in the first 30s.',
+			feedbackDueDate: '2026-11-21',
 			shareUrl: 'http://localhost:3000/share/demo',
 			isPasswordProtected: true,
 			trackingToken: undefined,
@@ -146,7 +148,7 @@ async function main() {
 			shareUrl: 'http://localhost:3000/share/demo',
 			readyVideos: [
 				{ name: 'Day 1 - Session 3', versionLabel: 'v1', approved: false },
-				{ name: 'Day 1 - Session 3', versionLabel: 'v2', approved: false },
+				{ name: 'Day 1 - Session 3', versionLabel: 'v2', approved: false, feedbackDueDate: '2026-11-21' },
 				{ name: 'Cut A', versionLabel: 'v3', approved: true },
 				{ name: 'Cut B', versionLabel: 'v1', approved: false },
 				{ name: 'Promo Reel', versionLabel: 'v2', approved: true },
@@ -169,7 +171,7 @@ async function main() {
 			projectTitle: 'Winter Campaign',
 			shareUrl: 'http://localhost:3000/share/demo',
 			videos: [
-				{ name: 'Cut A', versionLabel: 'v3', approved: false },
+				{ name: 'Cut A', versionLabel: 'v3', approved: false, feedbackDueDate: '2026-11-19' },
 				{ name: 'Promo Reel', versionLabel: 'v2', approved: true },
 			],
 			albums: [
@@ -177,6 +179,24 @@ async function main() {
 			],
 			notes: 'A couple of fresh deliverables for you — the rest is still in progress.',
 			isPasswordProtected: false,
+			trackingToken: undefined,
+			branding,
+		})).html
+	)
+
+	await writeHtml(
+		outDir,
+		'06c-feedback-reminder.html',
+		(await renderFeedbackReminderEmail({
+			clientName: 'Alex',
+			projectTitle: 'Winter Campaign',
+			shareUrl: 'http://localhost:3000/share/demo',
+			videos: [
+				{ name: 'Cut A', versionLabel: 'v3', feedbackDueDate: '2026-11-19' },
+				{ name: 'Day 1 - Session 3', versionLabel: 'v2', feedbackDueDate: '2026-11-21' },
+			],
+			isPasswordProtected: true,
+			unsubscribeUrl: 'http://localhost:3000/unsubscribe?demo=1',
 			trackingToken: undefined,
 			branding,
 		})).html

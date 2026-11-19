@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { sendNewAlbumReadyEmail, sendNewVersionEmail, sendProjectGeneralNotificationEmail, sendNewItemsReadyEmail, isSmtpConfigured, getEmailSettings, buildCompanyLogoUrl, sendEmail } from '@/lib/email'
+import { isFeedbackDeadlineActive } from '@/lib/feedback-deadline'
+import { getActiveFeedbackDeadlines, sendFeedbackReminderEmails } from '@/lib/feedback-reminders'
 import { getPasswordEmailQueue } from '@/lib/queue'
 import { generateNotificationSummaryEmail, generateProjectInviteInternalUsersEmail, generateAdminSummaryEmail } from '@/lib/email-templates'
 import { canDoAction, normalizeRolePermissions } from '@/lib/rbac'
@@ -83,9 +85,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           select: {
             id: true,
             name: true,
+            version: true,
             versionLabel: true,
             status: true,
             approved: true,
+            revisionRequestedAt: true,
+            feedbackDueDate: true,
           },
           orderBy: { createdAt: 'desc' }
         },
@@ -573,6 +578,47 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ success: true, message: `Comment summary sent to ${sentTo.join(' and ')}.` })
     }
 
+    // FEEDBACK REMINDER: manual send of the deadline reminder for chosen versions.
+    // Only versions whose deadline is still active are accepted (same rule as the
+    // scheduled job); unlike the scheduled job, versions the client has already
+    // commented on may be included — the admin chose them explicitly.
+    if (notificationType === 'feedback-reminder') {
+      const requestedVideoIds = Array.from(
+        new Set((Array.isArray(videoIds) ? videoIds : []).map((x: any) => String(x)).filter(Boolean))
+      )
+      if (requestedVideoIds.length === 0) {
+        return NextResponse.json({ error: 'Please select at least one video with a feedback deadline.' }, { status: 400 })
+      }
+      const requestedRecipientIds = Array.from(
+        new Set((Array.isArray(recipientIds) ? recipientIds : []).map((x: any) => String(x)).filter(Boolean))
+      )
+      if (requestedRecipientIds.length === 0) {
+        return NextResponse.json({ error: 'Please select at least one recipient' }, { status: 400 })
+      }
+
+      const { deadlines } = await getActiveFeedbackDeadlines(projectId)
+      const byId = new Map(deadlines.map((d) => [d.videoId, d]))
+      const chosen = requestedVideoIds.map((id) => byId.get(id)).filter((d): d is NonNullable<typeof d> => Boolean(d))
+      if (chosen.length !== requestedVideoIds.length) {
+        return NextResponse.json(
+          { error: 'One or more selected videos no longer have an active feedback deadline.' },
+          { status: 400 }
+        )
+      }
+
+      const result = await sendFeedbackReminderEmails({ projectId, deadlines: chosen, recipientIds: requestedRecipientIds, request })
+      if (result.sentTo.length === 0) {
+        return NextResponse.json({ error: result.error || 'Failed to send reminder' }, { status: result.error === 'No eligible recipients' ? 400 : 500 })
+      }
+      const list = result.sentTo.length === 1
+        ? result.sentTo[0]
+        : result.sentTo.slice(0, -1).join(', ') + ' & ' + result.sentTo[result.sentTo.length - 1]
+      return NextResponse.json({
+        success: true,
+        message: `Feedback reminder sent to ${list}.${result.failed > 0 ? ` ${result.failed} failed.` : ''}`,
+      })
+    }
+
     // Get recipients (client notifications)
     const recipients = await getProjectRecipients(projectId)
 
@@ -618,6 +664,16 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       )
     }
 
+    // Feedback deadlines that still apply (latest version, unapproved, not requested,
+    // project open). Only these are printed in the emails.
+    const activeFeedbackDueById = new Map<string, string>()
+    for (const v of project.videos) {
+      const group = project.videos.filter((g) => g.name === v.name)
+      if (isFeedbackDeadlineActive(v, group, project.status) && v.feedbackDueDate) {
+        activeFeedbackDueById.set(v.id, v.feedbackDueDate)
+      }
+    }
+
     // Prepare video data if specific video notification
     let video = null
     let album: { id: string; name: string; notes: string | null; projectId: string } | null = null
@@ -627,7 +683,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const isSpecificVideo = !notifyEntireProject && !isSelectedItems && !albumId
 
     // Selected items: a hand-picked subset of ready videos and/or albums (not the whole project)
-    let selectedVideos: Array<{ name: string; versionLabel: string; approved: boolean }> = []
+    let selectedVideos: Array<{ name: string; versionLabel: string; approved: boolean; feedbackDueDate: string | null }> = []
     let selectedAlbums: Array<{ name: string; photoCount: number }> = []
 
     if (isSelectedItems) {
@@ -653,7 +709,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         }
         selectedVideos = requestedVideoIds.map((id) => {
           const v = readyVideoById.get(id)!
-          return { name: v.name, versionLabel: v.versionLabel, approved: v.approved }
+          return { name: v.name, versionLabel: v.versionLabel, approved: v.approved, feedbackDueDate: activeFeedbackDueById.get(v.id) ?? null }
         })
       }
 
@@ -751,7 +807,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             clientName: recipient.name || 'Client',
             projectTitle: project.title,
             shareUrl,
-            readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel, approved: v.approved })),
+            readyVideos: project.videos.map(v => ({ name: v.name, versionLabel: v.versionLabel, approved: v.approved, feedbackDueDate: activeFeedbackDueById.get(v.id) ?? null })),
             readyAlbums,
             notes: trimmedNotes ? trimmedNotes : null,
             isPasswordProtected,
@@ -788,6 +844,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             videoName: video!.name,
             versionLabel: video!.versionLabel,
             videoNotes: video!.videoNotes || null,
+            feedbackDueDate: activeFeedbackDueById.get(String(videoId)) ?? null,
             shareUrl,
             isPasswordProtected,
             trackingToken: trackingToken.token,

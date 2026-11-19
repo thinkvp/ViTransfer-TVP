@@ -11,6 +11,7 @@ import { generateVideoAccessToken } from '@/lib/video-access'
 import { batchResolveFileSizes, getStoredFileRecords, storedFileExists } from '@/lib/stored-file'
 import { filterSubtitleAssetsForViewer } from '@/lib/subtitle-delivery'
 import type { DownloadableFile, DownloadableGroup, DownloadableFilesResult } from '@/lib/downloadable-files'
+import { isFeedbackDeadlineActive } from '@/lib/feedback-deadline'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -60,7 +61,7 @@ export async function GET(
 
   const projectMeta = await prisma.project.findUnique({
     where: { slug: token },
-    select: { id: true, sharePassword: true, authMode: true, enableUploads: true, enableClientUploads: true },
+    select: { id: true, status: true, sharePassword: true, authMode: true, enableUploads: true, enableClientUploads: true },
   })
 
   if (!projectMeta) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -311,6 +312,8 @@ export async function GET(
   for (const [videoName, videos] of videosByName.entries()) {
     const sortedVersions = [...videos].sort((a, b) => b.version - a.version)
     const versionFiles: DownloadableFile[] = sortedVersions.map((video) => {
+      // Only surface the deadline while it is live (latest, unapproved, not requested, project open).
+      const deadlineActive = isFeedbackDeadlineActive(video, sortedVersions, projectMeta.status)
       const tokens = videoTimelineTokens.get(video.id)
       const hasTimeline = tokens !== undefined && tokens !== null
       const presignedTimeline = videoTimelinePresigned.get(video.id)
@@ -327,6 +330,8 @@ export async function GET(
         createdAt: video.createdAt ? video.createdAt.toISOString() : undefined,
         approvedAt: video.approved && video.approvedAt ? video.approvedAt.toISOString() : undefined,
         revisionRequestedAt: video.revisionRequestedAt ? video.revisionRequestedAt.toISOString() : undefined,
+        feedbackDueDate: deadlineActive ? video.feedbackDueDate ?? undefined : undefined,
+        feedbackDueExtended: deadlineActive && video.feedbackDueExtendedAt ? true : undefined,
         width: video.width > 0 ? video.width : undefined,
         height: video.height > 0 ? video.height : undefined,
         codec: video.codec || undefined,

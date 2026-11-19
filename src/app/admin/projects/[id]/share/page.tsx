@@ -3097,6 +3097,7 @@ function AdminShareFeedbackGrid({
               clientName={clientDisplayName}
               clientEmail={project.recipients?.[0]?.email}
               isApproved={isApproved}
+              projectStatus={project.status}
               restrictToLatestVersion={Boolean(project.restrictCommentsToLatestVersion)}
               useFullTimecode={effectiveUseFullTimecode}
               videos={readyVideos as any}

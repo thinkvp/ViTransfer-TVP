@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer'
+import { formatFeedbackDueDate, getFeedbackDeadlineStatus, isValidFeedbackDueDate, todayYmd } from './feedback-deadline'
 import type { SendMailOptions, Transporter } from 'nodemailer'
 import { prisma } from './db'
 import { decrypt } from './encryption'
@@ -642,12 +643,32 @@ function renderNotesCard(notes: string | null | undefined, opts: { cardStyle: st
   `
 }
 
+/** " · feedback by Fri 21 Nov" — appended to a video line in the multi-item emails. */
+export function emailFeedbackDueInlineHtml(dueYmd: string): string {
+  if (!isValidFeedbackDueDate(dueYmd)) return ''
+  return ` <span style="font-size:13px; color:${EMAIL_THEME.textMuted}; white-space:nowrap;">&middot; feedback by <strong style="color:#374151;">${escapeHtml(formatFeedbackDueDate(dueYmd))}</strong></span>`
+}
+
+function renderFeedbackDeadlineCard(dueYmd: string | null | undefined, opts: { cardStyle: string; cardTitleStyle: string }) {
+  if (!dueYmd || !isValidFeedbackDueDate(dueYmd)) return ''
+  return `
+    <div style="${opts.cardStyle}">
+      <div style="${opts.cardTitleStyle}">Feedback Requested By</div>
+      <div style="font-size: 16px; color: #111827; font-weight: 600; padding: 2px 0;">${escapeHtml(formatFeedbackDueDate(dueYmd, { withYear: true }))}</div>
+      <div style="font-size: 14px; color: #374151; line-height: 1.5; padding-top: 4px;">
+        Please leave your feedback, or approve the video, by the end of that day.
+      </div>
+    </div>
+  `
+}
+
 export async function renderNewVersionEmail({
   clientName,
   projectTitle,
   videoName,
   versionLabel,
   videoNotes,
+  feedbackDueDate,
   shareUrl,
   isPasswordProtected = false,
   trackingToken,
@@ -658,6 +679,8 @@ export async function renderNewVersionEmail({
   videoName: string
   versionLabel: string
   videoNotes?: string | null
+  /** Active feedback deadline (YYYY-MM-DD) for this version, if any. */
+  feedbackDueDate?: string | null
   shareUrl: string
   isPasswordProtected?: boolean
   trackingToken?: string
@@ -703,6 +726,8 @@ export async function renderNewVersionEmail({
         </div>
       </div>
 
+      ${renderFeedbackDeadlineCard(feedbackDueDate, { cardStyle, cardTitleStyle })}
+
       ${renderNotesCard(videoNotes, { cardStyle, cardTitleStyle })}
 
       ${isPasswordProtected ? `
@@ -733,6 +758,7 @@ export async function sendNewVersionEmail({
   videoName,
   versionLabel,
   videoNotes,
+  feedbackDueDate,
   shareUrl,
   isPasswordProtected = false,
   trackingToken,
@@ -743,6 +769,7 @@ export async function sendNewVersionEmail({
   videoName: string
   versionLabel: string
   videoNotes?: string | null
+  feedbackDueDate?: string | null
   shareUrl: string
   isPasswordProtected?: boolean
   trackingToken?: string
@@ -753,6 +780,7 @@ export async function sendNewVersionEmail({
     videoName,
     versionLabel,
     videoNotes,
+    feedbackDueDate,
     shareUrl,
     isPasswordProtected,
     trackingToken,
@@ -1914,7 +1942,7 @@ export async function renderProjectGeneralNotificationEmail({
   clientName: string
   projectTitle: string
   shareUrl: string
-  readyVideos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
+  readyVideos?: Array<{ name: string; versionLabel: string; approved?: boolean; feedbackDueDate?: string | null }>
   readyAlbums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
@@ -1932,19 +1960,22 @@ export async function renderProjectGeneralNotificationEmail({
     : ''
 
   // Group videos by name, combining all version labels onto one line, sorted A→Z
-  const videoGroupMap = new Map<string, { versionLabels: string[]; anyApproved: boolean }>()
+  // Callers pass feedbackDueDate only for a version whose deadline is still active
+  // (src/lib/feedback-deadline.ts), so at most one version per group carries one.
+  const videoGroupMap = new Map<string, { versionLabels: string[]; anyApproved: boolean; feedbackDueDate: string | null }>()
   for (const v of readyVideos) {
     const g = videoGroupMap.get(v.name)
     if (g) {
       g.versionLabels.push(v.versionLabel)
       if (v.approved) g.anyApproved = true
+      if (!g.feedbackDueDate && v.feedbackDueDate) g.feedbackDueDate = v.feedbackDueDate
     } else {
-      videoGroupMap.set(v.name, { versionLabels: [v.versionLabel], anyApproved: !!v.approved })
+      videoGroupMap.set(v.name, { versionLabels: [v.versionLabel], anyApproved: !!v.approved, feedbackDueDate: v.feedbackDueDate || null })
     }
   }
   const videoGroups = Array.from(videoGroupMap.entries())
     .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-    .map(([name, { versionLabels, anyApproved }]) => ({ name, versionLabels, anyApproved }))
+    .map(([name, { versionLabels, anyApproved, feedbackDueDate }]) => ({ name, versionLabels, anyApproved, feedbackDueDate }))
 
   const sortedAlbums = [...readyAlbums].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 
@@ -1982,7 +2013,7 @@ export async function renderProjectGeneralNotificationEmail({
             <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:2px; margin-bottom:8px;">Videos</div>
             ${videoGroups.map(g => `
               <div style="font-size:15px; color:#374151; padding:6px 0;">
-                &#8226; ${escapeHtml(g.name)}${g.versionLabels.map(label => ` ${emailVersionPillHtml(label, resolved.accentColor, resolved.accentTextMode)}`).join('')}${g.anyApproved ? ` ${approvedPillHtml}` : ''}
+                &#8226; ${escapeHtml(g.name)}${g.versionLabels.map(label => ` ${emailVersionPillHtml(label, resolved.accentColor, resolved.accentTextMode)}`).join('')}${g.anyApproved ? ` ${approvedPillHtml}` : ''}${g.feedbackDueDate ? emailFeedbackDueInlineHtml(g.feedbackDueDate) : ''}
               </div>
             `).join('')}
           ` : ''}
@@ -2026,7 +2057,7 @@ export async function sendProjectGeneralNotificationEmail({
   clientName: string
   projectTitle: string
   shareUrl: string
-  readyVideos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
+  readyVideos?: Array<{ name: string; versionLabel: string; approved?: boolean; feedbackDueDate?: string | null }>
   readyAlbums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
@@ -2068,7 +2099,7 @@ export async function renderNewItemsReadyEmail({
   clientName: string
   projectTitle: string
   shareUrl: string
-  videos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
+  videos?: Array<{ name: string; versionLabel: string; approved?: boolean; feedbackDueDate?: string | null }>
   albums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
@@ -2087,19 +2118,22 @@ export async function renderNewItemsReadyEmail({
     : ''
 
   // Group videos by name, combining all version labels onto one line, sorted A→Z
-  const videoGroupMap = new Map<string, { versionLabels: string[]; anyApproved: boolean }>()
+  // Callers pass feedbackDueDate only for a version whose deadline is still active
+  // (src/lib/feedback-deadline.ts), so at most one version per group carries one.
+  const videoGroupMap = new Map<string, { versionLabels: string[]; anyApproved: boolean; feedbackDueDate: string | null }>()
   for (const v of videos) {
     const g = videoGroupMap.get(v.name)
     if (g) {
       g.versionLabels.push(v.versionLabel)
       if (v.approved) g.anyApproved = true
+      if (!g.feedbackDueDate && v.feedbackDueDate) g.feedbackDueDate = v.feedbackDueDate
     } else {
-      videoGroupMap.set(v.name, { versionLabels: [v.versionLabel], anyApproved: !!v.approved })
+      videoGroupMap.set(v.name, { versionLabels: [v.versionLabel], anyApproved: !!v.approved, feedbackDueDate: v.feedbackDueDate || null })
     }
   }
   const videoGroups = Array.from(videoGroupMap.entries())
     .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-    .map(([name, { versionLabels, anyApproved }]) => ({ name, versionLabels, anyApproved }))
+    .map(([name, { versionLabels, anyApproved, feedbackDueDate }]) => ({ name, versionLabels, anyApproved, feedbackDueDate }))
 
   const sortedAlbums = [...albums].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 
@@ -2137,7 +2171,7 @@ export async function renderNewItemsReadyEmail({
             <div style="font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:${EMAIL_THEME.textMuted}; margin-top:2px; margin-bottom:8px;">Videos</div>
             ${videoGroups.map(g => `
               <div style="font-size:15px; color:#374151; padding:6px 0;">
-                &#8226; ${escapeHtml(g.name)}${g.versionLabels.map(label => ` ${emailVersionPillHtml(label, resolved.accentColor, resolved.accentTextMode)}`).join('')}${g.anyApproved ? ` ${approvedPillHtml}` : ''}
+                &#8226; ${escapeHtml(g.name)}${g.versionLabels.map(label => ` ${emailVersionPillHtml(label, resolved.accentColor, resolved.accentTextMode)}`).join('')}${g.anyApproved ? ` ${approvedPillHtml}` : ''}${g.feedbackDueDate ? emailFeedbackDueInlineHtml(g.feedbackDueDate) : ''}
               </div>
             `).join('')}
           ` : ''}
@@ -2181,7 +2215,7 @@ export async function sendNewItemsReadyEmail({
   clientName: string
   projectTitle: string
   shareUrl: string
-  videos?: Array<{ name: string; versionLabel: string; approved?: boolean }>
+  videos?: Array<{ name: string; versionLabel: string; approved?: boolean; feedbackDueDate?: string | null }>
   albums?: Array<{ name: string; photoCount: number }>
   notes?: string | null
   isPasswordProtected?: boolean
@@ -2203,6 +2237,114 @@ export async function sendNewItemsReadyEmail({
     subject,
     html,
   })
+}
+
+/**
+ * Email template: Feedback deadline reminder (client). One email per recipient per
+ * project, listing every version whose feedback is due. Sent by the scheduled
+ * reminder job and by the manual "Feedback Reminder" option on the project page.
+ */
+export async function renderFeedbackReminderEmail({
+  clientName,
+  projectTitle,
+  shareUrl,
+  videos,
+  isPasswordProtected = false,
+  unsubscribeUrl,
+  trackingToken,
+  branding,
+}: {
+  clientName: string
+  projectTitle: string
+  shareUrl: string
+  videos: Array<{ name: string; versionLabel: string; feedbackDueDate: string }>
+  isPasswordProtected?: boolean
+  unsubscribeUrl?: string
+  trackingToken?: string
+  branding?: EmailBrandingOverrides
+}): Promise<RenderedEmail> {
+  const resolved = await resolveEmailBranding(branding)
+  const today = todayYmd()
+
+  const sorted = [...videos].sort(
+    (a, b) => a.feedbackDueDate.localeCompare(b.feedbackDueDate) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+  )
+  const earliest = sorted[0]?.feedbackDueDate || today
+  const earliestStatus = getFeedbackDeadlineStatus(earliest, today)?.status
+
+  const whenPhrase = (ymd: string) => {
+    const st = getFeedbackDeadlineStatus(ymd, today)
+    if (st?.status === 'today') return 'today'
+    if (st?.status === 'overdue') return `${formatFeedbackDueDate(ymd)} (overdue)`
+    if (st?.daysLeft === 1) return `tomorrow, ${formatFeedbackDueDate(ymd)}`
+    return formatFeedbackDueDate(ymd)
+  }
+
+  const subject = sorted.length === 1
+    ? `Feedback reminder: ${sorted[0].name} (${sorted[0].versionLabel}) due ${whenPhrase(sorted[0].feedbackDueDate)}`
+    : `Feedback reminder: ${projectTitle}`
+
+  const headerGradient = resolved.emailHeaderColor
+  const headerTextColor = resolved.emailHeaderTextMode === 'DARK' ? '#111827' : '#ffffff'
+  const primaryButtonStyle = emailPrimaryButtonStyle({ fontSizePx: 16, borderRadiusPx: 8, accent: resolved.accentColor, accentTextMode: resolved.accentTextMode })
+  const cardStyle = emailCardStyle({ paddingPx: 20, borderRadiusPx: 8, marginBottomPx: 24 })
+
+  const intro = sorted.length === 1
+    ? `Just a friendly reminder that we&rsquo;re hoping for your feedback on this video by the end of <strong>${escapeHtml(whenPhrase(sorted[0].feedbackDueDate))}</strong>.`
+    : earliestStatus === 'overdue'
+    ? 'Just a friendly reminder that we&rsquo;re still waiting on your feedback for the videos below.'
+    : 'Just a friendly reminder that we&rsquo;re hoping for your feedback on the videos below by the dates shown.'
+
+  const html = renderEmailShell({
+    companyName: resolved.companyName,
+    companyLogoUrl: resolved.companyLogoUrl,
+    headerGradient,
+    headerTextColor,
+    title: 'Feedback Reminder',
+    subtitle: projectTitle,
+    trackingToken,
+    trackingPixelsEnabled: resolved.trackingPixelsEnabled,
+    appDomain: resolved.appDomain,
+    mainCompanyDomain: resolved.mainCompanyDomain,
+    bodyContent: `
+      <p style="margin:0 0 20px; font-size:16px;">
+        Hi <strong>${escapeHtml(firstWordName(clientName) || clientName)}</strong>,
+      </p>
+      <p style="margin:0 0 24px; font-size:15px; color:#374151; line-height:1.6;">
+        ${intro}
+      </p>
+      <div style="${cardStyle}">
+        <div style="${emailCardTitleStyle()}">Awaiting Your Feedback</div>
+        ${sorted.map((v) => `
+          <div style="font-size:15px; color:#374151; padding:6px 0;">
+            &#8226; ${escapeHtml(v.name)} ${emailVersionPillHtml(v.versionLabel, resolved.accentColor, resolved.accentTextMode)}
+            <span style="font-size:13px; color:${EMAIL_THEME.textMuted}; white-space:nowrap;">&middot; due <strong style="color:#374151;">${escapeHtml(whenPhrase(v.feedbackDueDate))}</strong></span>
+          </div>
+        `).join('')}
+      </div>
+      <p style="margin:0 0 24px; font-size:14px; color:#374151; line-height:1.6;">
+        Leave your comments on the share page. When you&rsquo;re done, approve the video if it&rsquo;s good to go, or click <strong>Request Next Version</strong> so we know your feedback is complete.
+      </p>
+      ${isPasswordProtected ? `
+        <div style="${emailCardStyle({ paddingPx: 14, borderRadiusPx: 10, marginBottomPx: 14 })}">
+          Password protected. Use the password previously sent to you to open the link.
+        </div>
+      ` : ''}
+      <div style="text-align:center; margin:32px 0;">
+        <a href="${escapeHtml(shareUrl)}" style="${primaryButtonStyle}">
+          View Project
+        </a>
+      </div>
+      ${unsubscribeUrl ? `
+        <p style="margin:24px 0 0; font-size:13px; color:#9ca3af; text-align:center; line-height:1.5;">
+          Don't want to receive updates for this project? <a href="${escapeHtml(unsubscribeUrl)}" style="text-decoration:underline;">Unsubscribe</a>
+        </p>
+      ` : ''}
+      ${renderEmailFooterNotice(resolved.emailCustomFooterText)}
+    `,
+  })
+
+  return { subject, html }
 }
 
 function formatProjectKeyDateTypeLabel(type: string): string {

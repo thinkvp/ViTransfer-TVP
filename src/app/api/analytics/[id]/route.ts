@@ -409,6 +409,8 @@ export async function GET(
         ? 'Comment Summary'
         : evt.type === 'PASSWORD'
         ? 'Project Password'
+        : evt.type === 'FEEDBACK_REMINDER'
+        ? 'Feedback Reminder'
         : 'Specific Video & Version',
       recipients: JSON.parse(evt.recipientEmails) as string[],
       videoName: evt.video?.name,
@@ -431,6 +433,8 @@ export async function GET(
         ? 'Comment Summary'
         : tracking.type === 'PASSWORD'
         ? 'Project Password'
+        : tracking.type === 'FEEDBACK_REMINDER'
+        ? 'Feedback Reminder'
         : 'Specific Video & Version',
       recipientEmail: tracking.recipientEmail,
       videoName: tracking.video?.name,

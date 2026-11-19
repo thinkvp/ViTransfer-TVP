@@ -72,6 +72,9 @@ interface Settings {
   defaultClientNotificationTime: string | null
   defaultClientNotificationDay: number | null
   clientEmailProjectApproved: boolean | null
+  clientEmailFeedbackReminders?: boolean | null
+  feedbackReminderDaysBefore?: number[] | null
+  feedbackReminderTime?: string | null
   excludeInternalIpsFromAnalytics?: boolean | null
   uploadChunkSizeMB?: number | null
   downloadChunkSizeMB?: number | null
@@ -242,6 +245,9 @@ export default function GlobalSettingsPage() {
   const [defaultClientNotificationTime, setDefaultClientNotificationTime] = useState('09:00')
   const [defaultClientNotificationDay, setDefaultClientNotificationDay] = useState(1)
   const [clientEmailProjectApproved, setClientEmailProjectApproved] = useState(true)
+  const [clientEmailFeedbackReminders, setClientEmailFeedbackReminders] = useState(true)
+  const [feedbackReminderDaysBefore, setFeedbackReminderDaysBefore] = useState<number[]>([1])
+  const [feedbackReminderTime, setFeedbackReminderTime] = useState('09:00')
 
   useEffect(() => {
     let cancelled = false
@@ -359,7 +365,7 @@ export default function GlobalSettingsPage() {
     adminEmailTaskComments, adminEmailInvoicePaid, adminEmailQuoteAccepted,
     adminEmailProjectKeyDates, adminEmailUserKeyDates,
     defaultClientNotificationSchedule, defaultClientNotificationTime, defaultClientNotificationDay,
-    clientEmailProjectApproved, httpsEnabled, hotlinkProtection, ipRateLimit, sessionRateLimit,
+    clientEmailProjectApproved, clientEmailFeedbackReminders, feedbackReminderDaysBefore, feedbackReminderTime, httpsEnabled, hotlinkProtection, ipRateLimit, sessionRateLimit,
     shareSessionRateLimit, shareTokenTtlSeconds, passwordAttempts, sessionTimeoutValue,
     sessionTimeoutUnit, trackAnalytics, trackSecurityLogs, viewSecurityEvents,
     maxInternalCommentsPerProject, maxCommentsPerVideoVersion, maxProjectRecipients,
@@ -497,6 +503,9 @@ export default function GlobalSettingsPage() {
         setDefaultClientNotificationTime(data.defaultClientNotificationTime || '09:00')
         setDefaultClientNotificationDay(data.defaultClientNotificationDay ?? 1)
         setClientEmailProjectApproved(data.clientEmailProjectApproved ?? true)
+        setClientEmailFeedbackReminders(data.clientEmailFeedbackReminders ?? true)
+        setFeedbackReminderDaysBefore(Array.isArray(data.feedbackReminderDaysBefore) ? data.feedbackReminderDaysBefore : [1])
+        setFeedbackReminderTime(data.feedbackReminderTime || '09:00')
 
         // Load security settings
         const securityResponse = await apiFetch('/api/settings/security')
@@ -824,6 +833,9 @@ export default function GlobalSettingsPage() {
         defaultClientNotificationTime: defaultClientNotificationSchedule === 'DAILY' ? defaultClientNotificationTime : null,
         defaultClientNotificationDay: null,
         clientEmailProjectApproved,
+        clientEmailFeedbackReminders,
+        feedbackReminderDaysBefore,
+        feedbackReminderTime,
         s3LocalBackupEnabled,
         s3LocalBackupCategories,
         aiProvider: aiProvider || 'NONE',
@@ -1015,6 +1027,9 @@ export default function GlobalSettingsPage() {
         setDefaultClientNotificationTime(refreshedData.defaultClientNotificationTime || '09:00')
         setDefaultClientNotificationDay(refreshedData.defaultClientNotificationDay ?? 1)
         setClientEmailProjectApproved(refreshedData.clientEmailProjectApproved ?? true)
+        setClientEmailFeedbackReminders(refreshedData.clientEmailFeedbackReminders ?? true)
+        setFeedbackReminderDaysBefore(Array.isArray(refreshedData.feedbackReminderDaysBefore) ? refreshedData.feedbackReminderDaysBefore : [1])
+        setFeedbackReminderTime(refreshedData.feedbackReminderTime || '09:00')
       }
 
       // Reload security settings data
@@ -1414,6 +1429,12 @@ export default function GlobalSettingsPage() {
             setDefaultClientNotificationDay={setDefaultClientNotificationDay}
             clientEmailProjectApproved={clientEmailProjectApproved}
             setClientEmailProjectApproved={setClientEmailProjectApproved}
+            clientEmailFeedbackReminders={clientEmailFeedbackReminders}
+            setClientEmailFeedbackReminders={setClientEmailFeedbackReminders}
+            feedbackReminderDaysBefore={feedbackReminderDaysBefore}
+            setFeedbackReminderDaysBefore={setFeedbackReminderDaysBefore}
+            feedbackReminderTime={feedbackReminderTime}
+            setFeedbackReminderTime={setFeedbackReminderTime}
             show={showVideoProcessing}
             setShow={setShowVideoProcessing}
           />
@@ -1825,6 +1846,12 @@ export default function GlobalSettingsPage() {
                 setDefaultClientNotificationDay={setDefaultClientNotificationDay}
                 clientEmailProjectApproved={clientEmailProjectApproved}
                 setClientEmailProjectApproved={setClientEmailProjectApproved}
+                clientEmailFeedbackReminders={clientEmailFeedbackReminders}
+                setClientEmailFeedbackReminders={setClientEmailFeedbackReminders}
+                feedbackReminderDaysBefore={feedbackReminderDaysBefore}
+                setFeedbackReminderDaysBefore={setFeedbackReminderDaysBefore}
+                feedbackReminderTime={feedbackReminderTime}
+                setFeedbackReminderTime={setFeedbackReminderTime}
                 show={true}
                 setShow={() => {}}
                 hideCollapse

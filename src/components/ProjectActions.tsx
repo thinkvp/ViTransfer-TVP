@@ -27,6 +27,7 @@ import { apiFetch, apiPost, apiDelete } from '@/lib/api-client'
 import { formatFileSize } from '@/lib/utils'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { toast } from 'sonner'
+import { describeFeedbackDeadline, formatFeedbackDueDate, getFeedbackDeadlineStatus } from '@/lib/feedback-deadline'
 
 interface Video {
   id: string
@@ -40,6 +41,15 @@ interface ProjectActionsProps {
   project: Project
   videos: Video[]
   onRefresh?: () => void
+}
+
+type FeedbackDeadlineSummary = {
+  videoId: string
+  name: string
+  versionLabel: string
+  feedbackDueDate: string
+  lastReminderAt: string | null
+  hasClientComment: boolean
 }
 
 type AlbumSummary = {
@@ -63,13 +73,16 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
 
   // Notification modal state
   const [showNotificationModal, setShowNotificationModal] = useState(false)
-  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'selected-items' | 'comment-summary' | 'specific-album' | 'internal-invite'>('entire-project')
+  const [notificationType, setNotificationType] = useState<'entire-project' | 'specific-video' | 'selected-items' | 'comment-summary' | 'specific-album' | 'feedback-reminder' | 'internal-invite'>('entire-project')
   const [selectedVideoName, setSelectedVideoName] = useState<string>('')
   const [selectedVideoId, setSelectedVideoId] = useState<string>('')
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('')
   const [selectedItemVideoIds, setSelectedItemVideoIds] = useState<string[]>([])
   const [selectedItemAlbumIds, setSelectedItemAlbumIds] = useState<string[]>([])
   const [selectedItemsNotes, setSelectedItemsNotes] = useState<string>('')
+  const [feedbackDeadlines, setFeedbackDeadlines] = useState<FeedbackDeadlineSummary[]>([])
+  const [feedbackDeadlinesLoading, setFeedbackDeadlinesLoading] = useState(false)
+  const [selectedReminderVideoIds, setSelectedReminderVideoIds] = useState<string[]>([])
   const [albums, setAlbums] = useState<AlbumSummary[]>([])
   const [albumsLoading, setAlbumsLoading] = useState(false)
   const [entireProjectNotes, setEntireProjectNotes] = useState<string>('')
@@ -159,7 +172,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
   const hasAnyReadyForEntireProject = readyVideos.length > 0 || (photosEnabled && albumCount > 0)
 
   // Reset selections when notification type changes
-  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'selected-items' | 'comment-summary' | 'specific-album' | 'internal-invite') => {
+  const handleNotificationTypeChange = (type: 'entire-project' | 'specific-video' | 'selected-items' | 'comment-summary' | 'specific-album' | 'feedback-reminder' | 'internal-invite') => {
     setNotificationType(type)
     setSelectedVideoName('')
     setSelectedVideoId('')
@@ -167,6 +180,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     setSelectedItemVideoIds([])
     setSelectedItemAlbumIds([])
     setSelectedItemsNotes('')
+    setSelectedReminderVideoIds([])
     setEntireProjectNotes('')
     setInternalInviteNotes('')
     setSelectedRecipientIds([])
@@ -288,6 +302,37 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
     notificationTypeRef.current = notificationType
   }, [notificationType, projectRecipientsWithEmail, showNotificationModal])
 
+  // Feedback Reminder: load the project's active deadlines. Versions the client has
+  // already commented on start unticked (the scheduled job skips those too).
+  useEffect(() => {
+    if (!showNotificationModal || notificationType !== 'feedback-reminder') return
+    let cancelled = false
+    const load = async () => {
+      setFeedbackDeadlinesLoading(true)
+      try {
+        const res = await apiFetch(`/api/projects/${projectId}/feedback-deadlines`, { cache: 'no-store' })
+        if (!res.ok) throw new Error('Failed to load feedback deadlines')
+        const data = await res.json().catch(() => null)
+        const list = Array.isArray((data as any)?.deadlines) ? ((data as any).deadlines as FeedbackDeadlineSummary[]) : []
+        if (!cancelled) {
+          setFeedbackDeadlines(list)
+          setSelectedReminderVideoIds(list.filter((d) => !d.hasClientComment).map((d) => d.videoId))
+        }
+      } catch {
+        if (!cancelled) {
+          setFeedbackDeadlines([])
+          setSelectedReminderVideoIds([])
+        }
+      } finally {
+        if (!cancelled) setFeedbackDeadlinesLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [notificationType, projectId, showNotificationModal])
+
   useEffect(() => {
     if (notificationType !== 'comment-summary') return
     if (!sendPasswordSeparately) return
@@ -398,6 +443,11 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       return
     }
 
+    if (notificationType === 'feedback-reminder' && selectedReminderVideoIds.length === 0) {
+      setMessage({ type: 'error', text: 'Please select at least one video' })
+      return
+    }
+
     if (notificationType === 'internal-invite') {
       if (selectedInternalUserIds.length === 0) {
         setMessage({ type: 'error', text: 'Please select at least one user' })
@@ -417,7 +467,12 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       notificationType,
       videoId: notificationType === 'specific-video' ? selectedVideoId : null,
       albumId: notificationType === 'specific-album' ? selectedAlbumId : null,
-      videoIds: notificationType === 'selected-items' ? selectedItemVideoIds : undefined,
+      videoIds:
+        notificationType === 'selected-items'
+          ? selectedItemVideoIds
+          : notificationType === 'feedback-reminder'
+          ? selectedReminderVideoIds
+          : undefined,
       albumIds: notificationType === 'selected-items' ? selectedItemAlbumIds : undefined,
       notifyEntireProject: notificationType === 'entire-project',
       notes:
@@ -431,7 +486,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
       recipientIds: notificationType !== 'internal-invite' ? selectedRecipientIds : undefined,
       internalUserIds: notificationType === 'internal-invite' ? selectedInternalUserIds : undefined,
       projectFileIds: notificationType === 'internal-invite' ? selectedProjectFileIds : undefined,
-      sendPasswordSeparately: isPasswordProtected && sendPasswordSeparately,
+      sendPasswordSeparately: isPasswordProtected && sendPasswordSeparately && notificationType !== 'feedback-reminder',
     })
       .then((data) => {
         setMessage({ type: 'success', text: data.message || 'Notification sent successfully!' })
@@ -732,6 +787,9 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                       Specific Album Ready
                     </SelectItem>
                   )}
+                  <SelectItem value="feedback-reminder">
+                    Feedback Deadline Reminder
+                  </SelectItem>
 
                   <SelectSeparator />
 
@@ -875,6 +933,58 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                   </Select>
                 </div>
               </>
+            )}
+
+            {notificationType === 'feedback-reminder' && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">Videos awaiting feedback</label>
+                <div className="space-y-2 border rounded-md p-3 bg-muted/30">
+                  {feedbackDeadlinesLoading ? (
+                    <div className="text-xs text-muted-foreground">Loading deadlines…</div>
+                  ) : feedbackDeadlines.length === 0 ? (
+                    <div className="text-xs text-muted-foreground">
+                      No versions have an active feedback deadline. Set one when uploading a version, or from the version list.
+                    </div>
+                  ) : (
+                    feedbackDeadlines.map((d) => {
+                      const checked = selectedReminderVideoIds.includes(d.videoId)
+                      const overdue = getFeedbackDeadlineStatus(d.feedbackDueDate)?.status === 'overdue'
+                      return (
+                        <label key={d.videoId} className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 mt-0.5"
+                            checked={checked}
+                            onChange={(e) => {
+                              setSelectedReminderVideoIds((prev) =>
+                                e.target.checked ? Array.from(new Set([...prev, d.videoId])) : prev.filter((x) => x !== d.videoId)
+                              )
+                            }}
+                            disabled={loading}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium truncate">
+                              {d.name} <span className="text-muted-foreground font-normal">{d.versionLabel}</span>
+                            </span>
+                            <span className={`block text-xs truncate ${overdue ? 'text-destructive' : 'text-muted-foreground'}`}>
+                              Due {formatFeedbackDueDate(d.feedbackDueDate)} · {describeFeedbackDeadline(d.feedbackDueDate)}
+                              {d.lastReminderAt ? ` · last reminded ${new Date(d.lastReminderAt).toLocaleDateString()}` : ''}
+                            </span>
+                          </span>
+                          {d.hasClientComment && (
+                            <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border border-border shrink-0">
+                              client commented
+                            </span>
+                          )}
+                        </label>
+                      )
+                    })
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Versions the client has already commented on start unticked; scheduled reminders skip them.
+                </p>
+              </div>
             )}
 
             {notificationType === 'selected-items' && (
@@ -1076,7 +1186,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
             {/* Select Recipients is rendered above for client notifications */}
 
             {/* Password checkbox - only show if project is password protected */}
-            {isPasswordProtected && notificationType !== 'comment-summary' && (
+            {isPasswordProtected && notificationType !== 'comment-summary' && notificationType !== 'feedback-reminder' && (
               <div className="flex items-center space-x-2 p-3 bg-muted rounded-md">
                 <input
                   type="checkbox"
@@ -1094,7 +1204,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
               </div>
             )}
 
-            {isPasswordProtected && notificationType !== 'comment-summary' && (
+            {isPasswordProtected && notificationType !== 'comment-summary' && notificationType !== 'feedback-reminder' && (
               <p className="text-xs text-muted-foreground bg-accent/50 p-3 rounded-md border border-border">
                 <strong>Note:</strong> This project is password protected. {sendPasswordSeparately ? 'The password will be sent in a separate email for enhanced security.' : 'The password will NOT be included in the email - you must share it separately.'}
               </p>
@@ -1110,6 +1220,7 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 (notificationType === 'specific-video' && !selectedVideoId) ||
                 (notificationType === 'specific-album' && !selectedAlbumId) ||
                 (notificationType === 'selected-items' && selectedItemVideoIds.length === 0 && selectedItemAlbumIds.length === 0) ||
+                (notificationType === 'feedback-reminder' && selectedReminderVideoIds.length === 0) ||
                 (notificationType === 'internal-invite' && (selectedInternalUserIds.length === 0 || attachmentsTooLarge))
               }
               className="w-full"
@@ -1150,6 +1261,8 @@ export default function ProjectActions({ project, videos, onRefresh }: ProjectAc
                 ? 'This will send a comment summary email to recipients with notifications enabled.'
                 : notificationType === 'internal-invite'
                 ? 'This will send an email to the selected internal users with a link to access this project.'
+                : notificationType === 'feedback-reminder'
+                ? 'This will send one reminder email to the selected recipients listing the chosen versions and their due dates.'
                 : 'This will send an email to the selected recipients with a link to view the selected video version.'}
             </p>
           </div>

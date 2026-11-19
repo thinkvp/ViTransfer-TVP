@@ -15,6 +15,7 @@ import { getFolderRenameQueue } from '@/lib/queue'
 import { publishProjectEvent } from '@/lib/project-events'
 import { lockCommentsForApprovedVideo, lockCommentsForReviewedVersion } from '@/lib/comment-locks'
 import { cancelCommentNotification } from '@/lib/comment-helpers'
+import { isValidFeedbackDueDate, todayYmd } from '@/lib/feedback-deadline'
 import {
   allocateUniqueStorageName,
   buildProjectAllVideosRoot,
@@ -202,7 +203,7 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
-    const { approved, revisionRequested, name, versionLabel, videoNotes, allowApproval, autoGenerateSubtitles, confirmed } = body
+    const { approved, revisionRequested, name, versionLabel, videoNotes, allowApproval, autoGenerateSubtitles, feedbackDueDate, confirmed } = body
 
     // Validate inputs
     if (approved !== undefined && typeof approved !== 'boolean') {
@@ -254,6 +255,22 @@ export async function PATCH(
       )
     }
 
+    // feedbackDueDate: YYYY-MM-DD to set/extend, null or '' to clear.
+    if (feedbackDueDate !== undefined && feedbackDueDate !== null && typeof feedbackDueDate !== 'string') {
+      return NextResponse.json(
+        { error: 'Invalid request: feedbackDueDate must be a YYYY-MM-DD string or null' },
+        { status: 400 }
+      )
+    }
+    const normalizedFeedbackDueDate =
+      typeof feedbackDueDate === 'string' && feedbackDueDate.trim() ? feedbackDueDate.trim() : null
+    if (normalizedFeedbackDueDate && !isValidFeedbackDueDate(normalizedFeedbackDueDate)) {
+      return NextResponse.json(
+        { error: 'Invalid request: feedbackDueDate must be a valid YYYY-MM-DD date' },
+        { status: 400 }
+      )
+    }
+
     if (typeof videoNotes === 'string' && videoNotes.trim().length > 500) {
       return NextResponse.json(
         { error: 'Invalid request: videoNotes must be 500 characters or fewer' },
@@ -262,7 +279,7 @@ export async function PATCH(
     }
 
     // At least one field must be provided
-    if (approved === undefined && revisionRequested === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined && autoGenerateSubtitles === undefined) {
+    if (approved === undefined && revisionRequested === undefined && name === undefined && versionLabel === undefined && videoNotes === undefined && allowApproval === undefined && autoGenerateSubtitles === undefined && feedbackDueDate === undefined) {
       return NextResponse.json(
         { error: 'Invalid request: at least one field must be provided' },
         { status: 400 }
@@ -296,7 +313,7 @@ export async function PATCH(
     }
 
     // RBAC: conservative - any admin-side mutation requires Projects Full Control.
-    if (approved !== undefined || revisionRequested !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined || autoGenerateSubtitles !== undefined) {
+    if (approved !== undefined || revisionRequested !== undefined || name !== undefined || versionLabel !== undefined || videoNotes !== undefined || allowApproval !== undefined || autoGenerateSubtitles !== undefined || feedbackDueDate !== undefined) {
       const forbidden = requireActionAccess(authResult, 'projectsFullControl')
       if (forbidden) return forbidden
     }
@@ -506,6 +523,29 @@ export async function PATCH(
 
     if (autoGenerateSubtitles !== undefined) {
       updateData.autoGenerateSubtitles = autoGenerateSubtitles
+    }
+
+    if (feedbackDueDate !== undefined && normalizedFeedbackDueDate !== video.feedbackDueDate) {
+      const previous = video.feedbackDueDate
+      if (normalizedFeedbackDueDate && normalizedFeedbackDueDate < todayYmd() && (!previous || normalizedFeedbackDueDate < previous)) {
+        // Setting a brand-new past date is almost certainly a typo. (Keeping an existing
+        // overdue date, or moving it later but still in the past, is allowed.)
+        return NextResponse.json(
+          { error: 'Feedback deadline cannot be in the past' },
+          { status: 400 }
+        )
+      }
+      updateData.feedbackDueDate = normalizedFeedbackDueDate
+      // "Extended" = moved later than an existing date. Pulling it earlier or clearing it
+      // drops the label. Reminders re-arm on their own: slots derive from the due date.
+      updateData.feedbackDueExtendedAt =
+        normalizedFeedbackDueDate && previous && normalizedFeedbackDueDate > previous
+          ? new Date()
+          : normalizedFeedbackDueDate && previous
+          ? null
+          : normalizedFeedbackDueDate
+          ? video.feedbackDueExtendedAt
+          : null
     }
 
     if (videoRenamePlan) {

@@ -21,6 +21,7 @@ import { PendingAssetPicker, type PendingAsset } from './PendingAssetPicker'
 import { enqueueAssetUploads } from '@/hooks/useAssetUploadQueue'
 import { useTransferTuning } from '@/lib/transfer-tuning-client'
 import { toast } from 'sonner'
+import { FeedbackDeadlineField } from './FeedbackDeadlineField'
 
 /** Module-scope constant: a fresh [] default would change identity on every render. */
 const EMPTY_SIBLINGS: string[] = []
@@ -66,6 +67,7 @@ export default function VideoUpload({
   const [videoNotes, setVideoNotes] = useState(videoNotesProp ?? '')
   const [allowApproval, setAllowApproval] = useState<boolean>(allowApprovalProp ?? true)
   const [autoGenerateSubtitles, setAutoGenerateSubtitles] = useState<boolean>(false)
+  const [feedbackDueDate, setFeedbackDueDate] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [carryOver, setCarryOver] = useState<CarryOverSelection[]>([])
@@ -245,6 +247,7 @@ export default function VideoUpload({
           videoNotes: trimmedVideoNotes,
           allowApproval: allowApproval === true,
           autoGenerateSubtitles: transcriptionEnabled ? autoGenerateSubtitles === true : false,
+          feedbackDueDate: feedbackDueDate || null,
           originalFileName: file.name,
           originalFileSize: file.size,
           name: trimmedVideoName,
@@ -293,6 +296,7 @@ export default function VideoUpload({
       setVersionLabel('')
       setVideoNotes(videoNotesProp !== undefined ? (videoNotesProp ?? '') : '')
       setAllowApproval(allowApprovalProp ?? true)
+      setFeedbackDueDate('')
       setPendingAssets([])
 
       // Notify parent so the project page reflects the new UPLOADING record.
@@ -426,6 +430,13 @@ export default function VideoUpload({
           />
         </div>
       )}
+
+      <FeedbackDeadlineField
+        id="feedbackDueDate"
+        value={feedbackDueDate}
+        onChange={setFeedbackDueDate}
+        disabled={submitting}
+      />
 
       {/* File Selection */}
       <div className="space-y-2">

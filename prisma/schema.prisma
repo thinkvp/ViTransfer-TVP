@@ -827,6 +827,14 @@ model Video {
   revisionRequestedByRecipientId String?
   revisionRequestedByName        String?
 
+  // Optional client feedback deadline for this version (date only, YYYY-MM-DD, end of
+  // day in the server's TZ). Informational: nothing is locked once it passes, the share
+  // page just shows "Overdue". Only meaningful while the deadline is "active" — see
+  // src/lib/feedback-deadline.ts (latest version, not approved/requested, project open).
+  feedbackDueDate           String?   @db.VarChar(10)
+  feedbackDueExtendedAt     DateTime? // set when the date is moved later (drives the "Extended" label)
+  feedbackDueLastReminderAt DateTime? // latest reminder email (scheduled or manual) for this version
+
   // Upload attribution
   uploadedById   String?
   uploadedByName String?
@@ -880,6 +888,7 @@ model Video {
   @@index([status])
   @@index([projectId, status])
   @@index([projectId, createdAt])
+  @@index([feedbackDueDate])
 }
 
 model VideoAsset {
@@ -1204,6 +1213,11 @@ model Settings {
 
   // Per-type client email toggles (global defaults, all enabled by default)
   clientEmailProjectApproved Boolean @default(true) // Client notified when entire project is approved
+
+  // Feedback deadline reminders (scheduled client emails for versions with a feedback due date)
+  clientEmailFeedbackReminders Boolean @default(true)
+  feedbackReminderDaysBefore   Int[]   @default([1]) // days before the due date to remind; 0 = on the day
+  feedbackReminderTime         String  @default("09:00") // HH:MM, server TZ
 
   // Cached storage totals (reconciled daily by worker)
   accountingFilesBytes BigInt @default(0) // Total bytes of accounting attachments (receipts, BAS docs, etc.)

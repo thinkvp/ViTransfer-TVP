@@ -22,6 +22,7 @@ import { PendingAssetPicker, type PendingAsset } from './PendingAssetPicker'
 import { enqueueAssetUploads } from '@/hooks/useAssetUploadQueue'
 import { useTransferTuning } from '@/lib/transfer-tuning-client'
 import { toast } from 'sonner'
+import { FeedbackDeadlineField } from './FeedbackDeadlineField'
 
 type UploadStatus = 'pending' | 'queued' | 'error'
 
@@ -33,6 +34,8 @@ type QueuedVideo = {
   videoNotes: string
   allowApproval: boolean
   autoGenerateSubtitles: boolean
+  /** Optional client feedback deadline (YYYY-MM-DD), '' = none. */
+  feedbackDueDate: string
   /** Brand-new asset files to upload once this video's own upload has landed. */
   assets: PendingAsset[]
   status: UploadStatus
@@ -169,6 +172,7 @@ export default function MultiVideoUploadModal({
           videoNotes: '',
           allowApproval: canFullControl ? true : false,
           autoGenerateSubtitles: false,
+          feedbackDueDate: '',
           assets: [],
           status: 'pending',
           error: null,
@@ -293,6 +297,7 @@ export default function MultiVideoUploadModal({
             videoNotes: trimmedVideoNotes,
             allowApproval: item.allowApproval === true,
             autoGenerateSubtitles: transcriptionEnabled ? item.autoGenerateSubtitles === true : false,
+            feedbackDueDate: item.feedbackDueDate || null,
             originalFileName: item.file.name,
             originalFileSize: item.file.size,
             name: trimmedVideoName,
@@ -468,6 +473,27 @@ export default function MultiVideoUploadModal({
                         maxLength={500}
                         disabled={item.status !== 'pending'}
                       />
+                    </div>
+
+                    <div className="space-y-1 sm:col-span-2">
+                      <FeedbackDeadlineField
+                        id={`feedbackDueDate-${item.id}`}
+                        value={item.feedbackDueDate}
+                        onChange={(next) => updateItem(item.id, { feedbackDueDate: next })}
+                        disabled={item.status !== 'pending'}
+                      />
+                      {items.filter((q) => q.status === 'pending').length > 1 && item.status === 'pending' ? (
+                        <button
+                          type="button"
+                          className="text-xs text-primary underline-offset-2 hover:underline"
+                          onClick={() => {
+                            const value = item.feedbackDueDate
+                            setItems((prev) => prev.map((q) => (q.status === 'pending' ? { ...q, feedbackDueDate: value } : q)))
+                          }}
+                        >
+                          {item.feedbackDueDate ? 'Apply this deadline to all videos' : 'Clear deadline on all videos'}
+                        </button>
+                      ) : null}
                     </div>
 
                     {(canFullControl || transcriptionEnabled) && (

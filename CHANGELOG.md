@@ -5,6 +5,13 @@ All notable changes to ViTransfer-TVP will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Feedback deadlines for video versions** — when uploading a video or a new version you can set an optional date the client's feedback is due, and change or extend it later from the version list. The client sees it on the share page ("Feedback by Fri 21 Nov", then "Overdue" once it passes — nothing is locked), and in the version-ready, project-ready and multiple-items emails. The deadline stops showing once the version is approved, the client requests the next version, or a newer version is uploaded. **Schema migration:** `20261112000000_video_feedback_deadlines`
+- **Feedback deadline reminder emails** — clients are emailed before a deadline, skipping versions they've already commented on. Timing (e.g. 1 day before, on the day) and time of day are set under Settings → client system emails; reminders are on by default at 1 day before, 09:00. You can also send one by hand from the project's Send Notification → Feedback Deadline Reminder.
+
 ## [2.8.6] - 2026-11-19
 
 ### Changed

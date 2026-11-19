@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { formatFeedbackDueDate, getFeedbackDeadlineStatus, isValidFeedbackDueDate } from '@/lib/feedback-deadline'
 import { apiFetch } from '@/lib/api-client'
 import type { DownloadableFile, DownloadableGroup } from '@/lib/downloadable-files'
 import { getDownloadableFileKey, getDownloadableFileKind } from '@/lib/downloadable-file-utils'
@@ -32,6 +33,7 @@ import {
   CheckSquare,
   ChevronLeft,
   ChevronRight,
+  CalendarClock,
   Clock,
   Download,
   Eye,
@@ -2755,14 +2757,15 @@ export function ShareFilesBrowser({
     setContextMenu({ x: event.clientX, y: event.clientY, file, imageList: list })
   }
 
-  const statusPill = (tone: 'success' | 'warning' | 'info' | 'muted', Icon: typeof Check, text: string) => (
+  const statusPill = (tone: 'success' | 'warning' | 'info' | 'muted' | 'danger', Icon: typeof Check, text: string) => (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold',
         tone === 'success' && 'bg-success/15 text-success',
         tone === 'warning' && 'bg-warning/15 text-warning',
         tone === 'info' && 'bg-primary/15 text-primary',
-        tone === 'muted' && 'bg-muted text-muted-foreground'
+        tone === 'muted' && 'bg-muted text-muted-foreground',
+        tone === 'danger' && 'bg-destructive/15 text-destructive'
       )}
     >
       <Icon className="h-3.5 w-3.5" />
@@ -2903,6 +2906,19 @@ export function ShareFilesBrowser({
       pill = statusPill('muted', Eye, 'View only')
     } else if (latest.isRevisionRequested) {
       pill = statusPill('info', RotateCcw, joinMeta(['Changes requested', formatShortDate(latest.revisionRequestedAt)]))
+    } else if (latest.feedbackDueDate && isValidFeedbackDueDate(latest.feedbackDueDate)) {
+      // Server only sends feedbackDueDate while the deadline is live (see feedback-deadline.ts).
+      const deadline = getFeedbackDeadlineStatus(latest.feedbackDueDate)
+      const dueText = deadline?.status === 'overdue'
+        ? `Feedback overdue (${formatFeedbackDueDate(latest.feedbackDueDate)})`
+        : deadline?.status === 'today'
+        ? 'Feedback due today'
+        : `Feedback by ${formatFeedbackDueDate(latest.feedbackDueDate)}`
+      pill = statusPill(
+        deadline?.status === 'overdue' ? 'danger' : 'warning',
+        CalendarClock,
+        joinMeta([dueText, latest.feedbackDueExtended ? 'Extended' : null])
+      )
     } else {
       pill = statusPill('warning', Clock, joinMeta(['For review', formatShortDate(latest.createdAt)]))
     }

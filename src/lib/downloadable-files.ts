@@ -19,6 +19,9 @@ export interface DownloadableFile {
   createdAt?: string
   approvedAt?: string
   revisionRequestedAt?: string
+  /** Active client feedback deadline (YYYY-MM-DD) — only set while it still applies. */
+  feedbackDueDate?: string
+  feedbackDueExtended?: boolean
   /** Pixel dimensions (video versions and video/image assets). */
   width?: number
   height?: number
