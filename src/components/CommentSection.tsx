@@ -6,8 +6,9 @@ import type { Video } from '@/types/video'
 // Avoid importing Prisma runtime types in client components.
 type Comment = any
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { AlertTriangle, CalendarClock, CheckCircle2, ChevronDown, Clock, Eye, FileClock, History, Info, MessageCircle, Share2, X } from 'lucide-react'
-import { describeFeedbackDeadline, formatFeedbackDueDate, getFeedbackDeadlineStatus, isFeedbackDeadlineActive } from '@/lib/feedback-deadline'
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Eye, FileClock, History, Info, MessageCircle, Share2, X } from 'lucide-react'
+import { getFeedbackDeadlineStatus, isFeedbackDeadlineActive } from '@/lib/feedback-deadline'
+import { FeedbackDeadlineTile } from './FeedbackDeadlineTile'
 import MessageBubble from './MessageBubble'
 import CommentInput from './CommentInput'
 import { useCommentManagement } from '@/hooks/useCommentManagement'
@@ -982,6 +983,19 @@ export function CommentSectionView({
   // The List Controls row only renders when it has real actions; otherwise the sort
   // toggle floats over the message list so the row's vertical space is reclaimed.
   const showListActionsRow = isAdminView || showApproveVideoButton || showRequestNextVersion
+  // The deadline sits inside the action block (above Approve / Request Next Version)
+  // so the date and the actions that answer it read as one task; with no client
+  // actions on offer it gets its own block instead.
+  const deadlineInActionRow = Boolean(headerFeedbackDueDate && (showApproveVideoButton || showRequestNextVersion))
+  const deadlineInstruction = isAdminView
+    ? null
+    : showApproveVideoButton && showRequestNextVersion
+    ? "Approve it, or request the next version once you've left your notes."
+    : showApproveVideoButton
+    ? "Leave your notes, or approve it if it's good to go."
+    : showRequestNextVersion
+    ? "Request the next version once you've left all your notes."
+    : 'Leave your notes on the video.'
 
   const showOlderVersionNote = Boolean(
     !restrictToLatestVersion &&
@@ -1539,48 +1553,14 @@ export function CommentSectionView({
           />
         )}
 
-        {headerFeedbackDueDate && headerFeedbackDeadline ? (
-          <div
-            className={cn(
-              'border-b border-border shrink-0 px-4 py-2.5 flex items-center gap-2 text-sm',
-              headerFeedbackDeadline.status === 'overdue'
-                ? 'bg-destructive/10'
-                : headerFeedbackDeadline.status === 'today'
-                ? 'bg-warning/10'
-                : 'bg-muted/20'
-            )}
-          >
-            <CalendarClock
-              className={cn(
-                'w-4 h-4 shrink-0',
-                headerFeedbackDeadline.status === 'overdue'
-                  ? 'text-destructive'
-                  : headerFeedbackDeadline.status === 'today'
-                  ? 'text-warning'
-                  : 'text-muted-foreground'
-              )}
+        {headerFeedbackDueDate && headerFeedbackDeadline && !deadlineInActionRow ? (
+          <div className="border-b border-border shrink-0 px-4 py-3">
+            <FeedbackDeadlineTile
+              dueYmd={headerFeedbackDueDate}
+              extended={headerFeedbackExtended}
+              audience={isAdminView ? 'admin' : 'client'}
+              instruction={deadlineInstruction}
             />
-            <p className="min-w-0 flex-1">
-              <span className="text-muted-foreground">Feedback requested by </span>
-              <span className="font-medium text-foreground">{formatFeedbackDueDate(headerFeedbackDueDate)}</span>
-              <span
-                className={cn(
-                  'ml-1.5 text-xs',
-                  headerFeedbackDeadline.status === 'overdue'
-                    ? 'text-destructive font-medium'
-                    : headerFeedbackDeadline.status === 'today'
-                    ? 'text-warning font-medium'
-                    : 'text-muted-foreground'
-                )}
-              >
-                · {describeFeedbackDeadline(headerFeedbackDueDate)}
-              </span>
-            </p>
-            {headerFeedbackExtended ? (
-              <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                Extended
-              </span>
-            ) : null}
           </div>
         ) : null}
 
@@ -1613,6 +1593,15 @@ export function CommentSectionView({
             are no action buttons — the sort toggle then floats over the message list. */}
         {showListActionsRow ? (
         <div className="px-4 py-2 border-b border-border bg-card shrink-0">
+          {deadlineInActionRow && headerFeedbackDueDate ? (
+            <FeedbackDeadlineTile
+              className="pt-1 pb-3"
+              dueYmd={headerFeedbackDueDate}
+              extended={headerFeedbackExtended}
+              audience={isAdminView ? 'admin' : 'client'}
+              instruction={deadlineInstruction}
+            />
+          ) : null}
           <div className="flex flex-wrap items-center gap-2 justify-between">
             <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
               {isAdminView && (
@@ -1662,7 +1651,7 @@ export function CommentSectionView({
               </div>
             </div>
           </div>
-          {showRequestNextVersion ? (
+          {showRequestNextVersion && !deadlineInActionRow ? (
             <p className="mt-1.5 text-xs text-muted-foreground">
               Click <span className="font-medium text-foreground">Request Next Version</span>{' '}after all feedback has been submitted.
             </p>
