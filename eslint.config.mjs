@@ -70,6 +70,9 @@ const config = [
       'coverage/**',
       'dist/**',
       'next-env.d.ts',
+      // Claude Code session worktrees are full repo copies (incl. their own .next/);
+      // already gitignored, but ESLint doesn't read .gitignore.
+      '.claude/**',
     ],
   },
 ];
