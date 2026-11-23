@@ -2,13 +2,13 @@
 
 import { useMemo, useState, useEffect } from 'react'
 import type { Video } from '@/types/video'
-import { formatDuration, formatFileSize } from '@/lib/utils'
-import { Progress } from './ui/progress'
+import { cn, formatDuration, formatFileSize } from '@/lib/utils'
 import { Button } from './ui/button'
-import { Checkbox } from './ui/checkbox'
+import { Switch } from './ui/switch'
 import { InlineEdit } from './InlineEdit'
 import { Textarea } from './ui/textarea'
-import { Trash2, CheckCircle2, XCircle, Pencil, Check, X, ChevronDown, ChevronUp, Eye, Download, Captions, Loader2, FileClock } from 'lucide-react'
+import { Trash2, CheckCircle2, XCircle, Pencil, Check, ChevronDown, ChevronUp, Eye, Download, Captions, Loader2, FileClock, FileVideo, MoreHorizontal, Plus, CalendarPlus, CalendarClock, RotateCcw, History, RefreshCw, type LucideIcon } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { apiPost, apiPatch, apiDelete, apiFetch } from '@/lib/api-client'
 import { VideoAssetList } from './VideoAssetList'
 import { withDownloadTracking } from '@/lib/download-url'
@@ -434,496 +434,426 @@ export default function VideoList({
   }
 
   return (
-    <div className="space-y-4">
-      {videos.map((video) => (
-        (() => {
-          const isExpanded = expandedVideoIds.includes(video.id)
-          return (
-        <div key={video.id} className="border rounded-lg bg-muted/40 p-2 sm:p-3 space-y-2">
-          {/* Top row: Approved badge + Version label + Action buttons.
-              Mobile: label + expand chevron on the first line, action buttons wrap to a second line.
-              sm+: everything on a single line. */}
-          <div className="flex flex-wrap sm:flex-nowrap justify-between items-center gap-x-2 gap-y-1">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              {editingId === video.id ? (
-                <InlineEdit
-                  value={editValue}
-                  onChange={setEditValue}
-                  onSave={() => handleSaveEdit(video.id)}
-                  onCancel={handleCancelEdit}
-                  disabled={savingId === video.id}
-                  inputClassName="h-8 w-full sm:w-48"
-                />
-              ) : (
-                <>
-                  <h4 className="font-medium truncate">{video.versionLabel}</h4>
-                  {isAdmin && video.status === 'READY' && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
-                      onClick={() => handleStartEdit(video.id, video.versionLabel)}
-                      title="Edit version label"
-                    >
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
-            {/* Action icons - second row on mobile, inline right side on sm+ */}
-            {editingId !== video.id && (
-              <>
-              <div className="flex items-center gap-2 shrink-0 order-2 w-full justify-end sm:order-none sm:w-auto">
-                {/* Show status badge for non-ready states */}
-                {(video.status === 'UPLOADING' || video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'ERROR') && (
-                  <span
-                    className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 ${
-                      video.status === 'UPLOADING'
-                        ? 'bg-secondary text-foreground border border-border'
-                        : video.status === 'QUEUED'
-                        ? 'bg-warning-visible text-warning border-2 border-warning-visible'
-                        : video.status === 'PROCESSING'
-                        ? 'bg-primary-visible text-primary border-2 border-primary-visible'
-                        : 'bg-destructive-visible text-destructive border-2 border-destructive-visible'
-                    }`}
-                  >
-                    {(video.status === 'UPLOADING' || video.status === 'PROCESSING') && (
-                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
-                    )}
-                    {video.status === 'ERROR' ? 'FAILED' : video.status}
-                  </span>
-                )}
-                  {isAdmin && transcriptionEnabled && video.status === 'READY' && (() => {
-                    const subtitlesStatus = (video as any).transcriptionStatus as string | null | undefined
-                    const subtitlesBusy = subtitlesStatus === 'PENDING' || subtitlesStatus === 'PROCESSING'
-                    const subtitlesReady = Boolean((video as any).hasSubtitles)
-                    const subtitlesFailed = subtitlesStatus === 'FAILED' || subtitlesStatus === 'SKIPPED'
-                    return (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleGenerateSubtitles(video.id, subtitlesReady)}
-                        disabled={subtitlesBusy || generatingSubtitlesId === video.id}
-                        className={
-                          subtitlesBusy
-                            ? 'text-warning'
-                            : subtitlesReady
-                            ? 'text-success hover:text-success hover:bg-success-visible'
-                            : subtitlesFailed
-                            ? 'text-destructive hover:text-destructive hover:bg-destructive-visible'
-                            : 'text-primary hover:text-primary/80 hover:bg-primary/10'
-                        }
-                        title={
-                          subtitlesBusy
-                            ? 'Generating subtitles…'
-                            : subtitlesReady
-                            ? 'Subtitles ready — click to regenerate'
-                            : subtitlesStatus === 'FAILED'
-                            ? 'Subtitle generation failed — click to retry'
-                            : subtitlesStatus === 'SKIPPED'
-                            ? 'Skipped (video too long for the provider) — click to retry'
-                            : 'Generate subtitles'
-                        }
-                      >
-                        {subtitlesBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Captions className="w-4 h-4" />}
-                      </Button>
-                    )
-                  })()}
-                  {isAdmin && effectiveCanApprove && video.status === 'READY' && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleToggleApproval(video.id, video.approved || false)}
-                    disabled={approvingId === video.id}
-                    className={video.approved
-                      ? "text-warning hover:text-warning hover:bg-warning-visible"
-                      : "text-success hover:text-success hover:bg-success-visible"
-                    }
-                    title={video.approved ? "Unapprove video" : "Approve video"}
-                  >
-                    {video.approved ? (
-                      <XCircle className="w-4 h-4" />
-                    ) : (
-                      <CheckCircle2 className="w-4 h-4" />
-                    )}
-                  </Button>
-                )}
-                {isAdmin && effectiveCanApprove && video.status === 'READY' && !video.approved && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleToggleRevisionRequested(video.id, Boolean((video as any).revisionRequestedAt))}
-                    disabled={savingRevisionRequestedId === video.id}
-                    className={(video as any).revisionRequestedAt
-                      ? "text-primary hover:text-primary/80 hover:bg-primary/10"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent"
-                    }
-                    title={(video as any).revisionRequestedAt
-                      ? "Clear Reviewed status (next version requested)"
-                      : "Mark as Reviewed (next version requested)"}
-                  >
-                    <FileClock className="w-4 h-4" />
-                  </Button>
-                )}
-                {isAdmin && effectiveCanDelete && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDelete(video.id)}
-                    disabled={deletingId === video.id}
-                    className="text-destructive hover:text-destructive hover:bg-destructive-visible"
-                    title="Delete video"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </div>
-              {video.status === 'READY' && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => toggleExpanded(video.id)}
-                  className="text-muted-foreground hover:text-foreground hover:bg-accent shrink-0 order-1 sm:order-none"
-                  title={isExpanded ? 'Collapse version' : 'Expand version'}
-                >
-                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </Button>
-              )}
-              </>
+    <div className="space-y-3">
+      {videos.map((video) => {
+        const isExpanded = expandedVideoIds.includes(video.id)
+        const isReady = video.status === 'READY'
+        const latest = isLatestVersion(video)
+        const revisionRequestedAt = (video as any).revisionRequestedAt as string | null | undefined
+        const approvedAt = (video as any).approvedAt as string | null | undefined
+        const dueDate = isValidFeedbackDueDate(video.feedbackDueDate) ? (video.feedbackDueDate as string) : null
+        const deadlineActive = Boolean(dueDate && latest && !video.approved && !revisionRequestedAt)
+        const deadlineState = deadlineActive && dueDate ? getFeedbackDeadlineStatus(dueDate) : null
+
+        const subtitlesStatus = (video as any).transcriptionStatus as string | null | undefined
+        const subtitlesBusy = subtitlesStatus === 'PENDING' || subtitlesStatus === 'PROCESSING' || generatingSubtitlesId === video.id
+        const subtitlesReady = Boolean((video as any).hasSubtitles)
+        const subtitlesCheckedAt = (video as any).subtitlesApprovedAt as string | null | undefined
+
+        const metaParts = [
+          video.duration ? formatDuration(video.duration) : null,
+          video.fps ? `${Number(video.fps).toFixed(video.fps % 1 === 0 ? 0 : 2)} fps` : null,
+          video.width && video.height ? `${video.width}×${video.height}` : null,
+          Number(video.originalFileSize || 0) > 0 ? formatFileSize(Number(video.originalFileSize)) : null,
+        ].filter(Boolean) as string[]
+        const statsParts = [
+          `${Number(video.viewCount || 0).toLocaleString()} ${Number(video.viewCount || 0) === 1 ? 'view' : 'views'}`,
+          `${Number(video.downloadCount || 0).toLocaleString()} ${Number(video.downloadCount || 0) === 1 ? 'download' : 'downloads'}`,
+        ]
+        const uploadedBy = (video as any).uploadedByName as string | null | undefined
+        const uploadedPart = video.createdAt
+          ? `uploaded ${shortDate(video.createdAt)}${uploadedBy ? ` by ${uploadedBy}` : ''}`
+          : null
+
+        // Version status pill: processing states first, then the review outcome.
+        const statusPill = (() => {
+          if (video.status === 'UPLOADING' || video.status === 'QUEUED' || video.status === 'PROCESSING' || video.status === 'ERROR') {
+            const label = video.status === 'ERROR' ? 'Failed' : video.status === 'QUEUED' ? 'Queued' : video.status === 'UPLOADING' ? 'Uploading' : 'Processing'
+            const tone = video.status === 'ERROR' ? 'danger' : video.status === 'QUEUED' ? 'warning' : 'info'
+            return { label, tone, icon: video.status === 'ERROR' ? XCircle : Loader2, spin: video.status === 'UPLOADING' || video.status === 'PROCESSING' }
+          }
+          if (video.approved) return { label: joinParts(['Approved', shortDate(approvedAt)]), tone: 'success', icon: CheckCircle2, spin: false }
+          if (revisionRequestedAt) return { label: joinParts(['Changes requested', shortDate(revisionRequestedAt)]), tone: 'info', icon: RotateCcw, spin: false }
+          if (!latest) return { label: 'Earlier version', tone: 'muted', icon: History, spin: false }
+          return { label: 'For review', tone: 'warning', icon: Eye, spin: false }
+        })()
+
+        const canShowMenu = isAdmin && (isReady || effectiveCanDelete)
+
+        return (
+          <div
+            key={video.id}
+            className={cn(
+              'rounded-lg border bg-muted/40',
+              isExpanded ? 'p-3 sm:p-4' : 'px-3 py-2 sm:px-4'
             )}
-          </div>
-
-          {/* Bottom row: Filename */}
-          {editingId !== video.id && (
-            <div className="flex items-center justify-between gap-2">
-              {isAdmin && video.status === 'READY' ? (
-                <button
-                  type="button"
-                  onClick={() => handleDownloadVideo(video.id)}
-                  disabled={downloadingId === video.id}
-                  title="Download video"
-                  className="text-sm font-medium text-foreground hover:underline flex-1 min-w-0 truncate text-left disabled:opacity-50"
-                >
-                  {video.originalFileName || video.name}
-                </button>
-              ) : (
-                <p className="text-sm text-muted-foreground flex-1 min-w-0 truncate" title={video.originalFileName || video.name}>
-                  {video.originalFileName || video.name}
-                </p>
-              )}
-
-              <div className="flex items-center gap-2 shrink-0">
-                {video.status === 'READY' && (
-                  <div className="hidden sm:flex items-center gap-3 text-xs text-muted-foreground whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1">
-                      {Number(video.viewCount || 0).toLocaleString()}
-                      <Eye className="w-3 h-3" />
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      {Number(video.downloadCount || 0).toLocaleString()}
-                      <Download className="w-3 h-3" />
-                    </span>
-                  </div>
-                )}
-                {video.approved && (
-                  <span className="px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-success-visible text-success border-2 border-success-visible">
-                    Approved
-                  </span>
-                )}
-
-                {!video.approved && !video.revisionRequestedAt && isLatestVersion(video) && isValidFeedbackDueDate(video.feedbackDueDate) && (() => {
-                  const due = video.feedbackDueDate as string
-                  const state = getFeedbackDeadlineStatus(due)
-                  const tone = state?.status === 'overdue'
-                    ? 'bg-destructive-visible text-destructive border-destructive-visible'
-                    : state?.status === 'today'
-                    ? 'bg-warning-visible text-warning border-warning-visible'
-                    : 'bg-muted text-muted-foreground border-border'
-                  return (
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap border ${tone}`}
-                      title={`Feedback due ${formatFeedbackDueDate(due, { withYear: true })} (${describeFeedbackDeadline(due)})`}
-                    >
-                      {state?.status === 'overdue' ? 'Overdue' : `Due ${formatFeedbackDueDate(due)}`}
-                      {video.feedbackDueExtendedAt ? ' · Extended' : ''}
-                    </span>
-                  )
-                })()}
-
-                {isAdmin && video.status === 'READY' && !video.approved && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap">Approvable?</span>
-                    <Checkbox
-                      checked={Boolean(video.allowApproval)}
-                      onCheckedChange={(checked) => handleToggleAllowApproval(video.id, Boolean(checked))}
-                      disabled={!effectiveCanManageAllowApproval || savingAllowApprovalId === video.id}
-                      aria-label="Approvable"
+          >
+            {/* Header: label + status + deadline · actions */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="min-w-0 flex-1 basis-48">
+                <div className="flex flex-wrap items-center gap-2">
+                  {editingId === video.id ? (
+                    <InlineEdit
+                      value={editValue}
+                      onChange={setEditValue}
+                      onSave={() => handleSaveEdit(video.id)}
+                      onCancel={handleCancelEdit}
+                      disabled={savingId === video.id}
+                      inputClassName="h-8 w-full sm:w-48"
                     />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {video.status === 'QUEUED' && (
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-warning">Waiting in queue...</span>
-              </div>
-              <div className="relative h-4 w-full overflow-hidden rounded-full bg-secondary">
-                <div className="h-full w-full bg-warning/40" />
-              </div>
-            </div>
-          )}
-
-          {video.status === 'PROCESSING' && (
-            <div className="space-y-1">
-              {(() => {
-                const rawProg = video.processingProgress ?? 0
-                const pct = Math.min(99, Math.round(rawProg < 1 ? rawProg * 100 : rawProg))
-                return (
-                  <>
-                    <div className="flex justify-between text-xs">
-                      <span>Processing previews...</span>
-                      {pct > 0 && <span className="font-medium">{pct}%</span>}
-                    </div>
-                    <div className="relative h-4 w-full overflow-hidden rounded-full bg-secondary">
-                      <div
-                        className="h-full bg-primary transition-all"
-                        style={{
-                          width: `${Math.max(1, pct)}%`,
-                          backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.2) 10px, rgba(255,255,255,0.2) 20px)',
-                          backgroundSize: '28px 28px',
-                          animation: 'move-stripes 1s linear infinite'
-                        }}
-                      />
-                    </div>
-                  </>
-                )
-              })()}
-            </div>
-          )}
-
-          {video.status === 'ERROR' && video.processingError && (
-            <p className="text-sm text-destructive">{video.processingError}</p>
-          )}
-
-          {video.status === 'READY' && (
-            isExpanded && (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-3 sm:gap-4 text-xs sm:text-sm">
-                <div>
-                  <p className="text-muted-foreground">Duration</p>
-                  <p className="font-medium">{formatDuration(video.duration)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">FPS</p>
-                  <p className="font-medium">{video.fps ? `${video.fps.toFixed(2)}` : 'N/A'}</p>
-                </div>
-                <div className="sm:hidden">
-                  <p className="text-muted-foreground">Views</p>
-                  <p className="font-medium inline-flex items-center gap-1">
-                    {Number(video.viewCount || 0).toLocaleString()}
-                    <Eye className="w-3 h-3 text-muted-foreground" />
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Resolution</p>
-                  <p className="font-medium">
-                    {video.width}x{video.height}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Size</p>
-                  <p className="font-medium">{formatFileSize(Number(video.originalFileSize || 0))}</p>
-                </div>
-                <div className="sm:hidden">
-                  <p className="text-muted-foreground">Downloads</p>
-                  <p className="font-medium inline-flex items-center gap-1">
-                    {Number(video.downloadCount || 0).toLocaleString()}
-                    <Download className="w-3 h-3 text-muted-foreground" />
-                  </p>
-                </div>
-              </div>
-            )
-          )}
-
-          {/* Feedback Deadline */}
-          {video.status === 'READY' && isExpanded && (
-            <div className="pt-3">
-              <div className="flex items-center gap-2">
-                <p className="text-muted-foreground text-xs sm:text-sm">Feedback Deadline</p>
-                {isAdmin && editingId !== video.id && (
-                  editingDeadlineId === video.id ? (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-success hover:text-success hover:bg-success-visible"
-                        onClick={() => handleSaveDeadline(video.id)}
-                        disabled={savingDeadlineId === video.id}
-                        title="Save feedback deadline"
-                      >
-                        <Check className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive-visible"
-                        onClick={handleCancelEditDeadline}
-                        disabled={savingDeadlineId === video.id}
-                        title="Cancel"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
                   ) : (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
-                      onClick={() => handleStartEditDeadline(video.id, (video.feedbackDueDate as string) || '')}
-                      title={video.feedbackDueDate ? 'Change or extend feedback deadline' : 'Set feedback deadline'}
+                    <h4 className="text-base font-semibold leading-none">{video.versionLabel}</h4>
+                  )}
+                  <StatusPill tone={statusPill.tone as PillTone} icon={statusPill.icon} spin={statusPill.spin}>
+                    {statusPill.label}
+                  </StatusPill>
+                  {deadlineActive && dueDate ? (
+                    <StatusPill
+                      tone={deadlineState?.status === 'overdue' ? 'danger' : deadlineState && deadlineState.daysLeft <= 1 ? 'warning' : 'outline'}
+                      icon={CalendarClock}
+                      title={`Feedback due ${formatFeedbackDueDate(dueDate, { withYear: true })} (${describeFeedbackDeadline(dueDate)})`}
                     >
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                  )
-                )}
-              </div>
-
-              {editingDeadlineId === video.id ? (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <Input
-                    type="date"
-                    value={deadlineEditValue}
-                    onChange={(e) => setDeadlineEditValue(e.target.value)}
-                    disabled={savingDeadlineId === video.id}
-                    className="w-auto"
-                  />
-                  {[3, 7].map((days) => {
-                    // Extend from the current deadline, or from today if none / already passed.
-                    const today = todayYmd()
-                    const base = isValidFeedbackDueDate(deadlineEditValue) && deadlineEditValue >= today ? deadlineEditValue : today
-                    return (
-                      <button
-                        key={days}
-                        type="button"
-                        disabled={savingDeadlineId === video.id}
-                        onClick={() => setDeadlineEditValue(addDaysYmd(base, days) || '')}
-                        className="h-8 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                      >
-                        {days === 7 ? '+1 week' : `+${days} days`}
-                      </button>
-                    )
-                  })}
-                  {deadlineEditValue ? (
-                    <button
-                      type="button"
-                      disabled={savingDeadlineId === video.id}
-                      onClick={() => setDeadlineEditValue('')}
-                      className="h-8 px-1 text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
-                    >
-                      Remove
-                    </button>
+                      {deadlineState?.status === 'overdue' ? `Overdue since ${formatFeedbackDueDate(dueDate)}` : `Due ${formatFeedbackDueDate(dueDate)}`}
+                      {video.feedbackDueExtendedAt ? ' · Extended' : ''}
+                    </StatusPill>
+                  ) : null}
+                  {!isExpanded && isReady && metaParts.length > 0 ? (
+                    <span className="hidden sm:inline text-xs text-muted-foreground truncate">{metaParts.slice(0, 2).join(' · ')}</span>
                   ) : null}
                 </div>
-              ) : (
-                <p className="text-sm mt-1">
-                  {isValidFeedbackDueDate(video.feedbackDueDate) ? (
-                    <>
-                      {formatFeedbackDueDate(video.feedbackDueDate as string, { withYear: true })}
-                      <span className="text-muted-foreground">
-                        {' · '}
-                        {video.approved
-                          ? 'Approved'
-                          : video.revisionRequestedAt
-                          ? 'Changes requested'
-                          : !isLatestVersion(video)
-                          ? 'Superseded by a newer version'
-                          : describeFeedbackDeadline(video.feedbackDueDate as string)}
-                        {video.feedbackDueExtendedAt ? ' · Extended' : ''}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">No deadline</span>
-                  )}
-                </p>
-              )}
-            </div>
-          )}
 
-          {/* Version Notes */}
-          {video.status === 'READY' && (
-            isExpanded && (
-            <div className="pt-3">
-              <div className="flex items-center gap-2">
-                <p className="text-muted-foreground text-xs sm:text-sm">Version Notes</p>
-                {isAdmin && editingId !== video.id && (
-                  editingNotesId === video.id ? (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-success hover:text-success hover:bg-success-visible"
-                        onClick={() => handleSaveNotes(video.id)}
-                        disabled={savingNotesId === video.id}
-                        title="Save version notes"
-                      >
-                        <Check className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive-visible"
-                        onClick={handleCancelEditNotes}
-                        disabled={savingNotesId === video.id}
-                        title="Cancel"
-                      >
-                        <X className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ) : (
+              </div>
+
+              {editingId !== video.id ? (
+                <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {isExpanded && isAdmin && effectiveCanApprove && isReady ? (
+                    <Button
+                      variant={video.approved ? 'outline' : 'success'}
+                      size="sm"
+                      onClick={() => handleToggleApproval(video.id, video.approved || false)}
+                      disabled={approvingId === video.id}
+                    >
+                      {video.approved ? <XCircle className="mr-1.5 h-4 w-4" /> : <Check className="mr-1.5 h-4 w-4" />}
+                      {video.approved ? 'Unapprove' : 'Approve'}
+                    </Button>
+                  ) : null}
+                  {canShowMenu ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" className="h-8 w-8 p-0" aria-label="More actions" title="More actions">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-64">
+                        {!isExpanded && effectiveCanApprove && isReady ? (
+                          <DropdownMenuItem onSelect={() => handleToggleApproval(video.id, video.approved || false)}>
+                            {video.approved ? <XCircle className="mr-2 h-4 w-4" /> : <Check className="mr-2 h-4 w-4" />}
+                            {video.approved ? 'Unapprove' : 'Approve'}
+                          </DropdownMenuItem>
+                        ) : null}
+                        {isReady ? (
+                          <DropdownMenuItem onSelect={() => handleDownloadVideo(video.id)} disabled={downloadingId === video.id}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Download original
+                          </DropdownMenuItem>
+                        ) : null}
+                        {transcriptionEnabled && isReady ? (
+                          <DropdownMenuItem onSelect={() => handleGenerateSubtitles(video.id, subtitlesReady)} disabled={subtitlesBusy}>
+                            <Captions className="mr-2 h-4 w-4" />
+                            {subtitlesBusy ? 'Generating subtitles…' : subtitlesReady ? 'Regenerate subtitles' : 'Generate subtitles'}
+                          </DropdownMenuItem>
+                        ) : null}
+                        {effectiveCanApprove && isReady && !video.approved ? (
+                          <DropdownMenuItem
+                            onSelect={() => handleToggleRevisionRequested(video.id, Boolean(revisionRequestedAt))}
+                            disabled={savingRevisionRequestedId === video.id}
+                          >
+                            <FileClock className="mr-2 h-4 w-4" />
+                            {revisionRequestedAt ? 'Clear "changes requested"' : 'Mark as changes requested'}
+                          </DropdownMenuItem>
+                        ) : null}
+                        {isReady ? (
+                          <DropdownMenuItem onSelect={() => handleStartEdit(video.id, video.versionLabel)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Rename version
+                          </DropdownMenuItem>
+                        ) : null}
+                        {effectiveCanDelete ? (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() => handleDelete(video.id)}
+                              disabled={deletingId === video.id}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete version
+                            </DropdownMenuItem>
+                          </>
+                        ) : null}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : null}
+                  {isReady ? (
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 shrink-0 text-muted-foreground hover:bg-primary-visible hover:text-primary"
-                      onClick={() => handleStartEditNotes(video.id, (video.videoNotes as string) || '')}
-                      title="Edit version notes"
+                      onClick={() => toggleExpanded(video.id)}
+                      className="h-8 w-8 text-muted-foreground hover:bg-accent hover:text-foreground"
+                      title={isExpanded ? 'Collapse version' : 'Expand version'}
+                      aria-expanded={isExpanded}
                     >
-                      <Pencil className="w-3 h-3" />
+                      {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </Button>
-                  )
-                )}
-              </div>
-
-              {editingNotesId === video.id ? (
-                <div className="mt-2">
-                  <Textarea
-                    value={notesEditValue}
-                    onChange={(e) => setNotesEditValue(e.target.value)}
-                    rows={3}
-                    maxLength={500}
-                    className="resize-none"
-                    disabled={savingNotesId === video.id}
-                    placeholder="Add notes for this version (optional)"
-                  />
+                  ) : null}
                 </div>
-              ) : (
-                <p className="text-sm mt-1 whitespace-pre-wrap">
-                  {((video.videoNotes as string) || '').trim() ? (
-                    video.videoNotes
-                  ) : (
-                    <span className="text-muted-foreground">No notes</span>
-                  )}
-                </p>
-              )}
+              ) : null}
             </div>
-            )
-          )}
 
-          {/* Asset list section - always visible for READY videos if admin */}
-          {isAdmin && video.status === 'READY' && (
-            isExpanded && (
+            {/* Filename + one-line summary (full width, under the header) */}
+            {isExpanded && editingId !== video.id ? (
+              <>
+                {isAdmin && isReady ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadVideo(video.id)}
+                    disabled={downloadingId === video.id}
+                    title="Download original"
+                    className="mt-2 flex max-w-full items-center gap-1.5 text-left text-sm font-medium text-foreground hover:underline disabled:opacity-50"
+                  >
+                    <FileVideo className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{video.originalFileName || video.name}</span>
+                  </button>
+                ) : (
+                  <p className="mt-2 truncate text-sm text-muted-foreground">{video.originalFileName || video.name}</p>
+                )}
+                {isReady ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {joinParts([...metaParts, ...statsParts, uploadedPart])}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+
+            {video.status === 'QUEUED' && (
+              <div className="mt-3 space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-warning">Waiting in queue...</span>
+                </div>
+                <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+                  <div className="h-full w-full bg-warning/40" />
+                </div>
+              </div>
+            )}
+
+            {video.status === 'PROCESSING' && (
+              <div className="mt-3 space-y-1">
+                {(() => {
+                  const rawProg = video.processingProgress ?? 0
+                  const pct = Math.min(99, Math.round(rawProg < 1 ? rawProg * 100 : rawProg))
+                  return (
+                    <>
+                      <div className="flex justify-between text-xs">
+                        <span>Processing previews...</span>
+                        {pct > 0 && <span className="font-medium">{pct}%</span>}
+                      </div>
+                      <div className="relative h-2 w-full overflow-hidden rounded-full bg-secondary">
+                        <div
+                          className="h-full bg-primary transition-all"
+                          style={{
+                            width: `${Math.max(1, pct)}%`,
+                            backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255,255,255,0.2) 10px, rgba(255,255,255,0.2) 20px)',
+                            backgroundSize: '28px 28px',
+                            animation: 'move-stripes 1s linear infinite'
+                          }}
+                        />
+                      </div>
+                    </>
+                  )
+                })()}
+              </div>
+            )}
+
+            {video.status === 'ERROR' && video.processingError && (
+              <p className="mt-2 text-sm text-destructive">{video.processingError}</p>
+            )}
+
+            {/* Settings: label / value rows */}
+            {isReady && isExpanded && (
+              <dl className="mt-4 divide-y divide-border border-t border-border text-sm">
+                <PropertyRow label="Client approval">
+                  {video.approved ? (
+                    <span className="text-muted-foreground">Approved{approvedAt ? ` ${shortDate(approvedAt)}` : ''}. Unapprove to change.</span>
+                  ) : (
+                    <label className="inline-flex items-center gap-2">
+                      <Switch
+                        checked={Boolean(video.allowApproval)}
+                        onCheckedChange={(checked) => handleToggleAllowApproval(video.id, Boolean(checked))}
+                        disabled={!isAdmin || !effectiveCanManageAllowApproval || savingAllowApprovalId === video.id}
+                        aria-label="Clients can approve this version"
+                      />
+                      <span className={video.allowApproval ? 'text-foreground' : 'text-muted-foreground'}>
+                        {video.allowApproval ? 'Clients can approve this version' : "Clients can't approve this version"}
+                      </span>
+                    </label>
+                  )}
+                </PropertyRow>
+
+                <PropertyRow label="Feedback deadline">
+                  {editingDeadlineId === video.id ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        type="date"
+                        value={deadlineEditValue}
+                        onChange={(e) => setDeadlineEditValue(e.target.value)}
+                        disabled={savingDeadlineId === video.id}
+                        className="h-8 w-auto"
+                      />
+                      {[3, 7].map((days) => {
+                        // Extend from the current deadline, or from today if none / already passed.
+                        const today = todayYmd()
+                        const base = isValidFeedbackDueDate(deadlineEditValue) && deadlineEditValue >= today ? deadlineEditValue : today
+                        return (
+                          <button
+                            key={days}
+                            type="button"
+                            disabled={savingDeadlineId === video.id}
+                            onClick={() => setDeadlineEditValue(addDaysYmd(base, days) || '')}
+                            className="h-8 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                          >
+                            {days === 7 ? '+1 week' : `+${days} days`}
+                          </button>
+                        )
+                      })}
+                      {deadlineEditValue ? (
+                        <button
+                          type="button"
+                          disabled={savingDeadlineId === video.id}
+                          onClick={() => setDeadlineEditValue('')}
+                          className="h-8 px-1 text-xs text-muted-foreground underline-offset-2 hover:underline disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      ) : null}
+                      <div className="flex items-center gap-1.5">
+                        <Button size="sm" className="h-8" onClick={() => handleSaveDeadline(video.id)} disabled={savingDeadlineId === video.id}>
+                          Save
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-8" onClick={handleCancelEditDeadline} disabled={savingDeadlineId === video.id}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : dueDate ? (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span>
+                        {formatFeedbackDueDate(dueDate, { withYear: true })}
+                        <span
+                          className={cn(
+                            'text-muted-foreground',
+                            deadlineState?.status === 'overdue' && 'text-destructive',
+                            deadlineState && deadlineState.status !== 'overdue' && deadlineState.daysLeft <= 1 && 'text-warning'
+                          )}
+                        >
+                          {' · '}
+                          {video.approved
+                            ? 'Approved'
+                            : revisionRequestedAt
+                            ? 'Changes requested'
+                            : !latest
+                            ? 'Superseded by a newer version'
+                            : describeFeedbackDeadline(dueDate)}
+                          {video.feedbackDueExtendedAt ? ' · Extended' : ''}
+                        </span>
+                      </span>
+                      {isAdmin ? (
+                        <InlineAction icon={CalendarPlus} onClick={() => handleStartEditDeadline(video.id, dueDate)}>
+                          {deadlineActive ? 'Extend' : 'Change'}
+                        </InlineAction>
+                      ) : null}
+                    </div>
+                  ) : isAdmin ? (
+                    <InlineAction icon={Plus} onClick={() => handleStartEditDeadline(video.id, '')}>
+                      Set a feedback deadline
+                    </InlineAction>
+                  ) : (
+                    <span className="text-muted-foreground">None</span>
+                  )}
+                </PropertyRow>
+
+                <PropertyRow label="Version notes" alignTop={editingNotesId === video.id || Boolean((video.videoNotes || '').trim())}>
+                  {editingNotesId === video.id ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={notesEditValue}
+                        onChange={(e) => setNotesEditValue(e.target.value)}
+                        rows={3}
+                        maxLength={500}
+                        className="resize-none"
+                        disabled={savingNotesId === video.id}
+                        placeholder="Notes shown to the client with this version"
+                        autoFocus
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <Button size="sm" className="h-8" onClick={() => handleSaveNotes(video.id)} disabled={savingNotesId === video.id}>
+                          Save
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-8" onClick={handleCancelEditNotes} disabled={savingNotesId === video.id}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (video.videoNotes || '').trim() ? (
+                    <div className="space-y-1">
+                      <p className="whitespace-pre-wrap">{video.videoNotes}</p>
+                      {isAdmin ? (
+                        <InlineAction icon={Pencil} onClick={() => handleStartEditNotes(video.id, (video.videoNotes as string) || '')}>
+                          Edit
+                        </InlineAction>
+                      ) : null}
+                    </div>
+                  ) : isAdmin ? (
+                    <InlineAction icon={Plus} onClick={() => handleStartEditNotes(video.id, '')}>
+                      Add notes for the client
+                    </InlineAction>
+                  ) : (
+                    <span className="text-muted-foreground">None</span>
+                  )}
+                </PropertyRow>
+
+                {transcriptionEnabled || subtitlesReady ? (
+                  <PropertyRow label="Subtitles">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      {subtitlesBusy ? (
+                        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…
+                        </span>
+                      ) : subtitlesReady ? (
+                        subtitlesCheckedAt ? (
+                          <StatusPill tone="success" icon={Check}>Checked {shortDate(subtitlesCheckedAt)}</StatusPill>
+                        ) : (
+                          <StatusPill tone="outline" icon={Captions}>Ready, not checked yet</StatusPill>
+                        )
+                      ) : subtitlesStatus === 'FAILED' ? (
+                        <span className="text-destructive">Generation failed</span>
+                      ) : subtitlesStatus === 'SKIPPED' ? (
+                        <span className="text-muted-foreground">Skipped (video too long for the provider)</span>
+                      ) : (
+                        <span className="text-muted-foreground">None</span>
+                      )}
+                      {isAdmin && transcriptionEnabled && !subtitlesBusy ? (
+                        <InlineAction icon={subtitlesReady ? RefreshCw : Captions} onClick={() => handleGenerateSubtitles(video.id, subtitlesReady)}>
+                          {subtitlesReady ? 'Regenerate' : subtitlesStatus === 'FAILED' || subtitlesStatus === 'SKIPPED' ? 'Retry' : 'Generate'}
+                        </InlineAction>
+                      ) : null}
+                    </div>
+                  </PropertyRow>
+                ) : null}
+              </dl>
+            )}
+
+            {/* Assets */}
+            {isAdmin && isReady && isExpanded && (
               <VideoAssetList
                 videoId={video.id}
                 videoName={video.name}
@@ -936,12 +866,10 @@ export default function VideoList({
                 }}
                 refreshTrigger={assetRefreshTrigger}
               />
-            )
-          )}
-        </div>
-          )
-        })()
-      ))}
+            )}
+          </div>
+        )
+      })}
 
       <ConfirmDialog
         open={pendingDeleteVideoId !== null}
@@ -1000,4 +928,73 @@ export default function VideoList({
       />
     </div>
   )
+}
+
+type PillTone = 'success' | 'warning' | 'info' | 'danger' | 'muted' | 'outline'
+
+function StatusPill({
+  tone,
+  icon: Icon,
+  spin = false,
+  title,
+  children,
+}: {
+  tone: PillTone
+  icon?: LucideIcon
+  spin?: boolean
+  title?: string
+  children: React.ReactNode
+}) {
+  return (
+    <span
+      title={title}
+      className={cn(
+        'inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium',
+        tone === 'success' && 'bg-success/15 text-success',
+        tone === 'warning' && 'bg-warning/15 text-warning',
+        tone === 'info' && 'bg-primary/15 text-primary',
+        tone === 'danger' && 'bg-destructive/15 text-destructive',
+        tone === 'muted' && 'bg-muted text-muted-foreground',
+        tone === 'outline' && 'border border-border text-muted-foreground'
+      )}
+    >
+      {Icon ? <Icon className={cn('h-3 w-3', spin && 'animate-spin')} /> : null}
+      {children}
+    </span>
+  )
+}
+
+function PropertyRow({ label, alignTop = false, children }: { label: string; alignTop?: boolean; children: React.ReactNode }) {
+  return (
+    <div className={cn('grid grid-cols-1 gap-1 py-2.5 sm:grid-cols-[150px_minmax(0,1fr)] sm:gap-3', alignTop ? 'sm:items-start' : 'sm:items-center')}>
+      <dt className="text-xs text-muted-foreground sm:text-sm">{label}</dt>
+      <dd className="min-w-0">{children}</dd>
+    </div>
+  )
+}
+
+function InlineAction({ icon: Icon, onClick, children }: { icon: LucideIcon; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-sm text-primary hover:underline underline-offset-2"
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {children}
+    </button>
+  )
+}
+
+/** "4 Nov", or "4 Nov 2025" outside the current year. */
+function shortDate(value: string | Date | null | undefined): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const sameYear = date.getFullYear() === new Date().getFullYear()
+  return date.toLocaleDateString('en-AU', sameYear ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function joinParts(parts: Array<string | null | undefined | false>): string {
+  return parts.filter((p): p is string => typeof p === 'string' && p.length > 0).join(' · ')
 }

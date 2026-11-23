@@ -16,7 +16,10 @@ import {
   Copy,
   Captions,
   Upload,
+  Download,
+  MoreHorizontal,
 } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Button } from './ui/button'
 import { formatFileSize } from '@/lib/utils'
 import { apiFetch, apiDelete, apiPost } from '@/lib/api-client'
@@ -396,55 +399,60 @@ export function VideoAssetList({
                   <span>{getCategoryLabel(asset.category)}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                {canManage && canSetSubtitles(asset) && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleSetSubtitles(asset.id, asset.fileName)}
-                    disabled={settingSubtitles === asset.id}
-                    title={isActiveSubtitles(asset) ? "Active playback subtitles" : "Set as the video's subtitles"}
-                  >
-                    {settingSubtitles === asset.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Captions className={`h-4 w-4 ${isActiveSubtitles(asset) ? 'text-green-600' : ''}`} />
-                    )}
-                  </Button>
-                )}
-                {canManage && canSetAsThumbnail(asset) && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleSetThumbnail(asset.id, asset.fileName)}
-                    disabled={settingThumbnail === asset.id}
-                    title={isCurrentThumbnail(asset) ? "Remove custom thumbnail (revert to system-generated)" : "Set as video thumbnail"}
-                  >
-                    {settingThumbnail === asset.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ImagePlay className={`h-4 w-4 ${isCurrentThumbnail(asset) ? 'text-green-600' : ''}`} />
-                    )}
-                  </Button>
-                )}
-                {canManage && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDelete(asset.id, asset.fileName)}
-                    disabled={deletingId === asset.id}
-                    title="Delete asset"
-                  >
-                    {deletingId === asset.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    )}
-                  </Button>
-                )}
+              <div className="flex items-center gap-2 shrink-0">
+                {isCurrentThumbnail(asset) ? (
+                  <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
+                    <ImagePlay className="h-3 w-3" /> Thumbnail
+                  </span>
+                ) : null}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={`Actions for ${asset.fileName}`} title="Actions">
+                      {settingSubtitles === asset.id || settingThumbnail === asset.id || deletingId === asset.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <MoreHorizontal className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-60">
+                    <DropdownMenuItem onSelect={() => handleDownload(asset.id, asset.fileName)}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Download
+                    </DropdownMenuItem>
+                    {canManage && canSetSubtitles(asset) ? (
+                      <DropdownMenuItem
+                        onSelect={() => handleSetSubtitles(asset.id, asset.fileName)}
+                        disabled={settingSubtitles === asset.id || isActiveSubtitles(asset)}
+                      >
+                        <Captions className="mr-2 h-4 w-4" />
+                        {isActiveSubtitles(asset) ? 'In use as playback subtitles' : "Use as the video's subtitles"}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canManage && canSetAsThumbnail(asset) ? (
+                      <DropdownMenuItem
+                        onSelect={() => handleSetThumbnail(asset.id, asset.fileName)}
+                        disabled={settingThumbnail === asset.id}
+                      >
+                        <ImagePlay className="mr-2 h-4 w-4" />
+                        {isCurrentThumbnail(asset) ? 'Remove custom thumbnail' : 'Use as video thumbnail'}
+                      </DropdownMenuItem>
+                    ) : null}
+                    {canManage ? (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() => handleDelete(asset.id, asset.fileName)}
+                          disabled={deletingId === asset.id}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete asset
+                        </DropdownMenuItem>
+                      </>
+                    ) : null}
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
           ))}
